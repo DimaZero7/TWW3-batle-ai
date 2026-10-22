@@ -148,9 +148,9 @@ a{color:inherit}
 .node.t-env span{display:block}
 .blocks{display:grid;grid-template-columns:auto auto auto;justify-content:start;align-items:center;gap:12px;margin-top:6px}
 .blocks .nodestack{align-self:end;margin-bottom:-12px}
-.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-learn{--tc:#b8329a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a}
+.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-learn{--tc:#b8329a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a} .t-teach{--tc:#b5452b}
 .ty{background:color-mix(in srgb,var(--tc) 22%,transparent);color:var(--tc);border:1px solid var(--tc)}
-.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-learn,.node.t-env,.node.t-todo{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
+.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-learn,.node.t-env,.node.t-todo,.node.t-teach{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
 .node.on{box-shadow:0 0 0 3px var(--tc);background:color-mix(in srgb,var(--tc) 30%,var(--panel))}
 .nodestack{display:flex;flex-direction:column;align-items:center;gap:2px}
 .vlink{color:var(--muted);font-size:20px;line-height:1}
@@ -260,7 +260,7 @@ a{color:inherit}
   <section class="net" aria-label="Схема сети генерала">
     <h2 class="areah">Сеть</h2>
     <div class="zoombox" id="zoombox"><div class="types zlegend"><span class="tl">Типы блоков:</span>
-      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-learn">выученная таблица</span><span class="ty t-env">среда</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span><span class="bangleg"><span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span> сделано нейросетью, человек не проверял в деталях</span><span class="bangleg"><span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span> черновик нейросети: спроектировано без человека</span>
+      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-learn">выученная таблица</span><span class="ty t-env">среда</span><span class="ty t-test">проверка</span><span class="ty t-teach">учитель</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span><span class="bangleg"><span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span> сделано нейросетью, человек не проверял в деталях</span><span class="bangleg"><span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span> черновик нейросети: спроектировано без человека</span>
     </div><svg class="netsvg" id="netsvg" viewBox="0 0 900 600" role="group" aria-label="Схема сети генерала"></svg><div class="zbtns"><button type="button" id="zin" aria-label="Крупнее">+</button><button type="button" id="zout" aria-label="Мельче">−</button><button type="button" id="zreset" aria-label="Сбросить масштаб">⟲</button></div></div>
 <script>
 (function(){
@@ -475,29 +475,47 @@ a{color:inherit}
   pj2+='<line x1="'+(KC[1]+6)+'" y1="'+TOK[HT].y+'" x2="'+(QGX+16)+'" y2="'+TOK[HT].y+'" stroke="var(--open)" stroke-width="1.6"/>';
   pj2+='<line x1="'+(KC[1]+6)+'" y1="'+TOK[HU].y+'" x2="'+(QCX-1.5)+'" y2="'+TOK[HU].y+'" stroke="var(--open)" stroke-width="1.6"/>';
   h+='<g pointer-events="none">'+pj2+'</g>';
-  // --- Сбор групп (processing): units divide themselves between group places, ours only into our 10, enemy only into enemy 10 (side mask); 3 rounds, one network
+  // --- Сбор групп (algorithm, a rule, no weights): role by the unit card (С shooters / Б melee / Л lord and heroes / К fast), then inside a role
+  // greedy clustering by position (merge the two nearest clusters while their centres are closer than 100 m), a lone lord joins melee within 60 m;
+  // at most 10 places a side, both sides by the same rule; group numbers are kept between plans by shared units
   var GPX=QX+QW+18,GPW=250,gp="",GS=14,GSY=BY+44,RX=[GPX+100,GPX+148,GPX+196],GSX=RX[2]+8;
   var SL=[];for(var i=0;i<10;i++)SL.push({s:0,y:GSY+i*GS,used:i<4});for(var i=0;i<10;i++)SL.push({s:1,y:GSY+10*GS+18+i*GS,used:i<3});
   var GA=[[0,0,2,1,1,3,0,3,2],[10,10,11,12,10,11,12,10,11,12]],GU=[];
   GA.forEach(function(arr,side){arr.forEach(function(g,k){GU.push({s:side,k:k,y:SL[side*10+k].y+5.5,to:[g],hl:side===0&&k===2});});});
   var YU=GU[2].y;
-  // three rounds = three columns of the same places: round 1 everything is possible and fuzzy, by round 3 each unit sits in one place and unused places are empty
-  // the yellow unit's share per place in each round (a yellow chip, wider = bigger share)
-  var YS=[{1:.3,2:.4,3:.3},{1:.15,2:.75,3:.1},{2:.95}];
-  GU.forEach(function(u){SL.forEach(function(sl,j){if(sl.s!==u.s)return;var main=u.to.indexOf(j)>=0,yw=u.hl?(YS[0][j]||0):0;
-    var col=u.hl&&yw?'var(--open)':'color-mix(in srgb,var('+(u.s?'--foe':'--ours')+') 70%,var(--panel))';
-    gp+='<line x1="'+(GPX+76)+'" y1="'+u.y+'" x2="'+RX[0]+'" y2="'+(sl.y+5.5)+'" stroke="'+col+'" stroke-width="'+(yw?.6+yw*3:(main?1.3:.5))+'" opacity="'+(yw?.9:(main?.5:.12))+'"/>';});});
-  GU.forEach(function(u){gp+=crow(GPX+18,u.y-3,u.s,u.k+300,56);if(u.hl)gp+='<rect x="'+(GPX+15)+'" y="'+(u.y-6)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
-  SL.forEach(function(sl,j){var c=sl.s?'--foe':'--ours';
-    for(var r=0;r<3;r++){var x=RX[r],settled=r===0?false:!sl.used;
-      if(r<2)gp+='<line x1="'+(x+26)+'" y1="'+(sl.y+5.5)+'" x2="'+RX[r+1]+'" y2="'+(sl.y+5.5)+'" class="cw"/>';
-      var fill=sl.used?[18,26,36][r]:[18,7,0][r];
-      gp+='<rect x="'+x+'" y="'+sl.y+'" width="26" height="11" rx="3" fill="'+(fill?'color-mix(in srgb,var('+c+') '+fill+'%,var(--panel))':'none')+'" stroke="color-mix(in srgb,var('+c+') '+(settled?50:70)+'%,var(--panel))" stroke-width="1.1"'+(settled?' stroke-dasharray="3 2"':'')+'/>';
-      var ys=YS[r][j];if(ys){var cw=4+ys*18;gp+='<rect x="'+(x+13-cw/2)+'" y="'+(sl.y+2)+'" width="'+cw+'" height="7" rx="1.5" fill="var(--open)" opacity=".9"/>';}}
-    if(j===2)gp+='<rect x="'+(RX[2]-2)+'" y="'+(sl.y-1.5)+'" width="30" height="14" rx="4" fill="none" stroke="var(--open)" stroke-width="1.6"/>';});
-  ["круг 1","круг 2","круг 3"].forEach(function(t,r){gp+='<text class="ssub" x="'+(RX[r]+13)+'" y="'+(GSY-10)+'" text-anchor="middle">'+t+'</text>';});
-  gp+='<text class="ssub" x="'+(GPX+38)+'" y="'+(GSY-10)+'" text-anchor="middle">наши</text><text class="ssub" x="'+(GPX+38)+'" y="'+(GSY+10*GS+12)+'" text-anchor="middle">враг</text>';
-  h+=G("groupproc","t-proc",[GPX,BY,GPW,KY+KH-BY],"Сбор групп","обработка",gp);
+  // the role of each drawn unit (ours: group 0 = lord + melee, 1 = shooters, 2 = melee (yellow), 3 = fast; enemy: 10 melee, 11 shooters, 12 fast)
+  var ROLE=[["Л","Б","Б","С","С","К","Б","К","Б"],["Б","Б","С","К","Б","С","К","Б","С","К"]];
+  // a small field per side: where the units stand; a dashed circle = one cluster (one group), its centre in field shares
+  var FLD=[{x:GPX+90,y:GSY-4,w:96,h:10*GS+6},{x:GPX+90,y:GSY+10*GS+14,w:96,h:10*GS+6}];
+  var CC={0:[.38,.66],1:[.7,.84],2:[.66,.4],3:[.26,.18],10:[.42,.68],11:[.6,.2],12:[.22,.3]};
+  function ccxy(j){var s=j>=10?1:0,f=FLD[s],c=CC[j];return [f.x+f.w*c[0],f.y+f.h*c[1]];}
+  FLD.forEach(function(f,s){gp+='<rect x="'+f.x+'" y="'+f.y+'" width="'+f.w+'" height="'+f.h+'" rx="6" fill="color-mix(in srgb,var(--field) 35%,var(--panel))"/>';});
+  // the clusters (R 100 m): one dashed circle per group; the yellow group's circle is yellow
+  Object.keys(CC).forEach(function(j){j=+j;var p=ccxy(j),c=j>=10?'--foe':'--ours';
+    gp+='<circle cx="'+p[0]+'" cy="'+p[1]+'" r="17" fill="none" stroke="'+(j===2?'var(--open)':'color-mix(in srgb,var('+c+') 70%,var(--panel))')+'" stroke-width="'+(j===2?2:1.3)+'" stroke-dasharray="4 3"/>';});
+  // every unit: its card row with its role letter, a thin line to its spot on the field, the spot = the role letter
+  var NIN={};GU.forEach(function(u){var j=u.to[0],n=NIN[j]=(NIN[j]||0)+1,p=ccxy(j),a=n*2.2+j,r=n===1&&j!==0?0:9,role=ROLE[u.s][u.k],c=u.s?'--foe':'--ours';
+    var sx=p[0]+Math.cos(a)*r,sy=p[1]+Math.sin(a)*r;
+    if(role==="Л"){sx=p[0]-26;sy=p[1]+4;}   // the lord stood apart and joined the nearest melee group (closer than 60 m)
+    u.sx=sx;u.sy=sy;
+    gp+='<line x1="'+(GPX+76)+'" y1="'+u.y+'" x2="'+(sx-5)+'" y2="'+sy+'" '+(u.hl?'stroke="var(--open)" stroke-width="1.6"':'class="cw" style="opacity:.6"')+'/>';
+    gp+=crow(GPX+18,u.y-3,u.s,u.k+300,56);if(u.hl)gp+='<rect x="'+(GPX+15)+'" y="'+(u.y-6)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';
+    gp+='<text x="'+(GPX+8)+'" y="'+(u.y+3.5)+'" text-anchor="middle" font-size="9" font-weight="700" fill="var(--muted)">'+role+'</text>';});
+  GU.forEach(function(u){var c=u.s?'--foe':'--ours';
+    gp+='<circle cx="'+u.sx+'" cy="'+u.sy+'" r="5" fill="color-mix(in srgb,var('+c+') 30%,var(--panel))" stroke="'+(u.hl?'var(--open)':'color-mix(in srgb,var('+c+') 80%,var(--panel))')+'" stroke-width="'+(u.hl?1.8:1)+'"/>'+
+      '<text x="'+u.sx+'" y="'+(u.sy+3)+'" text-anchor="middle" font-size="7.5" font-weight="700" fill="var(--ink)">'+ROLE[u.s][u.k]+'</text>';});
+  // the lord's join: a short arrow to its group and "< 60 м"
+  var lp=ccxy(0),lu=GU[0];gp+='<path d="M'+(lu.sx+5)+' '+lu.sy+'L'+(lp[0]-16)+' '+(lp[1]+2)+'" stroke="var(--muted)" stroke-width="1" fill="none"/><text class="ssub" x="'+(lu.sx-2)+'" y="'+(lu.sy+15)+'" text-anchor="middle" style="font-size:8px">&lt; 60 м</text>';
+  // the places: a group = a filled place, unused places stay dashed; a line from every cluster to its place
+  SL.forEach(function(sl,j){var c=sl.s?'--foe':'--ours',x=RX[2];
+    if(sl.used){var p=ccxy(j);gp+='<line x1="'+(p[0]+17)+'" y1="'+p[1]+'" x2="'+(x-1)+'" y2="'+(sl.y+5.5)+'" '+(j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';}
+    gp+='<rect x="'+x+'" y="'+sl.y+'" width="26" height="11" rx="3" fill="'+(sl.used?'color-mix(in srgb,var('+c+') 36%,var(--panel))':'none')+'" stroke="color-mix(in srgb,var('+c+') '+(sl.used?70:50)+'%,var(--panel))" stroke-width="1.1"'+(sl.used?'':' stroke-dasharray="3 2"')+'/>';
+    if(j===2)gp+='<rect x="'+(x-2)+'" y="'+(sl.y-1.5)+'" width="30" height="14" rx="4" fill="none" stroke="var(--open)" stroke-width="1.6"/>';});
+  gp+='<text class="ssub" x="'+(GPX+44)+'" y="'+(GSY-10)+'" text-anchor="middle">роль · отряд</text><text class="ssub" x="'+(FLD[0].x+FLD[0].w/2)+'" y="'+(GSY-10)+'" text-anchor="middle">место, R 100 м</text><text class="ssub" x="'+(RX[2]+13)+'" y="'+(GSY-10)+'" text-anchor="middle">группы</text>';
+  gp+='<text class="ssub" x="'+(GPX+44)+'" y="'+(GSY+10*GS+12)+'" text-anchor="middle">враг</text>';
+  gp+='<text class="ssub" x="'+(GPX+GPW/2)+'" y="'+(GSY+20*GS+30)+'" text-anchor="middle" style="font-size:10px">С стрелки · Б ближний бой · Л лорд, герои · К быстрые</text>';
+  gp+='<text class="ssub" x="'+(GPX+GPW/2)+'" y="'+(GSY+20*GS+42)+'" text-anchor="middle" style="font-size:10px">номера групп — по общим отрядам</text>';
+  h+=G("groupproc","t-alg",[GPX,BY,GPW,KY+KH-BY],"Сбор групп","алгоритм",gp);
   // --- Группы (output): filled groups are solid brackets - on top the group card (short row), inside its units (rows, as in the army blocks);
   // empty places are small dashed empty brackets in one row under them
   var GOX=GPX+GPW+18,GOW=170,GBX=GOX+18,GTOP={},RS=10;
@@ -526,7 +544,7 @@ a{color:inherit}
   var go=grpDraw(GOX,GBX,500,false);
   h+=G("groups","t-out",[GOX,BY,GOW,KY+KH-BY],"Группы","выход",go);
   // the yellow unit leaves "Итог совещания" through the gap between columns (not across the enemy card)
-  var gl='<path d="M'+(QCX+57.5)+' '+TOK[HU].y+'H'+(QCX+60)+'V'+(QRY+12*11+4)+'H'+(GPX+8)+'V'+YU+'H'+(GPX+15)+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
+  var gl='<path d="M'+(QCX+57.5)+' '+TOK[HU].y+'H'+(QCX+60)+'V'+(QRY+12*11+4)+'H'+(GPX+2)+'V'+YU+'H'+(GPX+15)+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
   SL.forEach(function(sl,j){if(sl.used)gl+='<line x1="'+(GSX+(j===2?20:18))+'" y1="'+(sl.y+5.5)+'" x2="'+(GBX-2)+'" y2="'+GTOP[j]+'" '+(j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';});
   h+='<g pointer-events="none">'+gl+'</g>';
   // --- Совещание групп (processing): speakers = map tiles (from "Карта после совещания") and the groups; listeners = the groups only.
@@ -558,54 +576,78 @@ a{color:inherit}
     gkl+='<line x1="'+(GBX+68)+'" y1="'+g.y+'" x2="'+(GKC[0]-32)+'" y2="'+g.y+'" '+st+'/>';
     gkl+='<line x1="'+(GKC[1]+6)+'" y1="'+g.y+'" x2="'+(GQB-2)+'" y2="'+g.y+'" '+st+'/>';});
   h+='<g pointer-events="none">'+gkl+'</g>';
-  // --- Выбор заданий (processing): each of our groups picks a kind (1 of 10 from "Виды заданий"), then target 1, then target 2 (or none).
-  // drawn for the yellow group only: A = our groups (choosers), B = the 10 kinds, C = "group + its kind" (a diamond: it compares itself with every candidate), D = candidates
+  // --- Выбор заданий (processing): each of our groups (its card + threat numbers + tiles under it) picks a kind (1 of 6 named kinds), then ONE target:
+  // another of our groups, an enemy group or a tile of the coarse 4 x 4 grid (<= 36 candidates); pairs kind x target outside the kind's target types are masked (-inf),
+  // 'shoot' only for a group that is at least half shooters; on a re-plan the group's previous kind gets +B (inertia)
+  var KN=["attack","hold","flank","screen","shoot","withdraw"];
   var CHX=GQX+GQW+18,CHW=320,ch="",A0=CHX+10,B0=CHX+112,C0=CHX+205,D0=CHX+250,BYK=KY+150;
   function mbox(x,y,side,j,hl){var c=side?'--foe':'--ours',col=hl?'var(--open)':'color-mix(in srgb,var('+c+') 80%,var(--panel))';   // a group in small: card band + its units as faint bars
     var nm=(MEM[j]||[]).length,bh=14+nm*4,bt=y-bh/2,o='<rect x="'+x+'" y="'+bt+'" width="64" height="11" rx="3" fill="color-mix(in srgb,var('+c+') 16%,var(--panel))"/>';
     o+='<rect x="'+x+'" y="'+bt+'" width="64" height="'+bh+'" rx="3" fill="none" stroke="'+col+'" stroke-width="1.8"/><line x1="'+x+'" y1="'+(bt+11)+'" x2="'+(x+64)+'" y2="'+(bt+11)+'" stroke="'+col+'" stroke-width="1"/>';
     o+=crow(x+4,bt+2.5,side,j+800,56);for(var k=0;k<nm;k++)o+='<rect x="'+(x+4)+'" y="'+(bt+13.5+k*4)+'" width="55" height="2.5" rx="1" fill="color-mix(in srgb,var('+c+') 35%,var(--panel))"/>';return o;}
-  function mkind(x,y,i){var o="";for(var k=0;k<8;k++)o+='<rect x="'+(x+k*7)+'" y="'+y+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(700+i,k)*60)+'%,var(--panel))"/>';return o;}
-  var OURS=GL.filter(function(g){return g.side===0;}),FOES=GL.filter(function(g){return g.side===1;}),YG=OURS.filter(function(g){return g.j===2;})[0],KSC=[.15,.3,.1,.95,.2,.1,.35,.1,.15,.2],KPICK=3;
-  // B: the kinds (a copy of the table's rows) with numbers
-  for(var i=0;i<10;i++){var y=BYK+i*12;ch+='<text class="ssub" x="'+(B0-5)+'" y="'+(y+6)+'" text-anchor="end" style="font-size:9px">'+(i+1)+'</text>'+mkind(B0,y,i);}
-  // step 1: the yellow group compares itself with the 10 kinds (thickness = share), picks kind 4
-  for(var i=0;i<10;i++)ch+='<line x1="'+(A0+64)+'" y1="'+YG.y+'" x2="'+(B0-12)+'" y2="'+(BYK+i*12+3)+'" stroke="var(--open)" stroke-width="'+(.5+KSC[i]*3)+'" opacity="'+(.3+KSC[i]*.65)+'"/>';
-  ch+='<rect x="'+(B0-3)+'" y="'+(BYK+KPICK*12-3)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';
+  function mkind(x,y,i,seed){var o="";for(var k=0;k<8;k++)o+='<rect x="'+(x+k*7)+'" y="'+y+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval((seed||700)+i,k)*60)+'%,var(--panel))"/>';return o;}
+  var OURS=GL.filter(function(g){return g.side===0;}),FOES=GL.filter(function(g){return g.side===1;}),YG=OURS.filter(function(g){return g.j===2;})[0];
+  // the yellow group (melee) and the 6 kinds: thickness = share; 'shoot' is closed for it (no shooters), it picks 'attack' (its previous kind: +B)
+  var KSC=[.9,.25,.35,.15,0,.12],KPICK=0,KSHUT={4:1};
+  for(var i=0;i<6;i++){var y=BYK+i*16,sh=KSHUT[i];
+    ch+='<text class="ssub" x="'+(B0-5)+'" y="'+(y+6)+'" text-anchor="end" style="font-size:9px'+(sh?';text-decoration:line-through':'')+'">'+KN[i]+'</text><g opacity="'+(sh?.3:1)+'">'+mkind(B0,y,i)+'</g>';
+    if(sh)ch+='<line x1="'+(B0-2)+'" y1="'+(y+3)+'" x2="'+(B0+58)+'" y2="'+(y+3)+'" stroke="var(--foe)" stroke-width="1.4"/>';
+    else ch+='<line x1="'+(A0+64)+'" y1="'+YG.y+'" x2="'+(B0-50)+'" y2="'+(y+3)+'" stroke="var(--open)" stroke-width="'+(.5+KSC[i]*3)+'" opacity="'+(.3+KSC[i]*.65)+'"/>';}
+  ch+='<rect x="'+(B0-3)+'" y="'+(BYK+KPICK*16-3)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/><text x="'+(B0+62)+'" y="'+(BYK+KPICK*16+6)+'" style="font-size:9px;font-weight:700" fill="var(--open)">+B</text>';
+  ch+='<text class="ssub" x="'+(B0+28)+'" y="'+(BYK+6*16+10)+'" text-anchor="middle" style="font-size:9px">маска: вид × цель</text>';
   // the group and its kind meet in C
-  ch+='<line x1="'+(A0+64)+'" y1="'+YG.y+'" x2="'+(C0-7)+'" y2="'+YG.y+'" stroke="var(--open)" stroke-width="1.6"/><line x1="'+(B0+59)+'" y1="'+(BYK+KPICK*12+3)+'" x2="'+(C0-5)+'" y2="'+(YG.y-4)+'" stroke="var(--open)" stroke-width="1.6"/>';
-  // D: candidates - map tiles (top), our other groups, enemy groups
-  var CAND=[];for(var i=0;i<4;i++)CAND.push({k:"t",y:QPY+(i-1)*24,seed:i});
-  OURS.forEach(function(g){if(g.j!==2)CAND.push({k:"g",j:g.j,side:0,y:g.y});});FOES.forEach(function(g){CAND.push({k:"g",j:g.j,side:1,y:g.y});});
-  var T1=CAND.findIndex(function(c){return c.k==="g"&&c.j===11;}),T2=CAND.findIndex(function(c){return c.k==="g"&&c.j===0;});
-  // steps 2 and 3: from C to every candidate (grey), target 1 = their group (solid yellow), target 2 = our group (dashed yellow)
-  CAND.forEach(function(c,i){var hl=i===T1||i===T2,x2=c.k==="t"?D0+3:D0-1;
-    ch+='<line x1="'+(C0+7)+'" y1="'+YG.y+'" x2="'+x2+'" y2="'+c.y+'" '+(hl?'stroke="var(--open)" stroke-width="2.4"'+(i===T2?' stroke-dasharray="5 3"':''):'class="cw"')+'/>';});
-  CAND.forEach(function(c,i){ch+=c.k==="t"?tok(D0+32,c,false,c.seed):mbox(D0,c.y,c.side,c.j,i===T1||i===T2);});
-  ch+='<text class="ssub" x="'+(D0+32)+'" y="'+(CAND[T1].y-16)+'" text-anchor="middle" style="font-size:10px">цель 1</text><text class="ssub" x="'+(D0+32)+'" y="'+(CAND[T2].y-16)+'" text-anchor="middle" style="font-size:10px">цель 2</text>';
+  ch+='<line x1="'+(A0+64)+'" y1="'+YG.y+'" x2="'+(C0-7)+'" y2="'+YG.y+'" stroke="var(--open)" stroke-width="1.6"/><line x1="'+(B0+59)+'" y1="'+(BYK+KPICK*16+3)+'" x2="'+(C0-5)+'" y2="'+(YG.y-4)+'" stroke="var(--open)" stroke-width="1.6"/>';
+  // D: candidates - the coarse 4 x 4 grid of tiles (top), our other groups, enemy groups; one target
+  var TGX=D0+10,TGY=KY+34,TG=[];for(var r=0;r<4;r++)for(var c=0;c<4;c++){TG.push([TGX+c*11+5,TGY+r*11+5]);ch+='<rect x="'+(TGX+c*11)+'" y="'+(TGY+r*11)+'" width="10" height="10" rx="1.5" fill="color-mix(in srgb,var(--field) '+Math.round(30+cval(900+r*4+c,1)*60)+'%,var(--panel))"/>';}
+  var CAND=[];OURS.forEach(function(g){if(g.j!==2)CAND.push({k:"g",j:g.j,side:0,y:g.y});});FOES.forEach(function(g){CAND.push({k:"g",j:g.j,side:1,y:g.y});});
+  var T1=CAND.findIndex(function(c){return c.k==="g"&&c.j===11;});
+  TG.forEach(function(t){ch+='<line class="cw" x1="'+(C0+7)+'" y1="'+YG.y+'" x2="'+t[0]+'" y2="'+t[1]+'" style="opacity:.3"/>';});
+  CAND.forEach(function(c,i){var hl=i===T1;ch+='<line x1="'+(C0+7)+'" y1="'+YG.y+'" x2="'+(D0-1)+'" y2="'+c.y+'" '+(hl?'stroke="var(--open)" stroke-width="2.4"':'class="cw"')+'/>';});
+  CAND.forEach(function(c,i){ch+=mbox(D0,c.y,c.side,c.j,i===T1);});
+  ch+='<text class="ssub" x="'+(D0+32)+'" y="'+(CAND[T1].y-16)+'" text-anchor="middle" style="font-size:10px">цель</text>';
   ch+=knode(C0,YG.y,true);
   // A: our groups (the choosers)
   OURS.forEach(function(g){ch+=mbox(A0,g.y,0,g.j,g.j===2);});
-  ch+='<text class="ssub" x="'+(B0+28)+'" y="'+(BYK-10)+'" text-anchor="middle">виды</text><text class="ssub" x="'+(D0+32)+'" y="'+(QPY-48)+'" text-anchor="middle">цели</text>';
+  ch+='<text class="ssub" x="'+(B0+28)+'" y="'+(BYK-10)+'" text-anchor="middle">виды</text><text class="ssub" x="'+(TGX+22)+'" y="'+(TGY-8)+'" text-anchor="middle">участки 4×4</text>';
   h+=G("missionpick","t-proc",[CHX,KY,CHW,KH],"Выбор заданий","обработка",ch);
-  // --- Задания групп (output): for each of our groups - its kind card, target 1, target 2 (or none)
-  var E0=CHX+CHW+18,EW=210,ex="",EC=E0+12,MIS={0:[6,"t",null],1:[1,"f",null],2:[3,"f","o"],3:[3,"f","t"]};
+  h+=TPL("gentest",CHX,CHW,-40,KY,"Проверки генерала",14);
+  // --- Угроза и участки группы (algorithm): explicit numbers of the group's situation, added to the group card before the kind/target choice (a layer from zero)
+  var THX=GQX,THY=KY,THW=GQW,THH=BY-KY-24,th="";
+  th+=crow(THX+16,THY+20,0,2+800,56)+'<text class="ssub" x="'+(THX+80)+'" y="'+(THY+26)+'" style="font-size:10px">карточка группы</text>';
+  th+='<text class="ssub" x="'+(THX+22)+'" y="'+(THY+46)+'" style="font-size:16px;font-weight:700">+</text>';
+  [["до врага / 500 м",.6,"0,6"],["силы: лог отношения",.55,"+0,3"],["стрелки: свои / их",.5,"0,5 / 0,3"],["в соприкосновении",.2,"0,2"],["под обстрелом",.4,"0,4"],["в рукопашной",.1,"0,1"]].forEach(function(q,i){var y=THY+60+i*14;
+    th+='<text class="ssub" x="'+(THX+16)+'" y="'+(y+7)+'" style="font-size:9px">'+q[0]+'</text><rect x="'+(THX+130)+'" y="'+y+'" width="70" height="7" rx="2" fill="color-mix(in srgb,var(--ink) 10%,var(--panel))"/><rect x="'+(THX+130)+'" y="'+y+'" width="'+(q[1]*70)+'" height="7" rx="2" fill="color-mix(in srgb,#5f9a2e 70%,var(--panel))"/><text class="ssub" x="'+(THX+206)+'" y="'+(y+7)+'" style="font-size:9px">'+q[2]+'</text>';});
+  // the tiles under the group: a patch of the map, the group centre, the circle of 1.5 tiles (nearer = heavier)
+  var TPX=THX+30,TPY=THY+150,TPC=13;for(var r=0;r<5;r++)for(var c=0;c<5;c++){var d=Math.hypot(c-2,r-2),w=Math.exp(-d*d/2);
+    th+='<rect x="'+(TPX+c*TPC)+'" y="'+(TPY+r*TPC)+'" width="'+(TPC-2)+'" height="'+(TPC-2)+'" rx="2" fill="color-mix(in srgb,var(--field) '+Math.round(20+w*70)+'%,var(--panel))"/>';}
+  th+='<circle cx="'+(TPX+2*TPC+5.5)+'" cy="'+(TPY+2*TPC+5.5)+'" r="'+(1.5*TPC)+'" fill="none" stroke="var(--open)" stroke-width="1.6" stroke-dasharray="3 2"/><circle cx="'+(TPX+2*TPC+5.5)+'" cy="'+(TPY+2*TPC+5.5)+'" r="3" fill="var(--ours)"/>';
+  th+='<text class="ssub" x="'+(TPX+80)+'" y="'+(TPY+24)+'" style="font-size:10px">участки под группой:</text><text class="ssub" x="'+(TPX+80)+'" y="'+(TPY+38)+'" style="font-size:10px">8 чисел, радиус 1,5 участка</text><text class="ssub" x="'+(TPX+80)+'" y="'+(TPY+52)+'" style="font-size:10px">мимо совещания</text>';
+  h+=G("threat","t-alg",[THX,THY,THW,THH],"Угроза и участки группы","алгоритм",th);
+  // --- Задания групп (output): for each of our groups - its kind and ONE target
+  var E0=CHX+CHW+18,EW=210,ex="",EC=E0+12,MIS={0:[1,"t"],1:[4,"f"],2:[0,"f"],3:[2,"f"]};
   function chip(x,y,t){if(!t)return '<rect x="'+x+'" y="'+(y-5)+'" width="26" height="10" rx="3" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2.5 2"/>';
     var f=t==="t"?'var(--field)':'color-mix(in srgb,var('+(t==="f"?'--foe':'--ours')+') 55%,var(--panel))';return '<rect x="'+x+'" y="'+(y-5)+'" width="26" height="10" rx="3" fill="'+f+'"/>';}
-  ex+='<text class="ssub" x="'+(EC+28)+'" y="'+(OURS[0].y-24)+'" text-anchor="middle" style="font-size:10px">вид</text><text class="ssub" x="'+(EC+81)+'" y="'+(OURS[0].y-24)+'" text-anchor="middle" style="font-size:10px">цель 1</text><text class="ssub" x="'+(EC+115)+'" y="'+(OURS[0].y-24)+'" text-anchor="middle" style="font-size:10px">цель 2</text>';
-  OURS.forEach(function(g){var m=MIS[g.j];ex+=mkind(EC,g.y-3,m[0])+chip(EC+68,g.y,m[1])+chip(EC+102,g.y,m[2]);
+  ex+='<text class="ssub" x="'+(EC+28)+'" y="'+(OURS[0].y-24)+'" text-anchor="middle" style="font-size:10px">вид</text><text class="ssub" x="'+(EC+117)+'" y="'+(OURS[0].y-24)+'" text-anchor="middle" style="font-size:10px">цель</text>';
+  OURS.forEach(function(g){var m=MIS[g.j];ex+=mkind(EC,g.y-3,m[0])+'<text class="ssub" x="'+(EC+60)+'" y="'+(g.y+3)+'" style="font-size:9px">'+KN[m[0]]+'</text>'+chip(EC+104,g.y,m[1]);
     if(g.j===2)ex+='<rect x="'+(EC-4)+'" y="'+(g.y-9)+'" width="'+(140)+'" height="18" rx="4" fill="none" stroke="var(--open)" stroke-width="2"/>';});
   h+=G("missions","t-out",[E0,BY,EW,KY+KH-BY],"Задания групп","выход",ex);
-  // lines: our groups from "Группы после совещания" into A; C to the yellow row of the output; the yellow tile from the map into D
+  // lines: our groups from "Группы после совещания" into A; C to the yellow row of the output; the threat numbers into our groups (A); groups after -> threat
   var chl='<line x1="'+(C0+7)+'" y1="'+YG.y+'" x2="'+(EC-4)+'" y2="'+YG.y+'" stroke="var(--open)" stroke-width="1.6"/>';
   OURS.forEach(function(g){chl+='<line x1="'+(GQB+68)+'" y1="'+g.y+'" x2="'+A0+'" y2="'+g.y+'" '+(g.j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';});
   FOES.forEach(function(g){chl+='<line x1="'+(GQB+68)+'" y1="'+g.y+'" x2="'+(D0-1)+'" y2="'+g.y+'" class="cw"/>';});
+  var O0=OURS[0],O0T=O0.y-(14+(MEM[O0.j]||[]).length*4)/2;
+  chl+='<path d="M'+(THX+THW)+' '+(BYK+70)+'H'+(A0+40)+'V'+(O0T-3)+'" fill="none" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#arrM)"/>';
+  chl+='<path d="M'+(THX+THW/2)+' '+BY+'V'+(THY+THH)+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
+  h+='<defs><marker id="arrM" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--muted)"/></marker></defs>';
   h+='<g pointer-events="none">'+chl+'</g>';
-  // --- Виды заданий (learned table): 10 cards with no input - their numbers are weights changed only by training; the menu groups choose from (next blocks)
+  // --- Виды заданий (learned table): 6 named kinds, cards with no input - the general's keys for the kind choice
   var MKX=CHX,MKY=EY+140,MKW=190,MKH=162,mk="";
-  for(var i=0;i<10;i++){var y=MKY+16+i*10;mk+='<text class="ssub" x="'+(MKX+30)+'" y="'+(y+6)+'" text-anchor="end" style="font-size:9px">'+(i+1)+'</text>';
-    for(var k=0;k<8;k++)mk+='<rect x="'+(MKX+38+k*7)+'" y="'+y+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(700+i,k)*60)+'%,var(--panel))"/>';}
+  function ktab(x,y,seed){var o="";for(var i=0;i<6;i++){var yy=y+16+i*16;o+='<text class="ssub" x="'+(x+64)+'" y="'+(yy+6)+'" text-anchor="end" style="font-size:9px">'+KN[i]+'</text>'+mkind(x+70,yy,i,seed);}return o;}
+  mk=ktab(MKX,MKY,700);
   h+=G("missionkinds","t-learn",[MKX,MKY,MKW,MKH],"Виды заданий","выученная таблица",mk);
+  // --- Виды заданий исполнителя (learned table): the executor's own copy (its epochs move only this one, not the general's choice)
+  var XKX=E0,XKW=EW;
+  h+=G("execkinds","t-learn",[XKX,MKY,XKW,MKH],"Виды исполнителя","выученная таблица",ktab(XKX+10,MKY,760));
   // ===== designed by the network on its own (pen badge): deployment =====
   // a small map used by the deployment blocks: 8 x 6 участков; top 2 rows = enemy zone, bottom 2 = our zone
   var MG={nx:8,ny:6,cs:14};
@@ -661,15 +703,15 @@ a{color:inherit}
   ZU.forEach(function(u){var yy=zuy(u.k);za+=crow(ZA+152,yy,0,u.k+300,56);if(u.k===ZYK)za+='<rect x="'+(ZA+149)+'" y="'+(yy-3)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
   za+='<text class="ssub" x="'+(ZA+40)+'" y="'+(OURS[0].y-24)+'" text-anchor="middle" style="font-size:10px">задания групп</text><text class="ssub" x="'+(ZA+180)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">наши отряды</text>';
   h+=G("unittask","t-alg",[ZA,BY,ZAW,ZH],"Задание отряда","алгоритм",za);
-  // --- Задания отрядов (output): per unit - its group card, the task card, the two targets (direction + distance from the unit now)
+  // --- Задания отрядов (output): per unit - the kind card (from the executor's table) and one target (direction + distance from the unit now); the group card place is zeros
   var ZO=ZA+ZAW+18,ZOW=230,zo="";
   function arrowChip(x,y,ang,col){var dx=Math.cos(ang)*6,dy=Math.sin(ang)*6;return '<circle cx="'+x+'" cy="'+y+'" r="6" fill="none" stroke="'+col+'" stroke-width="1"/><line x1="'+x+'" y1="'+y+'" x2="'+(x+dx)+'" y2="'+(y+dy)+'" stroke="'+col+'" stroke-width="1.6"/>';}
-  ZU.forEach(function(u){var yy=zuy(u.k),m=MIS[u.j];zo+=crow(ZO+8,yy,0,u.j+800,56)+mkind(ZO+70,yy,m[0]);
-    zo+=arrowChip(ZO+142,yy+3,-1.2+u.k*.4,m[1]==="f"?'var(--foe)':m[1]==="o"?'var(--ours)':'var(--mine)')+(m[2]?arrowChip(ZO+160,yy+3,2.1-u.k*.3,m[2]==="f"?'var(--foe)':m[2]==="o"?'var(--ours)':'var(--mine)'):'<circle cx="'+(ZO+160)+'" cy="'+(yy+3)+'" r="6" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 2"/>');
+  ZU.forEach(function(u){var yy=zuy(u.k),m=MIS[u.j];zo+='<rect x="'+(ZO+8)+'" y="'+yy+'" width="55" height="6" rx="1.2" fill="none" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="2 2"/>'+mkind(ZO+70,yy,m[0],760);
+    zo+=arrowChip(ZO+150,yy+3,-1.2+u.k*.4,m[1]==="f"?'var(--foe)':m[1]==="o"?'var(--ours)':'var(--mine)');
     if(u.k===ZYK)zo+='<rect x="'+(ZO+4)+'" y="'+(yy-4)+'" width="166" height="14" rx="4" fill="none" stroke="var(--open)" stroke-width="2"/>';});
-  zo+='<text class="ssub" x="'+(ZO+36)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">группа</text><text class="ssub" x="'+(ZO+98)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">задание</text><text class="ssub" x="'+(ZO+151)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">цели</text>';
+  zo+='<text class="ssub" x="'+(ZO+36)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">группа: нули</text><text class="ssub" x="'+(ZO+98)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">вид</text><text class="ssub" x="'+(ZO+150)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">цель</text>';
   h+=G("unittasks","t-out",[ZO,BY,ZOW,ZH],"Задания отрядов","выход",zo);
-  // --- Исполнитель (processing) = today's unit network, plus one new input: the unit's task; everything else as now (tokens of all units, attention, memory, the chain of heads)
+  // --- Исполнитель (processing) = today's unit network, plus the unit's task (kind + target geometry) as an input and task masks on its heads (sector / target / kind; the volley lock under shoot)
   var ZX=ZO+ZOW+18,ZXW=300,zx="",ZT=ZX+40,ZN=ZX+120,ZCH=ZX+180;
   var ZTK=ZU.map(function(u){return {y:zuy(u.k)+3,s:0,k:u.k};}).concat([{y:BY+190,s:1,k:0},{y:BY+204,s:1,k:1},{y:BY+218,s:1,k:2},{y:BY+232,s:1,k:3}]);
   ZTK.forEach(function(a){zx+='<line class="cw" x1="'+(ZT+30)+'" y1="'+a.y+'" x2="'+(ZN-6)+'" y2="'+(zuy(ZYK)+3)+'"/>';});
@@ -679,10 +721,12 @@ a{color:inherit}
   zx+=knode(ZN,zuy(ZYK)+3,true)+'<text class="ssub" x="'+ZN+'" y="'+(zuy(ZYK)-12)+'" text-anchor="middle" style="font-size:9px">×3 + память</text>';
   // the chain of heads for the yellow unit: kind -> target -> sector -> cell -> how long (+ run, ability)
   var ZHD=["вид","цель","сектор","клетка","срок"];
-  ZHD.forEach(function(t,i){var yy=zuy(ZYK)-18+i*16;zx+='<rect x="'+(ZCH)+'" y="'+(yy-6)+'" width="52" height="13" rx="3" fill="color-mix(in srgb,var(--ink) 10%,var(--panel))" stroke="var(--muted)" stroke-width="1"/><text class="ssub" x="'+(ZCH+26)+'" y="'+(yy+4)+'" text-anchor="middle" style="font-size:9px">'+t+'</text>';
+  ZHD.forEach(function(t,i){var yy=zuy(ZYK)-18+i*16,mk=i<3;zx+='<rect x="'+(ZCH)+'" y="'+(yy-6)+'" width="52" height="13" rx="3" fill="color-mix(in srgb,var('+(mk?'--foe':'--ink')+') '+(mk?16:10)+'%,var(--panel))" stroke="'+(mk?'var(--foe)':'var(--muted)')+'" stroke-width="1"'+(mk?' stroke-dasharray="3 2"':'')+'/><text class="ssub" x="'+(ZCH+26)+'" y="'+(yy+4)+'" text-anchor="middle" style="font-size:9px">'+t+'</text>';
     zx+='<line x1="'+(ZN+7)+'" y1="'+(zuy(ZYK)+3)+'" x2="'+ZCH+'" y2="'+yy+'" stroke="var(--open)" stroke-width="1" opacity=".7"/>';
     if(i<4)zx+='<path d="M'+(ZCH+26)+' '+(yy+7)+'v3" stroke="var(--muted)" stroke-width="1"/>';});
   zx+='<text class="ssub" x="'+(ZCH+26)+'" y="'+(zuy(ZYK)+72)+'" text-anchor="middle" style="font-size:9px">+ бег, способность</text>';
+  zx+='<text class="ssub" x="'+(ZCH+26)+'" y="'+(zuy(ZYK)+88)+'" text-anchor="middle" style="font-size:9px;fill:var(--foe)">пунктир — маски задания</text><text class="ssub" x="'+(ZCH+26)+'" y="'+(zuy(ZYK)+101)+'" text-anchor="middle" style="font-size:9px;fill:var(--foe)">shoot: замок залпа</text>';
+  zx+='<text class="ssub" x="'+(ZT+2)+'" y="'+(BY+250)+'" text-anchor="middle" style="font-size:9px">вход задания:</text><text class="ssub" x="'+(ZT+2)+'" y="'+(BY+262)+'" text-anchor="middle" style="font-size:9px">вид + где цель</text>';
   zx+='<text class="ssub" x="'+(ZT)+'" y="'+(ZUY0-10)+'" text-anchor="middle" style="font-size:10px">все отряды</text>';
   h+=G("executor","t-proc",[ZX,BY,ZXW,ZH],"Исполнитель (сеть отряда)","обработка",zx);
   // --- Приказы отрядам (output): per unit the chosen kind, target, sector, cell, how long; held until the commitment ends
@@ -709,40 +753,82 @@ a{color:inherit}
   h+=G("situation","t-in",[ZS,ZB3,ZSW,ZB3H],"Обстановка","вход",zs);
   // --- Пересмотр замысла (algorithm): when to run the general again
   var ZP=ZA,ZPW=ZAW+ZOW+18,zp="";
-  ["раз в 30 с","группа разбита","задание выполнено","подкрепления","гибель лорда"].forEach(function(t,i){zp+='<rect x="'+(ZP+14+(i%3)*150)+'" y="'+(ZB3+20+Math.floor(i/3)*28)+'" width="140" height="20" rx="10" fill="color-mix(in srgb,var(--ink) 8%,var(--panel))" stroke="var(--muted)" stroke-width="1"/><text class="ssub" x="'+(ZP+84+(i%3)*150)+'" y="'+(ZB3+34+Math.floor(i/3)*28)+'" text-anchor="middle" style="font-size:10px">'+t+'</text>';});
-  zp+='<text class="ssub" x="'+(ZP+ZPW/2)+'" y="'+(ZB3+92)+'" text-anchor="middle" style="font-size:10px">между поводами замысел заперт</text>';
+  ["раз в 30 с","группа разбита","гибель лорда"].forEach(function(t,i){zp+='<rect x="'+(ZP+14+(i%3)*150)+'" y="'+(ZB3+20+Math.floor(i/3)*28)+'" width="140" height="20" rx="10" fill="color-mix(in srgb,var(--ink) 8%,var(--panel))" stroke="var(--muted)" stroke-width="1"/><text class="ssub" x="'+(ZP+84+(i%3)*150)+'" y="'+(ZB3+34+Math.floor(i/3)*28)+'" text-anchor="middle" style="font-size:10px">'+t+'</text>';});
+  zp+='<text class="ssub" x="'+(ZP+ZPW/2)+'" y="'+(ZB3+62)+'" text-anchor="middle" style="font-size:10px">не раньше 3 с после плана · к прошлому виду группы +B</text><text class="ssub" x="'+(ZP+ZPW/2)+'" y="'+(ZB3+92)+'" text-anchor="middle" style="font-size:10px">между поводами замысел заперт</text>';
   h+=G("replan","t-alg",[ZP,ZB3,ZPW,ZB3H],"Пересмотр замысла","алгоритм",zp);
   // --- Награда (algorithm): as now (v2) - win ±1, gold exchange to budget, a small price for changing an order
   var ZW=ZG,ZWW=ZGW,zw="";
   [[.8,"var(--mine)"],[.35,"var(--mine)"],[-.5,"var(--foe)"],[.6,"var(--mine)"],[-.2,"var(--foe)"]].forEach(function(q,i){var bh=Math.abs(q[0])*40,y0=ZB3+70;zw+='<rect x="'+(ZW+40+i*32)+'" y="'+(q[0]>0?y0-bh:y0)+'" width="20" height="'+bh+'" rx="2" fill="'+q[1]+'" opacity=".75"/>';});
   zw+='<line x1="'+(ZW+30)+'" y1="'+(ZB3+70)+'" x2="'+(ZW+210)+'" y2="'+(ZB3+70)+'" stroke="var(--muted)" stroke-width="1"/>';
   h+=G("reward","t-alg",[ZW,ZB3,ZWW,ZB3H],"Награда","алгоритм",zw);
-  // ===== training band =====
-  var ZB4=ZB3+ZB3H+40,ZB4H=150;
+  // ===== training: critics, the rules that compute signals, and the teachers (block type "учитель": a mechanism that trains other blocks) =====
+  // row 4: Скриптовый учитель · Оценка замысла · Мера выполнения · Оценка отряда · PPO исполнителя · Соперники
+  // row 5: Подражание учителю · PPO замысла · Ветки заданий · Доплата генералу · Доплата исполнителю · Учитель способностей
+  var ZB4=ZB3+ZB3H+40,ZB4H=150,ZB5=ZB4+ZB4H+40,ZB5H=150,TCH="#b5452b";
   function zneur(x,y,n){var o="";for(var i=0;i<n;i++)o+='<circle cx="'+x+'" cy="'+(y+i*16)+'" r="5" fill="color-mix(in srgb,var(--ink) 18%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 45%,var(--panel))" stroke-width="1.1"/>';return o;}
-  // --- Оценка замысла (processing): the general's critic - how good the plan is (expected battle result) from groups, tasks and the map
+  // a teacher's footer inside its block: whom it trains (in the teacher colour)
+  function tteach(x,y,w,t){return '<text x="'+(x+w/2)+'" y="'+y+'" text-anchor="middle" style="font-size:10px;font-weight:600" fill="'+TCH+'">'+t+'</text>';}
+  function tline(x,y,t,fs){return '<text class="ssub" x="'+x+'" y="'+y+'" style="font-size:'+(fs||10)+'px">'+t+'</text>';}
+  // --- Скриптовый учитель (algorithm): the source of the teacher's plans (30 % of training battles)
+  var ZT1=P1,ZT1W=P1W,zt="";
+  ["враг > 250 м → hold","больше половины стрелков → shoot","сблизились → attack","лорд, враг < 150 м → withdraw","у наших стрелков → screen","вторая группа, быстрые → flank"].forEach(function(t,i){
+    zt+='<rect x="'+(ZT1+12)+'" y="'+(ZB4+10+i*17)+'" width="'+(ZT1W-24)+'" height="14" rx="7" fill="color-mix(in srgb,#5f9a2e 12%,var(--panel))" stroke="color-mix(in srgb,#5f9a2e 50%,var(--panel))" stroke-width="1"/><text class="ssub" x="'+(ZT1+ZT1W/2)+'" y="'+(ZB4+21+i*17)+'" text-anchor="middle" style="font-size:9.5px">'+t+'</text>';});
+  h+=G("teacher","t-alg",[ZT1,ZB4,ZT1W,ZB4H],"Скриптовый учитель","алгоритм",zt);
+  // --- Оценка замысла (processing): the general's own critic - learns the plan's return alongside; the advantage uses the unit critic
   var ZV=ZA,ZVW=ZAW,zv="";zv+=zneur(ZV+70,ZB4+30,4)+zneur(ZV+140,ZB4+30,4);
   for(var i=0;i<4;i++)for(var j=0;j<4;j++)zv+='<line class="cw" x1="'+(ZV+75)+'" y1="'+(ZB4+30+i*16)+'" x2="'+(ZV+135)+'" y2="'+(ZB4+30+j*16)+'"/>';
   zv+='<text class="ssub" x="'+(ZV+190)+'" y="'+(ZB4+58)+'" text-anchor="middle" style="font-size:16px;font-weight:700">+0,3</text>';
   h+=G("planvalue","t-proc",[ZV,ZB4,ZVW,ZB4H],"Оценка замысла","обработка",zv);
-  // --- Ветки заданий (algorithm): at a decision, play the battle on in copies - the chosen task vs another - and compare
-  var ZK=ZO,ZKW=ZOW,zk="";
-  zk+='<circle cx="'+(ZK+40)+'" cy="'+(ZB4+60)+'" r="5" fill="var(--open)"/>';
-  [[-30,"задание 4"],[0,"задание 7"],[30,"задание 2"]].forEach(function(q,i){zk+='<path d="M'+(ZK+45)+' '+(ZB4+60)+'C'+(ZK+90)+' '+(ZB4+60)+' '+(ZK+100)+' '+(ZB4+60+q[0])+' '+(ZK+150)+' '+(ZB4+60+q[0])+'" fill="none" stroke="'+(i===0?'var(--open)':'var(--muted)')+'" stroke-width="'+(i===0?2:1.2)+'"/><text class="ssub" x="'+(ZK+156)+'" y="'+(ZB4+64+q[0])+'" style="font-size:10px">'+q[1]+'</text>';});
-  h+=G("branches","t-alg",[ZK,ZB4,ZKW,ZB4H],"Ветки заданий","алгоритм",zk);
-  // --- Оценка отряда (processing): today's critic (full view, no memory) - now also sees the plan
+  // --- Мера выполнения (algorithm): every decision, every unit with a task - a number 0..1 by the simulator's state; bars = probe g21 m10
+  var ZM=ZO,ZMW=ZOW,zm="";
+  [["attack",.78],["hold",.91],["flank",0],["screen",.65],["shoot",.73],["withdraw",.46]].forEach(function(q,i){var y=ZB4+12+i*15;
+    zm+=tline(ZM+16,y+8,q[0],9)+'<rect x="'+(ZM+70)+'" y="'+y+'" width="110" height="8" rx="2" fill="color-mix(in srgb,var(--ink) 10%,var(--panel))"/>'+(q[1]?'<rect x="'+(ZM+70)+'" y="'+y+'" width="'+(q[1]*110)+'" height="8" rx="2" fill="color-mix(in srgb,#5f9a2e 70%,var(--panel))"/>':'')+tline(ZM+186,y+8,q[1]?String(q[1]).replace(".",","):"—",9);});
+  h+=G("measure","t-alg",[ZM,ZB4,ZMW,ZB4H],"Мера выполнения","алгоритм",zm);
+  // --- Оценка отряда (processing): today's critic (full view, no memory); its value is also the base of the general's advantage
   var ZQ=ZX,ZQW=ZXW,zq="";zq+=zneur(ZQ+90,ZB4+30,4)+zneur(ZQ+160,ZB4+30,4)+zneur(ZQ+230,ZB4+46,2);
   for(var i=0;i<4;i++){for(var j=0;j<4;j++)zq+='<line class="cw" x1="'+(ZQ+95)+'" y1="'+(ZB4+30+i*16)+'" x2="'+(ZQ+155)+'" y2="'+(ZB4+30+j*16)+'"/>';for(var j=0;j<2;j++)zq+='<line class="cw" x1="'+(ZQ+165)+'" y1="'+(ZB4+30+i*16)+'" x2="'+(ZQ+225)+'" y2="'+(ZB4+46+j*16)+'"/>';}
   h+=G("unitvalue","t-proc",[ZQ,ZB4,ZQW,ZB4H],"Оценка отряда","обработка",zq);
-  // --- Обучение (algorithm): PPO on two levels; the gradient goes through every block
+  // --- PPO исполнителя (teacher): the unit network's PPO; advantage by the unit critic + the execution bonus; the ability head has its own term
   var ZL=ZR,ZLW=ZRW,zl="";
-  zl+='<path d="M'+(ZL+80)+' '+(ZB4+40)+'a35 30 0 1 1 0 50" fill="none" stroke="var(--muted)" stroke-width="2"/><path d="M'+(ZL+80)+' '+(ZB4+90)+'l8 -6 0 10z" fill="var(--muted)"/>';
-  zl+='<text class="ssub" x="'+(ZL+160)+'" y="'+(ZB4+52)+'" text-anchor="middle" style="font-size:10px">генерал</text><text class="ssub" x="'+(ZL+160)+'" y="'+(ZB4+80)+'" text-anchor="middle" style="font-size:10px">исполнители</text>';
-  h+=G("training","t-alg",[ZL,ZB4,ZLW,ZB4H],"Обучение","алгоритм",zl);
+  zl+='<path d="M'+(ZL+70)+' '+(ZB4+30)+'a32 28 0 1 1 0 48" fill="none" stroke="'+TCH+'" stroke-width="2"/><path d="M'+(ZL+70)+' '+(ZB4+78)+'l8 -6 0 10z" fill="'+TCH+'"/>';
+  zl+=tline(ZL+120,ZB4+40,"преимущество:",9)+tline(ZL+120,ZB4+54,"критик отрядов",9)+tline(ZL+120,ZB4+68,"+ доплата",9)+tteach(ZL,ZB4+108,ZLW,"учит: Исполнителя");
+  h+=G("training","t-teach",[ZL,ZB4,ZLW,ZB4H],"PPO исполнителя","учитель",zl);
   // --- Соперники (environment): who the plan is played against
   var ZE=ZG,ZEW=ZGW,ze="";
   ["сам с собой","прошлые версии","скрипты ИИ","обход / клещи / кайт"].forEach(function(t,i){ze+='<rect x="'+(ZE+20)+'" y="'+(ZB4+18+i*22)+'" width="200" height="16" rx="8" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))" stroke="color-mix(in srgb,var(--foe) 50%,var(--panel))" stroke-width="1"/><text class="ssub" x="'+(ZE+120)+'" y="'+(ZB4+30+i*22)+'" text-anchor="middle" style="font-size:10px">'+t+'</text>';});
   h+=G("opponents","t-env",[ZE,ZB4,ZEW,ZB4H],"Соперники","среда",ze);
+  // --- row 5: the teachers of the general (left four) and of the executor (right two)
+  // Подражание учителю: the net's choice is pulled to the teacher's (NLL), weight 0.3 -> floor 0.15
+  var ZI=P1,ZIW=P1W,zi="";
+  [[.15,.55],[.2,.1],[.1,.05],[.15,.1],[.25,.1],[.15,.1]].forEach(function(q,i){var x=ZI+40+i*32;
+    zi+='<rect x="'+x+'" y="'+(ZB5+70-q[0]*120)+'" width="12" height="'+(q[0]*120)+'" rx="2" fill="color-mix(in srgb,var(--ink) 30%,var(--panel))"/><rect x="'+(x+13)+'" y="'+(ZB5+70-q[1]*120)+'" width="12" height="'+(q[1]*120)+'" rx="2" fill="color-mix(in srgb,#5f9a2e 70%,var(--panel))"/>';});
+  zi+='<line x1="'+(ZI+34)+'" y1="'+(ZB5+70)+'" x2="'+(ZI+ZIW-30)+'" y2="'+(ZB5+70)+'" stroke="var(--muted)" stroke-width="1"/>'+tline(ZI+40,ZB5+86,"сеть · учитель   вес 0,3 → 0,15",9)+tteach(ZI,ZB5+108,ZIW,"учит: Выбор заданий");
+  h+=G("imitate","t-teach",[ZI,ZB5,ZIW,ZB5H],"Подражание учителю","учитель",zi);
+  // PPO замысла: each group of a plan shares one advantage = reward over the plan + g^n V(end) - V(start), V = the unit critic
+  var ZPP=ZA,ZPPW=ZAW,zpp="";
+  zpp+='<circle cx="'+(ZPP+30)+'" cy="'+(ZB5+40)+'" r="5" fill="var(--open)"/><path d="M'+(ZPP+35)+' '+(ZB5+40)+'H'+(ZPP+180)+'" stroke="var(--muted)" stroke-width="1.4"/><circle cx="'+(ZPP+185)+'" cy="'+(ZB5+40)+'" r="5" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
+  zpp+=tline(ZPP+18,ZB5+30,"V(начало)",9)+tline(ZPP+160,ZB5+30,"V(конец)",9)+tline(ZPP+60,ZB5+56,"Σ награды за план",9)+tline(ZPP+18,ZB5+74,"преимущество плана =",9)+tline(ZPP+18,ZB5+88,"Σ + γⁿ·V(конец) − V(начало)",9)+tteach(ZPP,ZB5+108,ZPPW,"учит: Выбор заданий");
+  h+=G("ppoplan","t-teach",[ZPP,ZB5,ZPPW,ZB5H],"PPO замысла","учитель",zpp);
+  // Ветки заданий: at the plan's first decision the battle is copied - my kind vs the teacher's kind for one group; price = trade over 60 s
+  var ZK=ZO,ZKW=ZOW,zk="";
+  zk+='<circle cx="'+(ZK+30)+'" cy="'+(ZB5+50)+'" r="5" fill="var(--open)"/>';
+  [[-22,"мой вид",1],[22,"вид учителя",0]].forEach(function(q){zk+='<path d="M'+(ZK+35)+' '+(ZB5+50)+'C'+(ZK+80)+' '+(ZB5+50)+' '+(ZK+90)+' '+(ZB5+50+q[0])+' '+(ZK+140)+' '+(ZB5+50+q[0])+'" fill="none" stroke="'+(q[2]?'var(--open)':'var(--muted)')+'" stroke-width="'+(q[2]?2:1.4)+'"/>'+tline(ZK+146,ZB5+54+q[0],q[1],10);});
+  zk+=tline(ZK+18,ZB5+96,"цена = размен за 60 с · вес 0,3",9)+tteach(ZK,ZB5+112,ZKW,"учит: Выбор заданий (вид)");
+  h+=G("branches","t-teach",[ZK,ZB5,ZKW,ZB5H],"Ветки заданий","учитель",zk);
+  // Доплата генералу: + 0.2 x the group's execution measure over the plan, centred by kind
+  var ZGG=ZX,ZGGW=ZXW,zgg="";
+  zgg+=tline(ZGG+20,ZB5+34,"к преимуществу плана, у каждой группы:",10)+'<text x="'+(ZGG+ZGGW/2)+'" y="'+(ZB5+62)+'" text-anchor="middle" style="font-size:14px;font-weight:700" fill="var(--ink)">+ 0,2 × (мера − среднее вида)</text>'+tline(ZGG+20,ZB5+86,"центр по виду: «лёгкий» вид не выгоднее",10)+tteach(ZGG,ZB5+108,ZGGW,"учит: Выбор заданий");
+  h+=G("gaingen","t-teach",[ZGG,ZB5,ZGGW,ZB5H],"Доплата генералу","учитель",zgg);
+  // Доплата исполнителю: W = 1 x (measure - kind's mean) into each unit's advantage, withdraw / screen x2
+  var ZGE=ZR,ZGEW=ZRW,zge="";
+  zge+='<text x="'+(ZGE+ZGEW/2)+'" y="'+(ZB5+40)+'" text-anchor="middle" style="font-size:13px;font-weight:700" fill="var(--ink)">1 × (мера − среднее вида)</text>'+tline(ZGE+16,ZB5+62,"withdraw, screen × 2",10)+tline(ZGE+16,ZB5+80,"в преимущество отряда, не в награду",9)+tteach(ZGE,ZB5+108,ZGEW,"учит: Исполнителя");
+  h+=G("gainexec","t-teach",[ZGE,ZB5,ZGEW,ZB5H],"Доплата исполнителю","учитель",zge);
+  // Учитель способностей: ability branches with an open loop + the ability critic + the head's own signal
+  var ZAB=ZG,ZABW=ZGW,zab="";
+  zab+='<circle cx="'+(ZAB+24)+'" cy="'+(ZB5+40)+'" r="5" fill="var(--open)"/>';
+  [[-16,"нажал",1],[16,"не нажал: те же приказы",0]].forEach(function(q){zab+='<path d="M'+(ZAB+29)+' '+(ZB5+40)+'C'+(ZAB+60)+' '+(ZB5+40)+' '+(ZAB+66)+' '+(ZB5+40+q[0])+' '+(ZAB+100)+' '+(ZB5+40+q[0])+'" fill="none" stroke="'+(q[2]?'var(--open)':'var(--muted)')+'" stroke-width="'+(q[2]?2:1.4)+'"'+(q[2]?'':' stroke-dasharray="4 3"')+'/>'+tline(ZAB+104,ZB5+44+q[0],q[1],9);});
+  zab+=tline(ZAB+16,ZB5+80,"+ критик способностей · свой сигнал головы",9)+tteach(ZAB,ZB5+108,ZABW,"учит: Исполнителя (способности)");
+  h+=G("abilteach","t-teach",[ZAB,ZB5,ZABW,ZB5H],"Учитель способностей","учитель",zab);
   // ===== lines =====
   var zl2="";
   // tasks + places -> unit task (through the place-choice rows); the yellow group
@@ -758,17 +844,35 @@ a{color:inherit}
   zl2+='<path d="M'+(ZS+80)+' '+ZB3+'V'+(ZB+0)+'" fill="none" stroke="var(--muted)" stroke-width="1.6"/>';
   zl2+='<path d="M'+(ZS+20)+' '+(ZB3+40)+'H'+(ZP+ZPW)+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
   zl2+='<path d="M'+(ZG+ZGW-40)+' '+ZB+'V'+ZB3+'" fill="none" stroke="var(--muted)" stroke-width="1.6"/>';
-  // re-planning -> back to the general's inputs (dashed, along the bottom of the scheme)
-  var ZBACK=ZB4+ZB4H+26;zl2+='<path d="M'+(ZP+40)+' '+(ZB3+ZB3H)+'V'+ZBACK+'H'+(GX)+'V'+(EY+110+4)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="6 4"/><text class="ssub" x="'+(GX+200)+'" y="'+(ZBACK-6)+'" style="font-size:11px">пересмотр: генерал считает заново по текущим «Армиям»</text>';
-  // training inputs
+  // re-planning -> back to the general's inputs (dashed): out of the block's left side, down the gap before it, along the bottom of the scheme
+  var Yg=ZB5+ZB5H+16,Ye=Yg+18,ZBACK=Ye+26;zl2+='<path d="M'+ZP+' '+(ZB3+ZB3H/2)+'H'+(ZP-9)+'V'+ZBACK+'H'+(GX)+'V'+(EY+110+4)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="6 4"/><text class="ssub" x="'+(GX+200)+'" y="'+(ZBACK-6)+'" style="font-size:11px">пересмотр: генерал считает заново по текущим «Армиям»</text>';
+  // reward -> PPO исполнителя; unit critic -> PPO исполнителя; situation -> execution measure
   zl2+='<path d="M'+(ZW+ZWW/2)+' '+(ZB3+ZB3H)+'V'+(ZB4-10)+'H'+(ZL+ZLW-30)+'V'+ZB4+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
   zl2+='<path d="M'+(ZQ+ZQW)+' '+(ZB4+ZB4H/2)+'H'+ZL+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
-  zl2+='<path d="M'+(ZV+ZVW)+' '+(ZB4+ZB4H-30)+'H'+(ZK)+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/><path d="M'+(ZK+ZKW)+' '+(ZB4+ZB4H-30)+'H'+(ZQ)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="3 3"/>';
+  zl2+='<path d="M'+(ZS+20)+' '+(ZB3+ZB3H)+'V'+(ZB4-14)+'H'+(ZM+ZMW/2)+'V'+ZB4+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
+  // the scripted teacher's plans -> imitation and the branches' alternative; the measure -> both execution bonuses
+  zl2+='<path d="M'+(ZT1+60)+' '+(ZB4+ZB4H)+'V'+(ZB5-2)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arrM)"/>';
+  zl2+='<path d="M'+(ZT1+ZT1W-30)+' '+(ZB4+ZB4H)+'V'+(ZB4+ZB4H+12)+'H'+(ZK+40)+'V'+(ZB5-2)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arrM)"/>';
+  zl2+='<path d="M'+(ZM+ZMW-30)+' '+(ZB4+ZB4H)+'V'+(ZB4+ZB4H+24)+'H'+(ZGE+ZGEW/2)+'V'+(ZB5-2)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arrM)"/><path d="M'+(ZGG+ZGGW/2)+' '+(ZB4+ZB4H+24)+'V'+(ZB5-2)+'" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arrM)"/>';
   zl2+='<path d="M'+(ZE+ZEW+8)+' '+(ZB4+ZB4H/2)+'V'+(KY+KH/2)+'H'+(ZG+ZGW)+'" fill="none" stroke="var(--muted)" stroke-width="1.4"/>';
+  // the exec-kinds table -> "Задание отряда" (the executor's task input takes its kind card from it)
+  zl2+='<path d="M'+(XKX+XKW-30)+' '+MKY+'V'+(ZB+18)+'H'+(ZA+30)+'V'+ZB+'" fill="none" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#arrM)"/>';
+  // ===== teachers -> the blocks they train (teacher colour) =====
+  var tw='fill="none" stroke="'+TCH+'" stroke-width="2"',tm=' marker-end="url(#arrT)"';
+  h+='<defs><marker id="arrT" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="'+TCH+'"/></marker></defs>';
+  // the general's teachers: one bus along the bottom into "Выбор заданий"
+  [ZI+ZIW/2,ZPP+ZPPW/2,ZK+ZKW/2,ZGG+ZGGW/2].forEach(function(x){zl2+='<path d="M'+x+' '+(ZB5+ZB5H)+'V'+Yg+'" '+tw+'/>';});
+  zl2+='<path d="M'+(ZGG+ZGGW/2)+' '+Yg+'H'+(CHX+270)+'V'+(ZB+2)+'" '+tw+tm+'/>';
+  zl2+='<text x="'+(ZPP+10)+'" y="'+(Yg+15)+'" style="font-size:12px;font-weight:600" fill="'+TCH+'">учат генерала: выбор вида, цели и места (через «Выбор заданий»)</text>';
+  // the executor's teachers: the two bonuses-terms go into its PPO, the PPO goes up into the executor
+  zl2+='<path d="M'+(ZGE+ZGEW/2+40)+' '+ZB5+'V'+(ZB4+ZB4H+2)+'" '+tw+tm+'/>';
+  zl2+='<path d="M'+(ZAB+30)+' '+ZB5+'V'+(ZB4+ZB4H+12)+'H'+(ZL+ZLW-20)+'V'+(ZB4+ZB4H+2)+'" '+tw+tm+'/>';
+  zl2+='<path d="M'+(ZL+20)+' '+ZB4+'V'+(ZB+8)+'H'+(ZX+ZXW-30)+'V'+(ZB+2)+'" '+tw+tm+'/>';
+  zl2+='<text x="'+(ZL+28)+'" y="'+(ZB4-24)+'" style="font-size:12px;font-weight:600" fill="'+TCH+'">учат исполнителя</text>';
   h+='<g pointer-events="none">'+zl2+'</g>';
   XEND=ZG+ZGW+30;var ZBOTTOM=ZBACK+20;
   // the table feeds "Выбор заданий" from below: up the block's left margin, then into the kinds column
-  h+='<g pointer-events="none"><path d="M'+(MKX+20)+' '+MKY+'V'+(KY+KH+4)+'H'+(CHX+4)+'V'+(BYK+57)+'H'+(B0-16)+'" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linejoin="round"/></g>';
+  h+='<g pointer-events="none"><path d="M'+(MKX+20)+' '+MKY+'V'+(KY+KH+4)+'H'+(CHX+4)+'V'+(BYK+45)+'H'+(B0-50)+'" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linejoin="round"/></g>';
   var H=ZBOTTOM;svg.setAttribute("viewBox","0 -110 "+(XEND+26)+" "+(H+190));
   svg.innerHTML=h;
   [].forEach.call(svg.querySelectorAll(".snode"),function(g){g.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();g.dispatchEvent(new MouseEvent("click",{bubbles:true}));}});});
@@ -1097,33 +1201,35 @@ a{color:inherit}
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Выбор заданий</b> — следующий блок.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-missionpick">
   <section class="cards">
     <div>
-      <div class="colh">Решено</div>
-      <div class="box done"><h2>Выбор заданий <span class="chip done">решено</span></h2>
+      <div class="colh">Сейчас (черновик)</div>
+      <div class="box"><h2>Выбор заданий <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Каждая наша группа выбирает вид задания</b> из 10 абстрактных «Видов заданий».</li>
-          <li><b>И указывает две цели</b> — среди наших групп, вражеских групп и участков карты; вторая может быть «нет». Задание — это отношение: «прикрыть нашу группу 1 от их группы 2».</li>
+          <li><b>По шагам: вид → одна цель.</b> Каждая наша группа сравнивает свою карточку (после совещания групп + угроза + участки под ней) с 6 видами и берёт один, потом — одну цель.</li>
+          <li><b>Цели</b> — наши группы (кроме себя), группы врага и участки грубой сетки 4 × 4 (участок 400 м = среднее 16 секторов): до 36 кандидатов.</li>
+          <li><b>Маска пар «вид × цель»</b> — вид берёт только цели своих типов (attack — только группу врага, hold — участок или нашу группу…), остальные пары закрыты (−∞); вид, для которого цели нет, не выбирается; shoot — только группе, где стрелков не меньше половины.</li>
+          <li><b>Инерция вида</b> — при пересмотре к прошлому виду той же группы +1 (B): без неё вид менялся в 57 % пересмотров.</li>
+          <li><b>Вражеские группы заданий не выбирают</b> — они только цели. Выбор — с вероятностями; премия за разнообразие — у каждого шага своя, 0,001.</li>
         </ul>
-      </div>
-      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
-        <ul class="small">
-          <li><b>По шагам</b> — вид → цель 1 → цель 2 (как в AlphaStar); каждый шаг — сравнение, как в ромбе совещания, и выбор одного. Иначе пришлось бы выбирать из 10 × 40 × 40 сочетаний сразу.</li>
-          <li><b>Кандидаты в цели</b> — «Группы после совещания» (наши и враг) и участки «Карты после совещания».</li>
-          <li><b>Вражеские группы заданий не выбирают</b> (маска) — они только цели.</li>
-          <li><b>В начале обучения выбор мягкий</b> — задание и цели берутся с вероятностями, иногда пробуются все: иначе невыбранные виды так и останутся случайными.</li>
-        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Две цели из ~262 кандидатов</b> (группы + 256 участков 16 × 16) — это было решено раньше. Равномерный старт почти никогда не выбирал группу: в игре g8 все 24 цели за 12 замыслов — участки по всей карте; разнообразие выборов 13,2–13,4 при максимуме 13,4, то есть выбор случайный. <i>Отвергнуто</i> — одна цель из ≤ 36.</li>
+            <li><b>Неподходящая пара — «нулевое выполнение»</b>, а не маска: сеть тратила бы выборы на бессмыслицу. <i>Отвергнуто.</i></li>
+            <li><b>Одна премия 0,01 на сумму всех шагов</b> (~13 нат) тянула к случайной цели. <i>Отвергнуто</i> — по шагам, 0,001.</li>
+          </ul>
+        </details>
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Защита от дёрганья</b> — когда можно менять задание; на этап боя (записано в «Сборе групп»).</li>
+      <li><b>Цель почти не важна</b> — подмена цели меняет решения отрядов на KL 0,012, подмена вида — на 0,28 (проба g21). Генерал выбирает вид по бою, цель — пока почти нет.</li>
+      <li><b>Свой сигнал генерала слабый</b> — см. «PPO замысла».</li>
     </ul></div></div></div>
   </section>
 </template>
@@ -1131,18 +1237,17 @@ a{color:inherit}
 <template id="tpl-missions">
   <section class="cards">
     <div>
-      <div class="colh">Решено</div>
-      <div class="box done"><h2>Задания групп <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+      <div class="colh">Сейчас (черновик)</div>
+      <div class="box"><h2>Задания групп <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>На каждую нашу группу</b> — карточка выбранного вида задания, цель 1 и цель 2 (или «нет»). Цель — указание на участника: наша группа, их группа или участок.</li>
+          <li><b>На каждую нашу группу</b> — вид (attack, hold, flank, screen, shoot, withdraw) и одна цель: наша группа, группа врага или участок сетки 4 × 4.</li>
           <li><b>Пустые места групп</b> — без задания.</li>
-          <li><b>Дальше</b> — исполнителям: каждый отряд получит свой вектор + карточку своей группы + её задание и цели.</li>
+          <li><b>В 30 % боёв обучения</b> задания даёт скриптовый учитель (группы те же, что собрало правило).</li>
+          <li><b>Дальше</b> — отрядам группы: вид + где цель относительно отряда; и маски задания исполнителю.</li>
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Исполнители</b> — как отряд получает задание группы; следующий блок.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1213,13 +1318,15 @@ a{color:inherit}
       <div class="colh">Черновик</div>
       <div class="box"><h2>Задание отряда <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Алгоритм, без весов</b> — для каждого нашего отряда: найти его группу (по составу из «Сбора групп»), взять её карточку после совещания, карточку её задания и две цели.</li>
-          <li><b>Цели в понятном отряду виде</b> — для цели-группы: центр её отрядов сейчас; для цели-участка: его центр. От отряда: направление (относительно того, куда он смотрит), расстояние в метрах ÷ 100; «нет» — нули и флаг.</li>
-          <li><b>Считается каждую секунду</b> — цели движутся; задание и группа меняются только при пересмотре замысла.</li>
+          <li><b>Алгоритм, без весов</b> — для каждого нашего отряда: его группа (по составу), вид её задания (карточка — из таблицы исполнителя) и её цель.</li>
+          <li><b>Цель в понятном отряду виде</b> — направление от того, куда отряд смотрит (cos, sin), расстояние / 100 м (не больше 20), флаг «нет». Цель-группа — центр её стоящих отрядов сейчас, участок — его центр.</li>
+          <li><b>Числа для масок</b> идут вместе с наблюдением: вид, точка цели, досягаемость, группа-цель, номера групп всех отрядов, замок залпа — обучение считает маски из той же записи, что и бой.</li>
+          <li><b>Карточки группы во входе нет</b> (нули): исполнитель её не слушал (подмена — KL 0,003), а через неё в генерала шёл градиент исполнителя.</li>
+          <li><b>Считается каждое решение</b> — цели движутся; вид и группа меняются только при пересмотре.</li>
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Доли состава</b> — отряд на 90 % в группе 3: брать только её или смесь по долям? Предложение: карточка = смесь по долям (тогда обучение проходит в «Сбор групп»), цели — от главной группы.</li></ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1229,7 +1336,8 @@ a{color:inherit}
       <div class="colh">Черновик</div>
       <div class="box"><h2>Задания отрядов <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>На каждый наш отряд</b> — карточка его группы, карточка задания, две цели (направление + расстояние, или «нет»). Это новый вход исполнителя.</li>
+          <li><b>На каждый наш отряд</b> — карточка вида задания и одна цель (направление + расстояние, или «нет»); место карточки группы — нули. Это вход исполнителя.</li>
+          <li><b>Плюс числа масок</b> — по ним исполнителю закрываются недопустимые действия.</li>
         </ul>
       </div>
     </div>
@@ -1243,14 +1351,24 @@ a{color:inherit}
       <div class="colh">Черновик</div>
       <div class="box"><h2>Исполнитель (сеть отряда) <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Это нынешняя сеть отрядов</b> — без переделки: токен на каждый отряд (225 чисел + 30 слотов способностей), сектора карты 16×16, 3 слоя внимания (256, 8 голов), память (GRU), цепочка голов: вид (держать / идти / атаковать / отойти / продолжать) → цель-враг → сектор → клетка → срок; плюс бег и способность. Решение раз в 1 с, обязательство 2–16 с.</li>
-          <li><b>Один новый вход</b> — «Задание отряда» проецируется слоем в 256 и прибавляется к токену отряда (как сейчас прибавляются эффекты). Враги заданий не получают.</li>
-          <li><b>Зачем так</b> — исполнитель уже умеет играть отрядами; задание его направляет, а не заменяет. Старые веса можно взять как старт: новый вход стартует с нулевых весов и сеть играет как раньше.</li>
-          <li><b>Задание — подсказка, не приказ</b> — исполнитель сам решает, как его выполнить; награда за «послушание» не даётся (учится от исхода боя).</li>
+          <li><b>Это нынешняя сеть отрядов</b> — токен на каждый отряд, сектора карты 16×16, 3 слоя внимания, память, цепочка голов: вид приказа → цель → сектор → клетка → срок; плюс бег и способность. Решение раз в 1 с.</li>
+          <li><b>Вход задания</b> — вид (карточка из своей таблицы) + где цель; слой с нулевого старта, прибавляется к токену отряда. Врагам — ничего.</li>
+          <li><b>Маски задания</b> — задание не только подсказка, оно режет действия (−∞ в головах). Включены безвредные: withdraw — секторы не ближе к врагу; attack/flank — не дальше от цели (но не меньше 150 м); hold — в досягаемости точки, атака — только врагов рядом с ней; screen — у отрезка «наша группа — враг». Маска закрыла всё — откат (без маски).</li>
+          <li><b>Замок залпа под shoot</b> — стрелку, который целится или стреляет, — только «продолжать», пока не выйдет залп (в игре любой новый приказ сбрасывает прицел). Нет залпа — замок снимается через цикл: прицел + 1,3 × перезарядка (из базы игры) + одно решение; у лучника 22,5 с. Свободен в рукопашной и при враге ближе 50 м.</li>
+          <li><b>Учится</b> от PPO исполнителя (исход боя) и доплаты за выполнение задания; голова способностей — от своего учителя (блоки снизу).</li>
         </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Задание как подсказка без платы</b> — исполнитель не слушал: подмена вида меняла решения на KL 0,0006, подмена всего задания нулями — 0,0023. <i>Отвергнуто</i> — доплата за выполнение + маски.</li>
+            <li><b>Строгие маски «нельзя отбиваться»</b> — проверка по частям на точке g13 (256 боёв на соперника, одни и те же бои): без масок рейтинг +0,77, все части сразу −1,31. Вредят те, что запрещают драться: withdraw без атаки (вместе с секторами) −1,15 к «без масок», атака только по группе-цели −0,61, shoot без рукопашной и по чужим целям −0,19. Ограничения движения безвредны (+0,03…+0,19), умолчание +0,01. <i>Отвергнуто</i> — выключены по умолчанию: при плохом выборе генерала отряд под «отойти» не мог ответить и бежал под ударами.</li>
+            <li><b>Замок залпа проверен</b> в симуляторе (точка g15, 24 боя): +0,68 → +0,94 — в шуме (±0,4–0,5), не вредит; нужен прежде всего в игре — там исполнитель под shoot каждую секунду давал ~10 стрелкам новый приказ, и до залпа они не доходили.</li>
+            <li><b>Карточка группы во входе</b> — не слушал (KL 0,003). <i>Отвергнуто</i> — нули.</li>
+          </ul>
+        </details>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Цель-указатель исполнителя</b> — сейчас указывает на любого видимого врага; подталкивать ли к врагам из цели задания — пока нет, пусть учится сам.</li></ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Включать ли строгие маски</b> — теперь генерал выбирает вид по бою (связь выбора с обстановкой 0,77 нат); повторить проверку масок по частям на новой точке.</li></ul></div></div></div>
   </section>
 </template>
 
@@ -1303,13 +1421,14 @@ a{color:inherit}
       <div class="colh">Черновик</div>
       <div class="box"><h2>Пересмотр замысла <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Когда генерал думает заново</b> — раз в 30 с или по поводу: группа разбита (больше половины её отрядов бежит), задание выполнено (цель-группа бежит / участок занят), подошли подкрепления, погиб лорд.</li>
-          <li><b>Между поводами замысел заперт</b> — группы, задания и цели не меняются (защита от дёрганья, «Сбор групп» → на будущее).</li>
-          <li><b>Как</b> — генерал проходит всю схему заново с текущими «Армиями» (бойцы и здоровье «пришло» — сколько осталось сейчас); места групп в «Сборе групп» стартуют со своих прошлых карточек (инерция).</li>
+          <li><b>Когда генерал думает заново</b> — раз в 30 с боя; раньше — если группа разбита (больше половины её отрядов бежит или уничтожено) или погиб лорд (наш или их); не раньше 3 с после прошлого плана. «Задание выполнено» и «подкрепления» поводами не стали.</li>
+          <li><b>Между поводами замысел заперт</b> — группы, задания и цели не меняются.</li>
+          <li><b>Как</b> — генерал проходит схему заново на армиях «сейчас» и на положении отрядов из наблюдения стороны; номера групп — по общим отрядам; к прошлому виду группы +B (инерция).</li>
+          <li><b>В игре</b> — то же по времени боя (ускорение игры ничего не меняет).</li>
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Положение отрядов для генерала</b> — сейчас у генерала нет «где кто стоит» (мы убрали это из «Армий»); при пересмотре в бою оно важно (кто рядом с кем). Предложение: вход «Положение в бою» в совещание — это правка готовых блоков, решать человеку.</li></ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1320,7 +1439,7 @@ a{color:inherit}
       <div class="box"><h2>Награда <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
           <li><b>Как сейчас (v2)</b> — победа ±1, обмен золотом к бюджету, малая цена смены приказа; гибель лорда в награде не весит.</li>
-          <li><b>Одна награда на всё</b> — генерал и исполнители учатся от неё же; отдельной награды «выполнил задание» нет (иначе выучит задания, а не победу).</li>
+          <li><b>Доплаты за выполнение в награду не входят</b> — они идут только в преимущество (блоки «Доплата генералу» и «Доплата исполнителю»): критик и отдача генерала их не видят, генералу нет выгоды выбирать лёгкие задания.</li>
         </ul>
       </div>
     </div>
@@ -1334,9 +1453,15 @@ a{color:inherit}
       <div class="colh">Черновик</div>
       <div class="box"><h2>Оценка замысла <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Критик генерала</b> — по группам после совещания, заданиям и карте предсказывает исход боя (сумму награды до конца боя или до следующего пересмотра).</li>
-          <li><b>Зачем</b> — точка отсчёта: замысел вышел лучше или хуже ожидаемого; из разницы учатся выбор заданий, целей и мест.</li>
+          <li><b>Критик генерала</b> — по карточкам плана предсказывает отдачу плана; учится рядом.</li>
+          <li><b>В преимущество плана сейчас идёт не он</b>, а критик сети отрядов («Оценка отряда»): тот объясняет 0,995 разброса, а этот — 0,38 (g22).</li>
         </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>База — своя оценка, отдача — сумма награды за план</b>: 98,6 % разброса отдачи — у последних планов боя (±1 за победу), у расстановки ~0,004; оценка объясняла ~0 — генералу нечем было учиться. <i>Отвергнуто.</i></li>
+          </ul>
+        </details>
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
@@ -1349,13 +1474,20 @@ a{color:inherit}
       <div class="colh">Черновик</div>
       <div class="box"><h2>Ветки заданий <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Как ветки способностей сейчас</b> — в момент решения генерала бой копируется: выбранное задание группы против другого (2–4 копии), играется ~60 с, сравнивается обмен золотом. Разница — честная цена выбора.</li>
-          <li><b>Также «держать задание или бросить»</b> — для отряда, отвалившегося от группы ради соблазна: ветка «вернулся» против «остался».</li>
-          <li><b>Дорого</b> — делать на части решений (как сейчас доля 0,2 у способностей).</li>
+          <li><b>Кого учит</b> — генерала: выбор вида.</li>
+          <li><b>Как</b> — в первое решение нового плана, с долей P (не больше 64 снимков на обновление), бой копируется; у одной группы плана: «мой вид» против «вида учителя» (что дал бы ей скриптовый учитель сейчас). Учитель ничего не даёт или даёт тот же вид — случайная замена из допустимых.</li>
+          <li><b>Игра копий</b> — 4 копии × 60 с; план заперт, но исполнители и соперники решают заново каждую секунду (закрытая петля для отрядов).</li>
+          <li><b>Сигнал</b> — цена = размен золотом за 60 с («мой» − «учителя»), делится на разброс по куску, ±5; член PPO на вероятность вида этой группы, вес 0,3. Цена читается как «мой выбор лучше учительского здесь?».</li>
         </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Ветки только с видами той же цели</b> — «отойти» сравнивался лишь с «держать» и «прикрыть» (у которых маска не даёт драться) и выигрывал (+0,09…+0,63): ветки стали главной силой за «отойти» — 77 % видов. <i>Отвергнуто</i> — все допустимые виды со своими целями, потом — против выбора учителя.</li>
+          </ul>
+        </details>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Цена — почти шум</b> — доля сигнала 0 в 5 из 9 обновлений (g22), в остальных 0,2–0,37; у способностей закрытая петля на 60 с даёт тоже ~0,07. Лечение — частичная открытая петля и критик видов (см. «PPO замысла»).</li></ul></div></div></div>
   </section>
 </template>
 
@@ -1377,16 +1509,17 @@ a{color:inherit}
   <section class="cards">
     <div>
       <div class="colh">Черновик</div>
-      <div class="box"><h2>Обучение <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+      <div class="box"><h2>PPO исполнителя <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>PPO на двух уровнях</b> — исполнители как сейчас (1024 боя, 64 решения между обновлениями); генерал — по своим решениям (до боя и при пересмотрах) с «Оценкой замысла» и ветками.</li>
-          <li><b>Сквозь все блоки</b> — карточки групп и заданий входят в исполнителя, поэтому поправка от его ошибки доходит до совещаний, сбора групп и анализов; выбор вида, целей и мест (дискретный) учится от «Оценки замысла» и веток.</li>
-          <li><b>Старт</b> — исполнитель берёт веса нынешней сети (новый вход с нулями); генерал с нуля. Первые шаги — мягкий выбор и доплата за различимость заданий.</li>
-          <li><b>Скелет сразу</b> — вся цепочка с самыми простыми блоками, бой идёт с первого дня; у каждого блока свои проверки и проверочные вопросы.</li>
+          <li><b>Кого учит</b> — исполнителя (сеть отрядов).</li>
+          <li><b>Сигнал</b> — как раньше: PPO, 1024 боя, 64 решения между обновлениями; преимущество — по критику отрядов («Оценка отряда») + доплата за выполнение задания у каждого отряда.</li>
+          <li><b>Генерал отвязан</b> — у исполнителя своя таблица видов, карточки группы во входе нет: эпохи исполнителя больше не двигают выбор генерала.</li>
+          <li><b>Голова способностей</b> — со своим членом от «Учителя способностей».</li>
+          <li><b>Старт</b> — веса последней сети отрядов, вход задания с нулей: играет как раньше.</li>
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Скорость</b> — замерить, сколько добавляет генерал (он считает редко, дёшево); исполнитель как сейчас.</li></ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1408,59 +1541,59 @@ a{color:inherit}
 <template id="tpl-missionkinds">
   <section class="cards">
     <div>
-      <div class="colh">Решено</div>
-      <div class="box done"><h2>Виды заданий <span class="chip done">решено</span></h2>
+      <div class="colh">Сейчас (черновик)</div>
+      <div class="box"><h2>Виды заданий — 6 со смыслом <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <div class="ptwrap"><table class="ptab"><tr><th>вид</th><th>цель</th><th>что значит</th></tr>
+          <tr><td>attack</td><td>группа врага</td><td>атаковать</td></tr>
+          <tr><td>hold</td><td>участок или наша группа</td><td>держать место</td></tr>
+          <tr><td>flank</td><td>группа врага</td><td>ударить не в перед (фланг, тыл)</td></tr>
+          <tr><td>screen</td><td>наша группа</td><td>встать между ней и врагом</td></tr>
+          <tr><td>shoot</td><td>группа врага</td><td>обстреливать (только группе, где стрелков не меньше половины)</td></tr>
+          <tr><td>withdraw</td><td>участок или наша группа</td><td>отойти, не вступая в рукопашную</td></tr>
+        </table></div>
         <ul class="small">
-          <li><b>10 видов, абстрактные</b> — мы не называем их («обход», «держать»); смысл им даёт сама сеть, как и составу групп.</li>
-          <li><b>Таблица без входа</b> — 10 карточек, их числа — выученные веса: меняются только обучением (поправка от ошибки генерала обратно).</li>
-          <li><b>Это меню</b> — сама таблица ничего не делает; группа выбирает из неё одно задание (следующие блоки), его карточка идёт дальше — отрядам группы.</li>
+          <li><b>У каждого вида — мера «выполнено» от 0 до 1</b> (блок «Мера выполнения»): на ней держатся доплаты и проверки.</li>
+          <li><b>Таблица без входа</b> — 6 выученных карточек; это ключи, с которыми группа сравнивает себя при выборе вида. У исполнителя — своя копия (блок «Виды исполнителя»).</li>
         </ul>
-      </div>
-      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
-        <ul class="small">
-          <li><b>Карточка той же длины</b>, что карточки групп — чтобы группа сравнивала себя с заданиями напрямую.</li>
-          <li><b>Риск «пустых заданий»</b> — в начале задания ничего не значат, отряды их не замечают, выбор ни на что не влияет; или сеть всегда берёт одно и то же. Лечение: цели задания явные (указанием), на старте небольшая доплата, если по поведению отрядов можно угадать их задание; следить, сколько видов используется и различается ли поведение.</li>
-          <li><b>Запасной путь</b> — если абстрактные не взлетят, тем же 10 местам можно дать смысл учениями («место 1 — обход фланга») без переделки сети.</li>
-        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>10 абстрактных видов без имён</b> — это было решено раньше («смысл даст сама сеть»). Ночь g1–g8 (~280 обновлений) ничего не выучила: виду незачем подчиняться, раз он ничего не значит; исполнитель задание не слушал (подмена вида меняла решения на KL 0,0006), значит выбор генерала ни на что не влиял и его сигнал был шумом — замкнутый круг. <i>Отвергнуто.</i></li>
+            <li><b>Сработал «запасной путь»</b> из прежнего решения: местам дали смысл — имена, цели своих типов и меру выполнения.</li>
+          </ul>
+        </details>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Как группа выбирает задание и цели</b> — следующие блоки: совещание групп, выбор заданий (вид → цель 1 → цель 2).</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-groupproc">
   <section class="cards">
     <div>
-      <div class="colh">Решено</div>
-      <div class="box done"><h2>Сбор групп <span class="chip done">решено</span></h2>
+      <div class="colh">Сейчас — правило (черновик)</div>
+      <div class="box"><h2>Сбор групп правилом <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>10 мест под группы на сторону</b> — наши 10 и враг 10. С запасом: например, конница на 2 фланга, 3 части пехоты, 2 части стрелков, резерв и летуны — 9 групп, и ещё есть куда отделиться в бою (пример, не требование). Пустое место — группы нет.</li>
-          <li><b>Свои — только в свои места, враги — только во вражеские</b> (маска стороны). Группы врага — догадка сети о его строении: «их конница — отдельно от основной силы».</li>
-          <li><b>Отряд делит себя на 100 % между местами своей стороны</b> — места соревнуются за отряды, поэтому группы раздельные, а не «все во всех».</li>
-          <li><b>Состав учит сеть</b> — правил вроде «конница всегда вместе» нет.</li>
+          <li><b>Роль по карточке отряда</b> — лорд и герои; быстрые (кавалерия, колесницы или бег от 7 м/с); стрелки (есть дальность стрельбы); ближний бой — все остальные.</li>
+          <li><b>Внутри роли — по месту</b> — два ближайших кластера одной стороны и роли сливаются, пока их центры ближе 100 м (по одной паре за раз).</li>
+          <li><b>Одинокий лорд или герой</b> встаёт в ближайшую группу ближнего боя, если до неё меньше 60 м; иначе — своя группа.</li>
+          <li><b>Не больше 10 групп на сторону</b> — лишние сливаются по две ближайшие. Обе стороны — одним правилом; бегущие и мёртвые — вне групп.</li>
+          <li><b>Номера держатся</b> — при пересмотре новые группы сопоставляются со старыми по общим отрядам: номер живёт, пока группа держит свои отряды.</li>
+          <li><b>Карточка группы</b> — из её отрядов (среднее минус среднее своей стороны: без вычитания карточки групп почти одинаковые). Учится только тот, кто читает карточку.</li>
+          <li><b>Что вышло</b> — 3,3–3,8 группы на сторону, смешанных групп «стрелки + пехота» 0 %, разброс внутри группы 23 м против 46 м при случайном делении.</li>
         </ul>
-      </div>
-      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
-        <ul class="small">
-          <li><b>Одна сеть</b> — одни веса на все места и на обе стороны; места отличаются стартовыми карточками.</li>
-          <li><b>3 круга</b> — отряды делятся, группы обновляются, и так 3 раза: из размытого деления в чёткое. Все круги — внутри одного решения.</li>
-          <li><b>Бегущие — вне групп</b>, пока не соберутся (бегущим в игре не управляют).</li>
-        </ul>
-      </div>
-      <div class="colh">На будущее</div>
-      <div class="box later"><h2>На этап боя: защита от дёрганья <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
-        <ul class="small">
-          <li><b>Замок кодом</b> — пересборка групп и заданий только по расписанию (раз в 20–30 с) или по событию (группа разбита, задание выполнено, подкрепления, гибель лорда); твёрдый предел смен в минуту.</li>
-          <li><b>«Оставить или пересобрать» — отдельное решение с ценой</b> — обе ветки проигрываются вперёд, смена без выгоды учится как невыгодная.</li>
-          <li><b>Инерция</b> — на пересмотре места стартуют со своих прошлых карточек; разделение группы = часть отрядов ушла на свободное место.</li>
-          <li><b>Следить</b> — число смен замысла за бой; сколько групп реально используется и по сколько отрядов (не дробит ли «в пыль»).</li>
-        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Выученный сбор (10 мест, 3 круга, отряд делит себя между местами)</b> — это было решено раньше. Атлас точки g17r (1536 боёв): первый план — <b>одна группа на всю армию во всех 1536 боях</b>, дальше в среднем 1,6; карточки групп одинаковые (косинус 0,995); по роли не группирует (смешанных 0,52 при случайном делении 0,53), по месту почти нет (115 м против 125 м); у 31 % отрядов главное место меньше 0,5 — отряд прыгает между группами. <i>Отвергнуто</i>, оставлено за флагом.</li>
+            <li><b>Ещё раньше</b> (ночь g1–g8): после вычитания среднего ключа каждый отряд делился ровно по 0,100 на 10 мест, 65 % групп — из одного отряда; градиента к сбору групп не было.</li>
+            <li><b>Почему правило, а не чинить сеть</b> — пока генерал учится выбирать вид задания по бою, ему нужны осмысленные группы сразу; плохие группы делали бессмысленным и выбор задания.</li>
+          </ul>
+        </details>
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Группы врага: чем проверить</b> — правды о группах врага нет (против ИИ игры групп у него нет); учатся только от исхода боя.</li>
+      <li><b>Вернуть ли выученный сбор</b> — когда у генерала будет свой сильный сигнал; сравнить правило и сеть на одних и тех же боях.</li>
     </ul></div></div></div>
   </section>
 </template>
@@ -1468,16 +1601,16 @@ a{color:inherit}
 <template id="tpl-groups">
   <section class="cards">
     <div>
-      <div class="colh">Решено</div>
-      <div class="box done"><h2>Группы <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+      <div class="colh">Сейчас (черновик)</div>
+      <div class="box"><h2>Группы <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
         <ul class="small">
-          <li><b>Группа = карточка + состав</b> — на каждое из 10 наших и 10 вражеских мест: карточка группы (сводка её отрядов: кто, сколько, насколько сильны) и состав (какие отряды в ней — они потом и выполняют задание). Пустое место — пустая группа.</li>
+          <li><b>Группа = карточка + состав</b> — на каждую группу: карточка (сводка её отрядов) и состав (какие отряды в ней — они и выполняют задание). До 10 групп на сторону, лишние места пустые.</li>
+          <li><b>Отряд — ровно в одной группе</b> (правило), а не «долями» между местами.</li>
+          <li><b>Дальше</b> — совещание групп; к карточке нашей группы перед выбором задания прибавляются числа угрозы и участки под ней (блок «Угроза и участки группы»).</li>
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Задания группам</b> — вид задания и цель (участок итоговой карты, вражеский отряд или группа, своя группа); ещё не проектировали.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1493,9 +1626,7 @@ a{color:inherit}
         </ul>
       </div>
     </div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Задания группам</b> — как группа указывает участок; ещё не проектировали.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1538,9 +1669,7 @@ a{color:inherit}
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
       <li><b>Сколько слоёв и какой ширины</b> — предложение: 2–3 слоя; подобрать замером.</li>
-      <li><b>Сколько участков за столом</b> — сколько клеток даёт анализ карты на выходе.</li>
       <li><b>Сводка армии</b> — отдельный «собиратель» за столом (вариант 2), который слушает всех и подводит итог.</li>
-      <li><b>Выходы генерала</b> — что берём из стола и как; ещё не проектировали.</li>
     </ul></div></div></div>
   </section>
 </template>
@@ -1692,6 +1821,252 @@ a{color:inherit}
       <li><b>Упор против больших</b> (<code>charge_defense_vs_large</code>, 6 копейщиков и алебардщиков) — не моделируется: больших отрядов нет. Из входа убран; вернуть вместе с большими отрядами.</li>
       <li><b>Авангард</b> (<code>guerrilla_deploy</code>, ополчение и ночные бегуны) — расстановка вне своей зоны; сейчас расставляет сценарий. Из входа убран; вернуть, когда расставлять начнёт генерал (слои карты «можно передовым» уже есть).</li>
     </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-threat">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Угроза и участки группы <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Зачем</b> — генерал выбирал вид задания, не видя обстановки группы: связь вида с угрозой 0,003 нат, с силой рядом 0,006. Теперь эти числа лежат прямо на карточке группы.</li>
+          <li><b>Угроза</b> (у каждой нашей группы, перед выбором вида и цели): расстояние до ближайшей вражеской группы (/ 500 м, до 3); логарифм отношения сил «мы : они» (стоимость × доля здоровья, ±3); доля стрелков у нас и у неё; доля отрядов в соприкосновении (враг ближе 40 м); «враг есть».</li>
+          <li><b>Бой</b> — доля отрядов группы под обстрелом (враг стреляет, и его цель — наш отряд) и доля в рукопашной. В игре — те же поля моста (стреляет ли отряд, его цель, рукопашная): нулями ничего не заполняется.</li>
+          <li><b>Участки под группой</b> — 8 чисел участков в радиусе 1,5 участка от центра группы (ближние весят больше) — у каждой группы, и у вражеской (как у цели). Путь от карты к выбору прямой, мимо совещания.</li>
+          <li><b>Как входит</b> — через слой с нулевого старта: старая точка играет как раньше, пока слой не выучится.</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Участки только через совещание</b> — даже после нормировки обнуление участков меняло выбор вида на KL ~1e-7: выбор участки не читал. <i>Отвергнуто</i> — теперь участки прямо на карточке группы.</li>
+            <li><b>Сырые числа участков</b> — разброс 0,03–0,11, три из восьми всегда 0, содержимое участка — 2 % его токена. <i>Отвергнуто</i> — числа нормируются по карте, три мёртвых заменены силой своих стрелков, стрелков врага и быстрых врага.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Читает ли выбор участки теперь</b> — замерить обнулением участков на новой точке (KL выбора вида); пока не мерили.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-execkinds">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Виды заданий исполнителя <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Своя таблица у исполнителя</b> — те же 6 видов; на старте — копия таблицы генерала. Вход задания отряда берёт карточку вида отсюда.</li>
+          <li><b>Зачем</b> — эпохи обучения исполнителя двигают только эту таблицу, а не выбор генерала.</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Одна таблица на двоих</b> — градиент эпох исполнителя через карточку вида двигал ключи выбора генерала (−0,21 доли «отойти» за одно обновление), мимо тормоза по KL генерала. <i>Отвергнуто.</i></li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-measure">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Мера выполнения <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Что</b> — каждое решение, после шагов симулятора, у каждого нашего отряда с заданием — число от 0 до 1 по состоянию симулятора. Это определение «выполнено», а не механика игры. near(d, R) = 1 в пределах R, до 0 к 3R.</li>
+        </ul>
+        <div class="ptwrap"><table class="ptab"><tr><th>вид</th><th>мера 0…1</th></tr>
+          <tr><td>attack</td><td>1 — в рукопашной с отрядом цели; иначе 0,5 × (1 − d / 300 м) до центра группы-цели</td></tr>
+          <tr><td>hold</td><td>near(d до точки, R): участок — 200 м, группа — 100 м</td></tr>
+          <tr><td>flank</td><td>как attack, но засчитывается удар не в перед: по стороне, с которой начался контакт (фланг, тыл — 1; перед — 0)</td></tr>
+          <tr><td>screen</td><td>на отрезке «наша группа — ближайший враг» × near(до отрезка, 50 м)</td></tr>
+          <tr><td>shoot</td><td>стрелок: 1 — стреляет по цели, 0,5 — цель в дальности, 0 — в рукопашной; без стрельбы: 1 — в 50–250 м от цели</td></tr>
+          <tr><td>withdraw</td><td>0 в рукопашной; иначе 0,5 × near(до точки) + 0,5 × (до ближайшего врага / 300 м)</td></tr>
+        </table></div>
+        <ul class="small">
+          <li><b>Сплочённость</b> — каждая мера × 1 в пределах 150 м от центра своей группы, до 0 к 300 м: отряд, ушедший от своих, задание не выполняет.</li>
+          <li><b>На схеме</b> — меры по видам на точке g21 (проба, 8 боёв против ai_like): flank за эти бои не давался ни разу.</li>
+          <li><b>В игре не считается</b> — там нет обучения.</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>attack — до ближайшего отряда цели</b>: оплачивал погоню двух отрядов и лорда за одним арбалетчиком на 700 м. <i>Отвергнуто</i> — до центра группы.</li>
+            <li><b>flank — по углу сейчас</b>: ударенный отряд разворачивается к атакующему, и удачный удар во фланг через пару секунд выглядит как «в перед». <i>Отвергнуто</i> — по стороне начала контакта.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-teacher">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Скриптовый учитель <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Что</b> — правило, которое в 30 % боёв обучения даёт задания нашим группам вместо генерала (группы те же). Это не сеть и не учитель-механизм, а источник осмысленных планов.</li>
+          <li><b>Правило</b> (позднее перекрывает раннее): каждая группа сначала <b>ждёт</b> — hold участка, пока враг дальше 250 м и наши стрелки стреляют меньше 30 с; потом — attack ближайшей группы врага; группа, где больше половины стрелков, — shoot ближайшей; одна группа не стрелков без лорда, ближайшая к нашим стрелкам, — screen их; группа лорда при враге ближе 150 м — withdraw к самой большой другой группе; <b>обход</b> — из двух групп на одну цель дальняя от её фронта получает flank (если ближе 300 м), быстрые — flank группы, которую сковывает наша пехота.</li>
+          <li><b>Куда идут его планы</b> — исполнитель учится на них, как на своих; генералу — подражание и замена в ветках заданий. PPO генерала и «Оценка замысла» их не видят.</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Учитель «все в атаку с первой секунды»</b> — S27 ждал и встречал (80 приказов «стоять» за первые 100 с против 8 у генерала). <i>Отвергнуто</i> — учитель ждёт.</li>
+            <li><b>Учитель без обхода</b> — flank не давался никогда, мера flank 0,00; при принудительном flank мера 0,20–0,30 и удары сбоку и сзади вдвое чаще, чем под attack: исполнитель обходить умеет, ему не хватало примеров. Теперь flank — в 2,3 % планов учителя.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Обход быстрыми</b> — в сгенерированных армиях боёв обучения нет кавалерии: правило «быстрые → flank» ни разу не сработало; проверить на армиях с конницей.</li></ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-imitate">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Подражание учителю <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Кого учит</b> — генерала: выбор вида и цели.</li>
+          <li><b>Сигнал</b> — на планах скриптового учителя известны его вид и цель у каждой группы; в каждом шаге обучения генерала к потере прибавляется W × «насколько сеть не согласна с учителем»: −(log π(вид учителя) + log π(цель учителя | вид)).</li>
+          <li><b>Вес</b> — W = 0,3, убывает за 300 обновлений до <b>пола 0,15</b>, а не до нуля. Градиент — только в генерала.</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Без учителя</b> (g10): генерал дрейфовал на шуме — 46 % flank (вид с самым низким выполнением 0,13), связь выбора с обстановкой 0,03 нат.</li>
+            <li><b>Подражание до нуля</b> (g18–g21): пока W был 0,3–0,18, рейтинг рос до +1,21; когда W упал 0,18 → 0,065, рейтинг упал +0,97 → +0,56, хотя выполнение и «слушает ли исполнитель» росли. <i>Отвергнуто</i> — пол 0,15.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Когда снять пол</b> — когда свой сигнал генерала удержит рейтинг без подражания (см. «PPO замысла»).</li></ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-ppoplan">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>PPO замысла <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Кого учит</b> — генерала: выбор вида, цели и места.</li>
+          <li><b>Сигнал</b> — каждая наша группа плана — агент; все группы плана делят одно преимущество: награда за время плана + γⁿ · V(конец) − V(начало), где V — критик сети отрядов.</li>
+          <li><b>Старые планы</b> (~40 %: план живёт до 30 с, кусок — 64 с) — отношение вероятностей от политики в начале обновления, отставание — отдельный усечённый вес c = min(1, exp(lp0 − lp_plan)).</li>
+          <li><b>Шаг</b> — 2 эпохи по 512 планов, до эпох исполнителя; тормоз — KL 0,03 (оценка k3, не бывает отрицательной).</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Отношение старого плана от его собственной вероятности</b> — обрезались почти все старые планы (0,6–0,8): их данные пропадали. <i>Отвергнуто.</i></li>
+            <li><b>Перезапись вероятностей планов в начале куска</b> — отставание плана терялось совсем (смещение). <i>Отвергнуто.</i></li>
+            <li><b>Тормоз по среднему log r</b> — уходил в минус (−0,40), шаг генерала шёл без тормоза. <i>Отвергнуто</i> — k3.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Свой сигнал генерала слабый.</b> Одно число на план на все группы, а цена веток — почти шум: доля сигнала в цене 0 в 5 из 9 обновлений, 63 строки веток на обновление (2,4 % планов). Без подражания рейтинг падает (+0,97 → +0,56). <b>План — рецепт учителя способностей:</b> (1) частичная открытая петля веток — в копии «другой вид» все, кроме отрядов этой группы, повторяют записанные приказы; (2) критик видов — цена для каждой группы каждого плана (~8 500 строк вместо 63); (3) свой сигнал головы вида — вид убрать из общего PPO, свой член. Готово, когда рейтинг не падает при подражании 0.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-gaingen">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Доплата генералу за выполнение <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Кого учит</b> — генерала: выбор вида и цели.</li>
+          <li><b>Сигнал</b> — у каждой нашей группы плана к преимуществу плана прибавляется 0,2 × её мера выполнения за план минус скользящее среднее этого вида.</li>
+          <li><b>Зачем центр по виду</b> — иначе выгодно выбирать «лёгкие» виды; остаётся только «выполнимо ли это здесь».</li>
+          <li><b>Размер</b> — в пробе 0,01–0,04 разброса преимущества на группу: малая поправка, не главный сигнал.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-gainexec">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Доплата исполнителю за выполнение <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Кого учит</b> — исполнителя: слушать задание.</li>
+          <li><b>Сигнал</b> — каждое решение, у каждого отряда с заданием: W × (мера − скользящее среднее вида), W = 1; withdraw и screen × 2 (их исполнитель выполнял хуже всего).</li>
+          <li><b>Куда</b> — только в преимущество отряда (горизонт ~10 решений), не в награду: критик и генерал доплату не видят.</li>
+          <li><b>Что дало</b> — выполнение заданий 0,22 (g10) → 0,72 (g21); подмена вида теперь меняет решения отрядов на KL 0,28 (было 0,0067).</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Доплата за различимость</b> (классификатор угадывает вид по поведению группы) — без нормировки была на 3–4 порядка ниже сигнала, точность 0,13–0,31 при случае 0,1; исполнитель задание не слушал. <i>Отвергнуто</i> — заменена доплатой за выполнение.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-abilteach">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Учитель способностей <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Кого учит</b> — голову способностей исполнителя (когда нажать способность).</li>
+          <li><b>Ветки «нажал / не нажал»</b> — доля 0,2 нажатий и 0,005 пропущенных моментов, 4 копии × 60 с. <b>Открытая петля:</b> копия «не нажал» повторяет записанные приказы копии «нажал» — разница только от нажатия; доля сигнала в цене 0 → 0,46–0,59.</li>
+          <li><b>Критик способностей</b> — маленькая сеть (2 × 64) учится на ценах веток (буфер 25 тыс.) и даёт цену каждому моменту: ~22 800 оценённых моментов на обновление вместо ~130 переигранных. Работает как фильтр шума.</li>
+          <li><b>Цена по бонусам</b> для трёх способностей («Стой насмерть», «Смертоносный натиск», «Охотник на врагов») — по полезной работе их бонусов, дёшево и с малым шумом.</li>
+          <li><b>Свой сигнал головы</b> — голова убрана из общего PPO, свой член с весом 1 без убывания, шаг × 2, корпусу — 0,1 её градиента, лишняя эпоха по голове.</li>
+          <li><b>Что дало</b> (g22) — голова нажимает по обстановке: «Смертоносный натиск» в рукопашной 0,79 против 0,02 вне её, «Стой насмерть» 0,68 против 0,03.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Это образец для своего сигнала генерала (см. «PPO замысла»). Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-gentest">
+  <section class="cards">
+    <div>
+      <div class="colh">Черновик</div>
+      <div class="box"><h2>Проверки генерала <span class="auto" title="черновик нейросети: спроектировано без обсуждения с человеком"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 11l1-3.2 5.6-5.6 2.2 2.2-5.6 5.6z" fill="#fff"/><path d="M3 11l3.2-1" stroke="#fff" stroke-width="1"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Проба «слушает ли»</b> (8 боёв против ai_like на точку, подмены во входе исполнителя): подмена вида меняет решения отрядов на KL <b>0,0067 (g12r) → 0,28 (g21)</b>; подмена цели — 0,012 (g21).</li>
+          <li><b>Выбирает ли по бою</b> — связь выбора вида с обстановкой (взаимная информация, максимум 1,79 нат): <b>0,03 (g10) → 0,77 (g19)</b>.</li>
+          <li><b>Выполнение заданий</b> (среднее меры): <b>0,22 (g10) → 0,72 (g21)</b>.</li>
+          <li><b>Атлас модулей</b> (точка g17r, 1536 боёв на режим): генерал тогда ничего не добавлял (с ним +0,88, без него +0,89); случайный вид −0,27, запрет «отойти» −0,12; 77 % групп — «отойти». Отсюда починки: группы правилом, своя таблица видов у исполнителя, числа угрозы, участки на карточке, ветки по всем видам.</li>
+          <li><b>Игра</b> (точка g19 m20, «Нормальная»): против ИИ игры <b>9 : 0</b>, против сети S27 — <b>10 : 0</b> и <b>11 : 0</b>.</li>
+        </ul>
+        <details class="why">
+          <summary>Проверка масок по частям (точка g13, 256 боёв на соперника)</summary>
+          <div class="ptwrap"><table class="ptab"><tr><th>вариант</th><th class="num">рейтинг</th><th class="num">к «без масок»</th></tr>
+            <tr><td>без масок</td><td class="num">+0,77</td><td class="num">—</td></tr>
+            <tr><td>все части</td><td class="num">−1,31</td><td class="num">−2,08</td></tr>
+            <tr><td>withdraw: без атаки + секторы</td><td class="num">−0,37</td><td class="num">−1,15</td></tr>
+            <tr><td>withdraw: только секторы</td><td class="num">+0,84</td><td class="num">+0,07</td></tr>
+            <tr><td>attack: цель только из группы</td><td class="num">+0,16</td><td class="num">−0,61</td></tr>
+            <tr><td>attack: секторы</td><td class="num">+0,82</td><td class="num">+0,05</td></tr>
+            <tr><td>shoot: обе части</td><td class="num">+0,58</td><td class="num">−0,19</td></tr>
+            <tr><td>hold, screen: секторы и цели</td><td class="num">+0,80…+0,96</td><td class="num">+0,03…+0,19</td></tr>
+            <tr><td><b>умолчание</b> (безвредные)</td><td class="num">+0,78</td><td class="num">+0,01</td></tr>
+          </table></div>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1852,7 +2227,7 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Обработка · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},missionpick:{t:"Обработка · Выбор заданий",tpl:"tpl-missionpick"},missions:{t:"Выход · Задания групп",tpl:"tpl-missions"},deploypick:{t:"Обработка · Выбор мест расстановки",tpl:"tpl-deploypick"},deployplaces:{t:"Выход · Места групп",tpl:"tpl-deployplaces"},deploylayout:{t:"Алгоритм · Раскладка отрядов",tpl:"tpl-deploylayout"},deployment:{t:"Выход · Расстановка",tpl:"tpl-deployment"},unittask:{t:"Алгоритм · Задание отряда",tpl:"tpl-unittask"},unittasks:{t:"Выход · Задания отрядов",tpl:"tpl-unittasks"},executor:{t:"Обработка · Исполнитель (сеть отряда)",tpl:"tpl-executor"},orders:{t:"Выход · Приказы отрядам",tpl:"tpl-orders"},game:{t:"Среда · Игра / симулятор",tpl:"tpl-game"},situation:{t:"Вход · Обстановка",tpl:"tpl-situation"},replan:{t:"Алгоритм · Пересмотр замысла",tpl:"tpl-replan"},reward:{t:"Алгоритм · Награда",tpl:"tpl-reward"},planvalue:{t:"Обработка · Оценка замысла",tpl:"tpl-planvalue"},branches:{t:"Алгоритм · Ветки заданий",tpl:"tpl-branches"},unitvalue:{t:"Обработка · Оценка отряда",tpl:"tpl-unitvalue"},training:{t:"Алгоритм · Обучение",tpl:"tpl-training"},opponents:{t:"Среда · Соперники",tpl:"tpl-opponents"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
+  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Алгоритм · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},missionpick:{t:"Обработка · Выбор заданий",tpl:"tpl-missionpick"},missions:{t:"Выход · Задания групп",tpl:"tpl-missions"},deploypick:{t:"Обработка · Выбор мест расстановки",tpl:"tpl-deploypick"},deployplaces:{t:"Выход · Места групп",tpl:"tpl-deployplaces"},deploylayout:{t:"Алгоритм · Раскладка отрядов",tpl:"tpl-deploylayout"},deployment:{t:"Выход · Расстановка",tpl:"tpl-deployment"},unittask:{t:"Алгоритм · Задание отряда",tpl:"tpl-unittask"},unittasks:{t:"Выход · Задания отрядов",tpl:"tpl-unittasks"},executor:{t:"Обработка · Исполнитель (сеть отряда)",tpl:"tpl-executor"},orders:{t:"Выход · Приказы отрядам",tpl:"tpl-orders"},game:{t:"Среда · Игра / симулятор",tpl:"tpl-game"},situation:{t:"Вход · Обстановка",tpl:"tpl-situation"},replan:{t:"Алгоритм · Пересмотр замысла",tpl:"tpl-replan"},reward:{t:"Алгоритм · Награда",tpl:"tpl-reward"},planvalue:{t:"Обработка · Оценка замысла",tpl:"tpl-planvalue"},branches:{t:"Учитель · Ветки заданий",tpl:"tpl-branches"},unitvalue:{t:"Обработка · Оценка отряда",tpl:"tpl-unitvalue"},training:{t:"Учитель · PPO исполнителя",tpl:"tpl-training"},opponents:{t:"Среда · Соперники",tpl:"tpl-opponents"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"},threat:{t:"Алгоритм · Угроза и участки группы",tpl:"tpl-threat"},execkinds:{t:"Выученная таблица · Виды заданий исполнителя",tpl:"tpl-execkinds"},teacher:{t:"Алгоритм · Скриптовый учитель",tpl:"tpl-teacher"},measure:{t:"Алгоритм · Мера выполнения",tpl:"tpl-measure"},imitate:{t:"Учитель · Подражание учителю",tpl:"tpl-imitate"},ppoplan:{t:"Учитель · PPO замысла",tpl:"tpl-ppoplan"},gaingen:{t:"Учитель · Доплата генералу",tpl:"tpl-gaingen"},gainexec:{t:"Учитель · Доплата исполнителю",tpl:"tpl-gainexec"},abilteach:{t:"Учитель · Учитель способностей",tpl:"tpl-abilteach"},gentest:{t:"Проверка · Проверки генерала",tpl:"tpl-gentest"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
