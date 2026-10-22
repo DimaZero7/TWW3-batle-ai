@@ -292,10 +292,17 @@ battle with another mission kind for one group, the exchange's difference is the
 kind is the teacher's by default (`--general-branch-alt teacher`: "my choice against the teacher's")
 (`--general-branches P`, an estimated +12–17 % to the step at 60 s). The kind's own signal (defaults): in the
 "another kind" copy only the swapped group decides anew, the other units and the enemy repeat the "as chosen" copy's
-orders (partial open loop, `--general-branch-openloop 1`), the kind critic (`kind_critic.py`) learns the branches'
-prices and estimates the kind of every group of every plan, the kind head is out of the plan's PPO and learns only from
-the prices, the critic and the imitation (`--general-kind-own-signal 1`, lr × 2, 2 passes), the price scale is each
-kind's own; up to 128 branches an update ([details](training/general.md#the-kind-heads-own-signal)). The whole loop is built as a skeleton, in the simulator, flag `run.py
+orders (partial open loop, `--general-branch-openloop 1`), the branches' price is centred by its running mean (the
+loop has a steady −0.0027 of the budget shift in favour of "as chosen", `--general-branch-center 1`), the dense signal
+is the **outcome Q** (`kind_q.py`, `--general-kind-q outcome`): every group of every ended plan (~7 500 an update
+against ~124 branches) against the exchange over 60 s since the plan began in the battle itself; Q's input is the group
+card the kind head reads + 20 numbers + the kind's inertia + the kinds allowed; on at ev ≥ 0.05 on the held-out
+battles (every 10th battle whole); the advantage Q(chosen) − Σ π Q, × the shrink (the kind part's coefficient less
+two standard errors); the branches are played, centred and give the agreement `kind_q_agree`, they teach the head only
+under `both`/`branch`; the kind head is out of the plan's PPO and learns only from Q (and the branches under `both`)
+and the imitation (`--general-kind-own-signal 1`, lr × 2, 2 passes), the
+scale is each kind's own; up to 128 branches an update; the kind critic on the branches' prices (ev ≤ 0.015) only
+under `--general-kind-q branch` ([details](training/general.md#the-kind-heads-own-signal)). The whole loop is built as a skeleton, in the simulator, flag `run.py
 --general` (the chain's step `general`); simplifications: tiles = the 16 × 16 sectors, zero effects, small widths
 (card 128, 1.14 million weights), the zone = `place.py`'s area. In the game a checkpoint with a general plays through
 the companion with the same code (`tools/nn/companion/general.py`): the plan at the first state, re-plans on battle

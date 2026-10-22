@@ -427,8 +427,9 @@ class General(nn.Module):
         kind step's alone), "kind_logp" [P, G, K] (every kind's log-probability; uniform for a place that is not a
         group), "kind_ok" [P, G, K] (the kinds that may be chosen: some target of their types), "lp_parts" [P, G, 3]
         (the kind's, target's and place's steps apart), "target_logits" / "target_ok" [P, G, 2G + C] (the target step's
-        logits, masked, and the targets allowed for the group's kind: the teacher's imitation), "pairs" [P, G, 2] (the
-        (kind, target) pairs allowed, all kinds x the targets there are: the log's masked share). Targets: 0..G-1 our
+        logits, masked, and the targets allowed for the group's kind: the teacher's imitation), "query" [P, G, D] (our
+        groups' cards as the kind head reads them: after the group council and the threat, fight and tile layers),
+        "pairs" [P, G, 2] (the (kind, target) pairs allowed, all kinds x the targets there are: the log's masked share). Targets: 0..G-1 our
         groups, G..2G-1 theirs, 2G.. the coarse tiles (target_kind); a kind only with the target types it takes
         (config.MISSION_KINDS: the pair_ok buffer)."""
         G = self.cfg.places
@@ -441,6 +442,7 @@ class General(nn.Module):
         if getattr(self.cfg, "group_tiles", False):
             # the tiles under every group's centre, ours (the kind's and target's query) and theirs (the targets' keys)
             g = g + self.gtile_in(self.group_tiles(inp, c).to(g.dtype))
+        query = g[:, :G]                      # what the kind head reads of our groups (the outcome Q's input, kind_q.py)
         mine = active[:, :G]                                                  # [P, G] our groups choose
         act = act or {}
         cand_ok = torch.cat([active, c["coarse_ok"]], 1)                      # [P, 2G + C]
@@ -480,7 +482,7 @@ class General(nn.Module):
         # the masked share (the log): the (kind, target) pairs a group may choose of all kinds x the targets there are
         n_t = base_t.sum(-1).to(lp.dtype)
         pairs_ok = (base_t[:, :, None, :] & pair[None, None]).sum((-1, -2)).to(lp.dtype)
-        return {"kind": kind, "target": target, "place": place, "lp": lp, "ent": ent, "value": value,
+        return {"kind": kind, "target": target, "place": place, "lp": lp, "ent": ent, "value": value, "query": query,
                 "ent_parts": torch.stack([ent_k, ent_t, ent_p], -1) * m[..., None],
                 "lp_kind": lp_k * m, "kind_logp": kind_logp, "kind_ok": k_ok,
                 "lp_parts": torch.stack([lp_k, lp_t, lp_p], -1) * m[..., None],
@@ -586,15 +588,22 @@ class General(nn.Module):
         same group); zeros without prev_kind or with B = 0. (A kind with no target of its types now stays masked: the
         mask comes after.)"""
         B = float(getattr(self.cfg, "kind_stick", 0.0))
-        pk = inp.get("prev_kind")
-        if not B or pk is None or inp.get("prev_main") is None:
+        if not B:
             return torch.zeros_like(k_logits)
-        G, K = self.cfg.places, k_logits.shape[-1]
-        ar = torch.arange(G, device=k_logits.device)
+        return B * self.prev_kind_hot(inp, c, k_logits.shape[-1]).to(k_logits.dtype)
+
+    def prev_kind_hot(self, inp, c, K):
+        """[P, G, K] bool: the last plan's kind of each of our groups where the group kept some of that number's units
+        (kind_bonus's rule); all False without prev_kind or prev_main."""
+        G = self.cfg.places
+        pk = inp.get("prev_kind")
+        dev = c["main"].device
+        if pk is None or inp.get("prev_main") is None:
+            return torch.zeros(c["main"].shape[0], G, K, dtype=torch.bool, device=dev)
+        ar = torch.arange(G, device=dev)
         kept = ((c["main"][..., None] == ar) & (inp["prev_main"][..., None] == ar)).any(1)       # [P, G]
         kept = kept & (pk >= 0) & inp["has_prev"].reshape(-1, 1)
-        hot = (pk.clamp(0, K - 1)[..., None] == torch.arange(K, device=k_logits.device)) & kept[..., None]
-        return B * hot.to(k_logits.dtype)
+        return (pk.clamp(0, K - 1)[..., None] == torch.arange(K, device=dev)) & kept[..., None]
 
     def forward(self, inp, act=None, greedy=False):
         c = self.cards(inp)

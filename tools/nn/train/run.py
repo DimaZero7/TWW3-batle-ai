@@ -374,7 +374,8 @@ def with_general(actor, args):
                              teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s,
                              teacher_flank=bool(args.general_teacher_flank), flank_measure=args.general_flank_measure,
                              kl=args.general_kl, kind_own=bool(args.general_kind_own_signal),
-                             kind_weight=args.general_kind_weight, kind_epochs=args.general_kind_epochs)
+                             kind_weight=args.general_kind_weight, kind_epochs=args.general_kind_epochs,
+                             kind_q=args.general_kind_q)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
@@ -389,9 +390,22 @@ def general_brancher(args, glearn_cfg, device):
         share=glearn_cfg.branches, copies=args.general_branch_copies, horizon_s=args.general_branch_horizon,
         cap=args.general_branch_cap, batch=args.general_branch_batch, alt=args.general_branch_alt,
         price=args.general_branch_price, greedy=args.general_branch_greedy, kinds=args.general_branch_kinds,
-        openloop=bool(args.general_branch_openloop), critic=bool(args.general_kind_critic),
+        openloop=bool(args.general_branch_openloop),
+        critic=bool(args.general_kind_critic) and glearn_cfg.kind_q == "branch",     # (its estimate used only there)
         critic_warmup=args.general_kind_critic_warmup, critic_buffer=args.general_kind_critic_buffer,
-        norm=args.general_kind_norm, seed=args.seed), device)
+        norm=args.general_kind_norm, center=bool(args.general_branch_center), seed=args.seed), device)
+
+
+def general_outcome_q(args, glearn_cfg, gcfg, device, decision_s=1.0):
+    """The outcome Q of the mission kinds (tools/nn/general/kind_q.py) of --general-kind-q outcome|both, else None;
+    decision_s: the battles' decision step (the features' wait in chunks: kind_q.wait_chunks)."""
+    if glearn_cfg is None or glearn_cfg.kind_q == "branch":
+        return None
+    from tools.nn.general import kind_q as gkq
+    return gkq.OutcomeQ(gcfg.kinds, gcfg.card, device, buffer=args.general_kind_q_buffer,
+                        warmup=args.general_kind_q_warmup, ev_min=args.general_kind_q_ev_min,
+                        norm=args.general_kind_norm, shrink=bool(args.general_kind_q_shrink), seed=args.seed,
+                        wait=gkq.wait_chunks(args.general_kind_q_horizon, decision_s, args.steps))
 
 
 def imitate_floor(args, cfg, carried):
@@ -435,7 +449,15 @@ def general_text(g):
                + (f", vs teacher {g.get('branch_vs_teacher_n', 0)} (fallback {g['branch_alt_fallback']:.2f}) better "
                   f"{g.get('branch_vs_teacher_better', 0):.2f} worse {g.get('branch_vs_teacher_worse', 0):.2f} price "
                   f"{g.get('branch_vs_teacher_price', 0):+.4f}" if "branch_alt_fallback" in g else "")
+               + (f" (raw {g['branch_price_raw_mean']:+.4f}, centre {g['branch_center']:+.4f})"
+                  if "branch_center" in g else "")
                if "branch_branches" in g else "")
+            + (f"; kind Q {g.get('kind_q_samples', 0)} groups on {g.get('kind_q_on', 0)} ev "
+               f"{g.get('kind_q_ev', float('nan')):.3f} (kind part {g.get('kind_q_ev_kind', float('nan')):+.4f}, coef "
+               f"{g.get('kind_q_coef', float('nan')):+.2f} se {g.get('kind_q_coef_se', float('nan')):.2f}, shrink "
+               f"{g.get('kind_q_shrink', float('nan')):.2f}), +{g.get('kind_q_matured', 0)} plans (ended "
+               f"{g.get('kind_q_ended_share', 0):.2f}, lost {g.get('kind_q_lost', 0)}), agrees with the branches "
+               f"{g.get('kind_q_agree', float('nan')):+.3f}" if "kind_q_samples" in g else "")
             + (f"; distinct acc {g.get('distinct_acc', 0):.3f} (chance {g.get('distinct_chance', 0):.2f}) gain "
                f"{g.get('distinct_gain', 0):+.3f} bonus {g.get('distinct_bonus', 0):+.4f} w {g.get('distinct_weight', 0):.5f} "
                f"scale {g.get('distinct_scale', 0):.4f}"
@@ -863,8 +885,23 @@ def _train(args, every=None, teacher=None, normal=None):
             saved = ts.get("general_kind")
             if saved is not None and saved.get("openloop") != gb.cfg.openloop:
                 saved = None
+            if saved is not None and bool(saved.get("centered", False)) != gb.cfg.center:
+                saved = dict(saved, critic=None)  # (the critic's prices centred or not: its buffer starts afresh)
             got = gb.load(saved)
             print(f"general kind critic / scales: {'resumed ' + ', '.join(got) if got else 'fresh'}", flush=True)
+        # --general-kind-q outcome|both: every ended plan's groups against the trade their kinds led to
+        env.general_rt.outcome_q = general_outcome_q(args, glearn_cfg, env.general_rt.gcfg, device, env.decision_s)
+        if env.general_rt.outcome_q is not None:
+            env.general_rt.q_h = args.general_kind_q_horizon
+            ts = (checkpoint.train_state(args.init) or {}) if args.init and args.resume else {}
+            gq = env.general_rt.outcome_q
+            loaded = gq.load(ts.get("general_kind_q"))
+            print(f"general kind Q ({glearn_cfg.kind_q}): the trade over {args.general_kind_q_horizon:g} s after each "
+                  f"plan (waits {gq.wait_n} chunks), buffer {gq.cap}, ready at {gq.warmup} groups and held-out "
+                  f"(every 10th battle) ev >= {gq.ev_min:g}, shrink (coefficient - 2 se) "
+                  f"{'on' if gq.use_shrink else 'off'}, scale {gq.norm_kind}"
+                  + (f", branches' weight beside it {glearn_cfg.branch_weight:g}" if glearn_cfg.kind_q == "both" else "")
+                  + f"; {'resumed (' + str(len(gq)) + ' groups)' if loaded else 'fresh'}", flush=True)
         env.general_rt.take_stats()
     env.take_stats()
     env.orders_per_minute()
@@ -919,8 +956,12 @@ def _train(args, every=None, teacher=None, normal=None):
                 **({"ability_norm": env.brancher.norm.state()}
                    if args.ability_branch and env.brancher.norm is not None else {}),
                 **({"general_kind": dict(env.general_rt.brancher.state(),
-                                         openloop=env.general_rt.brancher.cfg.openloop)}
-                   if getattr(env, "general_rt", None) is not None and env.general_rt.brancher is not None else {})}
+                                         openloop=env.general_rt.brancher.cfg.openloop,
+                                         centered=env.general_rt.brancher.cfg.center)}
+                   if getattr(env, "general_rt", None) is not None and env.general_rt.brancher is not None else {}),
+                **({"general_kind_q": env.general_rt.outcome_q.state()}
+                   if getattr(env, "general_rt", None) is not None
+                   and getattr(env.general_rt, "outcome_q", None) is not None else {})}
 
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -956,7 +997,10 @@ def _train(args, every=None, teacher=None, normal=None):
             # --general-exec: the mission bonus's weight of this collection (W down to 0 over --general-exec-decay)
             env.general_rt.exec_w = gsignal.distinct_weight(glearn_cfg.exec, glearn_cfg.exec_decay, e_updates0 + update)
         batch = rollout.collect(env, actor, critic, args.steps)
-        if glearn_cfg is not None and env.general_rt is not None and env.general_rt.brancher is not None:
+        if glearn_cfg is not None and env.general_rt is not None and env.general_rt.outcome_q is not None:
+            # --general-kind-q outcome|both: the outcome Q's estimate of every ended plan's groups (the kind term)
+            env.general_rt.outcome_q.attach(batch, actor)
+        elif glearn_cfg is not None and env.general_rt is not None and env.general_rt.brancher is not None:
             # --general-kind-critic: its estimate of every ended plan's groups (learn.update's kind term)
             env.general_rt.brancher.attach(batch, actor)
         if env.men is not None and args.fighters_park:
@@ -1091,6 +1135,8 @@ def _train(args, every=None, teacher=None, normal=None):
                                   **{k[len("general_"):]: round(v, 5) for k, v in st.items() if k.startswith("general_")})
             if env.general_rt.brancher is not None:
                 row["general"].update({"branch_" + k: v for k, v in env.general_rt.brancher.stats.items()})
+            if env.general_rt.outcome_q is not None:
+                row["general"].update({"kind_q_" + k: v for k, v in env.general_rt.outcome_q.stats.items()})
         log.write(json.dumps(row) + "\n")
         log.flush()
         if update % args.print_every == 0:
@@ -1661,11 +1707,13 @@ def parser():
                     help="general branches: snapshots an update at most (0: no cap); <= the batch: one batch an update")
     ap.add_argument("--general-branch-batch", type=int, default=64,
                     help="general branches: snapshots a branch batch (x copies battles in each of its two branches)")
-    ap.add_argument("--general-branch-alt", default="teacher", choices=("teacher", "uniform", "policy"),
+    ap.add_argument("--general-branch-alt", default="teacher", choices=("teacher", "uniform", "policy", "same"),
                     help="general branches: the other kind - teacher: the kind and target the teacher's rule would give "
                          "the group there (the price: my choice against the teacher's; where it gives the same kind or "
                          "none: uniform, the log's alt_fallback), uniform over the others, or by the general's "
-                         "probabilities without the chosen one (the price then x (1 - pi(chosen)))")
+                         "probabilities without the chosen one (the price then x (1 - pi(chosen))); same (a diagnosis): "
+                         "the chosen kind again with another seed - the mean raw price is the loop's own bias, nothing "
+                         "trains on it")
     ap.add_argument("--general-branch-price", default="trade", choices=("trade", "reward"),
                     help="general branches: the price - the gold exchange at the horizon, or the side's reward over it")
     ap.add_argument("--general-branch-kinds", default="all", choices=("all", "target"),
@@ -1675,7 +1723,12 @@ def parser():
                     help="general branches: the networks in the branches take their most likely action")
     ap.add_argument("--general-branch-weight", type=float, default=1.0,
                     help="general branches: the weight of their term in the general's loss (without the kind head's "
-                         "own signal; with it: --general-kind-weight)")
+                         "own signal; with it: --general-kind-weight); under --general-kind-q both also the branches' "
+                         "weight beside the outcome Q's groups")
+    ap.add_argument("--general-branch-center", type=int, default=1, choices=(0, 1),
+                    help="general branches: 1 - the prices less their running mean over all pairs (~10 updates; the "
+                         "partial open loop's bias), before the advantage, the kind critic and the log's better/worse "
+                         "(the raw ones logged too); 0 - as measured")
     ap.add_argument("--general-branch-openloop", type=int, default=1, choices=(0, 1),
                     help="general branches: 1 - partial open loop: the 'other' copy plays the 'chosen' copy's orders "
                          "(both sides, the scripts) for every unit but the swapped group's, only that group decides "
@@ -1690,6 +1743,25 @@ def parser():
     ap.add_argument("--general-kind-norm", default="per-kind", choices=("per-kind", "chunk"),
                     help="general branches: the prices' scale - each kind's running root mean square over ~10 updates, "
                          "or the chunk's over all rows (before)")
+    ap.add_argument("--general-kind-q", default="outcome", choices=("outcome", "branch", "both"),
+                    help="general: the kind head's signal - outcome (the default): the outcome Q "
+                         "(tools/nn/general/kind_q.py: every group of every ended plan against the trade over "
+                         "--general-kind-q-horizon s after the plan in the battle itself; Q(chosen) - E_pi Q once "
+                         "ready; the branches, if on, only measured and logged: kind_q_agree, alt same); branch: the "
+                         "branches and the kind critic on their prices (before; the critic learns only here); both: the "
+                         "Q's groups + --general-branch-weight x the branches' rows")
+    ap.add_argument("--general-kind-q-horizon", type=float, default=60.0,
+                    help="general kind Q: seconds of battle after a plan's start its outcome covers (the battle's end "
+                         "earlier: up to it, marked)")
+    ap.add_argument("--general-kind-q-warmup", type=int, default=10000,
+                    help="general kind Q: groups in its buffer before it may be used")
+    ap.add_argument("--general-kind-q-buffer", type=int, default=30000,
+                    help="general kind Q: groups it keeps (~4 updates)")
+    ap.add_argument("--general-kind-q-ev-min", type=float, default=0.05,
+                    help="general kind Q: used once its held-out explained variance of the outcome is at least this")
+    ap.add_argument("--general-kind-q-shrink", type=int, default=1, choices=(0, 1),
+                    help="general kind Q: 1 - Q x (the held-out coefficient of its kind part less two standard "
+                         "errors by battle, within [0, 1]); 0 - as is")
     ap.add_argument("--general-kind-own-signal", type=int, default=1, choices=(0, 1),
                     help="general: 1 - the kind head's own signal: its log-probability out of the plan's PPO, it learns "
                          "from the branches and the kind critic (weight --general-kind-weight, no decay) and the "

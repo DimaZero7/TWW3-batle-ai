@@ -31,6 +31,14 @@ host's tests check them; docs/en/training/general.md "Training").
   fill x the update's mean square of all prices) / (rows + fill)), fill = NORM_PRIOR less its rows (at least 0), at
   least the floor. One chunk's 63-128 rows spread over 6 kinds give 10-20 rows a kind: a chunk's own mean square of
   them is mostly noise, and the kinds' prices differ in scale (a withdraw moves less gold than an attack).
+* RunningMean: the branches' running mean price over all pairs of kinds (run.py --general-branch-center 1): decayed
+  sums of the prices and of their rows (x NORM_DECAY an update, ~10 updates' memory, as KindNorm), the update's rows
+  added before the mean is read. The partial open loop's "other" copy re-decides against a world that replays orders
+  made for "chosen" and cannot answer it, so "chosen" wins by a steady -0.0027 of the budget whatever the pair
+  (build/diag_kind_critic): the centred price = price - that mean.
+* outcome_due: a plan's outcome for the outcome Q (run.py --general-kind-q outcome|both; kind_q.py) is known once
+  `horizon` seconds of battle passed since the plan began, or earlier when the battle ended (its trade is then final;
+  "ended" marks it).
 """
 import math
 
@@ -176,3 +184,41 @@ class KindNorm:
         self.sq, self.n = [float(x) for x in d["sq"]], [float(x) for x in d["n"]]
         self.last = None if d.get("last") is None else [float(x) for x in d["last"]]
         return True
+
+
+class RunningMean:
+    """The branches' running mean price (module doc). Plain floats: the host's tests run it."""
+
+    def __init__(self, decay=NORM_DECAY):
+        self.decay = float(decay)
+        self.s = 0.0
+        self.n = 0.0
+
+    def mean(self):
+        """The mean now (0 before any row)."""
+        return self.s / self.n if self.n > 0 else 0.0
+
+    def update(self, values):
+        """The update's prices (any iterable of numbers) -> the mean after adding them (the sums decay first)."""
+        self.s *= self.decay
+        self.n *= self.decay
+        for v in values:
+            self.s += float(v)
+            self.n += 1.0
+        return self.mean()
+
+    def state(self):
+        return {"s": self.s, "n": self.n}
+
+    def load(self, d):
+        """A saved state() (None or empty: fresh) -> loaded or not."""
+        if not d or "s" not in d:
+            return False
+        self.s, self.n = float(d["s"]), float(d["n"])
+        return True
+
+
+def outcome_due(elapsed, horizon, ended):
+    """Whether a plan's outcome is known (module doc): elapsed seconds since the plan began, ended - the battle is over;
+    numpy arrays and torch tensors alike (bool)."""
+    return (elapsed >= horizon - 1e-6) | ended

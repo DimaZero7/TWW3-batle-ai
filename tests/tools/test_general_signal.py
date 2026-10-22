@@ -190,3 +190,27 @@ def test_the_kind_norm_keeps_each_kinds_own_scale_over_updates():
     m = signal.KindNorm(3, floor=0.001)
     assert m.load(n.state()) and m.rms() == pytest.approx(n.rms()) and m.scale() == pytest.approx(n.scale())
     assert not signal.KindNorm(4).load(n.state()) and not signal.KindNorm(3).load(None)
+
+
+def test_the_branches_running_mean_takes_the_updates_rows_and_forgets_in_about_ten_updates():
+    c = signal.RunningMean()
+    assert c.mean() == 0.0                                         # before any row
+    assert c.update([-0.003, -0.001, -0.002]) == pytest.approx(-0.002)   # the first update: its own mean
+    # a steady bias is learned whatever the pairs' spread; an old one fades (~10 updates' memory)
+    for _ in range(60):
+        m = c.update([0.001 + 0.01, 0.001 - 0.01])
+    assert m == pytest.approx(0.001, abs=1e-6)
+    c2 = signal.RunningMean()
+    c2.update([1.0])
+    after = c2.update([0.0])
+    assert after == pytest.approx(signal.NORM_DECAY / (signal.NORM_DECAY + 1.0))
+    assert c2.update([]) == pytest.approx(after)                   # an update without rows keeps the mean
+    again = signal.RunningMean()
+    assert again.load(c.state()) and again.mean() == pytest.approx(c.mean())
+    assert not signal.RunningMean().load(None) and not signal.RunningMean().load({})
+
+
+def test_an_outcome_is_known_at_the_horizon_or_at_the_battles_end():
+    el = np.array([10.0, 59.0, 60.0, 61.0, 5.0])
+    ended = np.array([False, False, False, False, True])
+    assert signal.outcome_due(el, 60.0, ended).tolist() == [False, False, True, True, True]

@@ -44,6 +44,14 @@ training (docs/en/training/general.md "How it runs").
 * Mission branches (run.py --general-branches P: `brancher` is a branch.Brancher): every plan of the learner marks its
   rows "fresh" (every kind's log-probability is kept with the plan: kind_logp); the next decision's capture snapshots
   a share of them (branch.py) and clears the marks.
+* The kinds' outcomes (run.py --general-kind-q outcome|both: q_h = the horizon, s; kind_q.py): every plan notes its
+  side's trade at its start (side_trade: ability_branch.trade's, (the enemy's gold lost - its own) / budget) and, when
+  it is still in force q_h seconds on, the trade there; a learner's plan that ends (a ready record) gets an id "qid"
+  and waits (q_wait) until q_h seconds since its start have passed or its battle ended (the next plans of the battle
+  play in the window), then its outcome (the trade's change, its span, "ended": the battle was over first) is known;
+  end_chunk gives the chunk's ("q_out", each with its battle's number "bid": start_battles numbers every battle it
+  starts, both sides one number - the outcome Q holds battles out whole). A battle's restart bumps its slot's epoch: an
+  outcome of an older battle in that slot is dropped (never expected: a battle's plans are settled when it ends).
 * The game (tools/nn/companion/general.py GameBattles): the companion runs this Runtime on a view of the bridge's state
   shaped like a Battles of one battle - what it reads of `env`: st.u (x, z, b, side, men, hp, hp0, ms, gone, vis, cost,
   width, sp_h, sp_v), st.t, st.done, st.lord_dead_s, st.keys, setup.bounds, mem[s].frame, ctrl, past, battle_slot,
@@ -179,6 +187,12 @@ class Runtime:
         self.teach_fire_s = gteacher.FIRE_S       # --general-teacher-fire-s: ... and our shooters fired less than this
         self.teach_flank = True                   # --general-teacher-flank: two groups on one target - the second flanks
         self.flank_measure = "contact"            # --general-flank-measure: flank's melee part by the contact's side
+        # --general-kind-q outcome|both: the plans' outcomes over q_h seconds (module doc; 0: off, nothing kept)
+        self.q_h = 0.0
+        self.q_next = 0                           # the next ended plan's id
+        self.bid_next = 0                         # the next battle's number (start_battles)
+        self.q_wait = None                        # the ended plans waiting for their outcome (_q_add)
+        self.outcome_q = None                     # ... their Q (kind_q.OutcomeQ; run.py attaches it to the batch)
 
     # --- storage ------------------------------------------------------------------------------------------------
     def _rows(self, R):
@@ -198,7 +212,8 @@ class Runtime:
              "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo),
              "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo), "teach": z(R, dt=Bo),
              "new": z(R, dt=Bo), "teach_use": z(R, G, dt=Bo), "x_sum": z(R, G), "x_n": z(R, G),
-             "fire_t0": z(R) - 1.0, "vl_t0": z(R, N) - 1.0, "vl_at": z(R) - 1.0, "vl_lock": z(R, N, dt=Bo)}
+             "fire_t0": z(R) - 1.0, "vl_t0": z(R, N) - 1.0, "vl_at": z(R) - 1.0, "vl_lock": z(R, N, dt=Bo),
+             "q_t0": z(R), "q_tr0": z(R), "q_trh": z(R) + float("nan")}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
@@ -212,7 +227,8 @@ class Runtime:
         from tools.nn.general import army_input as ai
         z = (lambda *s, dt=torch.float32: torch.zeros(*s, dtype=dt, device=self.dev))
         return {"num": z(B, self.N, ai.SIZE), "lab": z(B, self.N, len(ai.LABELS), dt=torch.long),
-                "full": z(B, self.N, 2), "teach": z(B, dt=torch.bool)}
+                "full": z(B, self.N, 2), "teach": z(B, dt=torch.bool), "epoch": z(B, dt=torch.long),
+                "bid": z(B, dt=torch.long) - 1}
 
     def record(self, rows):
         """The plan records of rows [M] (net.INPUTS + PLAN: the plan's membership and numbering, choices,
@@ -389,6 +405,11 @@ class Runtime:
         r["members"][rows] = members
         r["lords"][rows] = torch.stack([own_alive, foe_alive], -1)
         r["t_plan"][rows] = env.st.t[b].float()
+        if self.q_h > 0:
+            # the kinds' outcomes (module doc): the side's trade at the plan's start (the ended plans read theirs above)
+            r["q_t0"][rows] = env.st.t[b].float()
+            r["q_tr0"][rows] = self.side_trade(env)[rows]
+            r["q_trh"][rows] = float("nan")
         r["n_dec"][rows] = 0
         r["new"][rows] = True                     # begun in this chunk (begin_chunk: the plans in force are old)
         r["r_sum"][rows] = 0.0
@@ -581,6 +602,9 @@ class Runtime:
         self.r["has"][rows] = False
         self.r["owner"][rows] = -1
         self.tix[rows] = -1
+        self.b["epoch"][idx] += 1                 # (the outcomes of an older battle in the slot are dropped)
+        self.b["bid"][idx] = self.bid_next + torch.arange(len(idx), device=self.dev)
+        self.bid_next += len(idx)
         self.plan(env, rows, deploy=True)
 
     def deploy_pending(self, env):
@@ -643,6 +667,14 @@ class Runtime:
         r["r_sum"] += add * r["has"].float()
         r["r_disc"] += add * r["has"].float() * self.gamma ** r["n_dec"].float()
         r["n_dec"] += r["has"].long()
+        tr = None
+        if self.q_h > 0:
+            # the kinds' outcomes (module doc): a plan in force q_h seconds on keeps the trade there
+            tr = self.side_trade(env)
+            t = env.st.t[torch.arange(2 * self.B, device=self.dev) % self.B].float()
+            hit = r["has"] & torch.isnan(r["q_trh"]) & gsignal.outcome_due(t - r["q_t0"], self.q_h,
+                                                                           torch.zeros_like(r["has"]))
+            r["q_trh"] = torch.where(hit, tr, r["q_trh"])
         if self.teach_clock():
             # the teacher's clock: the battle time our shooters first fired (a standing unit of the side firing)
             rows = torch.arange(2 * self.B, device=self.dev)
@@ -659,6 +691,8 @@ class Runtime:
             self.stats.add("battle_min", (env.st.t[rows % self.B].double() * mine).sum() / 60.0)   # their length
             r["has"][rows] = False
             r["owner"][rows] = -1
+        if tr is not None:
+            self._q_resolve(env, tr, finished)
 
     def _finish(self, rows, done, v_next=None):
         """The plans of rows end: ready records (the learner's, while training) with their return."""
@@ -689,6 +723,11 @@ class Runtime:
         # its groups' mean centred measure over the plan (0 where none was measured; learn.update's exec_general)
         rec["exec_c"] = r["x_sum"][rr] / r["x_n"][rr].clamp(min=1.0)
         rec["exec_ok"] = r["x_n"][rr] > 0
+        if self.q_h > 0:
+            # its id; its outcome waits (module doc)
+            rec["qid"] = torch.arange(self.q_next, self.q_next + len(rr), device=self.dev)
+            self.q_next += len(rr)
+            self._q_add(rr, rec["qid"])
         if self.distinct is not None:
             beh, ok = self.behaviour(rr)
             rec["beh"], rec["beh_ok"] = beh, ok
@@ -712,6 +751,61 @@ class Runtime:
         target = gsignal.plan_target(r["r_disc"][rows], n, v_end, float(done), self.gamma)
         v0 = r["v_start"][rows]
         return target, torch.where(torch.isnan(v0), target, v0)
+
+    # --- the kinds' outcomes (module doc; kind_q.py) ------------------------------------------------------------
+    def side_trade(self, env):
+        """[2B] each row's side's trade now: (the enemy's gold lost - its own) / budget (ability_branch.trade; the v2
+        reward's gold term)."""
+        from tools.nn.train import reward
+        u = env.st.u
+        g = reward.gold_sides(u, env.weights.rout_share)
+        t1 = ((g[:, 1] - g[:, 0]) / reward.budget(u)).float()
+        return torch.cat([t1, -t1])
+
+    def _q_add(self, rows, ids):
+        """The ended plans of rows wait for their outcome under their ids."""
+        r = self.r
+        n = len(rows)
+        nan = torch.full((n,), float("nan"), device=self.dev)
+        new = {"row": rows.clone(), "qid": ids, "t0": r["q_t0"][rows].clone(), "tr0": r["q_tr0"][rows].clone(),
+               "trh": r["q_trh"][rows].clone(), "epoch": self.b["epoch"][rows % self.B].clone(),
+               "bid": self.b["bid"][rows % self.B].clone(), "y": nan,
+               "span": nan.clone(), "ended": torch.zeros(n, dtype=torch.bool, device=self.dev),
+               "state": torch.zeros(n, dtype=torch.long, device=self.dev)}         # 0 waits, 1 known, 2 dropped
+        self.q_wait = new if self.q_wait is None else {k: torch.cat([self.q_wait[k], new[k]]) for k in new}
+
+    def _q_resolve(self, env, tr, finished):
+        """After a decision's steps (tr [2B] the trade now, finished [B]): the waiting plans whose window closed -
+        q_h seconds since their start (their trade there, kept while in force, or now) or their battle ended (its
+        trade final, "ended") - get their outcome; one of an older battle in the slot is dropped. No read-back."""
+        w = self.q_wait
+        if w is None or not len(w["row"]):
+            return
+        b = w["row"] % self.B
+        el = env.st.t[b].float() - w["t0"]
+        live = w["state"] == 0
+        stale = self.b["epoch"][b] != w["epoch"]
+        fin = finished[b]
+        has_h = ~torch.isnan(w["trh"])
+        due = live & ~stale & (has_h | gsignal.outcome_due(el, self.q_h, fin))
+        y = torch.where(has_h, w["trh"], tr[w["row"]]) - w["tr0"]
+        w["y"] = torch.where(due, y, w["y"])
+        w["span"] = torch.where(due, torch.where(has_h, torch.full_like(el, self.q_h), el), w["span"])
+        w["ended"] = torch.where(due, fin & ~has_h & (el < self.q_h - 1e-6), w["ended"])
+        w["state"] = torch.where(due, torch.ones_like(w["state"]),
+                                 torch.where(live & stale, torch.full_like(w["state"], 2), w["state"]))
+
+    def _q_take(self):
+        """The outcomes known since the last call {"qid", "y" (budget share), "span" (s), "ended", "bid" (the battle's
+        number)} (None: none); the known and the dropped leave the waiting list."""
+        w = self.q_wait
+        if w is None:
+            return None
+        done = w["state"] == 1
+        out = {k: w[k][done] for k in ("qid", "y", "span", "ended", "bid")}
+        keep = w["state"] == 0
+        self.q_wait = {k: v[keep] for k, v in w.items()}
+        return out if len(out["qid"]) else None
 
     # --- the critic's value and the behaviour (module doc) -------------------------------------------------------
     def note_value(self, env, value):
@@ -977,17 +1071,29 @@ class Runtime:
     def end_chunk(self):
         """-> {"table": the chunk's plan records [P, ..] (task_plan indexes it), "ready": the ended plans' records with
         their return since the last chunk, "teach": the teacher's ended plans' records with "use" [M, G] (the groups it
-        gave a mission: the general's imitation)}; each None when empty."""
+        gave a mission: the general's imitation)}; each None when empty; with q_h > 0 also "q_out" (the kinds'
+        outcomes known in the chunk, _q_take; the ready records carry their "qid")."""
         table = _cat(self.table) if self.table else None
         ready = _cat(self.ready)
         teach = _cat(self.teach_ready)
         self.table, self.ready, self.teach_ready = None, [], []
-        return {"table": table, "ready": ready, "teach": teach}
+        out = {"table": table, "ready": ready, "teach": teach}
+        if self.q_h > 0:
+            out["q_out"] = self._q_take()         # the kinds' outcomes known in the chunk (kind_q.py)
+        return out
 
     # --- the batch's changes ----------------------------------------------------------------------------------------
     def narrow(self, keep):
         """Only the battles keep [b] stay (Battles.narrow)."""
         two = torch.cat([keep, keep + self.B])
+        if self.q_wait is not None:
+            # the waiting outcomes of the battles kept, their rows renumbered
+            pos = torch.full((2 * self.B,), -1, dtype=torch.long, device=self.dev)
+            pos[two] = torch.arange(len(two), device=self.dev)
+            nr = pos[self.q_wait["row"]]
+            ok = nr >= 0
+            self.q_wait = {k: v[ok] for k, v in self.q_wait.items()}
+            self.q_wait["row"] = nr[ok]
         self.r = {k: v[two] for k, v in self.r.items()}
         self.b = {k: v[keep] for k, v in self.b.items()}
         self.tix = self.tix[two]
@@ -1013,7 +1119,7 @@ class Runtime:
         snapshot, no re-plans, no deployment, no records."""
         new = Runtime.__new__(Runtime)
         new.__dict__.update({k: v for k, v in self.__dict__.items() if k not in ("r", "b", "tix", "ready", "table",
-                                                                                  "teach_ready")})
+                                                                                  "teach_ready", "q_wait")})
         new.B = B
         new.r = self._rows(2 * B)
         for k in ("has", "main", "kind", "target", "tgt", "mix", "kc"):
@@ -1025,6 +1131,7 @@ class Runtime:
         new.ready, new.table, new.pending, new.teach_ready = [], None, None, []
         new.v_now, new.distinct, new.bonus = None, None, torch.zeros(2 * B, device=self.dev)
         new.brancher = None
+        new.q_h, new.q_wait, new.outcome_q = 0.0, None, None      # (no outcomes in a copy)
         new.t_now = None
         new.frozen = True
         new.training = False

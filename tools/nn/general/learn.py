@@ -47,6 +47,13 @@
   +-ADV_CLIP; the kind term is then the clipped surrogate of the kind's log-probability over those groups and the
   branches' rows together (their mean: a branch row with its measured price, a group with the critic's estimate - the
   ability critic's way). Without it the kind term is the branches' alone.
+* The kind's signal's source (LearnConfig.kind_q, run.py --general-kind-q; the default there "outcome"): "branch" - the
+  above (the branches' rows and the kind critic on their prices); "outcome" - the outcome Q (kind_q.py: every group of
+  every ended plan against what its kind led to in the battle itself) in the kind_q slot, the branches train nothing
+  (still played and logged: the agreement check); "both" - the outcome Q's groups and the branches' rows, the kind
+  term = the mean surrogate over the Q's groups + branch_weight x the mean surrogate over the branches' rows (either
+  alone while the other has none: the Q before it is ready; without the own signal the whole term has branch_weight,
+  the branches' rows no second one).
 * The kind head's own signal (LearnConfig.kind_own, run.py --general-kind-own-signal 1, the default): the kind's
   log-probability is left out of the plans' PPO ratio (the plan's advantage trains the target and the place only: one
   number for all groups of a plan cannot tell one group's kind from another's), the kind term has the weight
@@ -59,6 +66,9 @@ from dataclasses import dataclass
 import torch
 
 from tools.nn.general.net import CHOICES
+
+
+KIND_Q = ("branch", "outcome", "both")
 
 
 @dataclass(frozen=True)
@@ -97,6 +107,7 @@ class LearnConfig:
     kind_own: bool = False     # the kind head's own signal (module doc; run.py --general-kind-own-signal, on there)
     kind_weight: float = 1.0   # ... the kind term's weight under it (no decay)
     kind_epochs: int = 1       # ... passes of the kind term: 1 + the extra ones over the kind head alone
+    kind_q: str = "branch"     # the kind term's source (module doc): "branch", "outcome" or "both" (run.py: outcome)
 
     def __post_init__(self):
         if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
@@ -116,6 +127,8 @@ class LearnConfig:
             raise ValueError(f"--general-flank-measure {self.flank_measure!r}: 'contact' or 'angle'")
         if self.kind_weight < 0 or self.kind_epochs < 1:
             raise ValueError("--general-kind-weight >= 0, --general-kind-epochs >= 1")
+        if self.kind_q not in KIND_Q:
+            raise ValueError(f"--general-kind-q {self.kind_q!r}: one of {KIND_Q}")
         if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0 or self.imitate_min < 0:
             raise ValueError("--general-imitate, --general-imitate-decay, --general-imitate-min and "
                              "--general-exec-general are >= 0")
@@ -258,8 +271,9 @@ def critic_term(d, adv_c, lp0_kind, w, mine, clip):
 def _kind_loss(gen, branch, d, adv_c, lp0_kind, w, mine, cfg, sums):
     """(KL, loss) of the kind term (module doc) of one step: the branches' rows (branch: a part of at most minibatch
     rows; None: none) and the critic's groups of the step's plans (d: their general's output, adv_c [m, G]; None: none)
-    - the mean of the surrogates over both; loss None with neither. sums: the log's (None: not logged)."""
-    parts, cnt, kl, bl = [], 0.0, 0.0, None
+    - the mean of the surrogates over both (cfg.kind_q "both": the critic's mean + branch_weight x the branches');
+    loss None with neither. sums: the log's (None: not logged)."""
+    parts, cnt, kl, bl, cl = [], 0.0, 0.0, None, None
     if branch is not None:
         E = len(branch["adv"])
         part = branch if E <= cfg.minibatch else pick(branch, torch.randperm(E, device=branch["adv"].device)
@@ -277,14 +291,21 @@ def _kind_loss(gen, branch, d, adv_c, lp0_kind, w, mine, cfg, sums):
         s_c, n_c = critic_term(d, adv_c, lp0_kind, w, mine, cfg.clip)
         parts.append(-s_c)
         cnt += float(n_c)
+        cl = -s_c / n_c.clamp(min=1)
         if sums is not None:
             with torch.no_grad():
                 mk = mine.float()
                 sums["kind_kl"] += float((kl_est(lp0_kind, d["lp_kind"], cfg.kl) * mk).sum() / mk.sum().clamp(min=1))
     if not parts or cnt <= 0:
         return kl, None
-    # (the branches alone: their mean as it is - the term before the critic, bit for bit)
-    loss = bl if d is None else sum(parts) / cnt
+    if cfg.kind_q == "both":
+        # the outcome Q's groups + branch_weight x the branches' rows (each mean apart; without the own signal the
+        # whole term already has branch_weight)
+        bw = cfg.branch_weight if cfg.kind_own else 1.0
+        loss = sum(x for x in (cl, None if bl is None else bw * bl) if x is not None)
+    else:
+        # (the branches alone: their mean as it is - the term before the critic, bit for bit)
+        loss = bl if d is None else sum(parts) / cnt
     if sums is not None and d is not None:
         sums["kind_loss"] += float(loss.detach())
     return kl, loss
@@ -358,7 +379,8 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None, kind_q
     sums = {"pl": 0.0, "ent": 0.0, "ent_kind": 0.0, "ent_target": 0.0, "ent_place": 0.0, "vl": 0.0, "kl": 0.0,
             "clip": 0.0}
     w_kind = cfg.kind_weight if cfg.kind_own else cfg.branch_weight
-    use_b = branch is not None and w_kind > 0 and len(branch["adv"]) > 0
+    # (kind_q "outcome": the branches only measured, their rows train nothing)
+    use_b = branch is not None and w_kind > 0 and len(branch["adv"]) > 0 and cfg.kind_q != "outcome"
     use_c = adv_c is not None and w_kind > 0
     if use_c:
         sums.update(kind_loss=0.0, kind_kl=0.0)

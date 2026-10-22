@@ -467,7 +467,11 @@ group with another kind".
   teacher gives the group nothing, gives the kind the network chose, or a masked kind, the copies take a swap as
   `uniform` (their share: `branch_alt_fallback` in the log; "the teacher's second choice" is not used: the rule has no
   order of second choices). `uniform` — evenly of the candidates, `policy` — by the general's probabilities among
-  them, the price's factor 1 − π(chosen) among them.
+  them, the price's factor 1 − π(chosen) among them. `same` — a check, not a signal: "other" = the same kind with the
+  same target, but from the second decision on the "another kind" copy runs with another seed (other draws of the
+  networks and the simulator), so the group plays its kind again, differently. In the open loop the mean raw price
+  (`branch_price_raw_mean`) is the loop's own bias, ~0 without the loop. Such branches are only logged: the kind term,
+  the kind critic and the per-kind scale take none of them.
 - **Play.** At the chunk's end, before the update, every snapshot in `--general-branch-copies` (4) copies, two batches:
   "as chosen" and "another kind" (the group's units' kind card = the other kind's card, the target its target; the
   groups, places the same), `--general-branch-horizon` (60) s on. The plan is locked in the copies (no re-plans: open loop for the
@@ -495,6 +499,17 @@ group with another kind".
   `--general-branch-price trade` — the exchange at the horizon, (the enemy's gold destroyed − own) / budget, as in the
   v2 reward and the ability branches; `reward` — the side's reward summed over the horizon. A price > 0: the chosen
   kind is better than the swap.
+- **The price centred** (`--general-branch-center 1`, the default; `signal.RunningMean`). Why: in the partial open loop
+  "as chosen" beats "other" by 0.0027 ± 0.0003 of the budget on average whatever the pair of kinds
+  (`build/diag_kind_critic`: m[a, b] + m[b, a] < 0 in 28 of 30 cells). The cause is the loop itself: in "other" the
+  group decides anew while the enemy and the rest of the army replay orders made for "as chosen" and cannot answer it.
+  A bias, not a property of the kinds: by it better/worse is 0.2/0.35 in the open loop against ~0.5/0.5 in the closed
+  one, and "the network worse than the teacher" 0.36 against 0.16. How: the running mean price over all pairs (the
+  sums × 0.9 an update, ~10 updates; the update's rows added before it is read) is taken off every copy's price before
+  the advantage, the kind critic and the log's better/worse and against-the-teacher numbers; the raw ones are logged
+  beside them (`branch_price_raw_mean`, `branch_better_raw`, `branch_vs_teacher_price_raw` …), the mean itself is
+  `branch_center`. Kept in the checkpoint's `train` (`general_kind`); the kind critic's buffer of prices of the other
+  sort (centred or not) starts afresh on a resume. `0`: the prices as measured.
 - **The kind choice's advantage** = the price; with `policy` the price × (1 − π(chosen)). With `teacher` the advantage
   = Q(kind) − Q(the teacher's kind): the baseline does not depend on the choice, except on the plans where the network
   already chose the teacher's kind (a random swap there) — that bias pulls to the teacher's kind where it beats the
@@ -548,9 +563,61 @@ above), a critic as a denoiser over the prices, the head with its own signal, a 
   rows) gets the kind's advantage = Q(chosen) − Σ π0(k) Q(k) (π0: the general's policy at the update's start over the
   kinds it could take: a baseline independent of the choice, as COMA's), divided by the kind's scale (`KindNorm`),
   clipped to ±5.
+  The critic does not learn on the branches' prices (`build/diag_kind_critic`): ev ≤ 0.015 whatever the settings
+  against a ceiling of 0.43 (the price's real share); its 20 numbers carry no part of the price that depends on the
+  kind, and Q(a) − Q(b) cannot represent the open loop's steady shift (above, "The price centred"). So it works only
+  under `--general-kind-q branch`, and learns only there.
+- **The outcome Q** (`--general-kind-q outcome`, the default, or `both`; `tools/nn/general/kind_q.py`). Why: a branch
+  prices one group of ~5 % of the plans (~124 rows an update, a copy's noise 0.022 of the budget; a direct signal
+  needs ~500 branches an update — dear), while here a sample is every own group of every ended plan (~2 500 plans × ~3
+  groups), its outcome taken from the recorded battle itself, with no replay.
+  - *The outcome*: the side's exchange over `--general-kind-q-horizon` (60) s of battle since the plan began: (the
+    enemy's gold destroyed − own) / budget, as the branches' `trade` price (`Runtime.side_trade` =
+    `ability_branch.trade`). The battle's next plans play in the window (Q of the policy). A battle over sooner: the
+    exchange at its end (final by then), marked `ended`. `Runtime` keeps it (`q_h`): the exchange at the plan's start,
+    the one at the horizon if the plan is still in force; an ended plan gets an id `qid` and waits until the horizon
+    passed or the battle ended; `end_chunk` gives the chunk's known outcomes (`q_out`) with the battle's number `bid`
+    (every battle started gets its own, both sides one). A battle restarted in the same slot moves its epoch: an older
+    battle's outcome there is dropped. A plan's features wait for its outcome at most the horizon in chunks + 2 chunks
+    (`kind_q.wait_chunks`: 3 at 60 s and 64 decisions); those that never got one are `kind_q_lost` in the log. The
+    battles and the batch are the same to the bit as without it (test).
+  - *The input*: everything the kind head sees when it chooses, else the choice depends on what Q does not see and
+    Q(chosen) is biased: the group card the kind head reads (`decide` → `query`: after the group council and the
+    threat, fight and tile layers), detached from the gradient; the kind critic's 20 numbers; the kind's inertia (the
+    group's last kind where it kept its units, `General.prev_kind_hot`, what `kind_stick` is added to); the kinds the
+    group may take (`kind_ok`, 6 numbers: Q(attack) is not learned together over groups that may and may not shoot).
+    A separate
+    network on this input rather than a head on the general's body: the general's network, its checkpoints and the
+    game do not change, the buffer gives an update ~4 updates of data instead of one, and the cards' staleness in it
+    is bounded by its length (`--general-kind-q-buffer` 30 000 groups ≈ 4 updates).
+  - *The network*: 2 layers of 128, dropout 0.1, its own AdamW; the inputs standardised by the first fit and not
+    adjusted after (a known limit: the general's cards drift with time, the standardisation does not), the target in
+    units of the first fit's root mean square outcome. Each update 64 Huber steps of Q(chosen) ≈ the outcome. Held
+    out: every 10th **battle** whole (`kind_q.held_out`): all its plans and both its sides. Not by plan: a plan is
+    re-made every 30 s with a 60 s window, so the group's next plan shares half the held-out one's window and often its
+    kind (the inertia), and in a battle of the network with itself the other side has the same outcome with the other
+    sign — ev and the shrink came out too high.
+  - *The gate*: Q is on (`kind_q_on`) once it has ≥ `--general-kind-q-warmup` (10 000, ~1.5 updates) groups and
+    held-out ev ≥ `--general-kind-q-ev-min` (0.05). *The shrink* s (`--general-kind-q-shrink 1`): on the held-out plans
+    the coefficient c of A in outcome ~ 1 + V + A (V = Σ π Q, A = Q(chosen) − V) less two of its standard errors
+    (`kind_q_coef_se`, by battle: a battle's plans, groups and sides are tied), within [0, 1] — how far Q's part that
+    depends on the kind is borne out by the outcomes (nearly all of ev is the situation's part V, which the kind head
+    never sees). The point c jumps ±0.3 when the kind's part is small, and noise got a shrink near 1 at times.
+  - *The advantage*, as the kind critic's: Q(chosen) − Σ π0(k) Q(k) (COMA), Q × s, divided by the kind's scale — the
+    running root mean square of its groups' A over ~10 updates (`KindNorm` over the advantages, `--general-kind-norm
+    per-kind`; `chunk`: over all the update's groups), at least 1·10⁻⁴; clipped to ±5. The head gets an advantage of
+    about s.
+  - *The agreement with the branches* (`kind_q_agree`): for the update's branch rows, the correlation of Q(chosen) −
+    Q(other) (the mean over the copies' kinds) with the branch's centred price. > 0: Q and the branches say the same.
+- **The kind signal's source** (`--general-kind-q`): `outcome` (the default) — Q alone; the branches (when on) are
+  played, centred and logged (the agreement, the `same` mode) but train nothing; until Q is on the kind term is empty
+  (only the imitation trains the head). `both` — the kind term = the mean over Q's groups + `--general-branch-weight` ×
+  the mean over the branch rows (the branches have their own weight; until Q is on, the branches alone). `branch` —
+  the old way: the branch rows and the kind critic's groups together, the mean over all rows; the kind critic learns
+  only here.
 - **The kind term**: clipped PPO on the kind's log-probability over the branch rows (their measured price) and the
-  ended plans' groups (the critic's estimate) together, the mean over all rows. Until the critic is on: the branch rows
-  alone. (A branch is also a group of a plan that ends later: such a group counts twice; ~2–5 % of the groups.)
+  ended plans' groups (Q's or the critic's estimate), as said above. (A branch is also a group of a plan that ends
+  later: such a group counts twice; ~2–5 % of the groups.)
 - **The kind head out of the plan's PPO** (`--general-kind-own-signal 1`, the default). The kind's log-probability is
   taken out of the plan's PPO ratio: the plan's advantage (one number for all groups) trains the target and the place
   only. The kind learns from the kind term with the weight `--general-kind-weight` (1, no decay) and the imitation
@@ -659,6 +726,13 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `branch_critic_samples`, `branch_critic_on`, `branch_critic_ev`, `branch_critic_shrink`, `branch_critic_val`, `branch_critic_base`, `branch_critic_train`, `branch_critic_s` | the kind critic: prices in the buffer, on or not, the explained share of the held-out prices' spread, the shrink, the held-out error and "zero"'s, the training error, seconds |
 | `kind_loss`, `kind_kl`, `kind_critic_groups`, `kind_critic_adv_std`, `kind_critic_adv_mean` | the kind term with the critic's groups: loss, the kind's KL (k3), groups with an estimate, their advantage's spread and mean |
 | `kind_own`, `kind_extra_kl`, `kind_extra_steps` | the kind head's own signal (1/0); the extra pass over the kind head: KL, steps |
+| `branch_center`, `branch_price_raw_mean`, `branch_better_raw`, `branch_worse_raw`, `branch_vs_teacher_*_raw` | (`--general-branch-center 1`) the running mean price taken off; the raw mean price and the raw better/worse and against-the-teacher numbers (without `_raw`: centred) |
+| `branch_same` | (`--general-branch-alt same`) 1: the branches are the loop's check; the loop's bias is `branch_price_raw_mean` |
+| `kind_q_samples`, `kind_q_matured`, `kind_q_waiting`, `kind_q_ended_share`, `kind_q_span_s` | the outcome Q: groups in its buffer; plans whose outcome came in the update; plans waiting for theirs; the share of outcomes whose battle ended before the horizon; the window's mean length, s |
+| `kind_q_lost`, `kind_q_orphans` | plans whose features did not live to their outcome; outcomes that came without features (after a resume) |
+| `kind_q_held`, `kind_q_ev`, `kind_q_ev_kind`, `kind_q_coef`, `kind_q_coef_se`, `kind_q_shrink`, `kind_q_on` | on the held-out battles: groups; the explained share of the outcome's spread (the gate); the share of what V leaves that A explains; A's coefficient and its standard error by battle; the shrink (c − 2 errors); on or not |
+| `kind_q_agree`, `kind_q_agree_n` | the correlation of Q(chosen) − Q(other) with the update's branches' centred price (> 0: they agree), rows |
+| `kind_q_y_mean`, `kind_q_y_std`, `kind_q_train`, `kind_q_val`, `kind_q_base`, `kind_q_adv_rms`, `kind_q_scale_<k>`, `kind_q_seconds` | the buffer's outcomes (mean, spread); the training, held-out and the mean's errors; the update's groups' root mean square A; kind k's scale; seconds |
 
 The mandatory ones (rating, pair gold, own lord deaths) are in the `test5` evaluations as before.
 
@@ -710,10 +784,12 @@ against the battle return's spread of ~0.8, and ~0.3σ a group at the plan's las
 `distinct_scale` in the log.
 
 Mission branches: `--set general-branches=0.2` (the rest by default: 4 copies, 60 s, up to 128 snapshots an update,
-the partial open loop, the other kind the teacher's, the price by the exchange, the scale per kind, the kind critic, the
-kind head's own signal with weight 1, lr × 2 and 2 passes). Shorter and cheaper: `--set general-branch-horizon=30`. The
-old behaviour: `--set general-branch-openloop=0 general-kind-critic=0 general-kind-norm=chunk general-kind-own-signal=0
-general-branch-cap=64`.
+the partial open loop, the other kind the teacher's, the price by the exchange, centred, the scale per kind, the kind
+head's own signal with weight 1, lr × 2 and 2 passes, the head taught by the outcome Q over 60 s —
+`--general-kind-q outcome`, the branches only measure; to teach by the branches too: `--set general-kind-q=both`). Shorter and cheaper: `--set general-branch-horizon=30`. The loop's bias check: `--set
+general-branch-alt=same` (the raw price in the log; trains nothing). The old behaviour: `--set general-kind-q=branch
+general-branch-center=0` (and before that `general-branch-openloop=0 general-kind-critic=0 general-kind-norm=chunk
+general-kind-own-signal=0 general-branch-cap=64`).
 
 `--from <file>.pt` (new): a line's point outside `test5` — it is the `--init`, the `--reference` and the
 `--critic-init` (Adam and the counters go on). `--step NAME` (new): a named step's options over the standing ones.
@@ -763,6 +839,11 @@ to the battle (with it +0.88, without +0.89). Rejected:
   Now the partial open loop ([above](#mission-branches)).
 - **The prices' scale by the chunk** (the root mean square of 63 rows over all kinds): 10–20 rows a kind, the scale
   mostly noise. Now each kind's own scale over ~10 updates.
+- **The kind critic on the branches' prices as the signal's source** (g23, 3103 prices): ev ≤ 0.015 against a ceiling
+  of 0.43 whatever the settings (MLP 32–128, 1–2 layers, dropout, lr, Huber/MSE, early stop; ridge; a table of pairs ×
+  situations), the curve over the sample count flat (the kind's part 0.004 → 0.010); Q(a) − Q(b) cannot represent the
+  open loop's steady shift (−0.0027), which leaked into the kinds' Q (±1–2·10⁻³, the size of the real differences).
+  Now centred prices and the outcome Q of the battle itself; the critic only under `--general-kind-q branch`.
 - **Imitating the teacher down to zero** (g18–g21, `--general-imitate 0.3` down to 0 over 300 updates): while W was
   0.3–0.18 (g18–g19) the rating grew to +1.21; when W fell 0.18 → 0.065 (g20–g21) it fell +0.97 → +0.56, though the
   missions carried out and "does the executor listen" grew. The general's own signal (the plan's advantage by the

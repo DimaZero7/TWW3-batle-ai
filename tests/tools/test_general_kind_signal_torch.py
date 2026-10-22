@@ -131,9 +131,9 @@ def test_the_critics_features_are_our_groups_numbers_and_the_brancher_feeds_it()
     kq = batch["general"]["kind_q"]
     assert kq["q"].shape == (len(ready["kind"]), G, br.K) and kq["scale"].shape == (br.K,)
     assert bool((kq["scale"] > 0).all())
-    # saved and loaded: the critic's buffer and the scales
+    # saved and loaded: the critic's buffer, the scales and the prices' centre
     other = gbranch.Brancher(br.cfg, "cpu")
-    assert set(other.load(br.state())) == {"critic", "norm"} and len(other.critic) == len(br.critic)
+    assert set(other.load(br.state())) == {"critic", "norm", "center"} and len(other.critic) == len(br.critic)
 
 
 def forced(br, ready):
