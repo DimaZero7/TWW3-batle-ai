@@ -46,6 +46,19 @@ def test_the_kinds_inertia_is_a_rule_an_option_goes_over():
     assert (a.general_imitate, a.general_imitate_decay, a.general_exec_general) == (0.3, 300, 0.2)
 
 
+def test_the_imitations_floor_is_saved_and_the_option_given_goes_over_it():
+    from tools.nn.general import learn
+    cfg = learn.LearnConfig(imitate=0.3, imitate_min=0.15)
+    assert args_of().general_imitate_min == 0.15
+    assert run.imitate_floor(args_of(), cfg, {}).imitate_min == 0.15                  # nothing saved: the option's
+    assert run.imitate_floor(args_of(), cfg, {"general_imitate_min": 0.05}).imitate_min == 0.05     # the saved one
+    c = learn.LearnConfig(imitate=0.3, imitate_min=0.15)
+    assert run.imitate_floor(args_of("--general-imitate-min", "0.15"), c,
+                             {"general_imitate_min": 0.05}).imitate_min == 0.15       # given (even at the default)
+    with pytest.raises(ValueError):
+        learn.LearnConfig(imitate_min=-0.1)
+
+
 def test_without_the_option_the_saved_rule_stays():
     saved = dataclasses.replace(SAVED, deploy="script", replan_s=45.0)
     gcfg, over = run.general_config(args_of("--general-entropy-kind", "0.05"), saved)

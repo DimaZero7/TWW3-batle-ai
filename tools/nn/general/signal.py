@@ -8,6 +8,8 @@ host's tests check them; docs/en/training/general.md "Training").
   guesses a group's mission kind from what its units did during the plan; the bonus is log q(kind | behaviour) - log(1/K)
   (0 when it guesses no better than chance, up to log K when it is sure and right), clipped to [-log K, log K], x W.
 * distinct_weight: W down to 0 linearly over `decay` updates of the chain (0: no decay).
+* imitate_weight: the teacher's imitation's W down to a floor M (run.py --general-imitate-min), not to 0, linearly over
+  `decay` updates (W = 0: off, the floor does not turn it on; M above W: W stays).
 * distinct_scale: the bonus is in the executor's advantage's units: W x the guess's gain x the spread (std) of the
   executor's advantage before its normalisation (an average over the updates; ppo's adv_std_*) - W = 1 pays a group
   one advantage std for each nat the classifier guesses its kind better than chance.
@@ -51,6 +53,16 @@ def distinct_weight(w0, decay, updates):
     if not decay:
         return float(w0)
     return float(w0) * max(0.0, 1.0 - updates / float(decay))
+
+
+def imitate_weight(w0, decay, updates, floor=0.0):
+    """The imitation's weight after `updates` updates of the chain: w0 down to min(floor, w0) linearly over `decay` (0:
+    no decay); w0 <= 0: 0 (off)."""
+    w0 = float(w0)
+    if w0 <= 0:
+        return 0.0
+    m = min(max(0.0, float(floor)), w0)
+    return m + (w0 - m) * (distinct_weight(1.0, decay, updates))
 
 
 SCALE0 = 0.06       # the executor's advantage std before the first update (line S27/g1-g8 logs: 0.058-0.068)

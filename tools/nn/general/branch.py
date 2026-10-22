@@ -8,7 +8,12 @@ Capture (rollout.Battles.step -> Brancher.capture, after the decision's networks
 learner's plans made for this decision (Runtime marks them "fresh": a re-plan of this step, a deployment at the end of
 the step before) are taken with the chance `share`, within `cap` an update spread over the chunk's decisions and over
 the battle kinds' slots of the branch batch (the ability branches' way: ability_branch.composition). Of a taken plan
-one of its own groups is drawn (uniformly), and for every copy c another kind b_c, `alt`: "uniform" over the
+one of its own groups is drawn (uniformly), and for every copy c another kind b_c, `alt`: "teacher" (the default) - the
+kind and target the teacher's rule (teacher.py, Runtime.teacher_choice) would give that group in this battle now, in
+every copy (the price is then "how much better my choice is than the teacher's here": one comparison, a low spread);
+where the teacher gives the group nothing, gives the kind the network chose, or a kind the general could not take at
+the plan (masked), the copies fall back to "uniform" (the log's alt_fallback: their share; vs_teacher_better / worse:
+the shares of the teacher's comparisons the network's choice won / lost by more than ZERO) - "uniform" over the
 candidates, or "policy": by the general's probabilities among them. The candidates (Config.kinds): "all" - every kind
 the general could give the group at the plan (its kind_logp not masked), each with its own target: the group's target
 when the kind takes it, else the natural one of its types (alt_targets: attack / flank / shoot the nearest enemy group,
@@ -51,7 +56,7 @@ from tools.nn.sim import state as S
 from tools.nn.train import ability_branch as ab
 from tools.nn.train import reward
 
-ALTS = ("uniform", "policy")
+ALTS = ("teacher", "uniform", "policy")
 KINDS = ("all", "target")
 WITHDRAW_M = 300.0          # a withdraw without another group of ours: to the tile nearest this far behind the group
 PRICES = ("trade", "reward")
@@ -67,7 +72,8 @@ class Config:
     horizon_s: float = 60.0     # seconds of battle each branch plays
     cap: int = 64               # snapshots an update at most (0: no cap); spread over the chunk's decisions
     batch: int = 64             # snapshots a branch batch (x copies battles in each of the two branches)
-    alt: str = "uniform"        # the other kind: "uniform" over the K - 1 others, "policy" by the general without a
+    alt: str = "teacher"        # the other kind: "teacher" - the teacher's (else uniform), "uniform" over the K - 1
+    #                             others, "policy" by the general without a
     price: str = "trade"        # "trade": the gold exchange at the horizon; "reward": the side's reward over it
     greedy: bool = False        # the branches' networks take their most likely action, not a sample
     kinds: str = "all"          # the other kinds: "all" (each with its own target) or "target" (those taking the target)
@@ -276,17 +282,17 @@ class Brancher:
         """The copies' other kinds [k, copies] and the prices' weights [k] of plans whose group's kind log-probabilities
         are logp [k, K] and chosen kind `kind` [k] (Config.alt; signal.kind_advantage). valid [k, K]: the kinds that
         take the group's target (its type: config.MISSION_KINDS; None: all) - the other kind is one of them (each row
-        has one besides the chosen: capture's has_alt)."""
+        has one besides the chosen: capture's has_alt). "teacher" draws here as "uniform" (its fallback)."""
         k, K = logp.shape
         C = self.cfg.copies
         dev = logp.device
-        if valid is None and self.cfg.alt == "uniform":
+        if valid is None and self.cfg.alt != "policy":
             draw = torch.randint(0, K - 1, (k, C), generator=self.gen, device=dev)
             return gsignal.other_kind(draw, kind[:, None]), torch.ones(k, device=dev)
         others = torch.ones(k, K, dtype=torch.bool, device=dev) if valid is None else valid.clone()
         others[torch.arange(k, device=dev), kind] = False
         flat = others.float() / others.float().sum(1, keepdim=True).clamp(min=1)
-        if self.cfg.alt == "uniform":
+        if self.cfg.alt != "policy":
             return torch.multinomial(flat, C, replacement=True, generator=self.gen), torch.ones(k, device=dev)
         p = logp.exp()
         pa = p.gather(1, kind[:, None])[:, 0]
@@ -297,6 +303,46 @@ class Brancher:
         # is 1 - pi(chosen) of the kinds that take that target, the same formula over them)
         pv = pa / (pa + s[:, 0]).clamp(min=1e-12) if valid is not None else pa
         return torch.multinomial(q, C, replacement=True, generator=self.gen), gsignal.policy_weight(pv)
+
+    def teacher_alternatives(self, env, rt, nz, g, kind, valid):
+        """Config.alt "teacher": (alt [k, copies], w [k], alt_t [k, copies], alt_w [k, copies, 2], vs [k] bool) of the
+        plans of rows nz [k], their group g [k] and its chosen kind `kind` [k]; valid [k, K] the fallback's candidates
+        (as capture's). vs: the copies play the teacher's kind and target for the group (Runtime.teacher_choice in the
+        battle now); elsewhere the uniform fallback over valid (its targets: alt_targets with kinds "all", else kept)."""
+        from tools.nn.general import tiles as gtiles
+        r, G = rt.r, rt.G
+        gen = rt.learner.general
+        dev = nz.device
+        k, K = valid.shape
+        Cp = self.cfg.copies
+        C = gen.C
+        ar = torch.arange(k, device=dev)
+        cidx = gtiles.coarse_index(rt.mcfg.sectors, gen.cfg.target_grid, dev)
+        c_ok = torch.zeros(k, C, device=dev).index_add_(1, cidx, r["in/tile_ok"][nz].float()) > 0
+        tiles = r["tile_w"][nz].float()
+        tk, tt, tu = rt.teacher_choice(env, nz, r["main"][nz], r["active"][nz], tiles, c_ok)
+        t_kind, t_tgt, t_use = tk[ar, g], tt[ar, g], tu[ar, g]
+        kind_ok = r["kind_logp"][nz, g].gather(1, t_kind.clamp(0, K - 1)[:, None])[:, 0] > -1e6
+        pair_ok = gen.pair_ok.to(dev)[t_kind.clamp(0, K - 1), t_tgt.clamp(0, gen.pair_ok.shape[1] - 1)]
+        vs = t_use & (t_kind != kind) & (t_kind < K) & kind_ok & pair_ok
+        others = valid.clone()
+        others[ar, kind] = False
+        flat = others.float() / others.float().sum(1, keepdim=True).clamp(min=1)
+        flat = torch.where(flat.sum(1, keepdim=True) > 0, flat, torch.ones_like(flat))
+        draw = torch.multinomial(flat, Cp, replacement=True, generator=self.gen)
+        if self.cfg.kinds == "all":
+            f_t, f_w = alt_targets(rt, nz, g, draw)
+        else:
+            f_t = torch.full_like(draw, -1)
+            f_w = torch.full(draw.shape + (2,), float("nan"), device=dev)
+        ti = t_tgt - 2 * G
+        is_t = (ti >= 0) & (ti < C)
+        w = tiles.gather(1, ti.clamp(0, C - 1)[:, None, None].expand(-1, 1, 2))[:, 0]
+        t_w = torch.where(is_t[:, None], w, torch.full_like(w, float("nan")))
+        alt = torch.where(vs[:, None], t_kind[:, None].expand(k, Cp), draw)
+        alt_t = torch.where(vs[:, None], t_tgt[:, None].expand(k, Cp), f_t)
+        alt_w = torch.where(vs[:, None, None], t_w[:, None, :].expand(k, Cp, 2), f_w.float())
+        return alt, torch.ones(k, device=dev), alt_t, alt_w, vs
 
     def capture(self, env, info):
         rt = env.general_rt
@@ -350,19 +396,24 @@ class Brancher:
         kind = r["kind"][nz].gather(1, g[:, None])[:, 0]
         logp = r["kind_logp"][nz].gather(1, g[:, None, None].expand(-1, 1, K))[:, 0]       # [k, K]
         lp = logp.gather(1, kind[:, None])[:, 0]
-        alt, w = self.alternatives(logp, kind, valid.gather(1, g[:, None, None].expand(-1, 1, K))[:, 0])
-        if self.cfg.kinds == "all":
-            alt_t, alt_w = alt_targets(rt, nz, g, alt)
+        valid_g = valid.gather(1, g[:, None, None].expand(-1, 1, K))[:, 0]
+        if self.cfg.alt == "teacher":
+            alt, w, alt_t, alt_w, vs = self.teacher_alternatives(env, rt, nz, g, kind, valid_g)
         else:
-            alt_t = torch.full_like(alt, -1)
-            alt_w = torch.full(alt.shape + (2,), float("nan"), device=alt.device)
+            alt, w = self.alternatives(logp, kind, valid_g)
+            vs = torch.zeros(len(nz), dtype=torch.bool, device=nz.device)
+            if self.cfg.kinds == "all":
+                alt_t, alt_w = alt_targets(rt, nz, g, alt)
+            else:
+                alt_t = torch.full_like(alt, -1)
+                alt_w = torch.full(alt.shape + (2,), float("nan"), device=alt.device)
         b = nz % B
         ub, inv = torch.unique(b, return_inverse=True)
         c.snaps.append(ab.snapshot(env, ub, info))
         c.recs.append(rt.record(nz))
         c.entries.append({"t": torch.full_like(nz, t), "side": nz // B + 1, "group": g, "kind": kind, "lp": lp,
                           "alt": alt, "w": w.float(), "at": c.n_battles + inv, "new": r["new"][nz].clone(),
-                          "alt_t": alt_t, "alt_w": alt_w.float()})
+                          "alt_t": alt_t, "alt_w": alt_w.float(), "vs": vs})
         c.n_battles += len(ub)
         c.taken += len(nz)
 
@@ -398,6 +449,14 @@ class Brancher:
                   better=round(float((price > ZERO).float().mean()), 3),
                   worse=round(float((price < -ZERO).float().mean()), 3),
                   weight_mean=round(float(e["w"].mean()), 4))
+        if cfg.alt == "teacher":
+            vs = e["vs"]
+            n_vs = int(vs.sum())
+            st["alt_fallback"] = round(1.0 - n_vs / E, 4)
+            st["vs_teacher_n"] = n_vs
+            st["vs_teacher_better"] = round(float((price[vs] > ZERO).float().mean()), 3) if n_vs else 0.0
+            st["vs_teacher_worse"] = round(float((price[vs] < -ZERO).float().mean()), 3) if n_vs else 0.0
+            st["vs_teacher_price"] = round(float(price[vs].mean()), 5) if n_vs else 0.0
         rel = ab.reliability(diff)
         if rel is not None:
             st["price_rel"] = round(rel, 3)
@@ -460,4 +519,7 @@ def text(st):
         out += (f", price {st['price_mean']:+.4f} sd {st['price_std']:.4f} (se {st['price_se']:.4f}, real share "
                 f"{st.get('price_rel', float('nan')):.2f}), chosen better {st['better']:.2f} worse {st['worse']:.2f}, "
                 f"{st['battles']} battles {st['seconds']:.1f} s")
+    if "alt_fallback" in st:
+        out += (f"; against the teacher {st['vs_teacher_n']} (fallback {st['alt_fallback']:.2f}): mine better "
+                f"{st['vs_teacher_better']:.2f} worse {st['vs_teacher_worse']:.2f} price {st['vs_teacher_price']:+.4f}")
     return out

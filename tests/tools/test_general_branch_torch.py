@@ -148,6 +148,41 @@ def test_the_other_kinds_are_never_the_chosen_one_and_the_policys_weight_is_one_
         gbranch.Config(alt="best")
 
 
+def test_against_the_teacher_the_copies_play_its_kind_and_target_or_fall_back_to_another_kind():
+    env, actor, snap, cand = grabbed()
+    rt = env.general_rt
+    G, K = GCFG.places, GCFG.kinds
+    rows = torch.tensor([(c[1] - 1) * env.B + c[0] for c in cand])
+    group = torch.tensor([c[2] for c in cand])
+    kind = rt.r["kind"][rows].gather(1, group[:, None])[:, 0]
+    valid = rt.r["kind_logp"][rows, group] > -1e6
+    br = gbranch.Brancher(gbranch.Config(share=1.0, copies=3), "cpu")
+    assert br.cfg.alt == "teacher"                                     # the default
+    alt, w, alt_t, alt_w, vs = br.teacher_alternatives(env, rt, rows, group, kind, valid)
+    assert alt.shape == (len(rows), 3) and alt_t.shape == (len(rows), 3) and alt_w.shape == (len(rows), 3, 2)
+    assert torch.all(w == 1) and not bool((alt == kind[:, None]).any())   # never the chosen kind
+    # the teacher's rule in the battle now: where it gives the group another kind, every copy plays it with its target
+    from tools.nn.general import tiles as gtiles
+    cidx = gtiles.coarse_index(rt.mcfg.sectors, actor.general.cfg.target_grid, "cpu")
+    c_ok = torch.zeros(len(rows), actor.general.C).index_add_(1, cidx, rt.r["in/tile_ok"][rows].float()) > 0
+    tk, tt, tu = rt.teacher_choice(env, rows, rt.r["main"][rows], rt.r["active"][rows], rt.r["tile_w"][rows], c_ok)
+    ar = torch.arange(len(rows))
+    t_kind, t_tgt, t_use = tk[ar, group], tt[ar, group], tu[ar, group]
+    assert torch.equal(vs, vs & t_use & (t_kind != kind))
+    assert bool((t_use & (t_kind != kind) & valid[ar, t_kind]).eq(vs).all())
+    if bool(vs.any()):
+        assert torch.equal(alt[vs], t_kind[vs, None].expand(-1, 3))
+        assert torch.equal(alt_t[vs], t_tgt[vs, None].expand(-1, 3))
+    # the fallback: a kind the general could take, never the chosen one
+    assert bool((valid.gather(1, alt) | vs[:, None]).all())
+    # a teacher that agrees with the network everywhere: all fall back
+    same = torch.where(t_use, t_kind, kind)
+    _, _, _, _, vs2 = br.teacher_alternatives(env, rt, rows, group, same, valid)
+    assert not bool(vs2.any())
+    with pytest.raises(ValueError):
+        gbranch.Config(alt="teachers")
+
+
 def collected(branches, horizon=3.0):
     """A chunk of 3 decisions (every row re-plans at the first); branches: the mission branches on (all the new plans
     replayed) or not. -> (env, actor, critic, batch)."""
@@ -207,8 +242,11 @@ def test_the_branches_leave_the_batch_the_battles_and_the_update_bit_for_bit():
     st = env1.general_rt.brancher.stats
     assert E > 0 and st["branches"] == E and E <= st["plans"]
     assert br["rec"]["kind"].shape[0] == E and torch.isfinite(br["adv"]).all() and torch.isfinite(br["price"]).all()
-    for k in ("price_mean", "price_std", "price_se", "better", "worse", "battles", "seconds"):
+    for k in ("price_mean", "price_std", "price_se", "better", "worse", "battles", "seconds", "alt_fallback",
+              "vs_teacher_better", "vs_teacher_worse", "vs_teacher_n"):
         assert k in st, k
+    assert 0.0 <= st["alt_fallback"] <= 1.0 and st["vs_teacher_better"] + st["vs_teacher_worse"] <= 1.0
+    assert "against the teacher" in gbranch.text(st)
     assert not bool(env1.general_rt.r["fresh"].any())                 # the marks are cleared every decision
 
 
@@ -275,6 +313,8 @@ def test_no_branches_at_zero_and_the_flags_reach_the_config():
     br = run.general_brancher(a1, cfg, "cpu")
     assert br.cfg.share == 0.2 and br.cfg.copies == 2 and br.cfg.horizon_s == 30.0 and br.cfg.alt == "policy"
     assert br.cfg.greedy and br.cfg.price == "trade"
+    assert run.general_brancher(ap.parse_args(["--general", "--general-branches", "0.2"]), cfg, "cpu").cfg.alt == \
+        "teacher"                                                        # the default: against the teacher
     with pytest.raises(ValueError):
         learn.LearnConfig(branches=1.5)
     with pytest.raises(ValueError):
