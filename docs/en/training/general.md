@@ -205,12 +205,8 @@ PPO on two levels (`learn.py`):
   paid its own (the distinct bonus went to the whole side). The measures are computed and logged at any W (W = 0: not
   paid).
 - **Teacher** (`--general-teacher P`): [below](#teacher).
-- **Imitating the teacher** (`--general-imitate W`, default 0.3; `--general-imitate-decay N`: W goes down over N
-  updates, default 300, its own counter in the point's `train` from the first update with imitation, to the floor
-  `--general-imitate-min M`, default 0.15, not to zero; M is kept in the point's `train`, the option given on the
-  command line goes over the saved one; W = 0 turns imitation off, the floor does not turn it on;
-  `signal.imitate_weight`). The floor: the general's own signal is still weaker than the teacher's, and without the
-  support the general drifts to worse plans ([Tried and rejected](#tried-and-rejected)). Why imitation at all: in g10 the
+- **Imitating the teacher** (`--general-imitate W`, default 0.3; `--general-imitate-decay N`: W down to 0 over N
+  updates, default 300, its own counter in the point's `train` from the first update with imitation). Why: in g10 the
   general got only noise from the battle, its choice of kind drifted (46 % `flank`, the kind carried out worst, 0.13;
   the choice's dependence on the situation ≈ 0). How: on the teacher's plans its kind and target are known for every
   group it gave a mission. The teacher's groups are the ones the network collected (the teacher changes only the kind
@@ -459,14 +455,8 @@ group with another kind".
   `target` (the old way): only the kinds that take the group's target as it is (an enemy group — attack, flank, shoot;
   ours — hold, screen, withdraw; a tile — hold, withdraw): the atlas of g17r found it biased — withdraw was compared only
   with hold and screen (whose mask keeps a unit from fighting far from the point), never with attack, and the branches
-  pulled to withdraw. The kind: `--general-branch-alt teacher` (the default) — the kind and target the teacher would
-  give this group in this battle now (the [teacher's](#teacher) rule, `Runtime.teacher_choice`; its clock "our
-  shooters are firing" runs without `--general-teacher` too), in every copy. The price is then "how much better my
-  choice is than the teacher's here": one comparison with a sensible swap, a lower spread than a random one. Where the
-  teacher gives the group nothing, gives the kind the network chose, or a masked kind, the copies take a swap as
-  `uniform` (their share: `branch_alt_fallback` in the log; "the teacher's second choice" is not used: the rule has no
-  order of second choices). `uniform` — evenly of the candidates, `policy` — by the general's probabilities among
-  them, the price's factor 1 − π(chosen) among them.
+  pulled to withdraw. The kind: `--general-branch-alt uniform` (evenly of the candidates) or `policy` (by the general's
+  probabilities among them, the price's factor 1 − π(chosen) among them).
 - **Play.** At the chunk's end, before the update, every snapshot in `--general-branch-copies` (4) copies, two batches:
   "as chosen" and "another kind" (the group's units' kind card = the other kind's card, the target its target; the
   groups, places the same), `--general-branch-horizon` (60) s on. The plan is locked in the copies (no re-plans: open loop for the
@@ -480,10 +470,7 @@ group with another kind".
   `--general-branch-price trade` — the exchange at the horizon, (the enemy's gold destroyed − own) / budget, as in the
   v2 reward and the ability branches; `reward` — the side's reward summed over the horizon. A price > 0: the chosen
   kind is better than the swap.
-- **The kind choice's advantage** = the price; with `policy` the price × (1 − π(chosen)). With `teacher` the advantage
-  = Q(kind) − Q(the teacher's kind): the baseline does not depend on the choice, except on the plans where the network
-  already chose the teacher's kind (a random swap there) — that bias pulls to the teacher's kind where it beats the
-  others, the same way as the imitation. With `uniform` and `policy` both are fair advantages:
+- **The kind choice's advantage** = the price; with `policy` the price × (1 − π(chosen)). Both are fair advantages:
   with `uniform` the price's mean = K/(K−1) × (Q(kind) − the mean Q over the kinds), with `policy` exactly Q(kind) − V
   (the formulas and their check: `signal.py`, a test without torch). The prices are divided by their root mean square
   over the chunk (at least 0.005 of the budget) and clipped to ±5.
@@ -596,8 +583,6 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `branch_price_mean`, `branch_price_std`, `branch_price_rms`, `branch_price_se`, `branch_gold_mean` | the kind choice's price (budget share): mean, spread between branches, root mean square, the copies' noise; the mean in gold |
 | `branch_price_rel` | the real share of the prices' spread: 1 − the copies' noise of the mean / the prices' spread (the ceiling of what in the price is not noise) |
 | `branch_better`, `branch_worse` | the share of branches where the chosen kind is better than the swap (price > 0.002 of the budget) and worse (< −0.002) |
-| `branch_alt_fallback` | (`--general-branch-alt teacher`) the share of branches whose swap is a random one, not the teacher's (the teacher gave the group nothing, the same kind, or a masked one) |
-| `branch_vs_teacher_better`, `branch_vs_teacher_worse`, `branch_vs_teacher_n`, `branch_vs_teacher_price` | of the branches against the teacher: the share where the network's choice beats the teacher's (price > 0.002 of the budget) and loses (< −0.002), their number, the mean price |
 | `branch_battles`, `branch_battle_s`, `branch_seconds`, `branch_weight_mean` | battles in the branches, battle seconds, wall seconds; the price's mean factor (1, with `policy` 1 − π) |
 | `branch_loss`, `branch_kl`, `branch_clip`, `branch_rows` | the branches' term in the general's PPO: loss, the kind's KL, clipped share, rows |
 
@@ -639,9 +624,8 @@ and the general. The evaluations: the mandatory set only. The command from the u
 
 The chain's step already runs with `--general-return critic` (the advantage by the unit critic) and with the bonus for
 carrying missions out (`--general-exec 1` — the option's default; stronger: `--set general-exec=2`; the teacher:
-`--set general-teacher=0.3`; with the teacher the general imitates it, `--general-imitate 0.3` down to `--general-imitate-min 0.15`
-over 300 updates — the default; the branches (`--set general-branches=0.2`) compare the network's choice with the
-teacher's by default (`--general-branch-alt teacher`); the general's small bonus `--general-exec-general 0.2` and the kind's inertia `--general-kind-stick 1` —
+`--set general-teacher=0.3`; with the teacher the general imitates it, `--general-imitate 0.3` down to 0 over 300 updates
+— the default; the general's small bonus `--general-exec-general 0.2` and the kind's inertia `--general-kind-stick 1` —
 the defaults; the task masks `--general-task-mask 1`, the kinds' weights on the bonus `--general-exec-kind
 withdraw=2,screen=2`, the teacher's waiting `--general-teacher-hold-m 250 --general-teacher-fire-s 30`, the teacher's flank
 `--general-teacher-flank 1` and the flank measure by the contact's side `--general-flank-measure contact` — defaults too). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
@@ -697,11 +681,6 @@ to the battle (with it +0.88, without +0.89). Rejected:
 - **The kind choice without threat numbers:** the kind's link to the threat 0.003 nats, to the strength near 0.006 —
   the general did not see the group's situation directly. Now the threat numbers on the group's card.
 
-- **Imitating the teacher down to zero** (g18–g21, `--general-imitate 0.3` down to 0 over 300 updates): while W was
-  0.3–0.18 (g18–g19) the rating grew to +1.21; when W fell 0.18 → 0.065 (g20–g21) it fell +0.97 → +0.56, though the
-  missions carried out and "does the executor listen" grew. The general's own signal (the plan's advantage by the
-  critic, ~3300 plans an update, one number a plan) is still weaker than the teacher. Now: the floor
-  `--general-imitate-min 0.15`.
 - **Every task mask at once** (g14 from the point g13): the rating at minute 0 +0.86 → −1.25 (the exchange vs ai_like
   ×1.57 → ×0.45), after 19 updates only up to +0.04. Checked by parts ([Task masks](#task-masks)): `withdraw_attack`
   (with the sectors −1.15, the sectors alone +0.07), `attack_target` (−0.61) and `shoot_*` (−0.19) do harm — everything that forbids a unit to fight; they are
@@ -876,10 +855,7 @@ Tests at build time (group 1 of the design's "Checks" pages):
 - `test_general_branch_torch.py` — the mission branches: the swap changes the kind card of the group's units only; a
   swap to the same kind prices exactly 0, the branches repeat, the random state is restored; an executor that does not
   listen to its task (and without the task masks) prices every swap 0; the other kind is never the chosen one and only of the kinds taking the
-  group's target, the `policy` weight = 1 − π; against the teacher (`teacher`, the default) the copies play the
-  teacher's rule's kind and target in this battle where it gave another kind, else a random admissible swap (never
-  the chosen one); a teacher agreeing with the network everywhere — all swaps random; the log has `alt_fallback` and
-  the better / worse shares against the teacher; with
+  group's target, the `policy` weight = 1 − π; with
   branches (the term's weight 0) the batch, the battles and the weights after the update are the same to the bit as
   without; the term's old probability is the plan's (KL 0), its gradient reaches the kind, the council and the
   readers, not the targets, places or the value; at P = 0 no branches, the flags reach the config.

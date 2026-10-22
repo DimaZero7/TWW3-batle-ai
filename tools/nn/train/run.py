@@ -362,7 +362,6 @@ def with_general(actor, args):
                              distinct=args.general_distinct, distinct_decay=args.general_distinct_decay,
                              exec=args.general_exec, exec_decay=args.general_exec_decay, teacher=args.general_teacher,
                              imitate=args.general_imitate, imitate_decay=args.general_imitate_decay,
-                             imitate_min=args.general_imitate_min,
                              exec_general=args.general_exec_general, exec_kind=args.general_exec_kind,
                              teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s,
                              teacher_flank=bool(args.general_teacher_flank), flank_measure=args.general_flank_measure,
@@ -382,18 +381,6 @@ def general_brancher(args, glearn_cfg, device):
         cap=args.general_branch_cap, batch=args.general_branch_batch, alt=args.general_branch_alt,
         price=args.general_branch_price, greedy=args.general_branch_greedy, kinds=args.general_branch_kinds,
         seed=args.seed), device)
-
-
-def imitate_floor(args, cfg, carried):
-    """The general's LearnConfig with the imitation's floor (--general-imitate-min) of the run: the --init's saved one
-    (its train state "general_imitate_min") unless the command line gives the option."""
-    given = getattr(args, "cli_given", None)
-    saved = (carried or {}).get("general_imitate_min")
-    if saved is None or (given is not None and "general_imitate_min" in given):
-        return cfg
-    if given is None and args.general_imitate_min != parser().get_default("general_imitate_min"):
-        return cfg                                 # (a Namespace without cli_given: an option off its default is given)
-    return dataclasses.replace(cfg, imitate_min=float(saved))
 
 
 MISSION_NAMES = {k.name for k in MISSION_KINDS}
@@ -422,9 +409,6 @@ def general_text(g):
                f"{g.get('branch_price_mean', 0):+.4f} sd {g.get('branch_price_std', 0):.4f} (real share "
                f"{g.get('branch_price_rel', float('nan')):.2f}), chosen better {g.get('branch_better', 0):.2f} worse "
                f"{g.get('branch_worse', 0):.2f}, {g.get('branch_seconds', 0):.1f} s, term kl {g.get('branch_kl', 0):.4f}"
-               + (f", vs teacher {g.get('branch_vs_teacher_n', 0)} (fallback {g['branch_alt_fallback']:.2f}) better "
-                  f"{g.get('branch_vs_teacher_better', 0):.2f} worse {g.get('branch_vs_teacher_worse', 0):.2f} price "
-                  f"{g.get('branch_vs_teacher_price', 0):+.4f}" if "branch_alt_fallback" in g else "")
                if "branch_branches" in g else "")
             + (f"; distinct acc {g.get('distinct_acc', 0):.3f} (chance {g.get('distinct_chance', 0):.2f}) gain "
                f"{g.get('distinct_gain', 0):+.3f} bonus {g.get('distinct_bonus', 0):+.4f} w {g.get('distinct_weight', 0):.5f} "
@@ -794,8 +778,6 @@ def _train(args, every=None, teacher=None, normal=None):
     d_updates0 = int(carried.get("general_distinct_updates", 0))
     e_updates0 = int(carried.get("general_exec_updates", 0))   # --general-exec-decay's counter over the chain
     i_updates0 = int(carried.get("general_imitate_updates", 0))   # --general-imitate-decay's (from its first step)
-    if glearn_cfg is not None:
-        glearn_cfg = imitate_floor(args, glearn_cfg, carried)
     t_warm = time.time()
     env.step(actor, critic)                       # compiles the simulator's step (not counted)
     if env.general_rt is not None:
@@ -828,7 +810,7 @@ def _train(args, every=None, teacher=None, normal=None):
             print(f"general missions: the executor's bonus W {glearn_cfg.exec:g}"
                   + (f" -> 0 over {glearn_cfg.exec_decay} updates (from update {e_updates0} of the chain)"
                      if glearn_cfg.exec_decay else "") + f"; the teacher's share of the battles {glearn_cfg.teacher:g}"
-                  + (f"; its imitation W {glearn_cfg.imitate:g}" + (f" -> {min(glearn_cfg.imitate_min, glearn_cfg.imitate):g} over {glearn_cfg.imitate_decay} updates "
+                  + (f"; its imitation W {glearn_cfg.imitate:g}" + (f" -> 0 over {glearn_cfg.imitate_decay} updates "
                                                                    f"(from update {i_updates0})"
                                                                    if glearn_cfg.imitate_decay else "")
                      if glearn_cfg.teacher > 0 else "")
@@ -884,8 +866,7 @@ def _train(args, every=None, teacher=None, normal=None):
                           else int(carried.get("observe_updates", 0)),
                           "general_distinct_updates": d_updates0 + (update if dlearn is not None else 0),
                           "general_exec_updates": e_updates0 + (update if glearn_cfg is not None else 0),
-                          "general_imitate_updates": i_updates0 + (update if glearn_cfg is not None else 0),
-                          **({"general_imitate_min": glearn_cfg.imitate_min} if glearn_cfg is not None else {})},
+                          "general_imitate_updates": i_updates0 + (update if glearn_cfg is not None else 0)},
                 **({"general_distinct": dlearn.state()} if dlearn is not None else {}),
                 **({"ability_critic": env.brancher.critic.state(),
                     "ability_critic_openloop": bool(env.brancher.cfg.openloop),
@@ -950,11 +931,9 @@ def _train(args, every=None, teacher=None, normal=None):
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
         teach_w = {**teach_w, **(normal.weights() if normal is not None else normal_w)}
-        # (--general-imitate: the teacher's imitation's weight of this update, W down to the floor --general-imitate-min
-        # over --general-imitate-decay)
-        g_cfg = (dataclasses.replace(glearn_cfg, imitate=gsignal.imitate_weight(
-            glearn_cfg.imitate, glearn_cfg.imitate_decay, i_updates0 + update, glearn_cfg.imitate_min))
-                 if glearn_cfg is not None else None)
+        # (--general-imitate: the teacher's imitation's weight of this update, W down to 0 over --general-imitate-decay)
+        g_cfg = (dataclasses.replace(glearn_cfg, imitate=gsignal.distinct_weight(
+            glearn_cfg.imitate, glearn_cfg.imitate_decay, i_updates0 + update)) if glearn_cfg is not None else None)
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w,
                         observe=observe, general=g_cfg)
         taught = st.pop("teach", None)
@@ -1630,10 +1609,8 @@ def parser():
                     help="general branches: snapshots an update at most (0: no cap); <= the batch: one batch an update")
     ap.add_argument("--general-branch-batch", type=int, default=64,
                     help="general branches: snapshots a branch batch (x copies battles in each of its two branches)")
-    ap.add_argument("--general-branch-alt", default="teacher", choices=("teacher", "uniform", "policy"),
-                    help="general branches: the other kind - teacher: the kind and target the teacher's rule would give "
-                         "the group there (the price: my choice against the teacher's; where it gives the same kind or "
-                         "none: uniform, the log's alt_fallback), uniform over the others, or by the general's "
+    ap.add_argument("--general-branch-alt", default="uniform", choices=("uniform", "policy"),
+                    help="general branches: the other kind - uniform over the others, or by the general's "
                          "probabilities without the chosen one (the price then x (1 - pi(chosen)))")
     ap.add_argument("--general-branch-price", default="trade", choices=("trade", "reward"),
                     help="general branches: the price - the gold exchange at the horizon, or the side's reward over it")
@@ -1690,10 +1667,6 @@ def parser():
     ap.add_argument("--general-imitate-decay", type=int, default=300,
                     help="general: the imitation's W down to 0 linearly over this many updates of the chain (its own "
                          "counter, from its first update; 0: no decay)")
-    ap.add_argument("--general-imitate-min", type=float, default=0.15,
-                    help="general: the floor M of the imitation's decay - W goes down to M, not to 0 (the general's own "
-                         "signal is weaker than the teacher's for now: g20-g21 without it lost the rating); saved in the "
-                         "checkpoint, the option given on the command line over it")
     ap.add_argument("--general-exec-general", type=float, default=0.2,
                     help="general: S, its small bonus for missions carried out - each group's plan advantage + S x the "
                          "group's measure less its kind's running mean over the plan (the executor's centring: no gain "

@@ -429,26 +429,14 @@ class Runtime:
         missions where its battle is taught (--general-teacher; teacher.py): kind and target replaced on the groups the
         rule gives one. The groups wait (hold their tile) until the enemy is within teach_hold_m or our shooters have
         been firing teach_fire_s (the row's fire_t0, after())."""
-        b = rows % self.B
-        tiles = gtiles.coarse_world(self.mcfg, frame, self.gcfg.target_grid)
-        kind, target, use = self.teacher_choice(env, rows, c["main"], c["active"], tiles, c["coarse_ok"])
-        use = use & self.b["teach"][b][:, None]
-        return dict(d, kind=torch.where(use, kind, d["kind"]), target=torch.where(use, target, d["target"]),
-                    teach_use=use)
-
-    def teacher_choice(self, env, rows, main, active, tiles, tiles_ok):
-        """(kind, target, use) [M, G] the teacher's rule (teacher.choose) gives the groups main [M, N] / active [M, 2G]
-        of rows [M] in the battles' state now; tiles [M, C, 2] the coarse tiles' world centres, tiles_ok [M, C]. Its
-        clock (engage: our shooters have been firing teach_fire_s) is the row's fire_t0 (after()). Used by the
-        taught plans (_teach) and by the mission branches against the teacher (branch.py, alt "teacher")."""
         b, s = rows % self.B, rows // self.B + 1
         u = env.st.u
         f = (lambda k: u[k][b])
         side = f("side")
         standing = (side > 0) & (f("men") > 0) & ~f("gone") & ~f("r")
+        tiles = gtiles.coarse_world(self.mcfg, frame, self.gcfg.target_grid)
         t0 = self.r["fire_t0"][rows]
         engage = (t0 >= 0) & (env.st.t[b].float() - t0 >= self.teach_fire_s)
-<<<<<<< ours
         kind, target, use = gteacher.choose(c["main"], c["active"], f("x"), f("z"), side == s[:, None], standing,
                                             (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds,
                                             tiles=tiles, tiles_ok=c["coarse_ok"], engage=engage,
@@ -458,15 +446,6 @@ class Runtime:
         use = use & self.b["teach"][b][:, None]
         return dict(d, kind=torch.where(use, kind, d["kind"]), target=torch.where(use, target, d["target"]),
                     teach_use=use)
-=======
-        return gteacher.choose(main, active, f("x"), f("z"), side == s[:, None], standing,
-                               (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds,
-                               tiles=tiles, tiles_ok=tiles_ok, engage=engage, hold_m=self.teach_hold_m)
-
-    def teach_clock(self):
-        """The teacher's clock runs (after()): taught battles, or mission branches against the teacher."""
-        return self.teacher > 0 or (self.brancher is not None and getattr(self.brancher.cfg, "alt", "") == "teacher")
->>>>>>> theirs
 
     def _count(self, rows, owner, res, inp, deploy, reason):
         """The log's counters of a planning call (the learner's plans only), on the device."""
@@ -653,7 +632,7 @@ class Runtime:
         r["r_sum"] += add * r["has"].float()
         r["r_disc"] += add * r["has"].float() * self.gamma ** r["n_dec"].float()
         r["n_dec"] += r["has"].long()
-        if self.teach_clock():
+        if self.teacher > 0:
             # the teacher's clock: the battle time our shooters first fired (a standing unit of the side firing)
             rows = torch.arange(2 * self.B, device=self.dev)
             b, s = rows % self.B, rows // self.B + 1
