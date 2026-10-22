@@ -249,6 +249,7 @@ PPO on two levels (`learn.py`):
   group's type, not by behaviour; an accuracy above chance does not yet mean the executor listens — read it with the
   task input's weight norm.
 - **Mission branches** (`--general-branches P`, default 0 — off): [below](#mission-branches).
+- **The kind head's own signal** (`--general-kind-own-signal 1`, the default): [below](#the-kind-heads-own-signal).
 - **Start:** the executor takes the last unit network's weights, the new input at zero weights — it plays as before
   (test: the outputs are equal to the bit); the general from scratch.
 
@@ -449,7 +450,7 @@ group with another kind".
 
 - **Snapshot.** Every new plan of the learner (a re-plan or a deployment) is marked; at its first decision the battle
   is snapshotted with the chance P (as in the ability branches: the state before the simulator steps, the networks'
-  memories after the decision, the decision's orders, the general's plans). At most `--general-branch-cap` (64)
+  memories after the decision, the decision's orders, the general's plans). At most `--general-branch-cap` (128)
   snapshots an update, evenly over the chunk's decisions and over the battle kinds (against a script, against a past
   version, against itself — their shares in the branch batch as in the main batch). One of the plan's own groups is
   drawn, and for each copy another kind. `--general-branch-kinds all` (default): any kind the general could give the
@@ -470,12 +471,26 @@ group with another kind".
 - **Play.** At the chunk's end, before the update, every snapshot in `--general-branch-copies` (4) copies, two batches:
   "as chosen" and "another kind" (the group's units' kind card = the other kind's card, the target its target; the
   groups, places the same), `--general-branch-horizon` (60) s on. The plan is locked in the copies (no re-plans: open loop for the
-  general); the executors, the past versions and the scripts play as in the batch — the kind changes the battle only
-  through what the executor does with it. The first decision is the snapshot's orders in both (made under the chosen
+  general). The first decision is the snapshot's orders in both (made under the chosen
   kind): the other kind acts from the second second. Common random numbers as in the ability branches (one place in
   two batches of one shape, one seed a decision, one battle id): a swap to the same kind prices exactly 0 (test).
   `--general-branch-greedy`: the networks in the branches take their most likely action (less of the battle's chaos
   in the price).
+- **Partial open loop** (`--general-branch-openloop 1`, the default). Why: in the closed loop (every unit of both sides
+  in both copies decides anew every second) the copies drift apart within 10–20 s — one different sample, then
+  everything differs; the 60 s price is nearly all noise (g20–g22: real share 0 in 5 of 9 updates, 0.2–0.37 in the
+  others). How: every decision "as chosen" plays first and its orders are recorded (the learner's network, the past
+  versions, the scripts, the step an order lands on — `ability_branch._recording_play`); "another kind" decides as
+  usual (its own observation, its networks) but plays the "as chosen" orders for every unit except the swapped group's
+  units (its membership at the snapshot), which keep their own new orders (`branch._openloop_play`,
+  `branch.group_units`). Only the swapped group decides anew; the enemy and the rest of our army do what they did in
+  "as chosen". A full open loop as in the ability branches (where "not pressed" decides nothing) is impossible here:
+  the kind acts only through what the group's executor does with it. `0`: the old closed loop. Measured (CPU, the g22
+  checkpoint, 32 battles, the same 64 snapshots, 4 copies, 60 s): the price's real share 0.56 against 0.075 in the
+  closed loop, the copies' noise 0.008 against 0.013 of the budget; those are deployment snapshots (the first chunk).
+  In the same run's later chunks (mid-battle plans, 64–72 snapshots) 0.18, 0.0, 0.37: noise stays from the swapped
+  group's own samples (its executor samples differently under different kinds) — the next step if the share does not
+  hold ≥ 0.4 on 1024 battles: `--general-branch-greedy` and/or a 30 s horizon.
 - **The price** (budget share, from the general's side) = the mean over the copies of ("as chosen" − "another kind"):
   `--general-branch-price trade` — the exchange at the horizon, (the enemy's gold destroyed − own) / budget, as in the
   v2 reward and the ability branches; `reward` — the side's reward summed over the horizon. A price > 0: the chosen
@@ -485,24 +500,64 @@ group with another kind".
   already chose the teacher's kind (a random swap there) — that bias pulls to the teacher's kind where it beats the
   others, the same way as the imitation. With `uniform` and `policy` both are fair advantages:
   with `uniform` the price's mean = K/(K−1) × (Q(kind) − the mean Q over the kinds), with `policy` exactly Q(kind) − V
-  (the formulas and their check: `signal.py`, a test without torch). The prices are divided by their root mean square
-  over the chunk (at least 0.005 of the budget) and clipped to ±5.
-- **Training.** Every PPO step of the general adds `--general-branch-weight` (1) × a clipped PPO term on the log of
-  this group's kind probability (`learn.branch_term`: the plan computed again from its record, the gradient reaches the
+  (the formulas and their check: `signal.py`, a test without torch). The prices are divided by a scale and clipped to
+  ±5. The scale is **each kind's own** (`--general-kind-norm per-kind`, the default; `signal.KindNorm`, as
+  `--ability-norm per-ability`): the running root mean square of that (chosen) kind's prices over ~10 updates (the sums
+  × 0.9 an update), a kind with few rows filled up to 32 rows with the update's mean square of all prices, at least
+  0.005 of the budget; kept in the checkpoint's `train` (`general_kind`). Why: 64–128 rows an update over 6 kinds are
+  10–20 rows a kind, the chunk's root mean square of them is mostly noise, and the kinds' scales differ. `chunk`: the
+  old way, the chunk's root mean square of all prices.
+- **Training.** Every PPO step of the general adds a clipped PPO term on the log of
+  this group's kind probability (weight `--general-branch-weight`, 1, without the kind head's own signal; with it
+  `--general-kind-weight` and the kind critic's rows, [below](#the-kind-heads-own-signal)) (`learn.branch_term`: the plan computed again from its record, the gradient reaches the
   cards, the councils and the army readers as the general's PPO does; targets and places are not touched). The old
   probability is the plan's own (the ratio starts at 1, test). The branches take only the plans made in this chunk,
   with one exception: a deployment at the last step of the previous chunk is captured at this one's first decision.
   Such a branch is an old plan and counts as the old plans above: the ratio from the kind's `lp0`, the weight `c`
   (`branch_stale_w`). The same number of steps, the same KL stop. `branch_clip` 0.15–0.40 in g9 does not come from
   old plans: the branch term is at most 64 rows, and every general step (10–14 an update) trains on the same rows
-  again, so the ratio leaves the clip range within the update.
+  again, so the ratio leaves the clip range within the update. The term's KL is the k3 estimate (`--general-kl`, as the
+  KL stop's: never below 0; the old k1 went below 0, −0.009 in g22).
 - **P = 0**: no branches, nothing changes (test: with branches and the term's weight 0 the batch, the battles and the
   weights after the update are the same to the bit as without branches).
 
-What to keep in mind. The executor plays on its own in both copies (otherwise the kind affects nothing), and in the
-ability branches the price of such a "closed loop" over 60 s is nearly all noise (real share 0.07; over 30 s 0.16, over
-20 s 0.52; [ability branches](training.md#abilities-by-their-effect-branches)). Watch `branch_price_rel` in the log;
-below ~0.2 — a 30 s horizon (also the plan's length: a plan is re-made every 30 s) and/or `--general-branch-greedy`.
+What to keep in mind. The swapped group's executor plays on its own (otherwise the kind affects nothing); in the
+ability branches the price of a "closed loop" over 60 s is nearly all noise (real share 0.07; over 30 s 0.16, over
+20 s 0.52; [ability branches](training.md#abilities-by-their-effect-branches)), in the open loop 0.46–0.59. Watch
+`branch_price_rel` in the log: the partial open loop's aim is ≥ 0.4; below ~0.2 — a 30 s horizon (also the plan's
+length: a plan is re-made every 30 s) and/or `--general-branch-greedy`.
+
+## The kind head's own signal
+
+The aim: the general can learn its kind choice without imitating the teacher. The recipe is the one that made the
+ability branches work ([there](training.md#abilities-by-their-effect-branches)): a fair price (the partial open loop,
+above), a critic as a denoiser over the prices, the head with its own signal, a scale per kind.
+
+- **The kind critic** (`--general-kind-critic 1`, the default; `tools/nn/general/kind_critic.py`, after
+  `ability_critic.py`). A small separate network (2 layers of 64, dropout 0.2, its own AdamW; nothing of it reaches the
+  general's network) gives Q of every kind (budget share) from the group's numbers. Its input is what the general sees
+  of the group as fixed numbers, not its learned card (the buffer's rows stay comparable while the general learns):
+  the threat and fight numbers (`net.THREAT`, `net.FIGHT`), the tiles under the group's centre (`net.group_tiles`), the
+  group's size, our and the enemy's group counts, deployment — 20 numbers. A branch's price = Q(chosen) − Q(other), so
+  the regression (Huber) is on that difference, copy by copy (each copy has its own other kind). The buffer: the last
+  `--general-kind-critic-buffer` (25 000) prices, kept in the checkpoint's `train` (`general_kind`; prices of the other
+  loop, open or closed, are not taken). Each update 32 steps; every 10th price is held out: on them the shrink s ∈
+  [0, 1] (prediction = s × Q: where the network knows little the estimate falls to 0, "no kind is better") and ev. On
+  (`critic_on`) once it has ≥ `--general-kind-critic-warmup` (1000, ~8 updates at 128 rows) prices and its held-out
+  error is 2 % below "zero"'s. Then every own group of every ended plan (~8 500 groups an update instead of 64–128
+  rows) gets the kind's advantage = Q(chosen) − Σ π0(k) Q(k) (π0: the general's policy at the update's start over the
+  kinds it could take: a baseline independent of the choice, as COMA's), divided by the kind's scale (`KindNorm`),
+  clipped to ±5.
+- **The kind term**: clipped PPO on the kind's log-probability over the branch rows (their measured price) and the
+  ended plans' groups (the critic's estimate) together, the mean over all rows. Until the critic is on: the branch rows
+  alone. (A branch is also a group of a plan that ends later: such a group counts twice; ~2–5 % of the groups.)
+- **The kind head out of the plan's PPO** (`--general-kind-own-signal 1`, the default). The kind's log-probability is
+  taken out of the plan's PPO ratio: the plan's advantage (one number for all groups) trains the target and the place
+  only. The kind learns from the kind term with the weight `--general-kind-weight` (1, no decay) and the imitation
+  (while there is one). The kind head (`kind_q`, `kinds`) steps at `--general-kind-lr-mult` (2) × the general's lr
+  (its own Adam group, `run.optimizer`), and `--general-kind-epochs` (2): after the PPO epochs one more pass over the
+  kind term in which only the kind head moves (test: the other weights the same to the bit), with its own KL stop (k3
+  > 0.03). `0`: the old way, the kind in the plan's PPO + `--general-branch-weight` × the branches' term.
 
 ## Simplifications of the skeleton
 
@@ -599,7 +654,11 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `branch_alt_fallback` | (`--general-branch-alt teacher`) the share of branches whose swap is a random one, not the teacher's (the teacher gave the group nothing, the same kind, or a masked one) |
 | `branch_vs_teacher_better`, `branch_vs_teacher_worse`, `branch_vs_teacher_n`, `branch_vs_teacher_price` | of the branches against the teacher: the share where the network's choice beats the teacher's (price > 0.002 of the budget) and loses (< −0.002), their number, the mean price |
 | `branch_battles`, `branch_battle_s`, `branch_seconds`, `branch_weight_mean` | battles in the branches, battle seconds, wall seconds; the price's mean factor (1, with `policy` 1 − π) |
-| `branch_loss`, `branch_kl`, `branch_clip`, `branch_rows` | the branches' term in the general's PPO: loss, the kind's KL, clipped share, rows |
+| `branch_loss`, `branch_kl`, `branch_clip`, `branch_rows` | the branches' term in the general's PPO: loss, the kind's KL (k3), clipped share, rows |
+| `branch_norm_rms_<k>` | (`--general-kind-norm per-kind`) kind k's price scale after the update (the kind's number), budget share |
+| `branch_critic_samples`, `branch_critic_on`, `branch_critic_ev`, `branch_critic_shrink`, `branch_critic_val`, `branch_critic_base`, `branch_critic_train`, `branch_critic_s` | the kind critic: prices in the buffer, on or not, the explained share of the held-out prices' spread, the shrink, the held-out error and "zero"'s, the training error, seconds |
+| `kind_loss`, `kind_kl`, `kind_critic_groups`, `kind_critic_adv_std`, `kind_critic_adv_mean` | the kind term with the critic's groups: loss, the kind's KL (k3), groups with an estimate, their advantage's spread and mean |
+| `kind_own`, `kind_extra_kl`, `kind_extra_steps` | the kind head's own signal (1/0); the extra pass over the kind head: KL, steps |
 
 The mandatory ones (rating, pair gold, own lord deaths) are in the `test5` evaluations as before.
 
@@ -650,9 +709,11 @@ starts from `build/v2/itS27_4.pt`. The bonus for missions that tell apart goes o
 against the battle return's spread of ~0.8, and ~0.3σ a group at the plan's last decision; watch `distinct_bonus` and
 `distinct_scale` in the log.
 
-Mission branches: `--set general-branches=0.2` (the rest by default: 4 copies, 60 s, up to 64 snapshots an update,
-the other kind evenly of those taking the group's target, the price by the exchange, the term's weight 1). Shorter and cheaper:
-`--set general-branch-horizon=30`.
+Mission branches: `--set general-branches=0.2` (the rest by default: 4 copies, 60 s, up to 128 snapshots an update,
+the partial open loop, the other kind the teacher's, the price by the exchange, the scale per kind, the kind critic, the
+kind head's own signal with weight 1, lr × 2 and 2 passes). Shorter and cheaper: `--set general-branch-horizon=30`. The
+old behaviour: `--set general-branch-openloop=0 general-kind-critic=0 general-kind-norm=chunk general-kind-own-signal=0
+general-branch-cap=64`.
 
 `--from <file>.pt` (new): a line's point outside `test5` — it is the `--init`, the `--reference` and the
 `--critic-init` (Adam and the counters go on). `--step NAME` (new): a named step's options over the standing ones.
@@ -697,6 +758,11 @@ to the battle (with it +0.88, without +0.89). Rejected:
 - **The kind choice without threat numbers:** the kind's link to the threat 0.003 nats, to the strength near 0.006 —
   the general did not see the group's situation directly. Now the threat numbers on the group's card.
 
+- **Branches in the closed loop** (every unit of both sides in both copies decides anew): the price's real share 0 in 5
+  of 9 updates of g22, 0.2–0.37 in the others; on the same 64 snapshots 0.075 against 0.56 in the partial open loop.
+  Now the partial open loop ([above](#mission-branches)).
+- **The prices' scale by the chunk** (the root mean square of 63 rows over all kinds): 10–20 rows a kind, the scale
+  mostly noise. Now each kind's own scale over ~10 updates.
 - **Imitating the teacher down to zero** (g18–g21, `--general-imitate 0.3` down to 0 over 300 updates): while W was
   0.3–0.18 (g18–g19) the rating grew to +1.21; when W fell 0.18 → 0.065 (g20–g21) it fell +0.97 → +0.56, though the
   missions carried out and "does the executor listen" grew. The general's own signal (the plan's advantage by the

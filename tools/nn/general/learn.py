@@ -39,7 +39,20 @@
 * The mission branches (LearnConfig.branches = the share of the plans replayed, run.py --general-branches P; branch.py):
   the replayed plans' records with one group's kind price (batch["general"]["branch"]); every minibatch step adds
   branch_weight x the clipped surrogate of that group's kind log-probability under that advantage (branch_term; the
-  same steps, the same KL stop). P = 0: no branches, nothing changes (test).
+  same steps, the same KL stop). P = 0: no branches, nothing changes (test). Its KL is logged by LearnConfig.kl (k3:
+  never below 0).
+* The kind critic (branch.Brancher.kind_q, kind_critic.py; batch["general"]["kind_q"]: Q [M, G, K] of the ended
+  plans' groups and each kind's scale [K]): once it is ready, every own group of every ended plan gets the kind
+  choice's advantage Q(chosen) - sum_k pi0(k) Q(k) (pi0: the policy at the update's start), / its kind's scale, within
+  +-ADV_CLIP; the kind term is then the clipped surrogate of the kind's log-probability over those groups and the
+  branches' rows together (their mean: a branch row with its measured price, a group with the critic's estimate - the
+  ability critic's way). Without it the kind term is the branches' alone.
+* The kind head's own signal (LearnConfig.kind_own, run.py --general-kind-own-signal 1, the default): the kind's
+  log-probability is left out of the plans' PPO ratio (the plan's advantage trains the target and the place only: one
+  number for all groups of a plan cannot tell one group's kind from another's), the kind term has the weight
+  kind_weight (1, no decay) instead of branch_weight, and kind_epochs - 1 extra passes over the kind term alone move only
+  the kind head (kind_q, kinds; their own lr x --general-kind-lr-mult, run.optimizer), with their own KL stop. The
+  imitation stays as it is. Off: the kind head learns as before from the plan's advantage + branch_weight x the term.
 """
 from dataclasses import dataclass
 
@@ -81,6 +94,9 @@ class LearnConfig:
     teacher_flank: bool = True      # the teacher's flank rule: two groups attack one enemy group - the second flanks
     flank_measure: str = "contact"  # the flank measure in melee: the side the contact began on ("contact") or the
     #                                 angle now ("angle"; mission.py)
+    kind_own: bool = False     # the kind head's own signal (module doc; run.py --general-kind-own-signal, on there)
+    kind_weight: float = 1.0   # ... the kind term's weight under it (no decay)
+    kind_epochs: int = 1       # ... passes of the kind term: 1 + the extra ones over the kind head alone
 
     def __post_init__(self):
         if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
@@ -98,6 +114,8 @@ class LearnConfig:
             raise ValueError("--general-teacher-hold-m and --general-teacher-fire-s are >= 0")
         if self.flank_measure not in ("contact", "angle"):
             raise ValueError(f"--general-flank-measure {self.flank_measure!r}: 'contact' or 'angle'")
+        if self.kind_weight < 0 or self.kind_epochs < 1:
+            raise ValueError("--general-kind-weight >= 0, --general-kind-epochs >= 1")
         if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0 or self.imitate_min < 0:
             raise ValueError("--general-imitate, --general-imitate-decay, --general-imitate-min and "
                              "--general-exec-general are >= 0")
@@ -191,11 +209,20 @@ def stale(lp_plan, lp0, new):
     return ref, w
 
 
-def branch_term(gen, branch, clip):
+ADV_CLIP = 5.0      # the kind critic's advantage within +-this (branch.ADV_CLIP)
+KIND_HEAD = ("kind_q.", "kinds")     # the general's kind head (its own lr: run.optimizer; the extra passes move it alone)
+
+
+def kind_head_params(gen):
+    """[parameters] of the general's kind head (KIND_HEAD)."""
+    return [p for n, p in gen.named_parameters() if n.startswith(KIND_HEAD[0]) or n == KIND_HEAD[1]]
+
+
+def branch_term(gen, branch, clip, kl_how="k3"):
     """The mission branches' term (module doc) on branch (branch.Brancher.finish's: "rec" [E, ..], "group", "kind",
     "lp", "adv" [E]; with "ref" and "w" [E] (update's stale plans): the ratio's reference and the importance weight,
     else the plan's own log-probability and 1) -> (loss: minus the mean clipped surrogate of the group's kind
-    log-probability, KL against the reference, clip share)."""
+    log-probability, KL against the reference (kl_est's kl_how), clip share)."""
     rec = branch["rec"]
     _, d = gen(rec, act={k: rec[k] for k in CHOICES})
     lp = kind_lp(d, branch["group"])
@@ -204,9 +231,63 @@ def branch_term(gen, branch, clip):
     a = branch["adv"] * branch["w"] if "w" in branch else branch["adv"]
     surr = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
     with torch.no_grad():
-        kl = float((ref - lp).mean())
+        kl = float(kl_est(ref, lp, kl_how).mean())
         cl = float(((ratio - 1).abs() > clip).float().mean())
     return -surr.mean(), kl, cl
+
+
+def critic_advantage(kind_q, kind, kind_logp0, active):
+    """[M, G] the kind critic's advantage of the ended plans' groups (module doc): kind_q {"q" [M, G, K], "scale"
+    [K]}, kind [M, G] the chosen kinds, kind_logp0 [M, G, K] the policy's at the update's start, active [M, G] our
+    groups (0 elsewhere)."""
+    from tools.nn.general.kind_critic import baseline_advantage
+    raw = baseline_advantage(kind_q["q"].float(), kind, kind_logp0)
+    sc = kind_q["scale"].float()[kind.clamp(min=0)]
+    return (raw / sc.clamp(min=1e-6)).clamp(-ADV_CLIP, ADV_CLIP) * active.float()
+
+
+def critic_term(d, adv_c, lp0_kind, w, mine, clip):
+    """(sum of the clipped surrogates, groups) of the kind's log-probability d["lp_kind"] [m, G] against lp0_kind
+    under the critic's advantage adv_c [m, G] x the stale plans' weight w [m, G], over our groups mine [m, G]."""
+    ratio = torch.exp((d["lp_kind"] - lp0_kind) * mine.float())
+    a = adv_c * w
+    surr = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
+    return (surr * mine.float()).sum(), mine.float().sum()
+
+
+def _kind_loss(gen, branch, d, adv_c, lp0_kind, w, mine, cfg, sums):
+    """(KL, loss) of the kind term (module doc) of one step: the branches' rows (branch: a part of at most minibatch
+    rows; None: none) and the critic's groups of the step's plans (d: their general's output, adv_c [m, G]; None: none)
+    - the mean of the surrogates over both; loss None with neither. sums: the log's (None: not logged)."""
+    parts, cnt, kl, bl = [], 0.0, 0.0, None
+    if branch is not None:
+        E = len(branch["adv"])
+        part = branch if E <= cfg.minibatch else pick(branch, torch.randperm(E, device=branch["adv"].device)
+                                                               [:cfg.minibatch])
+        bl, bkl, bcl = branch_term(gen, part, cfg.clip, cfg.kl)
+        n_b = float(len(part["adv"]))
+        parts.append(bl * n_b)
+        cnt += n_b
+        kl = bkl
+        if sums is not None:
+            sums["branch_loss"] += float(bl.detach())
+            sums["branch_kl"] += bkl
+            sums["branch_clip"] += bcl
+    if d is not None:
+        s_c, n_c = critic_term(d, adv_c, lp0_kind, w, mine, cfg.clip)
+        parts.append(-s_c)
+        cnt += float(n_c)
+        if sums is not None:
+            with torch.no_grad():
+                mk = mine.float()
+                sums["kind_kl"] += float((kl_est(lp0_kind, d["lp_kind"], cfg.kl) * mk).sum() / mk.sum().clamp(min=1))
+    if not parts or cnt <= 0:
+        return kl, None
+    # (the branches alone: their mean as it is - the term before the critic, bit for bit)
+    loss = bl if d is None else sum(parts) / cnt
+    if sums is not None and d is not None:
+        sums["kind_loss"] += float(loss.detach())
+    return kl, loss
 
 
 def imitate_term(gen, teach):
@@ -231,7 +312,7 @@ def imitate_term(gen, teach):
                   "groups": float(n)}
 
 
-def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
+def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None, kind_q=None):
     """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "ret", their return); branch: the
     mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy (all and per
     head: ent_kind, ent_target, ent_place), KL (against the update's start; kl_plan: against the plans' own), clip
@@ -240,7 +321,9 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
     value's loss and explained variance (before the step), plans, groups a plan; with branches their
     term's loss, KL, clip share and rows; teach: the teacher's ended plans (the imitation's records, module doc; None:
     no term) - imitate_* (nll and accuracies before the steps, the term's mean over the steps); with exec_general S > 0
-    exec_general_term (the mean |S x centred measure| of the groups measured, in adv sd) and exec_general_mean (signed)."""
+    exec_general_term (the mean |S x centred measure| of the groups measured, in adv sd) and exec_general_mean (signed);
+    kind_q: the kind critic's estimate of the ended plans (module doc; None: none) - kind_* (the kind term's loss, KL,
+    the critic's advantage's spread and groups, the extra passes' KL and steps)."""
     gen = actor.general
     params = list(gen.parameters())
     M = ready["lp"].shape[0]
@@ -257,8 +340,15 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
     act_of = (lambda rec: {k: rec[k] for k in CHOICES})
     # the policy at the update's start (the KL stop's reference) and its gap to the plans' own log-probabilities
     with torch.no_grad():
-        lp0 = torch.cat([gen(_rows(ready, mb), act=act_of(_rows(ready, mb)))[1]["lp"]
-                         for mb in torch.arange(M, device=target.device).split(cfg.minibatch)])
+        d0 = [gen(_rows(ready, mb), act=act_of(_rows(ready, mb)))[1]
+              for mb in torch.arange(M, device=target.device).split(cfg.minibatch)]
+        lp0 = torch.cat([x["lp"] for x in d0])
+        lp0_kind = torch.cat([x["lp_kind"] for x in d0])
+        adv_c = None
+        if kind_q is not None and kind_q["q"].shape[0] == M:
+            adv_c = critic_advantage(kind_q, ready["kind"], torch.cat([x["kind_logp"] for x in d0]),
+                                     ready["active"][:, :G])
+        del d0
         mine0 = ready["active"][:, :G].float()
         kl_plan = float(((ready["lp"] - lp0) * mine0).sum() / mine0.sum().clamp(min=1))
         new = ready["new"] if "new" in ready else torch.ones(M, dtype=torch.bool, device=target.device)
@@ -267,7 +357,11 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
         stale_w = float((w_is * old0).sum() / old0.sum()) if float(old0.sum()) else None
     sums = {"pl": 0.0, "ent": 0.0, "ent_kind": 0.0, "ent_target": 0.0, "ent_place": 0.0, "vl": 0.0, "kl": 0.0,
             "clip": 0.0}
-    use_b = branch is not None and cfg.branch_weight > 0 and len(branch["adv"]) > 0
+    w_kind = cfg.kind_weight if cfg.kind_own else cfg.branch_weight
+    use_b = branch is not None and w_kind > 0 and len(branch["adv"]) > 0
+    use_c = adv_c is not None and w_kind > 0
+    if use_c:
+        sums.update(kind_loss=0.0, kind_kl=0.0)
     # the teacher's imitation: its numbers before the steps (logged whatever its weight), its term at weight imitate
     imit = {}
     if teach is not None and teach["lp"].shape[0] > 0:
@@ -303,7 +397,11 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
             mine = rec["active"][:, :G]
             m = mine.float()
             cnt = m.sum().clamp(min=1)
-            ratio = torch.exp((d["lp"] - ref[mb]) * m)
+            if cfg.kind_own:
+                # the kind's log-probability out of the plan's ratio (module doc): the target's and the place's only
+                ratio = torch.exp(((d["lp"] - d["lp_kind"]) - (ref[mb] - lp0_kind[mb])) * m)
+            else:
+                ratio = torch.exp((d["lp"] - ref[mb]) * m)
             if x_term is None:
                 a = adv[mb][:, None] * w_is[mb]               # (x 1 for the fresh plans: the plain PPO bit for bit)
             else:
@@ -320,15 +418,11 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
             if cfg.target_kl and kl > cfg.target_kl and n:
                 stop = True                          # (a minibatch past the KL: no step on it, no more epochs)
                 break
-            if use_b:
-                E = len(branch["adv"])
-                part = branch if E <= cfg.minibatch else pick(branch, torch.randperm(E, device=target.device)
-                                                                       [:cfg.minibatch])
-                bl, bkl, bcl = branch_term(gen, part, cfg.clip)
-                loss = loss + cfg.branch_weight * bl
-                sums["branch_loss"] += float(bl.detach())
-                sums["branch_kl"] += bkl
-                sums["branch_clip"] += bcl
+            if use_b or use_c:
+                _, kloss = _kind_loss(gen, branch if use_b else None, d if use_c else None,
+                                      adv_c[mb] if use_c else None, lp0_kind[mb], w_is[mb], mine, cfg, sums)
+                if kloss is not None:
+                    loss = loss + w_kind * kloss
             opt.zero_grad(set_to_none=True)
             loss.backward()
             if use_i:
@@ -361,8 +455,55 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
                         cs[name][0] += float(out_c[sel].sum())
                         cs[name][1] += float(mm.sum())
             n += 1
+    # the kind head's extra passes (module doc): the kind term alone, only the kind head moves, its own KL stop
+    extra = {"kl": 0.0, "steps": 0}
+    if cfg.kind_own and cfg.kind_epochs > 1 and (use_b or use_c):
+        head = {id(p) for p in kind_head_params(gen)}
+        for _ in range(cfg.kind_epochs - 1):
+            done = False
+            for mb in torch.randperm(M, device=target.device).split(cfg.minibatch):
+                rec = _rows(ready, mb)
+                mine = rec["active"][:, :G]
+                d = gen(rec, act=act_of(rec))[1] if use_c else None
+                if d is not None:
+                    with torch.no_grad():
+                        mk = mine.float()
+                        kkl = float((kl_est(lp0_kind[mb], d["lp_kind"], cfg.kl) * mk).sum() / mk.sum().clamp(min=1))
+                    if cfg.target_kl and kkl > cfg.target_kl:
+                        done = True
+                        break
+                bkl, kloss = _kind_loss(gen, branch if use_b else None, d, adv_c[mb] if use_c else None,
+                                        lp0_kind[mb], w_is[mb], mine, cfg, None)
+                if d is None:
+                    kkl = bkl
+                if kloss is None:
+                    continue
+                opt.zero_grad(set_to_none=True)
+                (w_kind * kloss).backward()
+                for p in params:
+                    if id(p) not in head:
+                        p.grad = None
+                gn = torch.nn.utils.clip_grad_norm_([p for p in params if id(p) in head], cfg.max_grad)
+                if bool(torch.isfinite(gn)):
+                    opt.step()
+                opt.zero_grad(set_to_none=True)
+                extra["kl"] += kkl
+                extra["steps"] += 1
+                if not use_c:
+                    break                                    # (the branches alone: one step a pass)
+            if done:
+                break
     actor.eval()
     out = {f"general_{k}": v / max(1, n) for k, v in sums.items()}
+    out["general_kind_own"] = float(bool(cfg.kind_own))
+    if extra["steps"]:
+        out["general_kind_extra_kl"] = extra["kl"] / extra["steps"]
+        out["general_kind_extra_steps"] = float(extra["steps"])
+    if use_c:
+        mk = ready["active"][:, :G]
+        out["general_kind_critic_groups"] = float(mk.sum())
+        out["general_kind_critic_adv_std"] = float(adv_c[mk].std()) if int(mk.sum()) > 1 else 0.0
+        out["general_kind_critic_adv_mean"] = float(adv_c[mk].mean()) if int(mk.sum()) else 0.0
     out["general_kl_plan"] = kl_plan
     for name, (c_n, g_n) in cs.items():
         if g_n:

@@ -163,3 +163,30 @@ def test_every_target_type_is_taken_by_two_kinds_at_least():
     assert len(al) == len(ks) and all(len(row) == len(config.TARGET_TYPES) for row in al)
     for j, t in enumerate(config.TARGET_TYPES):
         assert sum(row[j] for row in al) >= 2, t
+
+
+def test_the_kind_advantage_takes_each_rows_scale_when_given():
+    price, w = np.array([0.02, -0.01, 0.5]), np.ones(3)
+    a = signal.kind_advantage(price, w, 0.005, 5.0, np.array([0.01, 0.001, 0.01]))
+    assert list(a) == pytest.approx([2.0, -2.0, 5.0])               # the floor 0.005 under the second, the clip on the third
+    chunk = signal.kind_advantage(price, w, 0.005, 5.0)
+    assert list(chunk) == pytest.approx(list(price / np.sqrt(np.mean(price ** 2))))
+
+
+def test_the_kind_norm_keeps_each_kinds_own_scale_over_updates():
+    n = signal.KindNorm(3, floor=0.001)
+    assert n.scale() == [0.001] * 3                                  # before any update: the floor
+    big, small = [0.04] * 40, [0.004] * 40
+    sc = n.update([0] * 40 + [1] * 40, big + small)
+    assert sc[0] == pytest.approx(0.04) and sc[1] == pytest.approx(0.004)
+    # a kind with few rows is filled with the update's mean square of all prices up to NORM_PRIOR rows
+    ms = (40 * 0.04 ** 2 + 40 * 0.004 ** 2) / 80
+    assert sc[2] == pytest.approx(math.sqrt(ms))
+    # the memory: an update without kind 0 decays its sums but keeps its scale; kind 1's new rows move it
+    sc2 = n.update([1] * 40, [0.008] * 40)
+    assert sc2[0] == pytest.approx(0.04)
+    want = math.sqrt((0.9 * 40 * 0.004 ** 2 + 40 * 0.008 ** 2) / (0.9 * 40 + 40))
+    assert sc2[1] == pytest.approx(want)
+    m = signal.KindNorm(3, floor=0.001)
+    assert m.load(n.state()) and m.rms() == pytest.approx(n.rms()) and m.scale() == pytest.approx(n.scale())
+    assert not signal.KindNorm(4).load(n.state()) and not signal.KindNorm(3).load(None)

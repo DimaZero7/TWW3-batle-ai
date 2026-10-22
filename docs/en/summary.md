@@ -290,7 +290,12 @@ targets, no unit positions, abstract kinds) stayed uniformly random; by flags, t
 missions that tell apart (`--general-distinct`, in units of the executor's advantage spread), the mission branches — a copy of the
 battle with another mission kind for one group, the exchange's difference is the kind choice's price; the other
 kind is the teacher's by default (`--general-branch-alt teacher`: "my choice against the teacher's")
-(`--general-branches P`, an estimated +12–17 % to the step at 60 s). The whole loop is built as a skeleton, in the simulator, flag `run.py
+(`--general-branches P`, an estimated +12–17 % to the step at 60 s). The kind's own signal (defaults): in the
+"another kind" copy only the swapped group decides anew, the other units and the enemy repeat the "as chosen" copy's
+orders (partial open loop, `--general-branch-openloop 1`), the kind critic (`kind_critic.py`) learns the branches'
+prices and estimates the kind of every group of every plan, the kind head is out of the plan's PPO and learns only from
+the prices, the critic and the imitation (`--general-kind-own-signal 1`, lr × 2, 2 passes), the price scale is each
+kind's own; up to 128 branches an update ([details](training/general.md#the-kind-heads-own-signal)). The whole loop is built as a skeleton, in the simulator, flag `run.py
 --general` (the chain's step `general`); simplifications: tiles = the 16 × 16 sectors, zero effects, small widths
 (card 128, 1.14 million weights), the zone = `place.py`'s area. In the game a checkpoint with a general plays through
 the companion with the same code (`tools/nn/companion/general.py`): the plan at the first state, re-plans on battle

@@ -3,6 +3,7 @@ mission kind changed - the swap touches only that group's kind card, a swap to t
 branches leave the batch and the battles bit for bit, P = 0 builds nothing, the term's old log-probability is the
 plan's (docs/en/training/general.md "Mission branches"). torch: the training container, on the CPU."""
 import dataclasses
+import math
 
 import pytest
 
@@ -68,28 +69,32 @@ def columns(cand):
     return (torch.tensor([c[i] for c in cand]) for i in range(4))
 
 
-@pytest.mark.parametrize("price", ["trade", "reward"])
-def test_a_swap_to_the_same_kind_prices_exactly_zero_and_the_branches_repeat(price):
+@pytest.mark.parametrize("price,openloop", [("trade", False), ("reward", False), ("trade", True), ("reward", True)])
+def test_a_swap_to_the_same_kind_prices_exactly_zero_and_the_branches_repeat(price, openloop):
     env, actor, snap, cand = grabbed()
     b, side, group, kind = columns(cand)
     sub = ab.select(snap, b)
     with torch.no_grad():
         actor.task_in.weight.normal_(0, 0.5)                          # the executor listens to its task
     same = kind[:, None].repeat(1, 2)
-    d0, _ = gbranch.play_kinds(env, actor, sub, side, group, same, 2, 5, seed=3, price=price)
+    d0, _ = gbranch.play_kinds(env, actor, sub, side, group, same, 2, 5, seed=3, price=price,
+                                openloop=openloop)
     assert torch.count_nonzero(d0) == 0
     other = (kind[:, None].repeat(1, 2) + torch.tensor([1, 3])) % GCFG.kinds
     s = torch.get_rng_state()
-    d1, bg = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price)
+    d1, bg = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price,
+                                openloop=openloop)
     assert torch.equal(torch.get_rng_state(), s)                     # the global random state is the one before
-    d2, _ = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price)
+    d2, _ = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price,
+                                openloop=openloop)
     assert torch.equal(d1, d2) and d1.shape == (len(cand), 2) and bool((bg > 0).all())
     # an executor that does not listen to its task (the new input at zero, and no task's masks - they follow the
     # kind, taskmask.py): every swap prices exactly 0
     with torch.no_grad():
         actor.task_in.weight.zero_()
     env.general_rt.gcfg = dataclasses.replace(env.general_rt.gcfg, task_mask=False)
-    d3, _ = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price)
+    d3, _ = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price,
+                                openloop=openloop)
     assert torch.count_nonzero(d3) == 0
 
 
@@ -259,7 +264,9 @@ def test_the_terms_old_log_probability_is_the_plans_and_its_gradient_reaches_the
     assert abs(kl) < 1e-5                                             # the ratio starts at 1
     assert bool(br["new"].all())                                      # (the plans re-planned in the chunk: fresh)
     _, kl2, _ = learn.branch_term(gen, dict(br, ref=br["lp"] + 0.1, w=torch.ones(len(br["adv"]))), 0.2)
-    assert kl2 == pytest.approx(kl + 0.1, abs=1e-5)                   # the reference, when given
+    assert kl2 == pytest.approx(math.expm1(-0.1) + 0.1, abs=1e-5)    # the reference, when given; k3: never below 0
+    _, kl1, _ = learn.branch_term(gen, dict(br, ref=br["lp"] + 0.1, w=torch.ones(len(br["adv"]))), 0.2, "k1")
+    assert kl1 == pytest.approx(kl + 0.1, abs=1e-5)
     loss0, _, _ = learn.branch_term(gen, dict(br, adv=torch.randn(len(br["adv"])),
                                               w=torch.zeros(len(br["adv"]))), 0.2)
     assert float(loss0.detach()) == 0.0                                       # the weight multiplies the advantage

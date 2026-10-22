@@ -102,7 +102,7 @@ def sized(cfg, N, slots=22, width=1.0):
                                accum=max(1, math.ceil(width - 1e-9)))
 
 
-def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0, general_lr=1.0):
+def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0, general_lr=1.0, kind_lr=1.0):
     """Adam over the actor and the critic. In a widened network (width > 1, tools/nn/model/widen.py) the
     weights that read the copied token stream (widen.stream_readers: fan-in x width) take lr / width:
     every copy gets the gradient the small weight got and Adam moves each about lr, so their sum (what
@@ -111,17 +111,24 @@ def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0, general_lr=1.0):
     weight about lr whatever the loss's weight, so a heavier ability term barely speeds the head; this does. Not 1:
     the parameters in groups by runs of the same lr, in the actor's then the critic's order (the order a one-group
     optimizer has: resume maps the moments by it, both ways); 1: the one group as before. general_lr (--general-lr-mult):
-    the general's network's parameters (tools/nn/general/executor.general_params) take lr x it, the same way."""
+    the general's network's parameters (tools/nn/general/executor.general_params) take lr x it, the same way; kind_lr
+    (--general-kind-lr-mult under --general-kind-own-signal 1): the general's kind head (learn.kind_head_params) lr x
+    general_lr x it."""
     params = list(actor.parameters()) + list(critic.parameters())
-    if ability_lr != 1.0 or general_lr != 1.0:
+    if ability_lr != 1.0 or general_lr != 1.0 or kind_lr != 1.0:
         if width > 1.0:
             raise SystemExit("--ability-lr-mult / --general-lr-mult are for an unwidened network (v2)")
         head = {id(p) for p in ppo.ability_head_params(actor)}
         from tools.nn.general.executor import general_params
         gen = {id(p) for p in general_params(actor)}
+        kind = set()
+        if kind_lr != 1.0:
+            from tools.nn.general.learn import kind_head_params
+            kind = {id(p) for p in kind_head_params(actor.general)}
         groups = []
         for p in params:
-            plr = lr * ability_lr if id(p) in head else lr * general_lr if id(p) in gen else lr
+            plr = (lr * ability_lr if id(p) in head else lr * general_lr * kind_lr if id(p) in kind
+                   else lr * general_lr if id(p) in gen else lr)
             if not groups or groups[-1]["lr"] != plr:
                 groups.append({"params": [], "lr": plr})
             groups[-1]["params"].append(p)
@@ -366,7 +373,8 @@ def with_general(actor, args):
                              exec_general=args.general_exec_general, exec_kind=args.general_exec_kind,
                              teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s,
                              teacher_flank=bool(args.general_teacher_flank), flank_measure=args.general_flank_measure,
-                             kl=args.general_kl)
+                             kl=args.general_kl, kind_own=bool(args.general_kind_own_signal),
+                             kind_weight=args.general_kind_weight, kind_epochs=args.general_kind_epochs)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
@@ -381,7 +389,9 @@ def general_brancher(args, glearn_cfg, device):
         share=glearn_cfg.branches, copies=args.general_branch_copies, horizon_s=args.general_branch_horizon,
         cap=args.general_branch_cap, batch=args.general_branch_batch, alt=args.general_branch_alt,
         price=args.general_branch_price, greedy=args.general_branch_greedy, kinds=args.general_branch_kinds,
-        seed=args.seed), device)
+        openloop=bool(args.general_branch_openloop), critic=bool(args.general_kind_critic),
+        critic_warmup=args.general_kind_critic_warmup, critic_buffer=args.general_kind_critic_buffer,
+        norm=args.general_kind_norm, seed=args.seed), device)
 
 
 def imitate_floor(args, cfg, carried):
@@ -554,7 +564,9 @@ def _train(args, every=None, teacher=None, normal=None):
     width = actor.cfg.d / model_config.SMALL.d
     # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
     opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width, ab_lr,
-                    float(getattr(args, "general_lr_mult", 1.0)) if glearn_cfg is not None else 1.0)
+                    float(getattr(args, "general_lr_mult", 1.0)) if glearn_cfg is not None else 1.0,
+                    float(getattr(args, "general_kind_lr_mult", 1.0))
+                    if glearn_cfg is not None and glearn_cfg.kind_own else 1.0)
     # Adam's moments and the trainer's counters from --init (saved with latest.pt and m<minute>.pt): the next part of
     # a chain goes on as one run. Only when the critic comes from the same file (else its moments are another's).
     carried = None
@@ -838,8 +850,21 @@ def _train(args, every=None, teacher=None, normal=None):
         # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
         env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
         if env.general_rt.brancher is not None:
-            print(f"general mission branches: {env.general_rt.brancher.cfg}, term weight "
-                  f"{glearn_cfg.branch_weight:g}", flush=True)
+            gb = env.general_rt.brancher
+            if glearn_cfg.kind_own:
+                print(f"general mission branches: {gb.cfg}; the kind head's own signal: weight "
+                      f"{glearn_cfg.kind_weight:g} (no decay), kind lr x {args.general_kind_lr_mult:g}, kind epochs "
+                      f"{glearn_cfg.kind_epochs}", flush=True)
+            else:
+                print(f"general mission branches: {gb.cfg}, term weight {glearn_cfg.branch_weight:g}", flush=True)
+            # the kind critic and each kind's scale go on from --init's "train" (fresh otherwise; prices of another
+            # loop - open or closed - start afresh)
+            ts = (checkpoint.train_state(args.init) or {}) if args.init and args.resume else {}
+            saved = ts.get("general_kind")
+            if saved is not None and saved.get("openloop") != gb.cfg.openloop:
+                saved = None
+            got = gb.load(saved)
+            print(f"general kind critic / scales: {'resumed ' + ', '.join(got) if got else 'fresh'}", flush=True)
         env.general_rt.take_stats()
     env.take_stats()
     env.orders_per_minute()
@@ -892,7 +917,10 @@ def _train(args, every=None, teacher=None, normal=None):
                     "ability_critic_kind": env.brancher.price_kind()}
                    if args.ability_branch and env.brancher.critic is not None else {}),
                 **({"ability_norm": env.brancher.norm.state()}
-                   if args.ability_branch and env.brancher.norm is not None else {})}
+                   if args.ability_branch and env.brancher.norm is not None else {}),
+                **({"general_kind": dict(env.general_rt.brancher.state(),
+                                         openloop=env.general_rt.brancher.cfg.openloop)}
+                   if getattr(env, "general_rt", None) is not None and env.general_rt.brancher is not None else {})}
 
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -928,6 +956,9 @@ def _train(args, every=None, teacher=None, normal=None):
             # --general-exec: the mission bonus's weight of this collection (W down to 0 over --general-exec-decay)
             env.general_rt.exec_w = gsignal.distinct_weight(glearn_cfg.exec, glearn_cfg.exec_decay, e_updates0 + update)
         batch = rollout.collect(env, actor, critic, args.steps)
+        if glearn_cfg is not None and env.general_rt is not None and env.general_rt.brancher is not None:
+            # --general-kind-critic: its estimate of every ended plan's groups (learn.update's kind term)
+            env.general_rt.brancher.attach(batch, actor)
         if env.men is not None and args.fighters_park:
             env.men.park(env.st)                      # the men off the card while the network learns (Men.park)
         if env.men is not None and torch.cuda.is_available():
@@ -1626,7 +1657,7 @@ def parser():
                     help="general branches: copies of each pair (common random numbers), each with its own other kind")
     ap.add_argument("--general-branch-horizon", type=float, default=60.0,
                     help="general branches: seconds of battle each branch plays (the plan frozen)")
-    ap.add_argument("--general-branch-cap", type=int, default=64,
+    ap.add_argument("--general-branch-cap", type=int, default=128,
                     help="general branches: snapshots an update at most (0: no cap); <= the batch: one batch an update")
     ap.add_argument("--general-branch-batch", type=int, default=64,
                     help="general branches: snapshots a branch batch (x copies battles in each of its two branches)")
@@ -1643,7 +1674,33 @@ def parser():
     ap.add_argument("--general-branch-greedy", action="store_true",
                     help="general branches: the networks in the branches take their most likely action")
     ap.add_argument("--general-branch-weight", type=float, default=1.0,
-                    help="general branches: the weight of their term in the general's loss")
+                    help="general branches: the weight of their term in the general's loss (without the kind head's "
+                         "own signal; with it: --general-kind-weight)")
+    ap.add_argument("--general-branch-openloop", type=int, default=1, choices=(0, 1),
+                    help="general branches: 1 - partial open loop: the 'other' copy plays the 'chosen' copy's orders "
+                         "(both sides, the scripts) for every unit but the swapped group's, only that group decides "
+                         "anew (branch.py); 0 - closed loop, everybody decides anew in both")
+    ap.add_argument("--general-kind-critic", type=int, default=1, choices=(0, 1),
+                    help="general: 1 - the kind critic (tools/nn/general/kind_critic.py) learns the branches' prices and "
+                         "gives every group of every ended plan the kind's advantage Q(chosen) - E_pi Q once ready")
+    ap.add_argument("--general-kind-critic-warmup", type=int, default=1000,
+                    help="general kind critic: prices before it may be used")
+    ap.add_argument("--general-kind-critic-buffer", type=int, default=25000,
+                    help="general kind critic: prices it keeps")
+    ap.add_argument("--general-kind-norm", default="per-kind", choices=("per-kind", "chunk"),
+                    help="general branches: the prices' scale - each kind's running root mean square over ~10 updates, "
+                         "or the chunk's over all rows (before)")
+    ap.add_argument("--general-kind-own-signal", type=int, default=1, choices=(0, 1),
+                    help="general: 1 - the kind head's own signal: its log-probability out of the plan's PPO, it learns "
+                         "from the branches and the kind critic (weight --general-kind-weight, no decay) and the "
+                         "imitation; 0 - the plan's advantage + --general-branch-weight x the branches' term")
+    ap.add_argument("--general-kind-weight", type=float, default=1.0,
+                    help="general: the kind term's weight under --general-kind-own-signal 1")
+    ap.add_argument("--general-kind-lr-mult", type=float, default=2.0,
+                    help="general: the kind head's lr x this (x --general-lr-mult) under --general-kind-own-signal 1")
+    ap.add_argument("--general-kind-epochs", type=int, default=2,
+                    help="general: passes of the kind term under --general-kind-own-signal 1 (the extra ones move the "
+                         "kind head alone)")
     ap.add_argument("--general-distinct", type=float, default=0.0,
                     help="general: W, the executor's bonus for missions that tell apart (tools/nn/general/distinct.py): "
                          "a classifier guesses a group's mission kind from its units' behaviour during the plan; each "

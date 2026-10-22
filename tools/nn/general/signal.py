@@ -23,7 +23,14 @@ host's tests check them; docs/en/training/general.md "Training").
       advantage with an action-independent baseline (unbiased), weight 1;
     b by the policy without a (pi(b) / (1 - pi(a))): E[price] = Q(a) - E_{b != a} Q(b), and x (1 - pi(a)) it is
       exactly Q(a) - V (V = E_pi Q): weight 1 - pi(a).
-  The weighted prices are divided by their root mean square over the chunk (at least `floor`) and clipped to +-clip.
+  The weighted prices are divided by their root mean square over the chunk (at least `floor`) and clipped to +-clip;
+  with a scale per row (KindNorm, run.py --general-kind-norm per-kind, the default) by that instead.
+* KindNorm: each mission kind's running scale of its prices (the ability branches' AbilityNorm, --ability-norm
+  per-ability): per kind (the chosen one of the row) the decayed sums of its prices' squares and of its rows; an update
+  multiplies both by NORM_DECAY (~10 updates' memory) and adds its rows; a kind's root mean square = sqrt((squares +
+  fill x the update's mean square of all prices) / (rows + fill)), fill = NORM_PRIOR less its rows (at least 0), at
+  least the floor. One chunk's 63-128 rows spread over 6 kinds give 10-20 rows a kind: a chunk's own mean square of
+  them is mostly noise, and the kinds' prices differ in scale (a withdraw moves less gold than an attack).
 """
 import math
 
@@ -107,9 +114,65 @@ def policy_weight(p_chosen):
     return 1.0 - p_chosen
 
 
-def kind_advantage(price, weight, floor, clip):
+def kind_advantage(price, weight, floor, clip, scale=None):
     """The kind choice's advantage of the branches (module doc): price x weight, divided by the root mean square of
-    those over the chunk (at least floor), within +-clip. price, weight [E]."""
+    those over the chunk (at least floor) - or, given, by scale [E] (each row's kind's running scale, KindNorm; at
+    least floor) -, within +-clip. price, weight [E]."""
     x = price * weight
+    if scale is not None:
+        return (x / scale.clip(floor, None)).clip(-clip, clip)
     rms = float((x * x).mean()) ** 0.5
     return (x / max(rms, floor)).clip(-clip, clip)
+
+
+NORM_DECAY = 0.9    # KindNorm: the sums x this an update (~10 updates' memory)
+NORM_PRIOR = 32.0   # ... a kind with fewer rows is filled up to this many with the update's mean square of all prices
+
+
+class KindNorm:
+    """Each mission kind's running scale of its prices (module doc). Plain lists: K is small, the host's tests run it."""
+
+    def __init__(self, kinds, floor=0.005):
+        self.K = int(kinds)
+        self.floor = float(floor)
+        self.sq = [0.0] * self.K
+        self.n = [0.0] * self.K
+        self.last = None
+
+    def rms(self, shared_ms=0.0):
+        """[K] each kind's root mean square now (budget share)."""
+        out = []
+        for s, n in zip(self.sq, self.n):
+            fill = max(NORM_PRIOR - n, 0.0)
+            out.append(max(math.sqrt((s + fill * shared_ms) / max(n + fill, 1e-12)), self.floor))
+        return out
+
+    def update(self, kinds, prices):
+        """The update's priced rows: kinds [k] (ints 0..K-1) their chosen kind, prices [k] (budget share, either sign)
+        -> [K] each kind's scale after adding them."""
+        self.sq = [s * NORM_DECAY for s in self.sq]
+        self.n = [n * NORM_DECAY for n in self.n]
+        ms = 0.0
+        for k, v in zip(kinds, prices):
+            k, v = int(k), float(v)
+            self.sq[k] += v * v
+            self.n[k] += 1.0
+            ms += v * v
+        ms = ms / len(prices) if len(prices) else 0.0
+        self.last = self.rms(ms)
+        return self.last
+
+    def scale(self):
+        """[K] the scales of the last update (before any: the floor)."""
+        return list(self.last) if self.last is not None else [self.floor] * self.K
+
+    def state(self):
+        return {"sq": list(self.sq), "n": list(self.n), "last": self.last}
+
+    def load(self, d):
+        """A saved state() (None, empty or of another K: fresh) -> loaded or not."""
+        if not d or len(d.get("sq", ())) != self.K:
+            return False
+        self.sq, self.n = [float(x) for x in d["sq"]], [float(x) for x in d["n"]]
+        self.last = None if d.get("last") is None else [float(x) for x in d["last"]]
+        return True

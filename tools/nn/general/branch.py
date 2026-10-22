@@ -35,6 +35,17 @@ the copy's battle id is the same (ability_branch.play_pair's way): a swap to the
 greedy: the networks take their most likely action (the copies then differ by the simulator's draws and the orders'
 latency only: less of the battle's chaos in the price).
 
+Partial open loop (Config.openloop, run.py --general-branch-openloop 1, the default): closed loop, every unit of both
+sides decides anew every decision in both batches, and the two battles drift apart within 10-20 s (one different
+sample, then everything differs): the 60 s price was mostly that chaos (g20-g22: its real share 0 in 5 of 9 updates,
+0.2-0.37 in the others). Open: "chosen" is played first each decision and its orders are kept (the learner's and the
+past versions' networks, the scripts', the steps they land on: ability_branch._recording_play); "other" decides as
+usual (its observation, its networks) and then plays "chosen"'s orders for every unit but the swapped group's (its
+units at the snapshot, our side: they are the ones the kind reaches), whose own new orders it keeps - only that group
+re-decides under the other kind, the enemy and the rest of our army do what they did in "chosen" (the ability
+branches' open loop, where nobody re-decides, cannot be had here: the kind acts only through what its group's
+executor does). A swap to the same kind still prices exactly 0 (test).
+
 The price (budget share, from the planning side), "chosen" - "other": "trade" - the gold exchange at the horizon,
 (the enemy's gold lost - its own) / budget (ability_branch.trade, the v2 reward's gold term); "reward" - the side's
 reward summed over the horizon. Mean over the copies. The kind choice's advantage = signal.kind_advantage (x 1, or
@@ -52,6 +63,7 @@ from dataclasses import dataclass, field
 import torch
 
 from tools.nn.general import signal as gsignal
+from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.train import ability_branch as ab
 from tools.nn.train import reward
@@ -60,6 +72,7 @@ ALTS = ("teacher", "uniform", "policy")
 KINDS = ("all", "target")
 WITHDRAW_M = 300.0          # a withdraw without another group of ours: to the tile nearest this far behind the group
 PRICES = ("trade", "reward")
+NORMS = ("per-kind", "chunk")
 ZERO = ab.ZERO              # a price within this share of the budget either way is "even" (the log's better / worse)
 ADV_FLOOR = ab.ADV_FLOOR    # the weighted prices' root mean square at least this (budget share)
 ADV_CLIP = ab.ADV_CLIP      # the advantage within +-this
@@ -70,13 +83,18 @@ class Config:
     share: float = 0.2          # the chance a plan of the learner is replayed (run.py --general-branches)
     copies: int = 4             # copies of each branch (common random numbers in pairs), each with its own other kind
     horizon_s: float = 60.0     # seconds of battle each branch plays
-    cap: int = 64               # snapshots an update at most (0: no cap); spread over the chunk's decisions
+    cap: int = 128              # snapshots an update at most (0: no cap); spread over the chunk's decisions
     batch: int = 64             # snapshots a branch batch (x copies battles in each of the two branches)
     alt: str = "teacher"        # the other kind: "teacher" - the teacher's (else uniform), "uniform" over the K - 1
     #                             others, "policy" by the general without a
     price: str = "trade"        # "trade": the gold exchange at the horizon; "reward": the side's reward over it
     greedy: bool = False        # the branches' networks take their most likely action, not a sample
     kinds: str = "all"          # the other kinds: "all" (each with its own target) or "target" (those taking the target)
+    openloop: bool = True       # "other" plays "chosen"'s orders but for the swapped group's units (module doc)
+    critic: bool = True         # the kind critic (kind_critic.py): learns the prices, estimates every ended plan's groups
+    critic_warmup: int = 1000   # ... prices before it may be used
+    critic_buffer: int = 25000  # ... prices it keeps
+    norm: str = "per-kind"      # the prices' scale: "per-kind" (signal.KindNorm, ~10 updates) or "chunk" (this chunk's)
     seed: int = 0
 
     def __post_init__(self):
@@ -88,6 +106,8 @@ class Config:
             raise ValueError(f"general branches: kinds {self.kinds!r} not one of {KINDS}")
         if self.price not in PRICES:
             raise ValueError(f"general branches: price {self.price!r} not one of {PRICES}")
+        if self.norm not in NORMS:
+            raise ValueError(f"general branches: norm {self.norm!r} not one of {NORMS}")
         if self.copies < 1 or self.horizon_s <= 0 or self.batch < 1 or self.cap < 0:
             raise ValueError("general branches: copies >= 1, horizon > 0, batch >= 1, cap >= 0")
 
@@ -198,12 +218,44 @@ def alt_targets(rt, rows, group, alt):
     return target, tgt
 
 
+def group_units(env, side, group):
+    """[R, N] bool: the units of battle j's side side[j], group group[j] (the plan's membership "main"; -1: none) on
+    the branch env's learner rows (env.rows_learn's order: the orders' rows)."""
+    rt = env.general_rt
+    n = len(side)
+    row = (side - 1) * n + torch.arange(n, device=side.device)
+    hit = (rt.r["main"][row] == group[:, None]) & (group >= 0)[:, None]               # [n, N]
+    full = torch.zeros(2 * n, hit.shape[1], dtype=torch.bool, device=side.device)
+    full[row] = hit
+    return full[env.rows_learn]
+
+
+def _openloop_play(env, said, mine):
+    """env._play of "other" in the partial open loop (module doc): the decision's orders = "chosen"'s (said: its
+    recorded (parts, scripted, delay) of this decision) but for the swapped group's units mine [R, N] on the learner
+    rows, which keep their own."""
+    play = type(env)._play
+
+    def run(parts, scripted, delay, *a, **k):
+        c_parts, c_scripted, c_delay = said.pop()
+        out = []
+        for (rows, o), (c_rows, c_o) in zip(parts, c_parts):
+            assert rows is env.rows_learn or rows is env.rows_past or torch.equal(rows, c_rows)
+            if rows is env.rows_learn:
+                out.append((rows, O.merge(c_o, o, mine)))
+            else:
+                out.append((rows, c_o))
+        return play(env, out, c_scripted, c_delay, *a, **k)
+    return run
+
+
 def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed, price="trade", greedy=False,
-               alt_t=None, alt_w=None):
+               alt_t=None, alt_w=None, openloop=False):
     """The two branches of each snapshot battle (snap: b battles; side, group [b]: the plan's side and group, alt
     [b, copies]: copy c's other kind; alt_t [b, copies], alt_w [b, copies, 2]: its target and the target's world point,
-    None: the target kept), `decisions` decisions (the snapshot's own first). -> (diff [b, copies]: price
-    "chosen" - "other" (module doc), budget [b, copies] gold)."""
+    None: the target kept), `decisions` decisions (the snapshot's own first); openloop: "other" plays "chosen"'s
+    orders but for the group's units (module doc "Partial open loop"). -> (diff [b, copies]: price "chosen" - "other"
+    (module doc), budget [b, copies] gold)."""
     b = len(snap["keys"])
     dev = template.device
     rep = torch.arange(b, device=dev).repeat_interleave(copies)
@@ -220,6 +272,11 @@ def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed,
         if greedy:
             env._act = ab._greedy_act(env)
         envs[name] = (env, parts, scripted)
+    said = []
+    if openloop:
+        o_env = envs["other"][0]
+        envs["chosen"][0]._play = ab._recording_play(envs["chosen"][0], said)
+        o_env._play = _openloop_play(o_env, said, group_units(o_env, s_rep, group[rep]))
     total = {name: torch.zeros(len(rep), device=dev) for name in envs}
     state = (torch.get_rng_state(), torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None)
     try:
@@ -237,6 +294,7 @@ def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed,
         torch.set_rng_state(state[0])
         if state[1] is not None:
             torch.cuda.set_rng_state_all(state[1])
+        said.clear()
         for env, _, _ in envs.values():
             ab._unhook(env)
     if price == "trade":
@@ -263,6 +321,47 @@ class Brancher:
         self.copies = None                       # the last chunk's prices per copy [E, copies]
         self.comp = None                         # {battle kind: slots} of a branch batch (ability_branch.composition)
         self.kind_b = None                       # [B] each main battle's kind, on the host
+        self.critic = None                       # the kind critic (kind_critic.KindCritic), made at the first finish
+        self.norm = None                         # each kind's running scale (signal.KindNorm), the same
+        self.K = None
+
+    def _kinds(self, K):
+        """The critic and the norm for K kinds (made once)."""
+        if self.K == K:
+            return
+        self.K = K
+        if self.cfg.norm == "per-kind":
+            self.norm = gsignal.KindNorm(K, ADV_FLOOR)
+        if self.cfg.critic:
+            from tools.nn.general import kind_critic
+            self.critic = kind_critic.KindCritic(K, self.gen.device, buffer=self.cfg.critic_buffer,
+                                                 warmup=self.cfg.critic_warmup, seed=self.cfg.seed)
+
+    def state(self):
+        """The critic's and the norm's states (the checkpoint's "train"; None parts left out)."""
+        out = {}
+        if self.critic is not None:
+            out["critic"] = self.critic.state()
+        if self.norm is not None:
+            out["norm"] = self.norm.state()
+        return out
+
+    def load(self, d):
+        """A saved state() -> what was loaded ("critic", "norm"); before the first finish the kind count is the saved
+        one's (a finish with another count starts both afresh)."""
+        if not d:
+            return []
+        if self.K is None:
+            K = (d.get("critic") or {}).get("kinds") or len((d.get("norm") or {}).get("sq", ()))
+            if not K:
+                return []
+            self._kinds(int(K))
+        got = []
+        if self.critic is not None and self.critic.load(d.get("critic")):
+            got.append("critic")
+        if self.norm is not None and self.norm.load(d.get("norm")):
+            got.append("norm")
+        return got
 
     def slots(self):
         cfg = self.cfg
@@ -439,7 +538,17 @@ class Brancher:
         K = diff.shape[1]
         price = diff.mean(1)
         se = diff.std(1) / math.sqrt(K) if K > 1 else torch.zeros_like(price)
-        adv = gsignal.kind_advantage(price, e["w"], ADV_FLOOR, ADV_CLIP)
+        rec = _cat(c.recs)
+        self._kinds(int(env.general_rt.r["kind_logp"].shape[-1]))
+        scale = None
+        if self.norm is not None:
+            # each kind's running scale (signal.KindNorm) after this update's prices of it
+            sc = torch.tensor(self.norm.update(e["kind"].tolist(), (price * e["w"]).tolist()), device=price.device)
+            scale = sc[e["kind"]]
+            for i, v in enumerate(sc.tolist()):
+                if bool((e["kind"] == i).any()):
+                    st[f"norm_rms_{i}"] = round(float(v), 5)
+        adv = gsignal.kind_advantage(price, e["w"], ADV_FLOOR, ADV_CLIP, scale)
         gold = price * budget.mean(1)
         st.update(battles=played, battle_s=round(played * decisions * env.decision_s),
                   price_mean=round(float(price.mean()), 5),
@@ -460,11 +569,49 @@ class Brancher:
         rel = ab.reliability(diff)
         if rel is not None:
             st["price_rel"] = round(rel, 3)
+        if self.critic is not None:
+            # the kind critic learns this chunk's prices (each copy with its own other kind)
+            from tools.nn.general import kind_critic
+            t1 = time.time()
+            gen = env.general_rt.learner.general
+            X = kind_critic.features(gen, rec)[torch.arange(E, device=price.device), e["group"]]
+            self.critic.add(X, e["kind"], e["alt"].clamp(min=0), diff)
+            st.update({"critic_" + k: v for k, v in kind_critic.rounded(self.critic.fit()).items()})
+            st["critic_on"] = int(self.critic.ready())
+            st["critic_s"] = round(time.time() - t1, 2)
         st["seconds"] = round(time.time() - t0, 2)
         self.stats = st
         self.copies = diff
-        return {"rec": _cat(c.recs), "group": e["group"], "kind": e["kind"], "lp": e["lp"], "adv": adv,
+        return {"rec": rec, "group": e["group"], "kind": e["kind"], "lp": e["lp"], "adv": adv,
                 "price": price, "new": e["new"]}
+
+    def attach(self, batch, actor):
+        """batch (rollout.collect's) with the kind critic's estimate of its ended plans, batch["general"]["kind_q"]
+        (kind_q; nothing while it is not ready)."""
+        g = batch.get("general")
+        if g is None:
+            return batch
+        kq = self.kind_q(actor, g.get("ready"))
+        if kq is not None:
+            g["kind_q"] = kq
+        return batch
+
+    @torch.no_grad()
+    def kind_q(self, actor, ready):
+        """The kind critic's estimate for the ended plans ready (Runtime.end_chunk's records [M, ..]): {"q" [M, G, K]
+        (budget share), "scale" [K] (each kind's running scale; the chunk's price root mean square without the
+        norm)}, or None (no critic, not ready, no plans). learn.update turns it into each group's advantage."""
+        crit = self.critic
+        if crit is None or ready is None or not crit.ready() or not len(ready["kind"]):
+            return None
+        from tools.nn.general import kind_critic
+        gen = actor.general
+        q = crit.predict(kind_critic.features(gen, ready))
+        if self.norm is not None:
+            scale = torch.tensor(self.norm.scale(), device=q.device)
+        else:
+            scale = torch.full((q.shape[-1],), max(crit.rms(), ADV_FLOOR), device=q.device)
+        return {"q": q, "scale": scale}
 
     def _play(self, env, actor, snap, e):
         """The entries' branches in batches of the fixed composition (ability_branch.Brancher._play's way) ->
@@ -502,7 +649,7 @@ class Brancher:
                 alt_w = torch.cat([alt_w, torch.full((len(fill), K, 2), float("nan"), device=dev)])
             self.calls += 1
             d, bg = play_kinds(env, actor, sub, side, group, alt, K, decisions, cfg.seed + self.calls, cfg.price,
-                               cfg.greedy, alt_t, alt_w)
+                               cfg.greedy, alt_t, alt_w, cfg.openloop)
             diff[ix] = d[:len(part)]
             budget[ix] = bg[:len(part)]
             played += 2 * K * (len(part) + len(fill))
@@ -519,6 +666,9 @@ def text(st):
         out += (f", price {st['price_mean']:+.4f} sd {st['price_std']:.4f} (se {st['price_se']:.4f}, real share "
                 f"{st.get('price_rel', float('nan')):.2f}), chosen better {st['better']:.2f} worse {st['worse']:.2f}, "
                 f"{st['battles']} battles {st['seconds']:.1f} s")
+    if "critic_samples" in st:
+        out += (f"; kind critic {st['critic_samples']} prices, on {st.get('critic_on', 0)}, ev "
+                f"{st.get('critic_ev', float('nan')):.3f} shrink {st.get('critic_shrink', float('nan')):.2f}")
     if "alt_fallback" in st:
         out += (f"; against the teacher {st['vs_teacher_n']} (fallback {st['alt_fallback']:.2f}): mine better "
                 f"{st['vs_teacher_better']:.2f} worse {st['vs_teacher_worse']:.2f} price {st['vs_teacher_price']:+.4f}")

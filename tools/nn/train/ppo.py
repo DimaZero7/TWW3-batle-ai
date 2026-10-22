@@ -505,8 +505,9 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         # 0.02-0.06). It needs nothing of those epochs (the ended plans' records only). (With --general-branches the
         # chunk's mission kind prices: learn.update's branch term.)
         # (--general-imitate: the teacher's ended plans, the imitation's records)
+        # (--general-kind-critic: the kind critic's estimate of the ended plans' groups)
         g_out = glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch"),
-                              teach=batch["general"].get("teach"))
+                              teach=batch["general"].get("teach"), kind_q=batch["general"].get("kind_q"))
     with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
         out = _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
     out.update(g_out)
