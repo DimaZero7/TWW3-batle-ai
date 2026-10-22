@@ -20,6 +20,10 @@ from tools.nn.model import policy as model_policy
 
 # the parameters an executor has that a unit network's checkpoint has not: they start fresh when it is loaded
 FRESH = ("task_in.", "general.")
+# the general's layers added after the atlas's repairs (net.General: fight_in, gtile_in): an older general's checkpoint
+# loads them at zero, with a warning (once)
+NEW_LAYERS = ("general.fight_in.", "general.gtile_in.")
+_WARNED = []
 
 
 class GeneralActor(model_policy.ActorV2):
@@ -95,6 +99,12 @@ class GeneralActor(model_policy.ActorV2):
             # general's table (the executor reads the kinds it was trained on)
             with torch.no_grad():
                 self.general.exec_kinds.copy_(self.general.kinds)
+        new = sorted({k.split(".")[1] for k in missing if k.startswith(NEW_LAYERS)})
+        if new and any(k.startswith("general.") for k in state_dict) and not _WARNED:
+            _WARNED.append(1)
+            print("general: a checkpoint without the layers " + ", ".join(new) + " (net.General: the fight's numbers, "
+                  "the tiles under the groups) - they start fresh at zero: it plays as before until they learn",
+                  flush=True)
         return missing, unexpected
 
 

@@ -59,15 +59,16 @@ def parse_sets(items):
 
 class GameBattles:
     """What Runtime reads of a rollout.Battles, for one game battle (B = 1, its N units in the state document's order):
-    st.u - the unit fields [1, N] it reads (x, z, b, side, men, hp, hp0, ms, gone, vis, cost, width, sp_h, sp_v), st.t
-    [1] (the battle's time, s), st.done, st.lord_dead_s [1, 2] (s since the side's lord fell, -1 standing), st.keys;
-    setup.bounds [1, 4]; mem[s].frame (the side's observation frame); ctrl [1, 2] (the side the network commands is the
-    learner, the other a script); past (none); B, N, device, rows_learn.
+    st.u - the unit fields [1, N] it reads (x, z, b, side, men, hp, hp0, ms, gone, vis, cost, width, sp_h, sp_v, m,
+    fire, target), st.t [1] (the battle's time, s), st.done, st.lord_dead_s [1, 2] (s since the side's lord fell, -1
+    standing), st.keys; setup.bounds [1, 4]; mem[s].frame (the side's observation frame); ctrl [1, 2] (the side the
+    network commands is the learner, the other a script); past (none); B, N, device, rows_learn.
 
-    The game's state over it (update): positions, men, health share, morale state, visibility as read; a reading that
-    is missing keeps the last one; a unit with men and no position has left the map (gone, as the enemy's script reads
-    it); the static numbers (start health, cost, formation) are the simulator's of the unit's key (params.static, the
-    formation of exchange.formation_shape); a lord falls - dead, shattered or gone - as the simulator's lord_dead_s."""
+    The game's state over it (update): positions, men, health share, morale state, visibility, the melee and firing
+    flags and the engine's target as read; a reading that is missing keeps the last one; a unit with men and no
+    position has left the map (gone, as the enemy's script reads it); the static numbers (start health, cost,
+    formation) are the simulator's of the unit's key (params.static, the formation of exchange.formation_shape); a lord
+    falls - dead, shattered or gone - as the simulator's lord_dead_s."""
 
     def __init__(self, battle, side, params, device="cpu"):
         names = battle.names
@@ -96,7 +97,10 @@ class GameBattles:
                   "sp_v": f(sh.get("sp_v", np.zeros(N))),
                   "x": z.clone(), "z": z.clone(), "b": z.clone(), "men": z.clone(), "hp": z + 1.0, "ms": z + 1.0,
                   "gone": torch.zeros(1, N, dtype=torch.bool, device=self.device),
-                  "vis": torch.ones(1, N, dtype=torch.bool, device=self.device)}
+                  "vis": torch.ones(1, N, dtype=torch.bool, device=self.device),
+                  "m": torch.zeros(1, N, dtype=torch.bool, device=self.device),
+                  "fire": torch.zeros(1, N, dtype=torch.bool, device=self.device),
+                  "target": torch.full((1, N), -1, dtype=torch.long, device=self.device)}
         self.lord = torch.as_tensor(np.asarray(battle.setup.lord[0], bool), device=self.device)[None]
         self.st = SimpleNamespace(u=self.u, t=torch.zeros(1, device=self.device),
                                   done=torch.zeros(1, dtype=torch.bool, device=self.device),
@@ -123,6 +127,13 @@ class GameBattles:
         flags = torch.where(sh, torch.full_like(ms, 7.0), torch.where(rs, torch.full_like(ms, 6.0), u["ms"]))
         u["ms"] = torch.where(torch.isfinite(ms), ms, flags)
         u["vis"] = torch.as_tensor(np.asarray(state["vis"], bool), device=dev)
+        # the fight's flags (net.FIGHT: the group's shares under fire and in melee): the game's melee and firing flags
+        # and the engine's target (an enemy row as read; a missing field: none)
+        for k in ("m", "fire"):
+            u[k] = (torch.as_tensor(np.asarray(state[k], bool), device=dev) if k in state
+                    else torch.zeros_like(u[k]))
+        u["target"] = (torch.as_tensor(np.asarray(state["target"], np.int64), device=dev) if "target" in state
+                       else torch.full_like(u["target"], -1))
         u["gone"] = (u["men"] > 0) & ~seen
         st = self.st
         st.t = torch.as_tensor(np.asarray(state["t"], np.float32).reshape(1), device=dev)

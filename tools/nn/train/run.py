@@ -299,7 +299,8 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
                  "group_centre": "general_group_centre",
                  "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
-                 "tile_norm": "general_tile_norm", "threat": "general_threat", "task_group": "general_task_group"}
+                 "tile_norm": "general_tile_norm", "threat": "general_threat", "task_group": "general_task_group",
+                 "group_tiles": "general_group_tiles"}
 # the fields that make the network's shape (the saved weights fit only them; center: 0 has no weight, any other value
 # is only the learned share's start - the saved weight is the share): an option cannot change them on an --init's general
 GENERAL_SHAPE = ("card", "reader_hidden", "council_layers", "council_heads", "group_layers", "places", "kinds",
@@ -1546,7 +1547,12 @@ def parser():
                     help="general: 1 the tiles' numbers standardised over the map (an older checkpoint: 0)")
     ap.add_argument("--general-threat", type=lambda v: bool(int(v)), default=True,
                     help="general: 1 the groups' threat numbers (nearest enemy group's distance, strength ratio, "
-                         "shooter shares, contact) on their cards before the kind and target (an older checkpoint: 0)")
+                         "shooter shares, contact; the shares under fire and in melee) on their cards before the kind "
+                         "and target (an older checkpoint: 0)")
+    ap.add_argument("--general-group-tiles", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 the tiles under every group's centre (within 1.5 tiles, by distance) on its card - "
+                         "ours before the kind and target, theirs as targets (a layer from zero: an older checkpoint "
+                         "plays as before until it learns)")
     ap.add_argument("--general-task-group", type=lambda v: bool(int(v)), default=False,
                     help="general: 1 the executor's task carries the group card; 0 zeros there (the width kept; an "
                          "older checkpoint: 1)")

@@ -130,8 +130,13 @@ class GeneralConfig:
     tile_norm: bool = True     # the tiles' numbers standardised per map (each number less its mean over the map's
     #                            tiles, / its spread, within +-5): the raw ones hardly move (spread 0.03-0.11)
     threat: bool = True        # the group's threat numbers (net.threat: the nearest enemy group's distance, the
-    #                            strength ratio, both shooter shares, the share in contact) added to its card before
-    #                            the kind and target choices (a linear layer from zero)
+    #                            strength ratio, both shooter shares, the share in contact; net.fight: the shares
+    #                            under fire and in melee, by the state's flags) added to its card before the kind and
+    #                            target choices (linear layers from zero)
+    group_tiles: bool = True   # the tiles under every group's centre (net.group_tiles: the tiles' numbers within 1.5
+    #                            tiles of it, weighted by distance) added to its card - ours before the kind and target
+    #                            choices, theirs as the targets' keys (a linear layer from zero): the council's path
+    #                            to the tiles was dead (the atlas: tiles zeroed, the kind's KL ~1e-7)
     task_group: bool = False   # the executor's task input carries the group card (the atlas: ignored, KL 0.003);
     #                            False: those columns are zeros (the input's width kept: older checkpoints load)
 

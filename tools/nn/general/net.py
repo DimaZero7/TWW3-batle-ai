@@ -60,8 +60,15 @@ NEG = -1e9
 THREAT = ("enemy_dist", "strength_ratio", "own_shooters", "enemy_shooters", "contact", "has_enemy")
 THREAT_D = 500.0
 CONTACT_M = 40.0
+# ... and the fight's numbers of the group (General.fight, with GeneralConfig.threat; their own layer from zero, so a
+# checkpoint with the six above loads): the share of its units under fire (a standing enemy unit not in melee is firing
+# at it: the state's fire flag and target) and the share in melee (the state's melee flag) - inp "fight" [P, N, 2]
+FIGHT = ("under_fire", "melee")
+# the tiles under a group's centre (General.group_tiles; GeneralConfig.group_tiles): the tiles' numbers (as the
+# council reads them, tile_numbers) weighted by exp(-d^2 / 2 step^2) over the tiles within GROUP_TILE_R steps of it
+GROUP_TILE_R = 1.5
 INPUTS = ("num", "lab", "pos", "on", "own", "free", "tiles", "tile_ok", "zone", "deploy", "prev", "has_prev",
-          "prev_main", "prev_kind")
+          "prev_main", "prev_kind", "fight")
 CHOICES = ("kind", "target", "place")
 # a unit's place in the general's input, as the unit network's token reads it (observation.py: the side's frame):
 # forward and lateral / observation.POS, facing cos and sin, velocity forward and lateral / observation.VEL, known
@@ -290,6 +297,7 @@ class General(nn.Module):
         tpos = torch.zeros(self.S, len(POS_FEATURES))
         tpos[:, 0], tpos[:, 1] = f.reshape(-1) / POS_M, l.reshape(-1) / POS_M
         self.register_buffer("tile_pos", tpos, persistent=False)
+        self.tile_step = step
         self.register_buffer("coarse", gtiles.coarse_index(sectors, cfg.target_grid), persistent=False)
         # which (kind, target) pairs may be chosen: kind k with candidate c when its type (target_kind: our group, theirs,
         # a coarse tile) is one config.MISSION_KINDS[k] takes - [K, 2G + C]
@@ -317,6 +325,13 @@ class General(nn.Module):
         self.threat_in = nn.Linear(len(THREAT), d)
         nn.init.zeros_(self.threat_in.weight)
         nn.init.zeros_(self.threat_in.bias)
+        # the fight's numbers (FIGHT, with GeneralConfig.threat) and the tiles under the groups (GeneralConfig.group_tiles),
+        # each its own layer from zero: a checkpoint without them plays as before until they learn
+        self.fight_in = nn.Linear(len(FIGHT), d)
+        self.gtile_in = nn.Linear(len(gtiles.FEATURES), d)
+        for lin in (self.fight_in, self.gtile_in):
+            nn.init.zeros_(lin.weight)
+            nn.init.zeros_(lin.bias)
 
     # --- the cards ---------------------------------------------------------------------------------------------
     def coarse_tiles(self, tiles, tile_ok):
@@ -420,8 +435,12 @@ class General(nn.Module):
         g, tiles, active = c["groups"], c["tiles"], c["active"]
         d = g.shape[-1]
         if getattr(self.cfg, "threat", False):
-            # the groups' threat numbers on our groups' cards (GeneralConfig.threat)
-            g = torch.cat([g[:, :G] + self.threat_in(self.threat(inp, c).to(g.dtype)), g[:, G:]], 1)
+            # the groups' threat and fight numbers on our groups' cards (GeneralConfig.threat)
+            add = self.threat_in(self.threat(inp, c).to(g.dtype)) + self.fight_in(self.fight(inp, c).to(g.dtype))
+            g = torch.cat([g[:, :G] + add, g[:, G:]], 1)
+        if getattr(self.cfg, "group_tiles", False):
+            # the tiles under every group's centre, ours (the kind's and target's query) and theirs (the targets' keys)
+            g = g + self.gtile_in(self.group_tiles(inp, c).to(g.dtype))
         mine = active[:, :G]                                                  # [P, G] our groups choose
         act = act or {}
         cand_ok = torch.cat([active, c["coarse_ok"]], 1)                      # [P, 2G + C]
@@ -488,6 +507,42 @@ class General(nn.Module):
         share = float(getattr(self.cfg, "shoot_share", 0.5))
         out[..., shoot] = (n_sh > 0) & (n_sh >= share * n)                               # [P, G]
         return out
+
+    def centres(self, inp, c):
+        """(centre [P, 2G, 2] forward, lateral m in the side's frame, units [P, 2G], membership [P, N, 2G] float) of
+        every group of the plan c["main"]: the mean place of its units taking part and known (own, or an enemy seen)."""
+        G = self.cfg.places
+        main, on, own = c["main"], inp["on"], inp["own"]
+        pos = inp["pos"].float()
+        known = on & (own | (pos[..., -1] > 0.5))
+        xy = pos[..., :2] * POS_M
+        mf = ((main[..., None] == torch.arange(2 * G, device=main.device)) & known[..., None]).float()
+        n = mf.sum(1)
+        return torch.einsum("png,pnc->pgc", mf, xy) / n.clamp(min=1)[..., None], n, mf
+
+    def group_tiles(self, inp, c):
+        """[P, 2G, len(tiles.FEATURES)] the tiles' numbers under every group's centre (GeneralConfig.group_tiles): the
+        numbers the council reads (tile_numbers: standardised with tile_norm) of the tiles inside the map within
+        GROUP_TILE_R steps of the centre, weighted by exp(-d^2 / 2 step^2) (the centre's tile most, its neighbours less);
+        zeros for a place that is not a group (or with no tile there)."""
+        cent, n, _ = self.centres(inp, c)
+        feats = self.tile_numbers(inp["tiles"].float(), inp["tile_ok"])                 # [P, S, F]
+        tc = self.tile_pos[:, :2].float() * POS_M                                         # [S, 2]
+        d = (cent[:, :, None, :] - tc[None, None]).norm(dim=-1) / self.tile_step          # [P, 2G, S] in steps
+        w = torch.exp(-0.5 * d * d) * (d <= GROUP_TILE_R) * inp["tile_ok"][:, None, :].float() * (n > 0)[..., None]
+        return torch.einsum("pgs,psf->pgf", w, feats) / w.sum(-1, keepdim=True).clamp(min=1e-6)
+
+    def fight(self, inp, c):
+        """[P, G, len(FIGHT)] our groups' fight numbers (FIGHT): the share of the group's units (taking part) under
+        fire, the share in melee, of inp "fight" [P, N, 2] (Runtime.fight_of: the state's flags); zeros without it."""
+        G = self.cfg.places
+        main, on, own = c["main"], inp["on"], inp["own"]
+        f = inp.get("fight")
+        if f is None:
+            return torch.zeros(main.shape[0], G, len(FIGHT), device=main.device)
+        mf = ((main[..., None] == torch.arange(G, device=main.device)) & (on & own)[..., None]).float()
+        n = mf.sum(1)
+        return torch.einsum("png,pnk->pgk", mf, f.float()) / n.clamp(min=1)[..., None]
 
     def threat(self, inp, c):
         """[P, G, len(THREAT)] our groups' threat numbers (THREAT) on the plan's input (the units taking part, inp "on";

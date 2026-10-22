@@ -63,7 +63,7 @@ from tools.nn.general import tiles as gtiles
 from tools.nn.general import units as gunits
 from tools.nn.general.config import mission_kinds
 from tools.nn.general.executor import has_task
-from tools.nn.general.net import CHOICES, INPUTS, POS_FEATURES, target_kind
+from tools.nn.general.net import CHOICES, FIGHT, INPUTS, POS_FEATURES, target_kind
 from tools.nn.model import observation as ob
 from tools.nn.model import sectors as msectors
 from tools.nn.model.frame import Frame
@@ -201,7 +201,8 @@ class Runtime:
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
                   "in/own": z(R, N, dt=Bo), "in/free": z(R, N, dt=Bo), "in/tiles": z(R, S, len(gtiles.FEATURES)),
                   "in/tile_ok": z(R, S, dt=Bo), "in/zone": z(R, S, dt=Bo), "in/deploy": z(R, dt=Bo),
-                  "in/prev": z(R, 2 * G, D), "in/has_prev": z(R, dt=Bo), "in/prev_kind": z(R, G, dt=L) - 1})
+                  "in/prev": z(R, 2 * G, D), "in/has_prev": z(R, dt=Bo), "in/prev_kind": z(R, G, dt=L) - 1,
+                  "in/fight": z(R, N, len(FIGHT))})
         return r
 
     def _battles(self, B):
@@ -254,7 +255,7 @@ class Runtime:
         B = self.B
         b, s = rows % B, rows // B + 1
         u = {k: env.st.u[k][b] for k in ("x", "z", "b", "side", "men", "hp", "hp0", "ms", "gone", "vis", "cost",
-                                          "width", "sp_h", "sp_v")}
+                                          "width", "sp_h", "sp_v", "m", "fire", "target")}
         present = u["side"] > 0
         own = present & (u["side"] == s[:, None])
         alive = present & (u["men"] > 0) & ~u["gone"]
@@ -290,8 +291,21 @@ class Runtime:
         prev_kind = torch.where(last_k, self.r["kind"][rows], torch.full_like(self.r["kind"][rows], -1))
         inp = {"num": num, "lab": self.b["lab"][b], "pos": pos, "on": on, "own": own, "free": free, "tiles": tiles,
                "tile_ok": tile_ok, "zone": zone, "deploy": zone.any(-1), "prev": prev, "has_prev": has_prev,
-               "prev_main": prev_main, "prev_kind": prev_kind}
+               "prev_main": prev_main, "prev_kind": prev_kind, "fight": self.fight_of(u, alive)}
         return inp, frame, u
+
+    @staticmethod
+    def fight_of(u, alive):
+        """[M, N, 2] every unit's fight flags (net.FIGHT) of the state u [M, N]: under fire - a living enemy unit not
+        in melee is firing (the state's `fire`: in the simulator from the aim on, in the game IsFiringMissiles) with
+        this unit its target (`target`: the simulator's shot target, the game's engine target); in melee (`m`)."""
+        tgt = u["target"].long()
+        side = u["side"]
+        shoots = alive & u["fire"].bool() & ~u["m"].bool() & (tgt >= 0)
+        at = tgt.clamp(min=0, max=tgt.shape[1] - 1)
+        shoots = shoots & (side.gather(1, at) != side) & (side.gather(1, at) > 0)
+        hits = torch.zeros(tgt.shape, device=tgt.device).scatter_add_(1, at, shoots.float())
+        return torch.stack([(hits > 0) & alive, u["m"].bool() & alive], -1).float()
 
     @staticmethod
     def pos_of_obs(o):

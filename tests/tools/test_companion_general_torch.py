@@ -29,15 +29,19 @@ GCFG = gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2)
 LORD, SPEAR = "wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0"
 
 
-def general_actor(seed=0, task_w=0.0, sharp=1.0):
+def general_actor(seed=0, task_w=0.0, sharp=1.0, cards_w=0.0):
     """A tiny executor with a general. task_w: the task input's weights (0: the unit network's to the bit); sharp: the
     group collection's keys and queries x this (a fresh general splits every unit ~evenly over the places, 0.1 each:
-    its main place is then a tie that float noise flips)."""
+    its main place is then a tie that float noise flips); cards_w: the weights of the group cards' fight and tiles
+    layers (net.General fight_in, gtile_in; 0: as they start)."""
     torch.manual_seed(seed)
     actor = executor.wrap(policy.Actor(TINY).eval(), GCFG).eval()
     with torch.no_grad():
         if task_w:
             actor.task_in.weight.normal_(0, task_w)
+        if cards_w:
+            actor.general.fight_in.weight.normal_(0, cards_w)
+            actor.general.gtile_in.weight.normal_(0, cards_w)
         actor.general.groups.k.weight.mul_(sharp)
         actor.general.groups.q.weight.mul_(sharp)
     return actor
@@ -113,7 +117,7 @@ def parity(actor, seconds=240.0, seed=SEED, greedy=True, events=True):
     rt.learner, rt.greedy, rt.pending = actor, greedy, None
     gen = cg.GameGeneral(actor, gcfg, greedy=greedy, side=1, params=params)
     seen = {"move": 0, "mem_s": None, "mem_g": None, "battle": None, "plans": [], "plans_s": 0, "tasks": 0,
-            "reasons": set(), "max_err": 0.0, "kinds": set()}
+            "reasons": set(), "max_err": 0.0, "kinds": set(), "fight": torch.zeros(2)}
     sl = torch.as_tensor(slots)
     lord2 = int(slots[[i for i, n in enumerate(names) if sides[i] == 2 and n.endswith("lord")][0]])
 
@@ -159,6 +163,9 @@ def parity(actor, seconds=240.0, seed=SEED, greedy=True, events=True):
         for k in ("kind", "target"):
             assert torch.equal(rg[k][0][act], rs[k][0][act]), (k, seen["move"])
         assert float(rg["t_plan"][0]) == pytest.approx(float(rs["t_plan"][0]))
+        # the same fight flags of every unit at the plan (net.FIGHT: the game's melee and firing flags and target)
+        assert torch.equal(rg["in/fight"][0], rs["in/fight"][0][sl]), seen["move"]
+        seen["fight"] += rs["in/fight"][0].sum(0)
         # the same task, unit by unit
         assert torch.equal(task_g["task_on"][0], task_s["task_on"][0][sl])
         err = float((task_g["task"][0].double() - task_s["task"][0][sl].double()).abs().max())
@@ -174,13 +181,15 @@ def parity(actor, seconds=240.0, seed=SEED, greedy=True, events=True):
 
 def test_the_game_general_plans_and_tasks_as_the_simulators_runtime():
     # (a fresh general splits every unit ~evenly over the places: sharp makes its choices clear of float noise)
-    seen = parity(general_actor(task_w=0.5, sharp=30.0))
+    seen = parity(general_actor(task_w=0.5, sharp=30.0, cards_w=0.5))
     plans = seen["plans"]
     # the plan at the start, the timer every 30 s of battle, the lord's fall and the broken group in between
     assert plans[0]["reason"] == "deploy" and len(plans) == seen["plans_s"] >= 9, (len(plans), seen["plans_s"])
     assert seen["reasons"] == {"deploy", "timer", "lord", "broken"}, seen["reasons"]
     assert seen["tasks"] > 1000 and seen["max_err"] < 1e-4
     assert all(set(g["units"]) <= seen["own"] for p in plans for g in p["groups"])
+    # some unit under fire and some in melee at the plans (the fight's numbers are read in both)
+    assert float(seen["fight"][0]) > 0 and float(seen["fight"][1]) > 0, seen["fight"]
 
 
 # --- the re-plans on the battle's time and its events, on the bridge's documents --------------------------------------
