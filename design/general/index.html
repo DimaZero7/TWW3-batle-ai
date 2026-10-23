@@ -145,12 +145,12 @@ a{color:inherit}
 .proj line{stroke:var(--open);stroke-width:1.1;opacity:.85}
 :root{--tc-test:#1a9a8a}
 .areah{font-size:18px;margin:0 0 4px}
-.node.t-env span{display:block}
+.node.t-env span,.node.t-task span{display:block}
 .blocks{display:grid;grid-template-columns:auto auto auto;justify-content:start;align-items:center;gap:12px;margin-top:6px}
 .blocks .nodestack{align-self:end;margin-bottom:-12px}
-.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-learn{--tc:#b8329a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a} .t-teach{--tc:#b5452b}
+.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-learn{--tc:#b8329a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a} .t-teach{--tc:#b5452b} .t-task{--tc:#3f86a8}
 .ty{background:color-mix(in srgb,var(--tc) 22%,transparent);color:var(--tc);border:1px solid var(--tc)}
-.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-learn,.node.t-env,.node.t-todo,.node.t-teach{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
+.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-learn,.node.t-env,.node.t-todo,.node.t-teach,.node.t-task{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
 .node.on{box-shadow:0 0 0 3px var(--tc);background:color-mix(in srgb,var(--tc) 30%,var(--panel))}
 .nodestack{display:flex;flex-direction:column;align-items:center;gap:2px}
 .vlink{color:var(--muted);font-size:20px;line-height:1}
@@ -273,6 +273,17 @@ a{color:inherit}
 .rfx.hit{border-color:color-mix(in srgb,var(--foe) 60%,var(--line))}
 .rsim{font-size:12.5px;line-height:1.4;color:var(--muted);border-top:1px dashed var(--line);padding-top:5px}
 .rsim b{color:var(--ink);font-weight:600}
+/* Задачи: what is in work, the plan by value, closed recently */
+.tupd{font-size:14px;color:var(--muted);margin:0}
+.tupd b{color:var(--ink)}
+.tasks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:900px){.tasks{grid-template-columns:1fr}}
+.box.tnow{border-left:4px solid var(--open)}
+.box.tplan{border-left:4px solid var(--later)}
+.box.tpark{border-left:4px dashed var(--line)}
+.tasks ol,.tasks ul{margin:0;padding-left:24px}
+.tasks li{margin:0 0 7px;line-height:1.4}
+.tasks li::marker{color:var(--ink);font-weight:600}
 </style>
 
 <div class="wrap">
@@ -968,6 +979,11 @@ a{color:inherit}
     <h2 class="areah">Армии</h2>
     <div class="types"><span class="tl">Фракции и отряды, на которых учится сеть, — что про каждый знает симулятор.</span></div>
     <div class="blocks"><div class="brow"><button class="node t-env" data-n="roster" type="button">Отряды и фракции<span>2 фракции · 28 отрядов</span></button></div></div>
+  </section>
+  <section class="net simsec" aria-label="Задачи">
+    <h2 class="areah">Задачи</h2>
+    <div class="types"><span class="tl">Что в работе сейчас, что дальше по порядку ценности, что закрыто недавно.</span></div>
+    <div class="blocks"><div class="brow"><button class="node t-task" data-n="tasks" type="button">Список задач<span>обновлено 23.10, 13:00 · 4 в работе · 6 в плане</span></button></div></div>
   </section>
   <div class="crumbs" id="crumbs"></div>
 
@@ -2337,6 +2353,39 @@ a{color:inherit}
     </ul></div></div></div>
   </section>
 </template>
+<template id="tpl-tasks">
+  <div class="panel">
+  <p class="tupd">Список обновлён: <b>23.10, 13:00</b></p>
+  <section class="tasks">
+    <div><div class="colh">В работе · 4</div><div class="box tnow"><ol class="small" start="1">
+      <li><b>Отбор настроек учителя</b> целыми боями на починенном симуляторе: дистанция отхода лорда 150→250 м, когда ждать, стрельба до сближения, все на одну цель, пересмотр раз в 60 с. 512 боёв на вариант против itS27_4; победитель станет учителем генерала.</li>
+      <li><b>Входы сети.</b> Генералу — мораль, «дрогнул», усталость, патроны (и правило «стрелок — пока есть патроны»). Сети отрядов — числа действующих эффектов (яд числами), «меня обстреливают», секунды рукопашной. Дописываются с нулевыми весами, затем дообучение.</li>
+      <li><b>Яд и контактные эффекты</b> — разбор механики точными формулами, сверка с симулятором.</li>
+      <li><b>Армии обучения</b> — размеры сторон равномерно до полных 20 на 20, бюджет до 20 000.</li>
+    </ol></div></div>
+    <div><div class="colh">В плане — по ценности · 6</div><div class="box tplan"><ol class="small" start="5">
+      <li><b>Эффекты для генерала целиком</b> — блок «Анализ эффектов» есть в замысле, в коде выключен.</li>
+      <li><b>Повтор проверки масок</b> на починенном симуляторе, в т. ч. «держать» с досягаемостью 100 м (честное «держать позицию»). Прежний вывод «строгие маски вредят» получен под багом компиляции.</li>
+      <li><b>Лига:</b> эксплуататор (сеть отрядов от itS27_4 против генерала), затем генерал против него. Команда готова: <code>build/steps/x1_exploit.sh</code>.</li>
+      <li><b>Экзамен в игре</b> для лучшей точки после п. 1–2 (сравнить с 9 из 12 у g19/g23).</li>
+      <li><b>Новые отряды.</b> Империя — Охотники, Нульнские железнобокие, Хохландские длинные ружья. Скавены — Бегущие по канавам (4 вида: с пращами, с ядом), Стрелки с варп-джезейлами. С ними новые механики: Ловчая сеть (замедление в радиусе), снайперская стрельба, скрытность, бонусы против крупных и щитов — формулы точным путём.</li>
+      <li><b>Страница:</b> голова вида как «правила + якорь», русские подписи видов, новые входы; иконки способностей из игры вместо своих SVG.</li>
+    </ol></div></div>
+    <div><div class="colh">Закрыто / решено · 22–23.10</div><div class="box done"><ul class="small">
+      <li><b>Баг компиляции симулятора</b> (приближённое деление → часы урона шли с первой секунды) — починен, симулятор видит поведение как в игре.</li>
+      <li><b>Гибель лорда</b> — урон по бегущему лорду по правилам игры; доля гибели сошлась с игрой (0,31 против 0,33).</li>
+      <li><b>Собственный сигнал головы вида</b> — закрыт: 5 способов ниже шума, без учителя голова дрейфует за час. Голова = правила учителя + якорь.</li>
+      <li><b>Расстановка врага «как ИИ игры»</b> — снято: эффект мал, цена велика.</li>
+      <li><b>Прокси экзамена</b> против itS27_4 — в оценке каждого шага; itS27_4 закреплён в трети обучающих боёв; скрипты — 3 %.</li>
+    </ul></div></div>
+    <div><div class="colh">Отложено</div><div class="box tpark"><ul class="small">
+      <li><b>Случайность расстановки врага</b> в замеренном диапазоне — только вместе с другой правкой симулятора.</li>
+      <li><b>Размер карты:</b> 768 м против 1020 м в симуляторе.</li>
+    </ul></div></div>
+  </section>
+  </div>
+</template>
+
 <template id="tpl-roster">
   <div class="panel">
   <section class="cards">
@@ -2376,7 +2425,7 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={roster:{t:"Армии · Отряды и фракции",tpl:"tpl-roster"},landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Алгоритм · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},missionpick:{t:"Обработка · Выбор заданий",tpl:"tpl-missionpick"},missions:{t:"Выход · Задания групп",tpl:"tpl-missions"},deploypick:{t:"Обработка · Выбор мест расстановки",tpl:"tpl-deploypick"},deployplaces:{t:"Выход · Места групп",tpl:"tpl-deployplaces"},deploylayout:{t:"Алгоритм · Раскладка отрядов",tpl:"tpl-deploylayout"},deployment:{t:"Выход · Расстановка",tpl:"tpl-deployment"},unittask:{t:"Алгоритм · Задание отряда",tpl:"tpl-unittask"},unittasks:{t:"Выход · Задания отрядов",tpl:"tpl-unittasks"},executor:{t:"Обработка · Исполнитель (сеть отряда)",tpl:"tpl-executor"},orders:{t:"Выход · Приказы отрядам",tpl:"tpl-orders"},game:{t:"Среда · Игра / симулятор",tpl:"tpl-game"},situation:{t:"Вход · Обстановка",tpl:"tpl-situation"},replan:{t:"Алгоритм · Пересмотр замысла",tpl:"tpl-replan"},reward:{t:"Алгоритм · Награда",tpl:"tpl-reward"},planvalue:{t:"Обработка · Оценка замысла",tpl:"tpl-planvalue"},branches:{t:"Учитель · Ветки заданий",tpl:"tpl-branches"},unitvalue:{t:"Обработка · Оценка отряда",tpl:"tpl-unitvalue"},training:{t:"Учитель · PPO исполнителя",tpl:"tpl-training"},opponents:{t:"Среда · Соперники",tpl:"tpl-opponents"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"},threat:{t:"Алгоритм · Угроза и участки группы",tpl:"tpl-threat"},execkinds:{t:"Выученная таблица · Виды заданий исполнителя",tpl:"tpl-execkinds"},teacher:{t:"Алгоритм · Скриптовый учитель",tpl:"tpl-teacher"},measure:{t:"Алгоритм · Мера выполнения",tpl:"tpl-measure"},imitate:{t:"Учитель · Подражание учителю",tpl:"tpl-imitate"},ppoplan:{t:"Учитель · PPO замысла",tpl:"tpl-ppoplan"},gaingen:{t:"Учитель · Доплата генералу",tpl:"tpl-gaingen"},gainexec:{t:"Учитель · Доплата исполнителю",tpl:"tpl-gainexec"},abilteach:{t:"Учитель · Учитель способностей",tpl:"tpl-abilteach"},gentest:{t:"Проверка · Проверки генерала",tpl:"tpl-gentest"},kindhead:{t:"Выход · Голова вида",tpl:"tpl-kindhead"},abilhead:{t:"Выход · Голова способностей",tpl:"tpl-abilhead"},ownkind:{t:"Учитель · Свой сигнал головы вида",tpl:"tpl-ownkind"}};
+  var nodes={tasks:{t:"Задачи · Список задач",tpl:"tpl-tasks"},roster:{t:"Армии · Отряды и фракции",tpl:"tpl-roster"},landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Алгоритм · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},missionpick:{t:"Обработка · Выбор заданий",tpl:"tpl-missionpick"},missions:{t:"Выход · Задания групп",tpl:"tpl-missions"},deploypick:{t:"Обработка · Выбор мест расстановки",tpl:"tpl-deploypick"},deployplaces:{t:"Выход · Места групп",tpl:"tpl-deployplaces"},deploylayout:{t:"Алгоритм · Раскладка отрядов",tpl:"tpl-deploylayout"},deployment:{t:"Выход · Расстановка",tpl:"tpl-deployment"},unittask:{t:"Алгоритм · Задание отряда",tpl:"tpl-unittask"},unittasks:{t:"Выход · Задания отрядов",tpl:"tpl-unittasks"},executor:{t:"Обработка · Исполнитель (сеть отряда)",tpl:"tpl-executor"},orders:{t:"Выход · Приказы отрядам",tpl:"tpl-orders"},game:{t:"Среда · Игра / симулятор",tpl:"tpl-game"},situation:{t:"Вход · Обстановка",tpl:"tpl-situation"},replan:{t:"Алгоритм · Пересмотр замысла",tpl:"tpl-replan"},reward:{t:"Алгоритм · Награда",tpl:"tpl-reward"},planvalue:{t:"Обработка · Оценка замысла",tpl:"tpl-planvalue"},branches:{t:"Учитель · Ветки заданий",tpl:"tpl-branches"},unitvalue:{t:"Обработка · Оценка отряда",tpl:"tpl-unitvalue"},training:{t:"Учитель · PPO исполнителя",tpl:"tpl-training"},opponents:{t:"Среда · Соперники",tpl:"tpl-opponents"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"},threat:{t:"Алгоритм · Угроза и участки группы",tpl:"tpl-threat"},execkinds:{t:"Выученная таблица · Виды заданий исполнителя",tpl:"tpl-execkinds"},teacher:{t:"Алгоритм · Скриптовый учитель",tpl:"tpl-teacher"},measure:{t:"Алгоритм · Мера выполнения",tpl:"tpl-measure"},imitate:{t:"Учитель · Подражание учителю",tpl:"tpl-imitate"},ppoplan:{t:"Учитель · PPO замысла",tpl:"tpl-ppoplan"},gaingen:{t:"Учитель · Доплата генералу",tpl:"tpl-gaingen"},gainexec:{t:"Учитель · Доплата исполнителю",tpl:"tpl-gainexec"},abilteach:{t:"Учитель · Учитель способностей",tpl:"tpl-abilteach"},gentest:{t:"Проверка · Проверки генерала",tpl:"tpl-gentest"},kindhead:{t:"Выход · Голова вида",tpl:"tpl-kindhead"},abilhead:{t:"Выход · Голова способностей",tpl:"tpl-abilhead"},ownkind:{t:"Учитель · Свой сигнал головы вида",tpl:"tpl-ownkind"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
