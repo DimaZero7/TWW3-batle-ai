@@ -37,7 +37,10 @@ rows (one batch shape for the compiled step) and each row takes its own slot's o
 games and the learner's wins per slot (the pool's quality scores, league.Pool). One slot = the old single version.
 A pinned slot (pin_slot; run.py --past-pin): one more slot holds a fixed version for the whole run, apart from the pool
 (no quality score, never replaced); a past battle that starts takes it with probability pin_share, else the active
-slot; its battles count as "pinned" (take_stats), the pool's as "past".
+slot; its battles count as "pinned" (take_stats), the pool's as "past". With cells (run.py --past-pin-cells:
+pin_cells) only a past battle of those cells may take it - the cell in the PINNED version's view: its role and its
+own faction first ("defend/EMP-EMP": the pinned version defends as the Empire against the Empire), as the keys of an
+exploiter's report where that version was the learner; the log's pinned/<role>/<own>-<enemy> stay the learner's.
 
 The drills' teacher (teach= {drill name: its skilled script}; tools/nn/train/drills/teach.py): at every
 decision the script labels the learner's units in that drill's battles on the same state (it does
@@ -111,6 +114,56 @@ PIN_FACTIONS = tuple(matchups.SHORT.values()) + ("other",)
 PIN_CODE = {key: i for i, key in enumerate(matchups.SHORT)}
 UNTRAINED = len(league.OPPONENTS) + 1
 PINNED = len(league.OPPONENTS) + 2
+PIN_CELL_GAMES = 100     # --past-pin-cells auto: a cell of the report counts with at least this many games
+
+
+def pin_cell_code(text):
+    """The cell index ((role x F + own) x F + enemy, take_pin_stats' order) of "attack/EMP-SKV" (a "pinned/" prefix
+    allowed); ValueError for an unknown role or faction."""
+    t = text.strip()
+    t = t[len("pinned/"):] if t.startswith("pinned/") else t
+    role, slash, pair = t.partition("/")
+    own, dash, enemy = pair.partition("-")
+    F = len(PIN_FACTIONS)
+    if not slash or not dash or role not in ROLES or own not in PIN_FACTIONS or enemy not in PIN_FACTIONS:
+        raise ValueError(f"past pin cell {text!r}: <{'|'.join(ROLES)}>/<own>-<enemy> of {', '.join(PIN_FACTIONS)}")
+    return (ROLES.index(role) * F + PIN_FACTIONS.index(own)) * F + PIN_FACTIONS.index(enemy)
+
+
+def pin_cells(text):
+    """[cell names] of run.py --past-pin-cells: a comma list ("defend/EMP-EMP,attack/SKV-EMP"), or
+    "auto:<report.json>[:<win rate>[:<games>]]" - the cells of the report's training pinned_matchups (an exploiter's
+    run: the pinned version there was the learner, its keys in its view) where that learner won at least <win rate>
+    (0.55) of at least <games> (PIN_CELL_GAMES) battles. ValueError when none or a cell is unknown."""
+    import json as _json
+    from pathlib import Path as _Path
+    text = (text or "").strip()
+    if text.startswith("auto:"):
+        segs = text[len("auto:"):].split(":")
+        nums = []
+        while len(segs) > 1 and len(nums) < 2:
+            try:
+                nums.insert(0, float(segs[-1]))
+            except ValueError:
+                break
+            segs.pop()
+        path = ":".join(segs)
+        rate = nums[0] if nums else 0.55
+        games = nums[1] if len(nums) > 1 else PIN_CELL_GAMES
+        rep_ = _json.loads(_Path(path).read_text(encoding="utf-8"))
+        cells = (rep_.get("training") or {}).get("pinned_matchups") or rep_.get("pinned_matchups") or {}
+        names = [k[len("pinned/"):] if k.startswith("pinned/") else k for k, c in sorted(cells.items())
+                 if c.get("games", 0) >= games and c.get("win_rate", 0.0) >= rate]
+        if not names:
+            raise ValueError(f"past pin cells {text!r}: no cell of {path} with win_rate >= {rate:g} and games >= "
+                             f"{games:g}")
+    else:
+        names = [t.strip() for t in text.split(",") if t.strip()]
+        if not names:
+            raise ValueError("past pin cells: an empty list")
+    for n in names:
+        pin_cell_code(n)
+    return names
 # A teacher with a share of 0 runs its script every this many decisions only (the agreement is still measured)
 TEACH_PROBE = 8
 
@@ -459,6 +512,7 @@ class Battles:
         self.slot_stats = torch.zeros(self.past_slots, 2, device=self.device)      # ended games, learner wins
         # the pinned slot (pin_slot; run.py --past-pin): its index, the share of the past battles that take it, its draws
         self.pin, self.pin_share, self.pin_gen = None, 0.0, None
+        self.pin_cells = None         # [2 F F] bool: the cells (the pinned version's view) it plays in; None: every one
         self.active = 0
         self.slot_used = {0}                                  # slots that may hold battles (a superset, host side)
         self.is_past = (self.ctrl == league.CODE["past"]).any(1)                     # [B]
@@ -577,11 +631,13 @@ class Battles:
         self.active = int(slot)
         self.slot_used.add(self.active)
 
-    def pin_slot(self, slot, actor, share, seed=0):
+    def pin_slot(self, slot, actor, share, seed=0, cells=None):
         """A pinned past version (run.py --past-pin): slot `slot` holds `actor` for the whole run, apart from the pool's
         slots (never the active one, never changed); a past battle that starts takes it with probability `share`, else
         the active slot (a draw of its own generator, from `seed`). Its battles count as "pinned" in take_stats, not
-        "past". Before the first step: the battles that start now draw too."""
+        "past". Before the first step: the battles that start now draw too. cells: the cell names (pin_cells(); the
+        pinned version's role and faction first) its battles may be of - another cell's past battle takes the active
+        slot; None: every cell."""
         k = int(slot)
         if k == self.active or not 0 <= k < self.past_slots:
             raise ValueError(f"pinned slot {k}: not a slot apart from the active one ({self.past_slots} slots)")
@@ -590,6 +646,10 @@ class Battles:
         self.set_past(actor, slot=k)
         self.slot_pinned[k] = True
         self.pin, self.pin_share = k, float(share)
+        if cells is not None:
+            F = len(PIN_FACTIONS)
+            self.pin_cells = torch.zeros(2 * F * F, dtype=torch.bool, device=self.device)
+            self.pin_cells[[pin_cell_code(c) for c in cells]] = True
         self.pin_gen = torch.Generator(device=self.device).manual_seed(int(seed) + 7919)
         self.slot_used.add(k)
         self.battle_slot = self._restart_slot(torch.ones(self.B, dtype=torch.bool, device=self.device))
@@ -600,8 +660,20 @@ class Battles:
         new = torch.full_like(self.battle_slot, self.active)
         if self.pin is not None:
             take = torch.rand(self.B, generator=self.pin_gen, device=self.device) < self.pin_share
+            if self.pin_cells is not None:
+                take = take & self.pin_cells[self._pin_cell()]
             new = torch.where(take, torch.full_like(new, self.pin), new)
         return torch.where(finished, new, self.battle_slot)
+
+    def _pin_cell(self):
+        """[B] each battle's cell in the view of its past side (pin_cells: role, own faction, enemy faction - the
+        side the layout gives the past version; a battle without one: side 2's view, never read)."""
+        F = len(PIN_FACTIONS)
+        ps = (self.ctrl[:, 0] != league.CODE["past"]).long()                          # [B] 0: side 1, 1: side 2
+        fac = self._fac_codes()
+        own, enemy = fac.gather(1, ps[:, None]).squeeze(1), fac.gather(1, (1 - ps)[:, None]).squeeze(1)
+        role = (self.st.attacker != ps + 1).long()                                    # 0 attack, 1 defend
+        return (role * F + own) * F + enemy
 
     def slot_counts(self):
         """[slots] past battles each slot holds now (reads the GPU); slots without any but the active one (and the

@@ -654,6 +654,13 @@ def _train(args, every=None, teacher=None, normal=None):
     observe = observation(args, actor, start, cfg, int(carried.get("observe_updates", 0)), device)
     if args.entropy_decay and args.entropy_end is None:
         raise SystemExit("--entropy-decay needs --entropy-end (the weight it goes to)")
+    if args.past_pin_cells:
+        if not args.past_pin:
+            raise SystemExit("--past-pin-cells needs --past-pin")
+        try:
+            rollout.pin_cells(args.past_pin_cells)
+        except (ValueError, OSError) as e:
+            raise SystemExit(f"--past-pin-cells: {e}")
     weights = reward.Weights(order_change=args.order_cost, idle=args.idle, lord=args.lord, retarget=args.retarget,
                              idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
                              idle_step=args.idle_step, idle_rate=args.idle_rate, idle_window_s=args.idle_window,
@@ -879,7 +886,11 @@ def _train(args, every=None, teacher=None, normal=None):
         data = checkpoint.read(args.past_pin, device)
         pinned = checkpoint.actor_of(data).to(device).eval()
         pinned.load_state_dict(data["actor"])
-        env.pin_slot(slots, pinned, args.past_pin_share, args.seed)
+        cells = rollout.pin_cells(args.past_pin_cells) if args.past_pin_cells else None
+        env.pin_slot(slots, pinned, args.past_pin_share, args.seed, cells=cells)
+        if cells is not None:
+            print(f"past pinned: only in the cells (its own view: role/own-enemy) {', '.join(cells)}; there "
+                  f"{args.past_pin_share:g} of the past battles, the rest of the past battles the pool's", flush=True)
         print(f"past pinned: {Path(args.past_pin).name} in slot {slots}, apart from the pool; {args.past_pin_share:g} of "
               f"the past battles (~{args.past_pin_share * past_share:.0%} of all), counted as pinned/attack|defend",
               flush=True)
@@ -1489,6 +1500,12 @@ def parser():
     ap.add_argument("--past-pin", help="a fixed past opponent (a checkpoint) in a slot of its own, apart from the pool "
                                        "(no quality score, never replaced): it takes --past-pin-share of the past "
                                        "battles; its results in the log as pinned/attack|defend (rollout.Battles.pin_slot)")
+    ap.add_argument("--past-pin-cells",
+                    help="--past-pin: only past battles of these cells take the pinned version (the others the pool's), "
+                         "--past-pin-share of them; the cell in the PINNED version's view - its role and its own "
+                         "faction first: 'defend/EMP-EMP,attack/SKV-EMP' (as an exploiter's report.json, where it was "
+                         "the learner); 'auto:<report.json>:0.55' - the report's cells where it won >= 0.55 of >= 100 "
+                         "games (rollout.pin_cells)")
     ap.add_argument("--past-pin-share", type=float, default=0.65,
                     help="--past-pin: the share of the starting past battles that take the pinned version (0.65 of "
                          "past 0.38 / 0.80 of the mix ~ 31 %% of all battles)")
