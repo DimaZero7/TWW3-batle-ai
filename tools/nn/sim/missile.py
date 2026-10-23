@@ -836,15 +836,31 @@ _NODES = ((-0.7745967, 5 / 18), (0.0, 8 / 18), (0.7745967, 5 / 18))
 _RAYS = (-0.5, 0.0, 0.5)
 
 
-def _path_block(lo, hi, xa, xb, rk):
-    """The length of the friends' centre interval [lo, hi] along a path whose bodies (radius rk) reach its blocked
-    part - the path below their heads before xa and after xb (the arc's two crossings of their height) - and the
-    bodies that hold the muzzle itself or stand within rk of it horizontally, whatever the arc: their centres up to
-    pi / 4 rk ahead along the path (the mean half chord of that circle across the path's band)."""
+def _path_block(lo, hi, xa, xb, rk, dmin=None):
+    """The length of the friends' centre interval [lo, hi] along a path whose bodies (radius rk, the check's) reach
+    its blocked part - the path below their heads before xa and after xb (the arc's two crossings of their height).
+    dmin (the bodies' collision, the two men's radii: a friend's man never stands nearer to the shooter; None or 0:
+    no collision): within dmin of the shooter there are no centres - the window ahead starts at the band's mean
+    distance to that circle, m = mean over |u| < rk of sqrt(dmin^2 - u^2) - and the men the collision pushed out of
+    it along the line between the two stand on that circle: those within the path's band (asin(rk / dmin) of the
+    circle each side) add asin(rk / dmin) dmin^2 / (2 rk) of the window when the arc is below the heads there. A
+    body within rk of the muzzle would block at any arc; with dmin >= rk the collision leaves none there."""
     span = (hi - lo).clamp(min=0)
+    pushed = torch.zeros_like(span)
+    if dmin is not None:
+        d = torch.maximum(dmin, rk).expand_as(span)
+        rk_ = (rk.expand_as(span) if torch.is_tensor(rk) else torch.full_like(span, float(rk))).clamp(min=1e-3)
+        d = torch.maximum(d, rk_)
+        on = (dmin.expand_as(span) > 0) & (rk_ > 1e-3)        # (an empty slot: no body)
+        ang = torch.asin((rk_ / d).clamp(max=1.0))
+        m = (rk_ * torch.sqrt((d * d - rk_ * rk_).clamp(min=0)) + d * d * ang) / (2 * rk_)
+        lo = torch.where(on, torch.maximum(lo, m), lo)
+        # (the pushed men: the friend's centres reached into the circle, and the arc is below the heads at it)
+        into = on & (lo - m < 1e-6) & (hi > m) & (xa + rk_ > m)
+        pushed = torch.where(into, ang * d * d / (2 * rk_), pushed)
     near = (torch.minimum(hi, torch.maximum(xa + rk, math.pi / 4 * rk)) - lo).clamp(min=0)
     far = (hi - torch.maximum(lo, xb - rk)).clamp(min=0)
-    return torch.minimum(near + far, span)
+    return torch.minimum(near + far + pushed, span + pushed)
 
 
 def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True):
@@ -919,13 +935,17 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     dh = ha - hm
 
+    # the bodies' collision: a man of another unit stands no nearer than the two men's radii (the database's entity
+    # radius, its shape a circle; the probe 'stacked': none nearer than 0.6 m, the least ~1.1 m once settled)
+    dmin = torch.where(eye, torch.zeros_like(along), (u["radius"][:, :, None] + u["radius"][:, None, :]).expand_as(along))
+
     def place(y):
         """The path of i's man y m ahead of i's centre along the line: (L, the friends' centre interval along it lo..hi,
         how far across the path has come towards the target's centre at each friend)."""
         L = (dist - y).clamp(min=1.0)
         # (a body within rk of the muzzle blocks the shot at any arc - behind or beside it too: from pi / 4 rk behind,
-        # the mean half chord; the unit's own men in melee from the next man on, ri + rk: the shooter is not his own
-        # obstacle)
+        # the mean half chord, but the bodies' collision keeps a friend's men dmin off (_path_block); the unit's own
+        # men in melee from the next man on, ri + rk: the shooter is not his own obstacle)
         lo = torch.maximum(along - span - y, torch.where(eye, ri + rk, -math.pi / 4 * rk))
         hi = torch.minimum(along + span - y, edge - y)
         return L, lo, hi, (1 - (along - y) / L).clamp(min=0)
@@ -955,7 +975,7 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
         xb = torch.where(curved, xb_q, big)
         # a path in a file's band meets a man of it within the window with the share of the rank spacing it covers;
         # between the files it passes every rank (the files stand in line: the same men blocked every volley)
-        return rank_cover * (_path_block(lo, hi, xa, xb, rk) / s_al).clamp(max=1.0)
+        return rank_cover * (_path_block(lo, hi, xa, xb, rk, dmin) / s_al).clamp(max=1.0)
 
     def cover(shrink, s_off=None):
         """[B, i, k] the path s_off m across i's line passes through friend k's bodies (None: the share of i's men
