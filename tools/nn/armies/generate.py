@@ -42,6 +42,11 @@ run.py --armies v2 and AI-vs-AI battles) draws the numbers of units first (Gener
 4. the other side buys for that army's cost x its share / the first's share, +-TOLERANCE, with its drawn number of
    units, or the nearest number that can (fewer when even its cheapest units are too dear);
    the pools' and the factions' budget_max do not apply (the market of 19 units does).
+"v3" (training since 23.10.2026, run.py --armies v3) is v2's algorithm with its own numbers (config/nn/pools.json
+"armies_v3"): a side's number of units besides the lord evenly 1-19 (the lord with them: 2-20, the game's full army 20),
+a share "full" (5 %) of battles both sides full (19 units and the lord each: a uniform draw alone gives 19 against 19
+in 1/361 of battles), the ceiling evenly 2000-20000. v2 stays for the game's exam and its proxy (exam_sim: the same
+seeds, the same battles), the AI-vs-AI battles and the abilities' price.
 
 Casters (both schemes, config/nn/pools.json "mages", share 0 by default - then no draw is made): with that probability
 a battle gives each side its faction's caster (the Gold Wizard, the Warlock Engineer) beside the lord, on top of its
@@ -62,7 +67,8 @@ STYLE_ALPHA = 0.7              # Dirichlet concentration of a random army's pref
 TRAIN_SEEDS = range(0, 1_000_000_000)
 EVAL_SEEDS = range(1_000_000_000, 1_001_000_000)
 BUDGET_TRIES = 1000
-ARMIES = ("v1", "v2")          # the army schemes (module doc); v1 the default
+ARMIES = ("v1", "v2", "v3")    # the army schemes (module doc); v1 the default
+COUNT_SCHEMES = ("v2", "v3")   # the schemes that draw the numbers of units first (generate_v2); their pools are v2's
 
 
 def _shift(a, offs, back=False):
@@ -228,6 +234,7 @@ class Generator:
         self.budget_max = P.budget_max() if pools is None else None
         self.rare = P.budget_rare() if pools is None else (0.0, None)
         self.v2 = P.armies_v2()
+        self.v3 = P.armies_v2(scheme="v3")
         # the casters (pools.json "mages"; given pools: none): that share of battles gives each side its faction's
         # caster (add_mages)
         self.mage_share, self.mages = P.mages() if pools is None else (0.0, {})
@@ -236,6 +243,7 @@ class Generator:
         self._markets = {}
 
     def market(self, faction, max_units=None, scheme="v1"):
+        scheme = "v2" if scheme in COUNT_SCHEMES else scheme      # v3 fields v2's pools
         key = (faction, max_units or self.max_units, scheme)
         if key not in self._markets:
             self._markets[key] = Market((self.pools_v2 if scheme == "v2" else self.pools)[faction], key[1])
@@ -262,9 +270,9 @@ class Generator:
 
     def generate(self, rng, factions=None, budget_range=None, max_units=None, sides=None, name="random", armies="v1"):
         """A random battle (an arena dict, see the module's doc); armies: the scheme (ARMIES)."""
-        if armies == "v2":
-            assert budget_range is None, "armies v2 draws no budget range"
-            return self.generate_v2(rng, factions, max_units, sides, name)
+        if armies in COUNT_SCHEMES:
+            assert budget_range is None, f"armies {armies} draws no budget range"
+            return self.generate_v2(rng, factions, max_units, sides, name, scheme=armies)
         assert armies == "v1", f"armies {armies!r}: one of {ARMIES}"
         factions = list(factions or self.pools)
         own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
@@ -319,9 +327,10 @@ class Generator:
             side["mage"] = mage.unit.key
         return arena
 
-    def count(self, rng, max_units=None):
-        """A side's number of units besides the lord in the v2 scheme: a band by its share, then evenly inside it."""
-        bands = self.v2["counts"]
+    def count(self, rng, max_units=None, scheme="v2"):
+        """A side's number of units besides the lord in the v2 (v3) scheme: a band by its share, then evenly inside
+        it."""
+        bands = getattr(self, scheme)["counts"]
         p = np.asarray([s for _, _, s in bands])
         first, last, _ = bands[int(rng.choice(len(bands), p=p / p.sum()))]
         return min(int(rng.integers(first, last + 1)), max_units or self.max_units)
@@ -333,20 +342,24 @@ class Generator:
             return pool.templates[int(rng.choice(len(weights), p=weights / weights.sum()))]
         return None
 
-    def generate_v2(self, rng, factions=None, max_units=None, sides=None, name="random"):
-        """A random battle of the v2 scheme (the module's doc): the numbers of units first, the smaller army's price
-        between its cheapest and the ceiling, the other army for the same gold."""
+    def generate_v2(self, rng, factions=None, max_units=None, sides=None, name="random", scheme="v2"):
+        """A random battle of the v2 (v3) scheme (the module's doc): the numbers of units first, the smaller army's
+        price between its cheapest and the ceiling, the other army for the same gold. A "full" battle (its share of
+        the scheme's numbers, drawn once before the tries; share 0, v2: no draw): both sides top units."""
+        assert scheme in COUNT_SCHEMES, f"armies {scheme!r}: one of {COUNT_SCHEMES}"
+        cfg = getattr(self, scheme)
         factions = list(factions or self.pools)
         own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
         top = max_units or self.max_units
         fac = {"own": own, "enemy": enemy}
         pools = self.pools_v2           # the v2 scheme's pools (units_v2 too)
-        markets = {s: self.market(f, max_units, "v2") for s, f in fac.items()}
+        markets = {s: self.market(f, max_units, scheme) for s, f in fac.items()}
+        full = cfg.get("full", 0.0) > 0 and rng.random() < cfg["full"]
         share = self.shares((own, enemy))
         share = {s: share[f] for s, f in fac.items()}
         for _ in range(BUDGET_TRIES):
-            n = {s: self.count(rng, top) for s in fac}
-            ceiling = float(rng.uniform(*self.v2["ceiling"]))
+            n = {s: top if full else self.count(rng, top, scheme) for s in fac}
+            ceiling = float(rng.uniform(*cfg["ceiling"]))
             tpl = {s: self._template(rng, pools[f]) for s, f in fac.items()}
             if n["own"] != n["enemy"]:
                 a = "own" if n["own"] < n["enemy"] else "enemy"
@@ -382,10 +395,10 @@ class Generator:
             budget = {a: price, b: target}
             break
         else:
-            raise ValueError(f"armies v2: no battle of {own} and {enemy} in {BUDGET_TRIES} draws")
+            raise ValueError(f"armies {scheme}: no battle of {own} and {enemy} in {BUDGET_TRIES} draws")
         arena = {k: v for k, v in self.base.items() if k not in ("faction", "units", "description")}
-        arena.update(name=name, budget=round(price / share[a]), sides={}, armies="v2", ceiling=round(ceiling),
-                     note=f"random battle (armies v2): {own} against {enemy}, budget {round(price / share[a])}")
+        arena.update(name=name, budget=round(price / share[a]), sides={}, armies=scheme, ceiling=round(ceiling),
+                     note=f"random battle (armies {scheme}): {own} against {enemy}, budget {round(price / share[a])}")
         for side, faction in fac.items():
             pool = pools[faction]
             units = [pool.units[i] for i in bought[side]]
@@ -413,7 +426,7 @@ def generate(rng, factions=None, budget_range=None, max_units=None, sides=None, 
 
 def battle(seed, **kw):
     """The battle of a seed: the same seed, the same battle. Train on TRAIN_SEEDS, evaluate on EVAL_SEEDS.
-    armies="v2": the second scheme's battle of the seed (another battle than v1's)."""
+    armies="v2" / "v3": that scheme's battle of the seed (another battle than v1's)."""
     return generate(np.random.default_rng(seed), name=f"random_{seed}", **kw)
 
 

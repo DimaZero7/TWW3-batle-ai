@@ -363,7 +363,7 @@ class TestArmiesV2:
         assert a == G.battle(17, armies="v2") and a["armies"] == "v2"
         assert composition(a) != composition(G.battle(17))
         with pytest.raises(AssertionError):
-            G.battle(17, armies="v3")
+            G.battle(17, armies="v4")
 
     def test_the_count_bands_by_their_shares(self):
         gen, rng = G.default(), np.random.default_rng(5)
@@ -451,3 +451,67 @@ class TestArmiesV2:
         costs = [gen.generate(rng, sides=(SKV, SKV), armies="v2")["sides"]["own"]["cost"] for _ in range(60)]
         cheapest, dearest = 525 + 5 * 125, 525 + 5 * 950
         assert min(costs) < cheapest + 0.25 * (dearest - cheapest) and max(costs) > dearest - 0.25 * (dearest - cheapest)
+
+
+# The v2 scheme's whole battles (placement included) of the exam's 6 seeds (the game's nn-arena exam and its proxy
+# tools/nn/train/exam_sim.py) and a few train seeds, hashed before the v3 scheme joined (23.10.2026): v2 must give them
+# bit for bit, or the exam plays other battles.
+V2_SEEDS = (1000800014, 1000800163, 1000800092, 1000800042, 1000800127, 1000800133, 0, 1, 2, 17)
+V2_HASH = "c1486a702fd1231e24cfd1bea1067da3e00794963f43a4793520d809c6968ca1"
+
+
+@pytest.fixture(scope="module")
+def battles_v3():
+    return [G.battle(s, armies="v3") for s in range(1500)]
+
+
+class TestArmiesV3:
+    def test_v2_and_the_exam_seeds_unchanged(self):
+        import hashlib
+        from tools.nn.train import exam_sim
+        assert set(exam_sim.SEEDS) <= set(V2_SEEDS) and exam_sim.ARMIES == "v2"
+        arenas = [G.battle(s, armies="v2") for s in V2_SEEDS]
+        assert hashlib.sha256(json.dumps(arenas, sort_keys=True).encode()).hexdigest() == V2_HASH
+
+    def test_the_numbers(self):
+        v3 = P.armies_v2(scheme="v3")
+        assert v3 == {"counts": ((1, 19, 1.0),), "ceiling": (2000.0, 20000.0), "full": 0.05}
+        assert P.armies_v2()["full"] == 0.0                        # v2: no full draw
+        b = G.battle(17, armies="v3")
+        assert b == G.battle(17, armies="v3") and b["armies"] == "v3"
+        assert composition(b) != composition(G.battle(17, armies="v2"))
+
+    def test_the_counts_evenly(self):
+        gen, rng = G.default(), np.random.default_rng(5)
+        n = np.asarray([gen.count(rng, scheme="v3") for _ in range(19_000)])
+        assert n.min() == 1 and n.max() == 19
+        assert all(abs(np.mean(n == k) - 1 / 19) < 0.01 for k in range(1, 20))
+
+    def test_sides_by_bands_of_five_and_full_battles(self, battles_v3):
+        n = np.asarray([[len(units_of(a["sides"][s])) for s in ("own", "enemy")] for a in battles_v3])
+        flat = n.ravel()
+        assert flat.min() >= 1 and flat.max() == G.MAX_UNITS
+        # the lord with them 2-5 / 6-10 / 11-15 / 16-20: each band about a quarter (equal gold shrinks the bigger
+        # side of a mismatched pair, so single numbers are not exactly even)
+        for lo, hi in ((1, 4), (5, 9), (10, 14), (15, 19)):
+            assert abs(np.mean((flat >= lo) & (flat <= hi)) - 0.25) < 0.04
+        assert np.mean((n[:, 0] == 19) & (n[:, 1] == 19)) >= 0.045     # 20 against 20 with the lords
+        for a in battles_v3:
+            costs = [a["sides"][s]["cost"] for s in ("own", "enemy")]
+            assert max(costs) <= min(costs) / (1 - G.TOLERANCE) + 1e-6
+            assert 2000 <= a["ceiling"] <= 20000
+
+    def test_the_ceiling_up_to_20000(self, battles_v3):
+        c = np.asarray([a["ceiling"] for a in battles_v3])
+        cost = np.asarray([a["sides"][s]["cost"] for a in battles_v3 for s in ("own", "enemy")])
+        assert c.max() > 19000 and abs(np.mean(c > 15000) - 5 / 18) < 0.05
+        assert cost.max() > 13000 and cost.max() <= 20000 / (1 - G.TOLERANCE)
+
+    def test_full_battles_both_sides_full(self):
+        gen = G.Generator()
+        gen.v3 = dict(gen.v3, full=1.0)
+        rng = np.random.default_rng(11)
+        for sides in ((EMP, SKV), (SKV, SKV), (EMP, EMP)):
+            for _ in range(5):
+                a = gen.generate(rng, sides=sides, armies="v3")
+                assert all(len(units_of(a["sides"][s])) == 19 for s in ("own", "enemy"))

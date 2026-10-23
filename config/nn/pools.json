@@ -18,6 +18,12 @@
     "counts": [[15, 19, 0.40], [10, 14, 0.30], [5, 9, 0.20], [1, 4, 0.10]],
     "ceiling": [2000, 15000]
   },
+  "armies_v3": {
+    "_description": "The third army scheme (23.10.2026; tools/nn/armies/generate.py generate_v2 with scheme v3, docs/en/training/armies.md), for training (run.py --armies v3): v2's algorithm and pools with these numbers; v2 stays bit for bit for the game's exam and its proxy (exam_sim), the AI-vs-AI battles and the abilities' price. counts: a side's number of units besides the lord evenly 1-19 (with the lord 2-20: the game's full army is 20 with the lord). full: the share of battles with both sides full (19 units and the lord each), drawn once a battle before the numbers; an even draw alone gives 19 against 19 in 1/361 of battles. ceiling: the budget ceiling evenly 2000-20000 (the dearest armies of 19 units: Empire 16750, Skaven 19525 - above that the ceiling does not bind).",
+    "counts": [[1, 19, 1.0]],
+    "full": 0.05,
+    "ceiling": [2000, 20000]
+  },
   "caps": {
     "_description": "Template armies only: share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Random armies have no caps.",
     "inf_ranged": 0.6

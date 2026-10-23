@@ -33,7 +33,7 @@ def stats(arenas, pools):
     for a in arenas:
         budgets.append(a["budget"])
         sides = [a["sides"][s] for s in ("own", "enemy")]
-        if sides[0]["budget"] == sides[1]["budget"] or a.get("armies") == "v2":   # (v2: the second buys the first's cost)
+        if sides[0]["budget"] == sides[1]["budget"] or a.get("armies") in G.COUNT_SCHEMES:   # (v2, v3: the second buys the first's cost)
             gaps.append(abs(sides[0]["cost"] - sides[1]["cost"]) / max(s["cost"] for s in sides))
         lo, hi = sorted(sides, key=lambda s: (pools[s["faction"]].budget_factor, s["faction"]))
         pairs.setdefault((lo["faction"], hi["faction"]), []).append(lo["cost"] / hi["cost"])

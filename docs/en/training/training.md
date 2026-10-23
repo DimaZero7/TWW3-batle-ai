@@ -1613,8 +1613,8 @@ average over several exams. Numbers: `build/compare/itS*.json` (not in Git).
 
 **In training now (line S):** PPO v2 with the [v2 reward](#reward); opponents (`--mix`) self-play 0.35,
 [past versions](#past-versions) 0.38, `ai_like` 0.15, `nearest` 0.02, of the self / past battles 0.17 with
-[kiting](#kiting-in-self-play); the spread of inexact simulator numbers `--dr`; [v2 armies](armies.md#the-v2-scheme-numbers-of-units-first)
-(`--armies v2`) with the [new units](units.md#ratling-gun-plague-monks-censer-bearers-giant-rats); parts of 30-60 min,
+[kiting](#kiting-in-self-play); the spread of inexact simulator numbers `--dr`; [v3 armies](armies.md#the-v3-scheme-numbers-of-units-evenly)
+(`--armies v3`, before it v2) with the [new units](units.md#ratling-gun-plague-monks-censer-bearers-giant-rats); parts of 30-60 min,
 each from the last network of the previous one; [learning by observation](#learning-by-observation) is off.
 
 | Change | What is on now | Effect on the exam in the game | Details |

@@ -169,7 +169,7 @@ class Generated:
                  armies="v1"):
         """small: (share, units): that share of the bank with at most `units` units a side (the
         generator's budget rarely gives such armies when up to 19 are allowed); armies: the generator's scheme
-        (tools/nn/armies/generate.py ARMIES; v2 for training with run.py --armies v2)."""
+        (tools/nn/armies/generate.py ARMIES; v3 for training with run.py --armies v3)."""
         from tools.nn.armies import generate
         seeds = [int(s) for s in seeds]
         n_small = int(round(small[0] * len(seeds))) if small else 0

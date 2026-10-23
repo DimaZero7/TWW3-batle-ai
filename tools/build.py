@@ -500,10 +500,10 @@ def main(argv=None):
     parser.add_argument("--army-seed", type=int,
                         help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
                              "armies of a lord and 0-19 units a side; EVAL seeds for checks")
-    parser.add_argument("--armies", choices=("v1", "v2"), default="v1",
+    parser.add_argument("--armies", choices=("v1", "v2", "v3"), default="v1",
                         help="nn-arena --army-seed: the generator's scheme (tools/nn/armies/generate.py): v1 (checks, "
                              "the gate: the seed's battle as always) or v2 (user 11.10: the numbers of units first; "
-                             "AI-vs-AI battles, build/steps/aivai_batch.sh)")
+                             "AI-vs-AI battles, build/steps/aivai_batch.sh) or v3 (23.10: the training's scheme)")
     parser.add_argument("--army-swap", action="store_true",
                         help="nn-arena --army-seed: the seed's armies swapped (our side gets the generator's "
                              "enemy army): the second battle of a swapped pair (tools/nn/gate.py)")

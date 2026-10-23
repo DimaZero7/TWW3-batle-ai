@@ -7,10 +7,11 @@ The random battle generator for training: two armies with an equal budget (a fac
 [simulator](simulator.md) and in the game. The rules come from the
 [network model](network.md#armies-and-battle-rules).
 
-There are two schemes. **v1** (the default) draws the budget first, then the armies under it: the exam, the
-gate, the twin and `tools.build --army-seed` use it, one seed always the same battle. **v2** draws the number of
-units first, then the price ([the v2 scheme](#the-v2-scheme-numbers-of-units-first)): for training
-(`run.py --armies v2`) and AI-vs-AI battles.
+There are three schemes. **v1** (the default) draws the budget first, then the armies under it: the gate, the
+twin and `tools.build --army-seed` use it, one seed always the same battle. **v2** draws the number of units first,
+then the price ([the v2 scheme](#the-v2-scheme-numbers-of-units-first)): the game's exam and its simulator proxy
+(`exam_sim`), AI-vs-AI battles. **v3** keeps v2's order with the numbers of units evenly 1-19 and a budget up to
+20,000 ([the v3 scheme](#the-v3-scheme-numbers-of-units-evenly)): for training (`run.py --armies v3`).
 
 ## How to get them
 
@@ -35,7 +36,7 @@ flowchart LR
 
 | File | What |
 |---|---|
-| `config/nn/pools.json` | each faction's units for training, its budget factor (`budget_factor`), the share of template armies (`mix`), limits (`caps`), the v2 scheme's numbers (`armies_v2`) |
+| `config/nn/pools.json` | each faction's units for training, its budget factor (`budget_factor`), the share of template armies (`mix`), limits (`caps`), the v2 and v3 schemes' numbers (`armies_v2`, `armies_v3`) |
 | `config/nn/army_templates.json` | the factions' army templates from the game's database (written by `templates.py`) |
 | `tools/nn/armies/pools.py` | pools: unit passports, the generator's groups, template shares (`Template`), budgets |
 | `tools/nn/armies/generate.py` | budget, buying units, a battle from a seed |
@@ -130,6 +131,35 @@ Training speed (4 min on the GPU, the S12 network, the same settings): battle-se
 (the simulator pads the units to 20 a side anyway); battles are longer (against `ai_like` 404 → 530 s, against
 `nearest` 343 → 413 s), finished battles a minute 324 → 273. Building an army — 3.0 → 4.8 ms a battle (the bank is
 built in its own process).
+
+## The v3 scheme: numbers of units evenly
+
+`battle(seed, armies="v3")`. v2's order and pools (`units_v2`), its own numbers (`armies_v3` in `pools.json`):
+
+1. **Numbers of units** of each side besides the lord — evenly 1-19 (with the lord 2-20; the game's full army is 20
+   with the lord).
+2. **Full battles:** 5 % of battles (`full`) give both sides 19 units and the lord. Drawn once a battle, before the
+   numbers. Without it an even draw gives 19 against 19 in 1 battle of 361.
+3. **The budget ceiling** — evenly 2000-20,000. The pools hold no dearer armies: the dearest army of 19 units is the
+   Empire's 16,750 (19 Greatswords) and the Skaven's 19,525, so above that the ceiling changes nothing.
+4. The rest as in v2 (the smaller army first, the other for the same price ±5 %).
+
+v2 stays bit for bit: the game's exam and `exam_sim` use it (a test hashes the battles of the exam's 6 seeds).
+
+Over 10,000 battles (seeds 0 … 9,999):
+
+| What | v3 | v2 |
+|---|---|---|
+| Units a side 1-4 / 5-9 / 10-14 / 15-19 (with the lord 2-5 / 6-10 / 11-15 / 16-20) | 25% / 27% / 23% / 25% | 13% / 22% / 30% / 36% |
+| Exactly 19 units (a full army) a side | 9.2% | 7.0% |
+| Battles 19 against 19 (20 against 20 with the lords) | 5.5% | 0.6% |
+| Budget B: median; most | 4134; 18,463 | 5113; 14,680 |
+| Men a battle: mean; 99 %; most | 2548; 5842; 6842 | 3072; 5862; 6742 |
+
+It is even by bands of 5, not by every number (1-5 units 6-6.5 % each, 15-18 3.7-4.2 % each): with equal gold 1-2 units
+cannot stand against 15, and the bigger army shrinks, as in v2. A battle's men stay under the
+[fighters lab](fighters_lab.md)'s 7168 places: the batch sizes and the GPU memory are v2's (a side has 20 places
+anyway, 40 in all). Building an army 6.6 ms a battle (v2 10.6).
 
 ## Army templates from the game's database
 
@@ -317,9 +347,9 @@ armies = export.to_sim(arenas, "attack")                    # "defend": side 2 a
 st = scenario.build(armies, per_side=generate.MAX_UNITS + 1)
 ```
 
-- The v2 scheme in training: `run.py --armies v2` (the army bank, `bankproc.Spec.armies`); the network's checks
-  stay on v1. An AI-vs-AI battle: `python -m tools.build nn-arena --army-seed N --armies v2`
-  (`build/steps/aivai_batch.sh`).
+- The v3 scheme in training: `run.py --armies v3` (the army bank, `bankproc.Spec.armies`; the line in
+  `config/train-chain.json`); the network's checks stay on v1, the exam and `exam_sim` on v2. An AI-vs-AI battle:
+  `python -m tools.build nn-arena --army-seed N --armies v2` (`build/steps/aivai_batch.sh`; `--armies v3` works too).
 - `generate.generate(rng, factions=None, budget_range=None, max_units=None, sides=None, armies="v1")` —
   the same with your own random generator. `max_units=5` and `budget_range` give small
   armies (training's `--small` share). `factions` is a list of factions, `sides` the sides'

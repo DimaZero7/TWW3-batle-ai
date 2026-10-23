@@ -1496,10 +1496,12 @@ def parser():
     ap.add_argument("--no-eval", action="store_true")
     ap.add_argument("--max-units", type=int, default=19, help="random armies (tools/nn/armies): units a side at most")
     ap.add_argument("--bank", type=int, default=2048, help="generated battles ready at once")
-    ap.add_argument("--armies", choices=("v1", "v2"), default="v1",
+    ap.add_argument("--armies", choices=("v1", "v2", "v3"), default="v1",
                     help="the training banks' army scheme (tools/nn/armies/generate.py): v1 a budget, then armies under "
                          "it; v2 (user 11.10) the numbers of units first (15-19 40%%, 10-14 30%%, 5-9 20%%, 1-4 10%%), "
-                         "a ceiling 2000-15000, the other side for the same gold. Evaluations keep v1")
+                         "a ceiling 2000-15000, the other side for the same gold; v3 (23.10) as v2 with the numbers "
+                         "evenly 1-19, 5%% of battles both sides full, a ceiling 2000-20000. Evaluations keep v1, the "
+                         "exam's proxy v2")
     ap.add_argument("--drills", type=float, default=0.0,
                     help="share of the battles that are drills (tools/nn/train/drills; e.g. 0.08), taken from the "
                          "other opponents in proportion")

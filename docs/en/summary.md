@@ -331,9 +331,10 @@ the whole field and does not go to the game. 1024 battles at once, a decision ev
 arrive after 0.36 s. v2 with eyes trains at ~3,300-3,900 battle-seconds a second. Battles -
 [random armies](training/armies.md): equal budget, a lord and 0-19 units, ¾ of armies by the game AI's
 templates, numbers jittered ±15 %. Army scheme v1 (budget first; median 5 units) for the checks; v2
-(`run.py --armies v2`, AI-vs-AI battles: numbers of units first, 15-19 units for 36 % of sides, budget up to
-15,000) for training. On v2 the speed in battle-seconds is the same, but battles are ~20-30 % longer (finished
-battles a minute -16 %).
+(numbers of units first, 15-19 units for 36 % of sides, budget up to 15,000) for the exam, `exam_sim` and AI-vs-AI
+battles; v3 (`run.py --armies v3`: the numbers evenly 1-19, 5 % of battles full 20 against 20 with the lords, a
+budget ceiling of 20,000) for training. On v2 the speed in battle-seconds is v1's, but battles are ~20-30 % longer
+(finished battles a minute -16 %).
 
 **Reward v2** (`--reward v2`): win / loss + gold exchange (gold of the enemy destroyed minus our own, over
 the budget) + a price for an order change 0.006 ("keep" and a repeat are free)

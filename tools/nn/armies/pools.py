@@ -243,16 +243,19 @@ def budget_rare(path=None):
     return (share, None if most is None else float(most)) if share > 0 and most is not None else (0.0, None)
 
 
-def armies_v2(path=None):
-    """The second army scheme's numbers (config/nn/pools.json "armies_v2"): {"counts": ((first, last, share), ...),
-    "ceiling": (low, high)}: a side's units besides the lord by bands, the budget ceiling evenly."""
+def armies_v2(path=None, scheme="v2"):
+    """The numbers of an army scheme that draws the units first (config/nn/pools.json "armies_v2", "armies_v3"):
+    {"counts": ((first, last, share), ...), "ceiling": (low, high), "full": share}: a side's units besides the lord by
+    bands, the budget ceiling evenly, the share of battles with both sides full (default 0: no draw)."""
     doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
-    v = doc["armies_v2"]
+    v = doc[f"armies_{scheme}"]
     counts = tuple((int(a), int(b), float(s)) for a, b, s in v["counts"])
     assert counts and all(1 <= a <= b and s > 0 for a, b, s in counts), f"armies_v2 counts {counts}"
     low, high = (float(x) for x in v["ceiling"])
     assert 0 < low <= high, f"armies_v2 ceiling {low}..{high}"
-    return {"counts": counts, "ceiling": (low, high)}
+    full = float(v.get("full", 0.0))
+    assert 0 <= full <= 1, f"armies_{scheme} full {full}"
+    return {"counts": counts, "ceiling": (low, high), "full": full}
 
 
 PROBE_PASSPORTS = project.ROOT / "data" / "units" / "probe-units.json"
