@@ -199,14 +199,14 @@ class GameGeneral:
 
     def _counts(self):
         s = self.rt.stats
-        return {k: s[k] for k in ("plans", "replan_timer", "replan_broken", "replan_lord")}
+        return {k: s[k] for k in ("plans", "replan_timer", "replan_broken", "replan_lord", "replan_near")}
 
     def _records(self, n0, reason=None):
         n1 = self._counts()
         if n1["plans"] <= n0["plans"]:
             return []
         if reason is None:
-            why = [k for k in ("timer", "broken", "lord") if n1[f"replan_{k}"] > n0[f"replan_{k}"]]
+            why = [k for k in ("timer", "broken", "lord", "near") if n1[f"replan_{k}"] > n0[f"replan_{k}"]]
             reason = why[0] if why else "replan"
         self.plans += 1
         return [plan_record(self.rt, self.row, self.env, self._names, self.plans, reason)]

@@ -8,8 +8,9 @@ training (docs/en/training/general.md "How it runs").
   in their zone (a kite battle, a drill) or the config's deploy "script" - the general still plans its groups and
   missions.
 * Re-planning ("Пересмотр замысла"): every replan_s of battle, and on an event - one of our groups broken (more than
-  `broken` of its units at the plan routs or is destroyed), a lord fallen (ours or theirs) - but not sooner than
-  replan_min_s after the last plan. Between plans the groups, missions and targets are locked. A re-plan runs the whole
+  `broken` of its units at the plan routs or is destroyed), a lord fallen (ours or theirs), a standing enemy unit come
+  within replan_near_m of one of our groups' centres that was farther at the plan (the teacher's hold -> attack of all
+  attacking groups together, teacher.py "wait") - but not sooner than replan_min_s after the last plan. Between plans the groups, missions and targets are locked. A re-plan runs the whole
   network again on the armies now (men and health left), the side's observation's tiles and the places' cards of the
   last plan (inertia); the routing take no part in the groups. Every unit's place (net.POS_FEATURES: where it stands,
   its facing and velocity in the side's frame) comes from the side's observation's tokens (at the deployment, from the
@@ -81,7 +82,7 @@ from tools.nn.sim import orders as O
 LEARNER, PAST = 0, 2                    # league.LEARNER, league.CODE["past"] (league imports drills: kept light here)
 # the log's counters (Counts): summed on the device, read once an update (take_stats)
 COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy", "deploys", "deploys_net", "laid_units",
-          "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended", "distinct_bonus",
+          "replan_timer", "replan_broken", "replan_lord", "replan_near", "battles", "replans_ended", "distinct_bonus",
           "distinct_groups", "churn_units", "churn_moved", "kind_kept_groups", "kind_switched", "target_own",
           "target_enemy", "target_tile", "exec_bonus", "exec_bonus_abs", "exec_units", "pairs_ok", "pairs_all",
           "teach_plans", "battle_min", "shoot_groups", "shoot_noshooter", "shoot_units", "shoot_units_nomissile",
@@ -213,7 +214,7 @@ class Runtime:
              "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo), "teach": z(R, dt=Bo),
              "new": z(R, dt=Bo), "teach_use": z(R, G, dt=Bo), "x_sum": z(R, G), "x_n": z(R, G),
              "fire_t0": z(R) - 1.0, "vl_t0": z(R, N) - 1.0, "vl_at": z(R) - 1.0, "vl_lock": z(R, N, dt=Bo),
-             "q_t0": z(R), "q_tr0": z(R), "q_trh": z(R) + float("nan")}
+             "q_t0": z(R), "q_tr0": z(R), "q_trh": z(R) + float("nan"), "near0": z(R, G, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
@@ -407,6 +408,7 @@ class Runtime:
         r["members"][rows] = members
         r["lords"][rows] = torch.stack([own_alive, foe_alive], -1)
         r["t_plan"][rows] = env.st.t[b].float()
+        r["near0"][rows] = self.near_groups(env, rows)            # (the re-plan's event "the enemy near")
         if self.q_h > 0:
             # the kinds' outcomes (module doc): the side's trade at the plan's start (the ended plans read theirs above)
             r["q_t0"][rows] = env.st.t[b].float()
@@ -665,7 +667,10 @@ class Runtime:
         lds = env.st.lord_dead_s[b]
         fell = torch.stack([lds.gather(1, (s - 1)[:, None])[:, 0] >= 0, lds.gather(1, (2 - s)[:, None])[:, 0] >= 0], -1)
         lord = (r["lords"] & fell).any(-1)
-        event = live & (age >= self.gcfg.replan_min_s) & (broken | lord) & ~timer
+        near = torch.zeros_like(lord)
+        if getattr(self.gcfg, "replan_near_m", 0.0) > 0:
+            near = (self.near_groups(env, rows) & ~r["near0"]).any(-1)
+        event = live & (age >= self.gcfg.replan_min_s) & (broken | lord | near) & ~timer
         due = timer | event
         if not bool(due.any()):
             return
@@ -673,7 +678,30 @@ class Runtime:
         self.stats.add("replan_timer", (timer & mine).sum())
         self.stats.add("replan_broken", (event & broken & mine).sum())
         self.stats.add("replan_lord", (event & lord & ~broken & mine).sum())
+        self.stats.add("replan_near", (event & near & ~lord & ~broken & mine).sum())
         self.plan(env, due.nonzero().squeeze(1), deploy=False, obs=obs, reason="replan")
+
+    def near_groups(self, env, rows):
+        """[M, G] our groups of the plans in force of rows [M] (r["main"]) with a standing enemy unit (not routing:
+        the morale state below 6) within replan_near_m of their centre (the mean place of their standing units) in the
+        battles' state now; all False with replan_near_m 0."""
+        G = self.G
+        lim = float(getattr(self.gcfg, "replan_near_m", 0.0))
+        main = self.r["main"][rows]
+        if lim <= 0:
+            return torch.zeros(main.shape[0], G, dtype=torch.bool, device=self.dev)
+        b, s = rows % self.B, rows // self.B + 1
+        u = env.st.u
+        side = u["side"][b]
+        standing = (side > 0) & (u["men"][b] > 0) & ~u["gone"][b] & (u["ms"][b].float() < 5.5)   # (as replan's "out")
+        own = side == s[:, None]
+        p = torch.stack([u["x"][b].float(), u["z"][b].float()], -1)                       # [M, N, 2]
+        mem = ((main[..., None] == torch.arange(G, device=self.dev)) & (standing & own)[..., None]).float()
+        n = mem.sum(1)
+        cent = torch.einsum("mng,mnc->mgc", mem, p) / n.clamp(min=1)[..., None]
+        d = (cent[:, :, None, :] - p[:, None, :, :]).norm(dim=-1)                           # [M, G, N]
+        d = d.masked_fill(~(standing & ~own & (side > 0))[:, None, :], float("inf"))
+        return (n > 0) & (d.min(-1).values < lim)
 
     def after(self, env, r_rows, finished):
         """After a decision's simulator steps: the learner rows' reward r_rows [R] added to their plans; the plans of

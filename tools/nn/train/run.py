@@ -310,6 +310,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "shoot_share": "general_shoot_share", "melee_stay": "general_melee_stay",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
+                 "replan_near_m": "general_replan_near_m",
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
                  "group_centre": "general_group_centre",
                  "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
@@ -1762,7 +1763,11 @@ def parser():
                          "place.py's placement as before (the general still forms groups and gives missions)")
     ap.add_argument("--general-replan-s", type=float, default=30.0, help="general: seconds of battle between plans")
     ap.add_argument("--general-replan-min-s", type=float, default=3.0,
-                    help="general: an event's re-plan (a group broken, a lord fallen) not sooner than this after a plan")
+                    help="general: an event's re-plan (a group broken, a lord fallen, the enemy near) not sooner than "
+                         "this after a plan")
+    ap.add_argument("--general-replan-near-m", type=float, default=250.0,
+                    help="general: the re-plan's event 'the enemy near' - a standing enemy unit within this (m) of one "
+                         "of our groups' centres that was farther at the plan; 0: no such event")
     ap.add_argument("--general-entropy-kind", type=float, default=0.001,
                     help="general: the entropy bonus on the mission kind's choice (simplification 4: on; each head "
                          "apart: the kind's ~ln 10 and the target's ~ln 36 are not one sum)")

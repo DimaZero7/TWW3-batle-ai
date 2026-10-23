@@ -5,10 +5,7 @@ random. Those plans train the executor only: not the general's PPO, the plan val
 (runtime: the row's "teach").
 
 The rule (on the groups' standing units, the state's truth), later rules over earlier ones:
-  every group     wait, then attack: hold the coarse tile it stands on while the nearest standing enemy unit is farther
-                  than HOLD_M from its centre and our shooters have not been firing for FIRE_S yet (the row's `engage`);
-                  then attack the nearest enemy group (by the groups' centres) - S27 waited and met the enemy (80 hold
-                  orders in the first 100 s against the general's 8, build/diag_skv);
+  every group     attack the nearest enemy group (by the groups' centres);
   shooters        a group whose units are mostly shooters (range and ammunition): shoot the enemy group its shots hurt
                   most - the mean HP a shot of its shooters takes from that group's units (shot_hp: the simulator's
                   damage rule melee.per_hit - armour roll, overkill, resistances - less a shield's block of small arms
@@ -22,6 +19,12 @@ The rule (on the groups' standing units, the state's truth), later rules over ea
                   the infantry by the group rule; the human's battle against g31: "withdraw" to the whole infantry in
                   melee, 46 orders, those units killed 0.03 men/s against 0.19). No rule gives "withdraw" to a group
                   that fights and holds;
+  wait            the groups left to attack hold the coarse tile each stands on while the farthest of them has its
+                  nearest standing enemy unit farther than HOLD_M from its centre and our shooters have not been
+                  firing for FIRE_S yet (the row's `engage`); then all attack together - S27 waited and met the enemy
+                  (80 hold orders in the first 100 s against the general's 8, build/diag_skv); by each group alone
+                  (the human's battle against g31) the attack went piecemeal, contact 81 s apart (the runtime's re-plan
+                  on "the enemy near", GeneralConfig.replan_near_m, makes the switch at once);
   the flank       (flank=True, run.py --general-teacher-flank 1; build/diag_flank: the teacher never gave flank, the
                   general picked it for 1-2 % of groups and the measure stayed 0):
                   - two or more of our non-fast groups attack one enemy group X within NEAR_FLANK_M of them: the one
@@ -118,14 +121,6 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     target = near_e.clone()
     use = own_g & has_e
     foe_st = ~own & standing
-    # wait: hold the tile it stands on while the enemy is far and our shooters have not fired long
-    if engage is not None and tiles is not None and on("hold"):
-        de = (cent[:, :G, None, :] - p[:, None, :, :]).norm(dim=-1).masked_fill(~foe_st[:, None, :], float("inf"))
-        far = de.min(-1).values > hold_m                                            # [M, G]
-        t_idx = own_tile(cent[:, :G], tiles, tiles_ok)
-        wait = far & ~engage[:, None] & tiles_ok.any(-1, keepdim=True)
-        kind = torch.where(wait, torch.full_like(kind, k_of("hold")), kind)
-        target = torch.where(wait, 2 * G + t_idx, target)
     # shooters
     sh = torch.einsum("mng,mn->mg", mem[:, :, :G].float(), shooter.float()) / n[:, :G].clamp(min=1)
     shooters = own_g & (sh > 0.5) & on("shoot")
@@ -169,6 +164,15 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
         kind = torch.where(lh, torch.full_like(kind, k_of("hold")), kind)
         target = torch.where(lh, 2 * G + own_tile(cent[:, :G], tiles, tiles_ok), target)
         use = use | lh
+    # wait: the attacking groups hold the tiles they stand on while the farthest of them is far from the enemy and our
+    # shooters have not fired long; then all attack together
+    if engage is not None and tiles is not None and on("hold"):
+        de = (cent[:, :G, None, :] - p[:, None, :, :]).norm(dim=-1).masked_fill(~foe_st[:, None, :], float("inf"))
+        att = use & (kind == k_of("attack"))
+        far = ((de.min(-1).values > hold_m) & att).any(-1, keepdim=True)          # [M, 1] the farthest attacker
+        wait = att & far & ~engage[:, None] & tiles_ok.any(-1, keepdim=True)
+        kind = torch.where(wait, torch.full_like(kind, k_of("hold")), kind)
+        target = torch.where(wait, 2 * G + own_tile(cent[:, :G], tiles, tiles_ok), target)
     # the flank
     if flank and on("flank"):
         fast_g = torch.zeros_like(own_g)

@@ -54,7 +54,7 @@ flowchart TB
 | Layout | `deploy.py` | a rule: a line by the formations' widths on the group's tile, facing the enemy's centre; groups on one tile stand one behind the other; everything inside the zone |
 | Unit task | `runtime.Runtime.task` | for each own unit: its group card (the mix of the places' cards by its shares; by default zeros, `--general-task-group 0`: the executor did not listen to it, KL 0.003; the width kept, older points load), its group's mission kind card (of the executor's table), the group's target (direction from where the unit faces, cos and sin; distance / 100 m, at most 20; a "none" flag) — 2 × card + 4 numbers |
 | Executor | `executor.GeneralActor` | today's unit network; the task goes through a linear layer with zero weights and is added to the unit's token (as the commitment's input); enemies get nothing |
-| Re-planning | `runtime.Runtime.replan` | every 30 s of battle; sooner when a group is broken (more than half of its units rout or are destroyed) or a lord falls (ours or theirs), but not sooner than 3 s after the plan. Between plans the groups, missions and targets are locked |
+| Re-planning | `runtime.Runtime.replan` | every 30 s of battle; sooner when a group is broken (more than half of its units rout or are destroyed), a lord falls (ours or theirs) or a standing enemy comes within 250 m of the centre of one of our groups that had none so near at the plan (`--general-replan-near-m`, 0 — off; the log's `replan_near`, the companion's reason `near`), but not sooner than 3 s after the plan. Between plans the groups, missions and targets are locked |
 | Reward | `tools/nn/train/reward.py` | as now (v2); the bonus for carrying a mission out is not in the reward (only in the executor's units' advantage) |
 | Plan value | `General.value` | predicts the plan's return from the plan's cards (detached); with `--general-return critic` the advantage's base is the unit critic, and it learns beside it |
 | Missions that tell apart | `distinct.py`, `runtime.behave` | (`--general-distinct W`) a classifier guesses a group's mission kind from its units' behaviour; the executor's bonus, in units of its advantage's spread |
@@ -124,7 +124,7 @@ How the battle goes:
   bridge's, as before: `deploy` in the game is always `script` (the bridge does not move units yet), the checkpoint's
   value is overridden. The general splits the army into groups and gives missions; it picks no places.
 - **Re-planning** - the same rules: every 30 s of **battle time** (the state's `t`, so the game's speed-up x3-x10
-  changes nothing), a broken group, a lord fallen; not sooner than 3 s after the last plan.
+  changes nothing), a broken group, a lord fallen, the enemy within 250 m of a group; not sooner than 3 s after the last plan.
 - **The unit task** - every decision (once a second of battle); it goes into the executor with the usual input.
 - Without a general in the checkpoint (or with `--no-general`) the companion works as before, to the bit.
 - The missions' measures are not computed in the game (there is no training there); no teacher.
@@ -424,12 +424,15 @@ of the battles (drawn at the battle's start by its own generator — at P = 0 th
 same) the learner side's missions come from the rule, the groups from the network. The rule (on the groups' standing
 units), later over earlier:
 
-- every group first **waits**: `hold` the tile it stands on while the nearest standing enemy unit is farther than
-  250 m from its centre (`--general-teacher-hold-m`) and our shooters have been firing less than 30 s
-  (`--general-teacher-fire-s`; the first volley's time is the row's `fire_t0`); then — `attack` the nearest enemy group
-  (by the groups' centres). S27 waited and met the enemy (80 hold orders in the first 100 s against the general's 8,
-  `build/diag_skv`); the old teacher sent everyone to attack from the first second. The switch comes at the next
-  re-plan (every 30 s or on an event);
+- every group — `attack` the nearest enemy group (by the groups' centres), but first it **waits** (the rule comes after
+  all the others, for the groups left with `attack`): all attacking groups hold (`hold`) the tile they stand on while
+  for **the farthest** of them the nearest standing enemy unit is farther than 250 m from its centre
+  (`--general-teacher-hold-m`) and our shooters have been firing less than 30 s (`--general-teacher-fire-s`; the first
+  volley's time is the row's `fire_t0`); then **all attack together**. S27 waited and met the enemy (80 hold orders in
+  the first 100 s against the general's 8, `build/diag_skv`); the old teacher sent everyone to attack from the first
+  second. With the condition per group alone the attack went piecemeal (the human's battle against g31: the groups'
+  contact 81 s apart). The switch is at once: the re-plan on the event "the enemy near" (below,
+  `--general-replan-near-m`), not only every 30 s;
 - a group of mostly shooters (range and ammunition) — `shoot` the enemy group its shot takes the most health from:
   the mean over the pairs "our shooter — a unit of the target group" of a hit's expected damage by the simulator's rule
   (`melee.per_hit`, as in `missile.volley`: the projectile's damage and armour-piercing against the target's armour,
@@ -824,7 +827,7 @@ general-kind-own-signal=0 general-branch-cap=64`).
 
 **A point that already has a general.** Its settings (`GeneralConfig`) are saved in the point and taken from there. A
 rule's option given on the command line goes over the saved value: `--general-deploy`, `--general-replan-s`,
-`--general-replan-min-s`, `--general-rounds`, `--general-zone`, `--general-kind-stick` (a point without the field: 1),
+`--general-replan-min-s`, `--general-replan-near-m` (a point without the field: 250), `--general-rounds`, `--general-zone`, `--general-kind-stick` (a point without the field: 1),
 `--general-task-mask` (a point without the field: 1), `--general-shoot-share` (a point without the field: 0.5), `--general-melee-stay` (a point without the field: 1), the atlas's repairs `--general-groups`, `--general-group-r`, `--general-lord-join-m`, `--general-split-kinds`, `--general-tile-feats`, `--general-tile-norm`, `--general-threat`, `--general-task-group`, `--general-group-tiles` (a point without these fields — g15–g17r and before — plays as before: `net`, 0, `v1`, 0, 0, 1; on loading the line `general: a checkpoint saved before the atlas's repairs`; the new weights — the executor's table `exec_kinds` (a copy of the point's `kinds`) and the threat layer (zeros) — load fresh, Adam afresh for them; the fight's layer `fight_in` and the tiles-under-the-group layer `gtile_in` of a point without them are zeros, on loading the line `general: a checkpoint without the layers …`: the point plays as before until they learn); one not given stays as in the point (an option's
 default never goes over the point). A size's option (`--general-card`, `-hidden`, `-council-layers`, `-heads`,
 `-group-layers`, `-places`, `-kinds`, `-target-grid`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the

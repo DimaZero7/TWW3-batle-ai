@@ -161,6 +161,46 @@ def test_the_plan_is_locked_between_replans_and_replans_on_its_events():
     assert rt.stats["replan_lord"] == n0 + 2                         # both sides: their lord, our lord
 
 
+def test_a_replan_comes_once_when_the_enemy_comes_near_a_group():
+    """GeneralConfig.replan_near_m: a standing enemy unit within 250 m of one of our groups' centres that was farther
+    at the plan - a re-plan (not sooner than replan_min_s after the plan), once: the new plan knows it near."""
+    env = battles(B=2, mix={"self": 1.0})
+    actor, crit = nets()
+    env.step(actor, crit)
+    rt = env.general_rt
+    r = rt.r
+    assert rt.gcfg.replan_near_m == 250.0
+    row = 0
+    b, s = row % env.B, row // env.B + 1
+    u = env.st.u
+    near = rt.near_groups(env, torch.tensor([row]))[0]
+    g = int(torch.nonzero(r["active"][row][:rt.G] & ~near)[0])       # a group with no enemy near (the start: far)
+    mem = (r["main"][row] == g) & (u["side"][b] == s)
+    cx, cz = float(u["x"][b][mem].mean()), float(u["z"][b][mem].mean())
+    foe = int(torch.nonzero((u["side"][b] == 3 - s) & (u["men"][b] > 0))[0])
+
+    def bring():
+        u["x"][b, foe], u["z"][b, foe] = cx + 100.0, cz
+    n0, k0 = rt.stats["replan_near"], int(r["n_replan"][row])
+    bring()
+    env.step(actor, crit)
+    assert rt.stats["replan_near"] == n0                              # a second after the plan: not yet
+    r["t_plan"][row] -= 5.0
+    bring()
+    env.step(actor, crit)
+    assert rt.stats["replan_near"] >= n0 + 1 and int(r["n_replan"][row]) == k0 + 1
+    assert bool(r["near0"][row].any())                                # the new plan knows it near
+    n1 = rt.stats["replan_near"]
+    r["t_plan"][row] -= 5.0
+    bring()
+    env.step(actor, crit)
+    assert int(r["n_replan"][row]) == k0 + 1                          # once
+    off = dataclasses.replace(rt.gcfg, replan_near_m=0.0)
+    rt.gcfg = off
+    assert not bool(rt.near_groups(env, torch.tensor([row])).any())
+    assert n1 >= n0 + 1
+
+
 def test_the_task_is_for_own_units_in_a_group_only():
     env = battles(B=4)
     actor, crit = nets()

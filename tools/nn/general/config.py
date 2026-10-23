@@ -111,8 +111,11 @@ class GeneralConfig:
     #                            place.py's placement as before (the general still forms groups and gives missions)
     # --- re-planning ("Пересмотр замысла") ---
     replan_s: float = 30.0     # the plan is made again every this many seconds of battle ...
-    replan_min_s: float = 3.0  # ... and on an event (a group broken, a lord fallen), but not sooner than this after
-    #                            the last plan
+    replan_min_s: float = 3.0  # ... and on an event (a group broken, a lord fallen, the enemy near), but not sooner
+    #                            than this after the last plan
+    replan_near_m: float = 250.0  # ... the event "the enemy near": a standing enemy unit within this of one of our
+    #                            groups' centres that was farther at the plan (teacher.HOLD_M: the teacher's waiting
+    #                            groups attack together at once, not at the next 30 s plan); 0: no such event
     broken: float = 0.5        # a group is broken when more than this share of its units routs or is destroyed
     # --- the executor's task input ("Задание отряда") ---
     dist_m: float = 100.0      # a target's distance from the unit / this ...

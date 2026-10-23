@@ -326,6 +326,36 @@ def test_flank_in_melee_counts_by_the_side_the_contact_began_on():
         _flank_m(u, "side")
 
 
+def test_the_teachers_attacking_groups_wait_for_the_farthest_and_attack_together():
+    """The wait by the farthest attacking group: g0 200 m from the enemy, g1 400 m - both hold (by each group alone g0
+    would attack now); the enemy within 250 m of both: both attack at once; the shooters' clock: both attack."""
+    N = 4
+    # ours: 0 spear (g0, 200 m from e0), 1 spear (g1, 400 m); theirs: 2-3 (e0)
+    x = torch.tensor([[0.0, -200, 200, 210]])
+    z = torch.tensor([[0.0, 300, 0, 0]])
+    main = torch.tensor([[0, 1, G, G]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, G]] = True
+    own = torch.tensor([[True, True, False, False]])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    no = torch.zeros(1, N, dtype=torch.bool)
+    tiles = torch.tensor([[[0.0, 0.0], [-200.0, 300.0]] + [[5000.0, 5000.0]] * (C - 2)])
+    tiles_ok = torch.tensor([[True, True] + [False] * (C - 2)])
+    kw = dict(tiles=tiles, tiles_ok=tiles_ok, engage=torch.tensor([False]), flank=False)
+    kind, target, _ = teacher.choose(main, active, x, z, own, standing, no, no, G, CFG.kinds, **kw)
+    assert int(kind[0, 0]) == K["hold"] and int(kind[0, 1]) == K["hold"]          # g0 waits for g1
+    assert int(target[0, 0]) == 2 * G and int(target[0, 1]) == 2 * G + 1           # each its own tile
+    x2, z2 = x.clone(), z.clone()
+    x2[0, 2:] = torch.tensor([-50.0, -40.0])
+    z2[0, 2:] = torch.tensor([150.0, 150.0])                                       # within 250 m of both
+    kind, target, _ = teacher.choose(main, active, x2, z2, own, standing, no, no, G, CFG.kinds, **kw)
+    assert int(kind[0, 0]) == K["attack"] and int(kind[0, 1]) == K["attack"]
+    assert int(target[0, 0]) == G and int(target[0, 1]) == G
+    kind, _, _ = teacher.choose(main, active, x, z, own, standing, no, no, G, CFG.kinds,
+                                **dict(kw, engage=torch.tensor([True])))
+    assert int(kind[0, 0]) == K["attack"] and int(kind[0, 1]) == K["attack"]
+
+
 def test_the_teacher_gives_no_withdraw_to_the_lords_group_in_melee():
     """The lord threatened: his group withdraws only out of melee; fighting in melee and holding (none wavering:
     taskmask.fighting) it holds the tile it stands on; a unit wavering lets it withdraw. melee None: as before."""
