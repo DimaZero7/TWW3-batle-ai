@@ -1,6 +1,7 @@
 """Metric profiles with torch: the evaluation computes only the chosen blocks and the same mandatory
 numbers (evaluate.play measure), the fatigue tracker (behaviour.Fatigue), test5's evaluation wiring
 (spies) and the gap card's simulator replay of a recorded start (tools/nn/train/gapsim.py)."""
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -84,6 +85,53 @@ class TestEvaluationProfiles:
         res = test5.evaluation(None, SimpleNamespace(eval=8, drill_eval=16), "cpu", SimpleNamespace(meta=lambda: {}))
         assert seen["drills"] and res["profile"] == "full"
         assert test5.metrics({"by_opponent": {}, "profile": "mandatory"})["profile"] == "mandatory"
+
+    def test_no_script_metrics_plays_no_script_battles_and_no_references(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(evaluate, "play", lambda *a, **k: seen.setdefault("play", True))
+        monkeypatch.setattr(evaluate, "play_drills", lambda *a, **k: seen.setdefault("drills", {}))
+        monkeypatch.setattr(test5.exam_sim, "play", lambda *a, **k: seen.setdefault(
+            "exam", {"battles": 4, "pairs": [1, 0, 0], "expected": [1.0, 0.0], "wins12": 9.0, "trade": {"value": 0.1, "se": 0.05},
+                     "lord_dead_own": 0.25, "by_seed": {}}))
+        monkeypatch.setattr(test5.refs, "start", lambda **k: seen.__setitem__("refs", k))
+        args = SimpleNamespace(eval=8, drill_eval=16, profiles=("exam",), no_script_metrics=True)
+        assert test5.references(args) is None and "refs" not in seen and evaluate.REFS_READY is None
+        res = test5.evaluation(None, args, "cpu", SimpleNamespace(meta=lambda: {}), last=True)
+        assert "play" not in seen and "drills" not in seen and res["exam"]["lord_dead_own"] == 0.25
+        assert res["no_script_metrics"] and res["key"]["no_script_metrics"] and res["key"]["opponents"] == []
+        assert test5.evaluation(None, args, "cpu", SimpleNamespace(meta=lambda: {}))["by_opponent"] == {}
+        # the drills chosen: only the drills' check scripts are looked for, not the script baselines
+        args.profiles = ("drills",)
+        test5.references(args)
+        assert seen["refs"]["scripts"] == () and seen["refs"]["drills"] is None
+        test5.evaluation(None, args, "cpu", SimpleNamespace(meta=lambda: {}))
+        assert "drills" in seen and "play" not in seen
+        # without the flag the script baselines are started as before
+        seen.pop("refs")
+        test5.references(SimpleNamespace(eval=8, drill_eval=16, profiles=()))
+        assert seen["refs"]["scripts"] == test5.OPPONENTS and seen["refs"]["drills"] == ()
+        evaluate.REFS_READY = None
+
+    def test_the_profiles_of_the_script_battles_are_left_out(self):
+        kept, dropped = test5.without_scripts(("behaviour", "fatigue", "drills", "capacity", "exam"))
+        assert kept == ("drills", "exam") and dropped == ("behaviour", "fatigue", "capacity")
+
+    def test_the_report_of_a_step_without_script_metrics(self, tmp_path):
+        rows = [{"update": u, "games": {"pinned/attack": 10, "pinned/defend": 30, "self/attack": 60},
+                 "win_rate": {"pinned/attack": 0.5, "pinned/defend": 0.2}, "lord_dead_own": 0.1 * u} for u in (1, 2, 3)]
+        (tmp_path / "log.jsonl").write_text("".join(json.dumps(r) + chr(10) for r in rows), encoding="utf-8")
+        w = test5.window(tmp_path, 1, 3)
+        assert w["pinned/attack"] == {"games": 20, "wins": 10, "win_rate": 0.5}
+        assert w["pinned/all"]["games"] == 80 and w["pinned/all"]["wins"] == 22
+        assert w["lord_dead_own"] == pytest.approx(0.25) and w["games"] == 200 and w["updates"] == [2, 3]
+        assert test5.window(tmp_path, 3, 9) is None and test5.window(tmp_path / "none", 0, 9) is None
+        exam = {"battles": 4, "pairs": [1, 0, 0], "expected": [1.0, 0.0], "wins12": 9.0,
+                "trade": {"value": 0.1, "se": 0.05}, "lord_dead_own": 0.25, "by_seed": {}}
+        before = test5.metrics({"by_opponent": {}, "battles": {}, "no_script_metrics": True, "profile": "mandatory+exam"})
+        after = test5.metrics({"by_opponent": {}, "battles": {}, "no_script_metrics": True, "exam": exam, "window": w})
+        text = chr(10).join(test5.table(before, after) + test5.trend([(0, before), ("40", after)]))
+        assert "win vs pinned, all" in text and "0.275 (n 80)" in text and "exam's proxy: own lord dead" in text
+        assert before["no_script_metrics"] and "skill" in before
 
 
 class TestGapSim:

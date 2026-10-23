@@ -141,7 +141,7 @@ def resolve(path):
 
 
 def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fighters=True, seed=1, limit_s=LIMIT_S):
-    """The proxy of one network (an actor) -> summary() + {enemy, R, seeds, armies, fighters, seconds, per_battle:
+    """The proxy of one network (an actor) -> summary() + {enemy, R, seeds, armies, fighters, seconds, lord_dead_own, per_battle:
     {won, side, seed, trade, margin, destroyed, lost, budget}}. enemy: a checkpoint path or an actor. The draws (the
     orders, the latency) come from their own random state: the caller's (a training's) is left as it was."""
     import torch
@@ -165,6 +165,9 @@ def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fight
                             seeds=bank, armies=ARMIES, defend=True)
     b = res["battles"]["past"]
     out = summary(b["won"], b["side"], b["seed"], b["trade"], res["by_opponent"]["past"].get("timeouts"))
+    lord = res["by_opponent"]["past"].get("lord_dead_own")         # own lord deaths in its battles (test5's mandatory set)
+    if lord is not None:
+        out["lord_dead_own"] = round(float(lord), 4)
     out.update(enemy=name, R=int(r), seeds=[int(s) for s in seeds], armies=ARMIES, fighters=bool(fighters),
                seconds=round(time.time() - t0),
                per_battle={k: b[k] for k in ("won", "side", "seed", "trade", "margin", "destroyed", "lost", "budget")})

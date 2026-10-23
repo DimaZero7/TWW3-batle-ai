@@ -1,7 +1,8 @@
 """Metric profiles: which metrics a run computes (docs/en/training/workflow.md "Metric profiles").
 
 Every evaluation, gate summary and gap card computes a small MANDATORY set: in test5 the rating, the
-pair gold against each script (with the script baselines) and own lord deaths; in a gate summary the
+pair gold against each script (with the script baselines) and own lord deaths (test5 --no-script-metrics: own lord
+deaths only, in the exam's proxy and the training window; no script battles, no baselines); in a gate summary the
 outcomes, the pairs, the pair gold and own lord deaths; in a gap card the result, the trade, the gold
 each side lost and own lord deaths. Everything else is a named profile chosen per run
 (`--profile drills,transfer`); "full" is every profile of that tool but the opt-in ones (OPT_IN: named
