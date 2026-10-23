@@ -96,6 +96,11 @@ class GeneralConfig:
     #                            the default: those that cost nothing at minute 0 (docs "Task masks": the ablation)
     shoot_share: float = 0.5   # ... "shoot" for a group whose shooters are at least this share of its units (net.shoot_ok;
     #                            "at least one" let 61-66 % of the units under shoot be infantry without missiles)
+    melee_stay: bool = True    # "withdraw" not for a group that fights in melee and has not wavered (net.melee_ok,
+    #                            taskmask.fighting: some unit in melee, none wavering or worse); the teacher keeps the same
+    #                            rule (a rule, not a weight: an older checkpoint gets it too). The human's battle against
+    #                            g31: the whole infantry with the lord got "withdraw" in melee, 46 orders, those units
+    #                            killed 0.03 men/s against 0.19; False: withdraw anywhere
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet

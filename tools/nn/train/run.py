@@ -307,7 +307,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "center": "general_center", "sharp": "general_sharp", "stick": "general_stick",
                  "kind_stick": "general_kind_stick", "task_mask": "general_task_mask",
                  "task_mask_parts": "general_task_mask_parts",
-                 "shoot_share": "general_shoot_share",
+                 "shoot_share": "general_shoot_share", "melee_stay": "general_melee_stay",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
@@ -1707,6 +1707,9 @@ def parser():
     ap.add_argument("--general-shoot-share", type=float, default=0.5,
                     help="general: with --general-task-mask 1, 'shoot' only for a group whose shooters (a missile range "
                          "on the card) are at least this share of its units (a rule, saved with the checkpoint)")
+    ap.add_argument("--general-melee-stay", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 'withdraw' not for a group fighting in melee that has not wavered (some unit in "
+                         "melee, none wavering or worse); the teacher keeps the rule too; 0: withdraw anywhere")
     ap.add_argument("--general-groups", default="rule", choices=("rule", "net"),
                     help="general: the group collection - 'rule' (tools/nn/general/groups.py: roles, then clusters by "
                          "place, both sides alike; the attention's collection learns nothing) or 'net' (the learned slot "

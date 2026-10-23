@@ -122,7 +122,8 @@ def test_under_fire_is_a_firing_enemy_not_in_melee_with_the_unit_its_target():
 
 
 def test_the_groups_fight_shares_and_their_layer_from_zero():
-    on, off = model(), model(dataclasses.replace(CFG, threat=False))
+    # (the melee rule off in both: here the layer from zero alone; melee_stay closes "withdraw" to fighting groups)
+    on, off = model(dataclasses.replace(CFG, melee_stay=False)), model(dataclasses.replace(CFG, threat=False))
     inp = inputs()
     N = inp["on"].shape[1]
     fight = torch.zeros(2, N, 2, dtype=torch.float64)

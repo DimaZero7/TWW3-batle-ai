@@ -324,3 +324,36 @@ def test_flank_in_melee_counts_by_the_side_the_contact_began_on():
     assert _flank_m(u) == pytest.approx(0.0)
     with pytest.raises(ValueError):
         _flank_m(u, "side")
+
+
+def test_the_teacher_gives_no_withdraw_to_the_lords_group_in_melee():
+    """The lord threatened: his group withdraws only out of melee; fighting in melee and holding (none wavering:
+    taskmask.fighting) it holds the tile it stands on; a unit wavering lets it withdraw. melee None: as before."""
+    N = 5
+    # ours: 0 lord + 1 spear (g0), 2 spear (g1); theirs: 3 (e0, 40 m from the lord), 4 (e1)
+    x = torch.tensor([[0.0, 20, 300, 40, 900]])
+    z = torch.zeros(1, N)
+    main = torch.tensor([[0, 0, 1, G, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, G, G + 1]] = True
+    own = torch.tensor([[True] * 3 + [False] * 2])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    no = torch.zeros(1, N, dtype=torch.bool)
+    lord = torch.tensor([[True, False, False, False, False]])
+    tiles = torch.tensor([[[0.0, 0.0], [300.0, 0.0]] + [[5000.0, 5000.0]] * (C - 2)])
+    tiles_ok = torch.tensor([[True, True] + [False] * (C - 2)])
+    args = (main, active, x, z, own, standing, no, lord, G, CFG.kinds)
+    kw = dict(tiles=tiles, tiles_ok=tiles_ok)
+    kind, target, _ = teacher.choose(*args, **kw)                               # no melee known: withdraw
+    assert int(kind[0, 0]) == K["withdraw"] and int(target[0, 0]) == 1
+    out = torch.tensor([[False] * N])
+    kind, _, _ = teacher.choose(*args, **kw, melee=out, waver=out)              # out of melee: withdraw
+    assert int(kind[0, 0]) == K["withdraw"]
+    melee = torch.tensor([[False, True, False, True, False]])                   # the spear of g0 fights
+    kind, target, use = teacher.choose(*args, **kw, melee=melee, waver=out)
+    assert int(kind[0, 0]) == K["hold"] and int(target[0, 0]) == 2 * G + 0 and bool(use[0, 0])   # its own tile
+    waver = torch.tensor([[False, True, False, False, False]])
+    kind, _, _ = teacher.choose(*args, **kw, melee=melee, waver=waver)          # the spear wavers: withdraw
+    assert int(kind[0, 0]) == K["withdraw"]
+    kind, _, _ = teacher.choose(*args, melee=melee, waver=out)                   # no tiles: no withdraw either
+    assert int(kind[0, 0]) != K["withdraw"]

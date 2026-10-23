@@ -323,6 +323,17 @@ are on** (the "default" column), the harmful ones are off — why, in the table 
 | (general) | `shoot_group` | the kind `shoot` only for a group with at least the share `--general-shoot-share` of shooters | yes |
 | `shoot` | `shoot_volley` | **the volley lock**: a shooter that fires or aims gets nothing but "keep" (no move, no other target, no "hold") until its volley (below) | yes |
 
+**No "withdraw" for those who fight** (a flag of its own, `--general-melee-stay 1`, the default; the field
+`GeneralConfig.melee_stay`, a checkpoint without it — 1). The general cannot give `withdraw` to a group that fights and
+holds: at least one of its units in melee (the state's melee flag, the input `fight`) and none wavering (morale
+"wavering" or worse, a column of the input `num`; routing units are in no group). Other kinds stay open. The teacher
+keeps the same rule (`taskmask.fighting` — one code for both), so the imitation meets no masked pair. Why: in the
+human's battle against g31 (`build/diag_human_g31`) the whole infantry got "withdraw" in the middle of melee — the lord
+stands in one group with the infantry by the group rule, and a threat to the lord pulled everyone back (46 orders);
+those units killed 0.03 men/s instead of 0.19. The threshold is "at least one unit": a group leaving melee gives the
+enemy blows in the back at everyone who fights, while a wavering group may be pulled out. The executor under
+`withdraw` keeps its attack: the part `withdraw_attack` is off by default (test).
+
 **The volley lock** (`shoot_volley`). In the game any new order resets a shooter's aim (in the simulator too,
 `missile.aim_reset_on_order`). In the g15 battle as the Empire (seed 1000920026, 0:10) the executor under `shoot` gave
 ~10 shooters a new move or another target every second: they aimed 1-3 s and never reached a volley. The lock:
@@ -421,7 +432,10 @@ units), later over earlier:
   re-plan (every 30 s or on an event);
 - a group of mostly shooters (range and ammunition) — `shoot` the nearest enemy group;
 - one group — not shooters, without the lord, nearest to our largest shooting group — `screen` it;
-- the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group;
+- the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group, but only
+  if the group does not fight in melee (or someone in it wavers). Fighting and holding — `hold` of the tile it stands
+  on (by the group rule the lord is usually in a group with infantry; the teacher cannot split him off — the groups are
+  the network's). The same rule as the general's mask `--general-melee-stay` (["Task masks"](#task-masks));
 - **the flank** (`--general-teacher-flank 1`, the default): (1) where two or more of our (not fast) groups attack one
   enemy group, the one nearest to the point in front of the target (100 m ahead of its centre along its units' mean
   facing) attacks (pins it), the others get `flank` of the same group if it is within 300 m of their centre; (2) a fast
@@ -803,7 +817,7 @@ general-kind-own-signal=0 general-branch-cap=64`).
 **A point that already has a general.** Its settings (`GeneralConfig`) are saved in the point and taken from there. A
 rule's option given on the command line goes over the saved value: `--general-deploy`, `--general-replan-s`,
 `--general-replan-min-s`, `--general-rounds`, `--general-zone`, `--general-kind-stick` (a point without the field: 1),
-`--general-task-mask` (a point without the field: 1), `--general-shoot-share` (a point without the field: 0.5), the atlas's repairs `--general-groups`, `--general-group-r`, `--general-lord-join-m`, `--general-split-kinds`, `--general-tile-feats`, `--general-tile-norm`, `--general-threat`, `--general-task-group`, `--general-group-tiles` (a point without these fields — g15–g17r and before — plays as before: `net`, 0, `v1`, 0, 0, 1; on loading the line `general: a checkpoint saved before the atlas's repairs`; the new weights — the executor's table `exec_kinds` (a copy of the point's `kinds`) and the threat layer (zeros) — load fresh, Adam afresh for them; the fight's layer `fight_in` and the tiles-under-the-group layer `gtile_in` of a point without them are zeros, on loading the line `general: a checkpoint without the layers …`: the point plays as before until they learn); one not given stays as in the point (an option's
+`--general-task-mask` (a point without the field: 1), `--general-shoot-share` (a point without the field: 0.5), `--general-melee-stay` (a point without the field: 1), the atlas's repairs `--general-groups`, `--general-group-r`, `--general-lord-join-m`, `--general-split-kinds`, `--general-tile-feats`, `--general-tile-norm`, `--general-threat`, `--general-task-group`, `--general-group-tiles` (a point without these fields — g15–g17r and before — plays as before: `net`, 0, `v1`, 0, 0, 1; on loading the line `general: a checkpoint saved before the atlas's repairs`; the new weights — the executor's table `exec_kinds` (a copy of the point's `kinds`) and the threat layer (zeros) — load fresh, Adam afresh for them; the fight's layer `fight_in` and the tiles-under-the-group layer `gtile_in` of a point without them are zeros, on loading the line `general: a checkpoint without the layers …`: the point plays as before until they learn); one not given stays as in the point (an option's
 default never goes over the point). A size's option (`--general-card`, `-hidden`, `-council-layers`, `-heads`,
 `-group-layers`, `-places`, `-kinds`, `-target-grid`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the
 run: the weights would not fit. The log at the start has the line `general: from the checkpoint …; overridden by

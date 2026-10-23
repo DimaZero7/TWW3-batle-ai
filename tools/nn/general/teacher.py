@@ -11,7 +11,12 @@ The rule (on the groups' standing units, the state's truth), later rules over ea
                   orders in the first 100 s against the general's 8, build/diag_skv);
   shooters        a group whose units are mostly shooters (range and ammunition): shoot the nearest enemy group;
   one screen      the non-shooting group without the lord nearest to our largest shooting group screens it;
-  the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group;
+  the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group -
+                  unless the group fights in melee and holds (some unit in melee, none wavering: taskmask.fighting, the
+                  general's mask GeneralConfig.melee_stay): then it holds the tile it stands on (the lord rides with
+                  the infantry by the group rule; the human's battle against g31: "withdraw" to the whole infantry in
+                  melee, 46 orders, those units killed 0.03 men/s against 0.19). No rule gives "withdraw" to a group
+                  that fights and holds;
   the flank       (flank=True, run.py --general-teacher-flank 1; build/diag_flank: the teacher never gave flank, the
                   general picked it for 1-2 % of groups and the measure stayed 0):
                   - two or more of our non-fast groups attack one enemy group X within NEAR_FLANK_M of them: the one
@@ -28,6 +33,7 @@ general's imitation of the teacher (learn.py) never meets a masked pair.
 import torch
 
 from tools.nn.general import config as gconfig
+from tools.nn.general import taskmask as gtaskmask
 
 THREAT_M = 150.0         # the lord is threatened by a standing enemy unit this close
 HOLD_M = 250.0           # a group holds while the nearest standing enemy unit is farther than this (run.py
@@ -40,14 +46,21 @@ PIN_M = 150.0            # ... a holding / screening group pins its nearest enem
 INDEX = {k.name: k.index for k in gconfig.MISSION_KINDS}
 
 
+def own_tile(cent, tiles, tiles_ok):
+    """[M, G] the coarse tile (of those that may be targets) nearest to each group's centre cent [M, G, 2]."""
+    dt = (cent[:, :, None, :] - tiles[:, None, :, :]).norm(dim=-1).masked_fill(~tiles_ok[:, None, :], float("inf"))
+    return dt.argmin(-1)
+
+
 def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=None, tiles_ok=None, engage=None,
-           hold_m=HOLD_M, facing=None, flank=True, fast=None):
+           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None):
     """-> (kind [M, G], target [M, G], use [M, G]: our groups the rule gives a mission) of plans [M]: main [M, N] the
     plan's group numbers, active [M, 2G], the units' x, z, own, standing, shooter, lord [M, N]; kinds: the network's
     number of kinds (a rule whose kind is beyond it is not used); tiles [M, C, 2] the coarse tiles' world centres,
     tiles_ok [M, C] those that may be targets, engage [M] our shooters have fired FIRE_S (None: no waiting - every
     group attacks); facing [M, N] the units' facings (degrees, the state's b; None: the flank rule by the centres),
-    flank: the flank rule on, fast [M, N] the units of the role "fast" (groups.roles; None: no fast groups)."""
+    flank: the flank rule on, fast [M, N] the units of the role "fast" (groups.roles; None: no fast groups); melee,
+    waver [M, N] the units in melee and those wavering or worse (None: nobody - the lord's group withdraws always)."""
     M, N = main.shape
     dev = main.device
     ar = torch.arange(2 * G, device=dev)
@@ -70,9 +83,7 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     if engage is not None and tiles is not None and on("hold"):
         de = (cent[:, :G, None, :] - p[:, None, :, :]).norm(dim=-1).masked_fill(~foe_st[:, None, :], float("inf"))
         far = de.min(-1).values > hold_m                                            # [M, G]
-        dt = (cent[:, :G, None, :] - tiles[:, None, :, :]).norm(dim=-1).masked_fill(~tiles_ok[:, None, :],
-                                                                                   float("inf"))
-        t_idx = dt.argmin(-1)
+        t_idx = own_tile(cent[:, :G], tiles, tiles_ok)
         wait = far & ~engage[:, None] & tiles_ok.any(-1, keepdim=True)
         kind = torch.where(wait, torch.full_like(kind, k_of("hold")), kind)
         target = torch.where(wait, 2 * G + t_idx, target)
@@ -105,10 +116,19 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     other[:, torch.arange(G, device=dev), torch.arange(G, device=dev)] = -1.0
     o_idx = other.argmax(-1)
     has_o = other.max(-1).values > 0
-    wd = own_g & lord_g & threat[:, None] & has_o & on("withdraw")
+    fights = torch.zeros_like(own_g)
+    if melee is not None:
+        fights = gtaskmask.fighting(mem[:, :, :G], melee, torch.zeros_like(melee) if waver is None else waver)
+    wd = own_g & lord_g & threat[:, None] & has_o & on("withdraw") & ~fights
     kind = torch.where(wd, torch.full_like(kind, k_of("withdraw")), kind)
     target = torch.where(wd, o_idx, target)
     use = use | wd
+    # ... the lord's group fighting in melee: holds the tile it stands on (no withdraw, no chase)
+    if tiles is not None and on("hold"):
+        lh = own_g & lord_g & threat[:, None] & fights & tiles_ok.any(-1, keepdim=True)
+        kind = torch.where(lh, torch.full_like(kind, k_of("hold")), kind)
+        target = torch.where(lh, 2 * G + own_tile(cent[:, :G], tiles, tiles_ok), target)
+        use = use | lh
     # the flank
     if flank and on("flank"):
         fast_g = torch.zeros_like(own_g)

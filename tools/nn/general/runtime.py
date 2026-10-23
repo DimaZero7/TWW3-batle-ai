@@ -475,7 +475,16 @@ class Runtime:
                                (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds,
                                tiles=tiles, tiles_ok=tiles_ok, engage=engage, hold_m=self.teach_hold_m,
                                facing=f("b"), flank=self.teach_flank,
-                               fast=ggroups.roles(self.b["num"][b], self.b["lab"][b]) == ggroups.ROLES.index("fast"))
+                               fast=ggroups.roles(self.b["num"][b], self.b["lab"][b]) == ggroups.ROLES.index("fast"),
+                               **self._teach_fight(f))
+
+    def _teach_fight(self, f):
+        """The teacher's melee rule's inputs (teacher.choose melee, waver) of the state's fields f(name) -> [M, N]:
+        the units in melee and those wavering or worse - only with GeneralConfig.melee_stay (else none: the lord's
+        group withdraws as before)."""
+        if not getattr(self.gcfg, "melee_stay", False):
+            return {}
+        return {"melee": f("m").bool(), "waver": f("ms").float() >= gunits.WAVERING_MS}
 
     def teach_clock(self):
         """The teacher's clock runs (after()): taught battles, or mission branches against the teacher."""
