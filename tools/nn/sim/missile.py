@@ -909,10 +909,16 @@ def friend_lines(u, pw, target, params, contact=None):
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     dh = ha - hm
 
-    def chance(y, s_off, high, who):
-        """[B, i, k]: friend k blocks the path of i's man y m ahead of i's centre along the line, s_off m across it
-        (None: i's men across its width, the share of them whose path k covers)."""
+    def place(y):
+        """The path of i's man y m ahead of i's centre along the line: (L, the friends' centre interval along it lo..hi,
+        how far across the path has come towards the target's centre at each friend)."""
         L = (dist - y).clamp(min=1.0)
+        lo = torch.maximum(along - span - y, ri + rk)
+        hi = torch.minimum(along + span - y, edge - y)
+        return L, lo, hi, (1 - (along - y) / L).clamp(min=0)
+
+    def block(L, lo, hi, high):
+        """[B, i, k] the chance a path that crosses friend k (place) passes below one of its men's heads."""
         if arc is None and not high:
             tan, a = dh / L, torch.zeros_like(L)                         # a straight line
         else:
@@ -930,30 +936,33 @@ def friend_lines(u, pw, target, params, contact=None):
         curved = a > 1e-12
         xa = torch.where(curved, xa_q, xa_l)
         xb = torch.where(curved, xb_q, big)
-        lo = torch.maximum(along - span - y, ri + rk)
-        hi = torch.minimum(along + span - y, edge - y)
         crossed = _path_block(lo, hi, xa, xb, rk) / s_al
-        block = 1 - torch.pow(1 - rank_cover, crossed)
-        shrink = (1 - (along - y) / L).clamp(min=0)
-        if s_off is None:
-            sh = shrink.clamp(min=1e-3)
-            lo_s, hi_s = (across - half) / sh, (across + half) / sh
-            w = width_i.expand_as(lo_s)
-            share = (torch.minimum(hi_s, w / 2) - torch.maximum(lo_s, -w / 2)).clamp(min=0) / w.clamp(min=1e-3)
-            cov = torch.where(w > 1e-3, share.clamp(max=1.0), ((lo_s <= 0) & (hi_s >= 0)).float())
-        else:
-            cov = ((across - s_off * shrink).abs() <= half).float()
-        return torch.where(who, cov * block, torch.zeros_like(block))
+        return 1 - torch.pow(1 - rank_cover, crossed)
 
-    def men(high):
-        out = torch.zeros_like(u["men"])
-        for g, w in _NODES:
-            out = out + w * (1 - torch.prod(1 - chance(g * span_i, None, high, friend | own), dim=2))
-        return out
-    low, high = men(False), men(True)
+    def cover(shrink, s_off=None):
+        """[B, i, k] the path s_off m across i's line passes through friend k's bodies (None: the share of i's men
+        across its width whose paths do)."""
+        if s_off is not None:
+            return ((across - s_off * shrink).abs() <= half).float()
+        sh = shrink.clamp(min=1e-3)
+        lo_s, hi_s = (across - half) / sh, (across + half) / sh
+        w = width_i.expand_as(lo_s)
+        share = (torch.minimum(hi_s, w / 2) - torch.maximum(lo_s, -w / 2)).clamp(min=0) / w.clamp(min=1e-3)
+        return torch.where(w > 1e-3, share.clamp(max=1.0), ((lo_s <= 0) & (hi_s >= 0)).float())
+
+    who = friend | own
+    zero3 = torch.zeros_like(along)
+    low, high = torch.zeros_like(u["men"]), torch.zeros_like(u["men"])
+    for g, w in _NODES:
+        L, lo, hi, shrink = place(g * span_i)
+        cov = torch.where(who, cover(shrink), zero3)
+        low = low + w * (1 - torch.prod(1 - cov * block(L, lo, hi, False), dim=2))
+        high = high + w * (1 - torch.prod(1 - cov * block(L, lo, hi, True), dim=2))
+    L, lo, hi, shrink = place(span_i)
+    front_block = torch.where(friend, block(L, lo, hi, False), zero3)
     shut = torch.zeros_like(u["men"])
     for r in _RAYS:
-        ray = 1 - torch.prod(1 - chance(span_i, r * width_i, False, friend), dim=2)
+        ray = 1 - torch.prod(1 - cover(shrink, r * width_i) * front_block, dim=2)
         shut = shut + (ray >= 0.5).float()
     rays_clear = int(fcfg.get("rays_clear", 2))
     closed = (len(_RAYS) - shut) < rays_clear
