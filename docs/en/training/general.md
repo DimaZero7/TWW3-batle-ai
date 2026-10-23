@@ -430,9 +430,15 @@ units), later over earlier:
   (`--general-teacher-hold-m`) and our shooters have been firing less than 30 s (`--general-teacher-fire-s`; the first
   volley's time is the row's `fire_t0`); then **all attack together**. S27 waited and met the enemy (80 hold orders in
   the first 100 s against the general's 8, `build/diag_skv`); the old teacher sent everyone to attack from the first
-  second. With the condition per group alone the attack went piecemeal (the human's battle against g31: the groups'
-  contact 81 s apart). The switch is at once: the re-plan on the event "the enemy near" (below,
-  `--general-replan-near-m`), not only every 30 s;
+  second. The switch is at once: the re-plan on the event "the enemy near" (below, `--general-replan-near-m`), not only
+  every 30 s. **The fuse** (`runtime.wait_clock`, every decision): when the farthest group's distance to the enemy has
+  not shortened by at least 10 m for 60 s (the enemy stands, and so do we; `--general-teach-stall-s`, the field
+  `teach_stall_s`) or the wait has gone on 120 s since the plan it began at (`--general-teach-wait-s`,
+  `teach_wait_s`), the wait is over for the rest of the battle: a re-plan (`replan_wait` in the log), and all
+  attacking groups attack at any distance (as "5 minutes without a fight" of the opponent `human`). Without it, against
+  a standing enemy and no shooters of ours, the teacher would wait forever. Check (g31 m40, the teacher on every
+  learner battle, 10 battles an opponent, 300 s): battles without contact — 0 of 10 against `hold` and 0 of 10 against
+  `ai_like`, as in main;
 - a group of mostly shooters (range and ammunition) — `shoot` the enemy group its shot takes the most health from:
   the mean over the pairs "our shooter — a unit of the target group" of a hit's expected damage by the simulator's rule
   (`melee.per_hit`, as in `missile.volley`: the projectile's damage and armour-piercing against the target's armour,
@@ -858,6 +864,9 @@ At the start the log has the line `general only: N weights frozen, M trainable (
 The module atlas at the point g17r m10 (`build/diag_atlas2/atlas.md`, 1536 battles a mode): the general added nothing
 to the battle (with it +0.88, without +0.89). Rejected:
 
+- **The teacher's wait per group alone** (a group holds its tile while its own nearest enemy is beyond 250 m): the
+  attack went piecemeal — in the human's battle against g31 the groups' contact 81 s apart. Now the wait is by the
+  farthest attacking group, and they attack together (["Teacher"](#teacher)).
 - **The learned group collection** (slot attention, `--general-groups net`): the battle's first plan — one group for the
   whole army in all 1536 battles, later 1.6 on average; the plan's group cards alike (cosine 0.995); not by role (mixed
   "shooters + others" 0.52 against 0.53 for a random split), hardly by place (spread in a group 115 m against 125 m at

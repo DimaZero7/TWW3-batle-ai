@@ -24,7 +24,9 @@ The rule (on the groups' standing units, the state's truth), later rules over ea
                   firing for FIRE_S yet (the row's `engage`); then all attack together - S27 waited and met the enemy
                   (80 hold orders in the first 100 s against the general's 8, build/diag_skv); by each group alone
                   (the human's battle against g31) the attack went piecemeal, contact 81 s apart (the runtime's re-plan
-                  on "the enemy near", GeneralConfig.replan_near_m, makes the switch at once);
+                  on "the enemy near", GeneralConfig.replan_near_m, makes the switch at once); a fuse (the runtime's
+                  wait_clock, GeneralConfig.teach_stall_s / teach_wait_s): the farthest group no nearer the enemy
+                  for 60 s (the enemy stands, and so do we) or waiting 120 s - all attack (`engage`);
   the flank       (flank=True, run.py --general-teacher-flank 1; build/diag_flank: the teacher never gave flank, the
                   general picked it for 1-2 % of groups and the measure stayed 0):
                   - two or more of our non-fast groups attack one enemy group X within NEAR_FLANK_M of them: the one
@@ -94,7 +96,7 @@ def own_tile(cent, tiles, tiles_ok):
 
 
 def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=None, tiles_ok=None, engage=None,
-           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None, shot=None):
+           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None, shot=None, info=None):
     """-> (kind [M, G], target [M, G], use [M, G]: our groups the rule gives a mission) of plans [M]: main [M, N] the
     plan's group numbers, active [M, 2G], the units' x, z, own, standing, shooter, lord [M, N]; kinds: the network's
     number of kinds (a rule whose kind is beyond it is not used); tiles [M, C, 2] the coarse tiles' world centres,
@@ -102,7 +104,8 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     group attacks); facing [M, N] the units' facings (degrees, the state's b; None: the flank rule by the centres),
     flank: the flank rule on, fast [M, N] the units of the role "fast" (groups.roles; None: no fast groups); melee,
     waver [M, N] the units in melee and those wavering or worse (None: nobody - the lord's group withdraws always);
-    shot [M, N, N] the HP a shot of unit i takes from unit j in reach (shot_hp; None: shooters shoot the nearest)."""
+    shot [M, N, N] the HP a shot of unit i takes from unit j in reach (shot_hp; None: shooters shoot the nearest);
+    info: a dict that gets "wait" [M, G] (the groups the wait holds) when the wait rule runs."""
     M, N = main.shape
     dev = main.device
     ar = torch.arange(2 * G, device=dev)
@@ -171,6 +174,8 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
         att = use & (kind == k_of("attack"))
         far = ((de.min(-1).values > hold_m) & att).any(-1, keepdim=True)          # [M, 1] the farthest attacker
         wait = att & far & ~engage[:, None] & tiles_ok.any(-1, keepdim=True)
+        if info is not None:
+            info["wait"] = wait
         kind = torch.where(wait, torch.full_like(kind, k_of("hold")), kind)
         target = torch.where(wait, 2 * G + own_tile(cent[:, :G], tiles, tiles_ok), target)
     # the flank

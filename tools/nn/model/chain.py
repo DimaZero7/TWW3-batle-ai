@@ -100,8 +100,7 @@ class ChainHeads(nn.Module):
         self.ability_none = nn.Linear(d, 1)
         if cfg.pairs:     # the pair features (pairs.py) -> + the logit of attacking j; 0 at the start
             from tools.nn.model import pairs as pr
-            self.target_pair = nn.Linear(pr.SIZE, 1, bias=False)
-            nn.init.zeros_(self.target_pair.weight)
+            self.target_pair = pr.zero_linear(1)
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
         """Ability features appended since the checkpoint load with zero weights (encoder.pad_inputs)."""

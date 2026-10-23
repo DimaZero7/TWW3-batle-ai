@@ -116,6 +116,10 @@ class GeneralConfig:
     replan_near_m: float = 250.0  # ... the event "the enemy near": a standing enemy unit within this of one of our
     #                            groups' centres that was farther at the plan (teacher.HOLD_M: the teacher's waiting
     #                            groups attack together at once, not at the next 30 s plan); 0: no such event
+    teach_stall_s: float = 60.0  # the teacher's wait's fuse (runtime.wait_clock): its farthest waiting group's distance
+    #                            to the enemy not shorter for this long (the enemy stands, so do we) - all attack, and
+    #                            a re-plan on it; 0: off (with only "attack together" a standing enemy was never met)
+    teach_wait_s: float = 120.0  # ... or the wait going on this long since it began; 0: off
     broken: float = 0.5        # a group is broken when more than this share of its units routs or is destroyed
     # --- the executor's task input ("Задание отряда") ---
     dist_m: float = 100.0      # a target's distance from the unit / this ...

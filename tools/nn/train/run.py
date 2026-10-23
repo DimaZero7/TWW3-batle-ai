@@ -310,7 +310,8 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "shoot_share": "general_shoot_share", "melee_stay": "general_melee_stay",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
-                 "replan_near_m": "general_replan_near_m",
+                 "replan_near_m": "general_replan_near_m", "teach_stall_s": "general_teach_stall_s",
+                 "teach_wait_s": "general_teach_wait_s",
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
                  "group_centre": "general_group_centre",
                  "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
@@ -1765,6 +1766,11 @@ def parser():
     ap.add_argument("--general-replan-min-s", type=float, default=3.0,
                     help="general: an event's re-plan (a group broken, a lord fallen, the enemy near) not sooner than "
                          "this after a plan")
+    ap.add_argument("--general-teach-stall-s", type=float, default=60.0,
+                    help="general: the teacher's wait runs out (all attack, a re-plan) when its farthest waiting "
+                         "group has come no nearer the enemy for this long (s; 0: off)")
+    ap.add_argument("--general-teach-wait-s", type=float, default=120.0,
+                    help="general: ... or when the wait has gone on this long since it began (s; 0: off)")
     ap.add_argument("--general-replan-near-m", type=float, default=250.0,
                     help="general: the re-plan's event 'the enemy near' - a standing enemy unit within this (m) of one "
                          "of our groups' centres that was farther at the plan; 0: no such event")

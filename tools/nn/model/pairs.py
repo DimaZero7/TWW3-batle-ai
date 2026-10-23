@@ -206,13 +206,22 @@ def spell_range(obs_t):
     return torch.where(owned, rng.to(a.dtype), torch.zeros_like(rng, dtype=a.dtype)).max(-1).values
 
 
+def zero_linear(n_out):
+    """nn.Linear(SIZE, n_out, bias=False) with zero weights, drawing the random numbers a layer of SPELL_SIZE inputs
+    drew (its init, then zeroed): a fresh network's other weights stay those of the code before DAMAGE, seed for seed
+    (the tests' fixed seeds; the weights here are 0 either way)."""
+    lin = nn.Linear(SPELL_SIZE, n_out, bias=False)
+    lin.weight = nn.Parameter(torch.zeros(n_out, SIZE))
+    lin.in_features = SIZE
+    return lin
+
+
 class PairBias(nn.Module):
     """The pair features -> + a number per attention head (started at zero: nothing changes until trained)."""
 
     def __init__(self, heads):
         super().__init__()
-        self.lin = nn.Linear(SIZE, heads, bias=False)
-        nn.init.zeros_(self.lin.weight)
+        self.lin = zero_linear(heads)
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
         """A network saved before SPELL or DAMAGE: zero weights for them (computes what it did)."""

@@ -368,3 +368,47 @@ def test_a_decision_with_a_general_refuses_a_cuda_graph_before_any_read_back(mon
         env.step(actor, crit)
     monkeypatch.setattr(runtime, "capturing", lambda: False)
     env.step(actor, crit)
+
+
+def test_the_teachers_wait_runs_out_against_an_enemy_that_stands():
+    """GeneralConfig.teach_stall_s / teach_wait_s (Runtime.wait_clock): the enemy stands 400 m off and holds, our
+    shooters never fire - the teacher's groups hold at first, then (the farthest no nearer for 60 s, or 120 s of
+    waiting) a re-plan and every attacking group attacks: not later than 120 s into the wait."""
+    env = battles(B=2, mix={"hold": 1.0})
+    actor, crit = nets()
+    env.step(actor, crit)
+    rt = env.general_rt
+    rt.set_teacher(1.0)
+    u = env.st.u
+    hold, att = gconfig.MISSION_KINDS[1].index, gconfig.MISSION_KINDS[0].index
+    assert rt.gcfg.teach_stall_s == 60.0 and rt.gcfg.teach_wait_s == 120.0
+
+    def apart():
+        # the enemy 400 m beyond the learner's farthest unit (along x), our side without shooters
+        for row in torch.nonzero(rt.r["owner"] == 0).flatten().tolist():
+            b, s = row % env.B, row // env.B + 1
+            own = u["side"][b] == s
+            foe = (u["side"][b] > 0) & ~own
+            sign = 1.0 if float(u["x"][b][foe].mean()) >= float(u["x"][b][own].mean()) else -1.0
+            edge = float((u["x"][b][own] * sign).max())
+            u["x"][b, foe] = u["x"][b, foe] - sign * float((u["x"][b][foe] * sign).min()) + sign * (edge + 400.0)
+            u["range"][b, own] = 0.0
+    apart()
+    rows = torch.nonzero(rt.r["has"] & (rt.r["owner"] == 0)).flatten()
+    assert rows.numel()
+    rt.r["t_plan"][rows] -= 31.0                         # a plan now: the teacher's, with the enemy far
+    env.step(actor, crit)
+    r = rt.r
+    row = int(rows[0])
+    waited = bool(((r["kind"][row] == hold) & r["teach_use"][row]).any())
+    assert waited and float(r["w_t0"][row]) >= 0
+    t0 = float(r["w_t0"][row])
+    went = None
+    for _ in range(125):
+        env.step(actor, crit)
+        if bool(r["w_go"][row]) and bool(((r["kind"][row] == att) & r["teach_use"][row]).any()):
+            went = float(env.st.t[row % env.B]) - t0
+            break
+    assert went is not None and went <= 121.0, went
+    assert not bool(((r["kind"][row] == hold) & r["teach_use"][row] & (r["target"][row] >= 2 * rt.G)).any())
+    assert rt.stats["replan_wait"] + rt.stats["replan_timer"] >= 1
