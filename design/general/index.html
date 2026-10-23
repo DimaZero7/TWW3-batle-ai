@@ -284,6 +284,18 @@ a{color:inherit}
 .tasks ol,.tasks ul{margin:0;padding-left:24px}
 .tasks li{margin:0 0 7px;line-height:1.4}
 .tasks li::marker{color:var(--ink);font-weight:600}
+.trow{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
+.tdrag li{cursor:grab;border-radius:6px;padding:2px 4px;margin-left:-4px}
+.tdrag li:hover{background:color-mix(in srgb,var(--later) 10%,transparent)}
+.tdrag li.drag{opacity:.4}
+.tdrag li.ovb{box-shadow:0 -3px 0 var(--later)} .tdrag li.ova{box-shadow:0 3px 0 var(--later)}
+.tmv{display:inline-flex;gap:3px;flex:none}
+.tmv button{font-size:11px;line-height:1;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);cursor:pointer}
+.tmv button:disabled{opacity:.3;cursor:default}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.tbtn{font:inherit;font-size:14px;padding:5px 12px;border:1px solid var(--later);border-radius:8px;background:var(--later-bg);color:var(--ink);cursor:pointer}
+.tstat{font-size:13px;color:var(--done)} .tstat.warn{color:var(--open);font-weight:600}
+.tfall{display:flex;flex-direction:column;gap:4px} .tfall textarea{width:100%;box-sizing:border-box;font-family:var(--f-mono);font-size:12px}
 </style>
 
 <div class="wrap">
@@ -983,7 +995,7 @@ a{color:inherit}
   <section class="net simsec" aria-label="Задачи">
     <h2 class="areah">Задачи</h2>
     <div class="types"><span class="tl">Что в работе сейчас, что дальше по порядку ценности, что закрыто недавно.</span></div>
-    <div class="blocks"><div class="brow"><button class="node t-task" data-n="tasks" type="button">Список задач<span>обновлено 23.10, 13:00 · 4 в работе · 6 в плане</span></button></div></div>
+    <div class="blocks"><div class="brow"><button class="node t-task" data-n="tasks" type="button">Список задач<span>список задач</span></button></div></div>
   </section>
   <div class="crumbs" id="crumbs"></div>
 
@@ -2354,34 +2366,17 @@ a{color:inherit}
   </section>
 </template>
 <template id="tpl-tasks">
-  <div class="panel">
-  <p class="tupd">Список обновлён: <b>23.10, 13:00</b></p>
+  <div class="panel" data-tasks>
+  <p class="tupd">Список обновлён: <b data-t="updated"></b>. Новые задачи сюда добавляются только с согласия пользователя; порядок «В плане» берётся из файла <code>design/general/tasks.json</code>: перетащи пункт мышью (или кнопками ▲▼) и нажми «Сохранить порядок».</p>
   <section class="tasks">
-    <div><div class="colh">В работе · 4</div><div class="box tnow"><ol class="small" start="1">
-      <li><b>Отбор настроек учителя</b> целыми боями на починенном симуляторе: дистанция отхода лорда 150→250 м, когда ждать, стрельба до сближения, все на одну цель, пересмотр раз в 60 с. 512 боёв на вариант против itS27_4; победитель станет учителем генерала.</li>
-      <li><b>Входы сети.</b> Генералу — мораль, «дрогнул», усталость, патроны (и правило «стрелок — пока есть патроны»). Сети отрядов — числа действующих эффектов (яд числами), «меня обстреливают», секунды рукопашной. Дописываются с нулевыми весами, затем дообучение.</li>
-      <li><b>Яд и контактные эффекты</b> — разбор механики точными формулами, сверка с симулятором.</li>
-      <li><b>Армии обучения</b> — размеры сторон равномерно до полных 20 на 20, бюджет до 20 000.</li>
-    </ol></div></div>
-    <div><div class="colh">В плане — по ценности · 6</div><div class="box tplan"><ol class="small" start="5">
-      <li><b>Эффекты для генерала целиком</b> — блок «Анализ эффектов» есть в замысле, в коде выключен.</li>
-      <li><b>Повтор проверки масок</b> на починенном симуляторе, в т. ч. «держать» с досягаемостью 100 м (честное «держать позицию»). Прежний вывод «строгие маски вредят» получен под багом компиляции.</li>
-      <li><b>Лига:</b> эксплуататор (сеть отрядов от itS27_4 против генерала), затем генерал против него. Команда готова: <code>build/steps/x1_exploit.sh</code>.</li>
-      <li><b>Экзамен в игре</b> для лучшей точки после п. 1–2 (сравнить с 9 из 12 у g19/g23).</li>
-      <li><b>Новые отряды.</b> Империя — Охотники, Нульнские железнобокие, Хохландские длинные ружья. Скавены — Бегущие по канавам (4 вида: с пращами, с ядом), Стрелки с варп-джезейлами. С ними новые механики: Ловчая сеть (замедление в радиусе), снайперская стрельба, скрытность, бонусы против крупных и щитов — формулы точным путём.</li>
-      <li><b>Страница:</b> голова вида как «правила + якорь», русские подписи видов, новые входы; иконки способностей из игры вместо своих SVG.</li>
-    </ol></div></div>
-    <div><div class="colh">Закрыто / решено · 22–23.10</div><div class="box done"><ul class="small">
-      <li><b>Баг компиляции симулятора</b> (приближённое деление → часы урона шли с первой секунды) — починен, симулятор видит поведение как в игре.</li>
-      <li><b>Гибель лорда</b> — урон по бегущему лорду по правилам игры; доля гибели сошлась с игрой (0,31 против 0,33).</li>
-      <li><b>Собственный сигнал головы вида</b> — закрыт: 5 способов ниже шума, без учителя голова дрейфует за час. Голова = правила учителя + якорь.</li>
-      <li><b>Расстановка врага «как ИИ игры»</b> — снято: эффект мал, цена велика.</li>
-      <li><b>Прокси экзамена</b> против itS27_4 — в оценке каждого шага; itS27_4 закреплён в трети обучающих боёв; скрипты — 3 %.</li>
-    </ul></div></div>
-    <div><div class="colh">Отложено</div><div class="box tpark"><ul class="small">
-      <li><b>Случайность расстановки врага</b> в замеренном диапазоне — только вместе с другой правкой симулятора.</li>
-      <li><b>Размер карты:</b> 768 м против 1020 м в симуляторе.</li>
-    </ul></div></div>
+    <div><div class="colh">В работе · <span data-t="n_in"></span></div><div class="box tnow"><ol class="small" data-l="in_progress"></ol></div></div>
+    <div><div class="colh">В плане — по ценности · <span data-t="n_pl"></span></div><div class="box tplan">
+      <div class="tbar"><button type="button" class="tbtn" data-save>Сохранить порядок</button><span class="tstat" data-stat></span></div>
+      <ol class="small tdrag" data-l="planned"></ol>
+      <div class="tfall" data-fall hidden><span class="small">Порядок для копирования:</span><textarea readonly rows="7"></textarea></div>
+    </div></div>
+    <div><div class="colh">Закрыто / решено<span data-t="period"></span></div><div class="box done"><ul class="small" data-l="closed"></ul></div></div>
+    <div><div class="colh">Отложено</div><div class="box tpark"><ul class="small" data-l="parked"></ul></div></div>
   </section>
   </div>
 </template>
@@ -2422,6 +2417,209 @@ a{color:inherit}
   </div>
 </template>
 
+<!-- tasks-data:begin -->
+<script type="application/json" id="tasks-data">
+{
+  "updated": "23.10, 13:00",
+  "closed_period": "22–23.10",
+  "in_progress": [
+    {
+      "id": "teacher-select",
+      "title": "Отбор настроек учителя",
+      "text": "целыми боями на починенном симуляторе: дистанция отхода лорда 150→250 м, когда ждать, стрельба до сближения, все на одну цель, пересмотр раз в 60 с. 512 боёв на вариант против itS27_4; победитель станет учителем генерала."
+    },
+    {
+      "id": "net-inputs",
+      "title": "Входы сети.",
+      "text": "Генералу — мораль, «дрогнул», усталость, патроны (и правило «стрелок — пока есть патроны»). Сети отрядов — числа действующих эффектов (яд числами), «меня обстреливают», секунды рукопашной. Дописываются с нулевыми весами, затем дообучение."
+    },
+    {
+      "id": "poison-contact",
+      "title": "Яд и контактные эффекты",
+      "text": "— разбор механики точными формулами, сверка с симулятором."
+    },
+    {
+      "id": "train-armies",
+      "title": "Армии обучения",
+      "text": "— размеры сторон равномерно до полных 20 на 20, бюджет до 20 000."
+    }
+  ],
+  "planned": [
+    {
+      "id": "general-effects",
+      "title": "Эффекты для генерала целиком",
+      "text": "— блок «Анализ эффектов» есть в замысле, в коде выключен.",
+      "order": 1
+    },
+    {
+      "id": "masks-recheck",
+      "title": "Повтор проверки масок",
+      "text": "на починенном симуляторе, в т. ч. «держать» с досягаемостью 100 м (честное «держать позицию»). Прежний вывод «строгие маски вредят» получен под багом компиляции.",
+      "order": 2
+    },
+    {
+      "id": "league-exploiter",
+      "title": "Лига:",
+      "text": "эксплуататор (сеть отрядов от itS27_4 против генерала), затем генерал против него. Команда готова: `build/steps/x1_exploit.sh`.",
+      "order": 3
+    },
+    {
+      "id": "game-exam",
+      "title": "Экзамен в игре",
+      "text": "для лучшей точки после задач «Отбор настроек учителя» и «Входы сети» (сравнить с 9 из 12 у g19/g23).",
+      "order": 4
+    },
+    {
+      "id": "new-units",
+      "title": "Новые отряды.",
+      "text": "Империя — Охотники, Нульнские железнобокие, Хохландские длинные ружья. Скавены — Бегущие по канавам (4 вида: с пращами, с ядом), Стрелки с варп-джезейлами. С ними новые механики: Ловчая сеть (замедление в радиусе), снайперская стрельба, скрытность, бонусы против крупных и щитов — формулы точным путём.",
+      "order": 5
+    },
+    {
+      "id": "page-update",
+      "title": "Страница:",
+      "text": "голова вида как «правила + якорь», русские подписи видов, новые входы; иконки способностей из игры вместо своих SVG.",
+      "order": 6
+    }
+  ],
+  "closed": [
+    {
+      "id": "compile-bug",
+      "title": "Баг компиляции симулятора",
+      "text": "(приближённое деление → часы урона шли с первой секунды) — починен, симулятор видит поведение как в игре."
+    },
+    {
+      "id": "lord-death",
+      "title": "Гибель лорда",
+      "text": "— урон по бегущему лорду по правилам игры; доля гибели сошлась с игрой (0,31 против 0,33)."
+    },
+    {
+      "id": "kind-head-signal",
+      "title": "Собственный сигнал головы вида",
+      "text": "— закрыт: 5 способов ниже шума, без учителя голова дрейфует за час. Голова = правила учителя + якорь."
+    },
+    {
+      "id": "enemy-deploy-ai",
+      "title": "Расстановка врага «как ИИ игры»",
+      "text": "— снято: эффект мал, цена велика."
+    },
+    {
+      "id": "exam-proxy",
+      "title": "Прокси экзамена",
+      "text": "против itS27_4 — в оценке каждого шага; itS27_4 закреплён в трети обучающих боёв; скрипты — 3 %."
+    }
+  ],
+  "parked": [
+    {
+      "id": "enemy-deploy-random",
+      "title": "Случайность расстановки врага",
+      "text": "в замеренном диапазоне — только вместе с другой правкой симулятора."
+    },
+    {
+      "id": "map-size",
+      "title": "Размер карты:",
+      "text": "768 м против 1020 м в симуляторе."
+    }
+  ]
+}
+</script>
+<!-- tasks-data:end -->
+<script>
+(function(){
+  // the task list: data from #tasks-data (a copy of tasks.json, see sync_tasks.py); the user orders "planned" and saves it back
+  var D=null,dirty=false,savedAt=null,msg="",root=null,dragId=null;
+  try{D=JSON.parse(document.getElementById("tasks-data").textContent);}catch(e){D=null;}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function rich(s){return esc(s).replace(/`([^`]+)`/g,"<code>$1</code>");}
+  function ord(t){return typeof t.order==="number"?t.order:1e9;}
+  function sortPl(d){d.planned.sort(function(a,b){return ord(a)-ord(b);});d.planned.forEach(function(t,i){t.order=i+1;});}
+  function valid(d){return !!d&&["in_progress","planned","closed","parked"].every(function(k){return Array.isArray(d[k]);});}
+  function hhmm(){var d=new Date();return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);}
+  function body(t){return '<b>'+esc(t.title)+'</b> '+rich(t.text);}
+  function subtitle(){var s=document.querySelector('.node[data-n="tasks"] span');
+    if(s&&D)s.textContent="обновлено "+D.updated+" · "+D.in_progress.length+" в работе · "+D.planned.length+" в плане";}
+  if(!valid(D))D=null;
+  if(D)sortPl(D);
+  function paint(){
+    if(!root||!root.isConnected||!D)return;
+    function q(s){return root.querySelector(s);}
+    q('[data-t="updated"]').textContent=D.updated||"";
+    q('[data-t="n_in"]').textContent=D.in_progress.length;
+    q('[data-t="n_pl"]').textContent=D.planned.length;
+    q('[data-t="period"]').textContent=D.closed_period?" · "+D.closed_period:"";
+    q('[data-l="in_progress"]').innerHTML=D.in_progress.map(function(t){return '<li>'+body(t)+'</li>';}).join("");
+    var pl=q('[data-l="planned"]');pl.start=D.in_progress.length+1;
+    pl.innerHTML=D.planned.map(function(t,i){return '<li draggable="true" data-id="'+esc(t.id)+'"><div class="trow"><div>'+body(t)+'</div><span class="tmv">'+
+      '<button type="button" data-mv="-1" aria-label="выше"'+(i===0?' disabled':'')+'>▲</button><button type="button" data-mv="1" aria-label="ниже"'+(i===D.planned.length-1?' disabled':'')+'>▼</button></span></div></li>';}).join("");
+    ["closed","parked"].forEach(function(k){q('[data-l="'+k+'"]').innerHTML=D[k].map(function(t){return '<li>'+body(t)+'</li>';}).join("");});
+    var st=q('[data-stat]');st.className="tstat"+(dirty?" warn":"");
+    st.textContent=dirty?"не сохранено: порядок менялся":(msg||(savedAt?"сохранено "+savedAt:""));
+  }
+  function move(id,to){var i=D.planned.findIndex(function(t){return t.id===id;});if(i<0)return;
+    var t=D.planned.splice(i,1)[0];to=Math.max(0,Math.min(D.planned.length,to));D.planned.splice(to,0,t);
+    if(to!==i){D.planned.forEach(function(t,k){t.order=k+1;});dirty=true;msg="";}paint();}
+  // the file handle is kept in IndexedDB so the next save does not ask for the file again
+  function idb(){return new Promise(function(res,rej){var r=indexedDB.open("gen-tasks",1);
+    r.onupgradeneeded=function(){r.result.createObjectStore("h");};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+  async function getH(){try{var db=await idb();return await new Promise(function(res){var r=db.transaction("h").objectStore("h").get("tasks");
+    r.onsuccess=function(){res(r.result||null);};r.onerror=function(){res(null);};});}catch(e){return null;}}
+  async function putH(h){try{var db=await idb();db.transaction("h","readwrite").objectStore("h").put(h,"tasks");}catch(e){}}
+  function text(d){return JSON.stringify(d,null,2)+"\n";}
+  function fallback(why){
+    var a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([text(D)],{type:"application/json"}));a.download="tasks.json";document.body.appendChild(a);a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1000);
+    var f=root.querySelector("[data-fall]");f.hidden=false;
+    f.querySelector("textarea").value=D.planned.map(function(t,i){return (D.in_progress.length+i+1)+". "+t.id+" — "+t.title;}).join("\n");
+    msg=(why?why+" ":"")+"Скачан tasks.json "+hhmm()+": положи его в design/general/ вместо старого или передай порядок ниже.";dirty=false;paint();
+  }
+  async function save(){
+    if(!window.showSaveFilePicker){fallback("Браузер не умеет записывать файлы.");return;}
+    try{
+      var h=await getH(),opts={suggestedName:"tasks.json",types:[{description:"JSON",accept:{"application/json":[".json"]}}]};
+      if(h){var p=await h.queryPermission({mode:"readwrite"});if(p!=="granted")p=await h.requestPermission({mode:"readwrite"});
+        if(p!=="granted"){opts.startIn=h;h=null;}}
+      if(!h){if(!opts.startIn)opts.startIn="documents";h=await window.showSaveFilePicker(opts);await putH(h);}
+      // apply only the new order to what the file holds now: items added to the file meanwhile are kept
+      var cur=null,raw="";try{raw=await (await h.getFile()).text();}catch(e){}
+      if(raw.trim()){try{cur=JSON.parse(raw);}catch(e){cur=null;}
+        if(!valid(cur)){if(!confirm("Файл «"+h.name+"» не похож на tasks.json. Перезаписать его?"))return;cur=null;}}
+      var out=cur||JSON.parse(JSON.stringify(D)),ids=D.planned.map(function(t){return t.id;}),extra=0;
+      out.planned.forEach(function(t){var k=ids.indexOf(t.id);t.order=k>=0?k+1:ids.length+(++extra);});sortPl(out);
+      var w=await h.createWritable();await w.write(text(out));await w.close();
+      var changed=!!cur&&JSON.stringify(cur.in_progress.concat(cur.closed,cur.parked))!==JSON.stringify(D.in_progress.concat(D.closed,D.parked));
+      D=out;dirty=false;savedAt=hhmm();msg="сохранено "+savedAt+" в «"+h.name+"»"+(changed||extra?" (в файле были новые правки — показан файл)":"");subtitle();paint();
+    }catch(e){if(e&&e.name==="AbortError")return;fallback("Не удалось записать файл ("+(e&&e.message||e)+").");}
+  }
+  // on open: if the file was chosen before and access is still granted, show the file itself (it may be newer than the page copy)
+  (async function(){if(!window.showSaveFilePicker)return;var h=await getH();if(!h)return;
+    try{if(await h.queryPermission({mode:"read"})!=="granted")return;var d=JSON.parse(await (await h.getFile()).text());
+      if(valid(d)&&!dirty){sortPl(d);D=d;subtitle();paint();}}catch(e){}})();
+  window.addEventListener("beforeunload",function(e){if(dirty){e.preventDefault();e.returnValue="";}});
+  subtitle();
+  window.TasksUI={mount:function(c){
+    root=c.querySelector("[data-tasks]");if(!root)return;
+    if(!D){root.innerHTML='<div class="empty">Не удалось прочитать данные задач (#tasks-data).</div>';return;}
+    paint();
+    var pl=root.querySelector('[data-l="planned"]');
+    pl.addEventListener("click",function(e){var b=e.target.closest("button[data-mv]");if(!b)return;var li=b.closest("li");
+      var i=D.planned.findIndex(function(t){return t.id===li.dataset.id;});move(li.dataset.id,i+(+b.dataset.mv));});
+    function clr(){[].forEach.call(pl.querySelectorAll("li"),function(x){x.classList.remove("drag","ovb","ova");});}
+    pl.addEventListener("dragstart",function(e){var li=e.target.closest&&e.target.closest("li");if(!li)return;dragId=li.dataset.id;
+      e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",dragId);}catch(_){}li.classList.add("drag");});
+    pl.addEventListener("dragover",function(e){if(!dragId)return;var li=e.target.closest("li");if(!li)return;e.preventDefault();
+      var r=li.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;
+      [].forEach.call(pl.querySelectorAll("li"),function(x){if(x!==li)x.classList.remove("ovb","ova");});
+      li.classList.toggle("ova",after);li.classList.toggle("ovb",!after);});
+    pl.addEventListener("drop",function(e){if(!dragId)return;var li=e.target.closest("li");e.preventDefault();
+      if(li&&li.dataset.id!==dragId){var r=li.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;
+        var from=D.planned.findIndex(function(t){return t.id===dragId;}),to=D.planned.findIndex(function(t){return t.id===li.dataset.id;})+(after?1:0);
+        if(from<to)to--;var id=dragId;dragId=null;move(id,to);}else{dragId=null;clr();}});
+    pl.addEventListener("dragend",function(){dragId=null;clr();});
+    root.querySelector("[data-save]").addEventListener("click",save);
+  }};
+})();
+</script>
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
@@ -2445,7 +2643,7 @@ a{color:inherit}
     [].forEach.call(document.querySelectorAll(".node"),function(b){b.classList.toggle("on",b.dataset.n===cur);});
     var N=nodes[cur];document.getElementById("crumbs").innerHTML="<b>"+N.t+"</b>";
     var c=document.getElementById("content");c.innerHTML="";
-    if(N.tpl){c.appendChild(document.getElementById(N.tpl).content.cloneNode(true));draw(c);}
+    if(N.tpl){c.appendChild(document.getElementById(N.tpl).content.cloneNode(true));draw(c);if(window.TasksUI)window.TasksUI.mount(c);}
     else c.innerHTML='<div class="empty">Ещё не обсуждали. Дойдём по порядку.</div>';
   }
   function fillGrid(el,fn,w,h){var s="";for(var y=0;y<h;y++)for(var x=0;x<w;x++)s+='<i style="background:'+fn(x,y)+'"></i>';el.innerHTML=s;}
