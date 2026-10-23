@@ -599,7 +599,8 @@ flowchart TB
   ward", together at most 90 %; damage beyond the killed man's health is lost; a lone man — the mean), 0..1 (a hit
   that kills is 1). `shot_i` — i's projectile (the missile damage and armour-piercing of its card; 0 for a unit
   without missiles) less j's shield when i stands within 60° of j's front (`shield_defence_angle_missile` of the game's
-  database; j's front not seen now — a frontal shot assumed); `blow_i` — i's melee blow (melee damage and
+  database; j's front not seen now — a frontal shot assumed), the shield pierced by the armour-piercing share as in
+  the simulator (the block chance × (1 − 0.5 × armour-piercing / all damage)); `blow_i` — i's melee blow (melee damage and
   armour-piercing; no hit chance and no bonuses against large or infantry — the single blow's rule has none). "j in
   i's range" is there already (`in_range_i`). All from the cards in the tokens (the game's database), never the
   battle's time. Older checkpoints get zero weights for the new numbers (`pad_inputs` in `PairBias` and in the

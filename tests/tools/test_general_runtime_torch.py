@@ -195,6 +195,13 @@ def test_a_replan_comes_once_when_the_enemy_comes_near_a_group():
     bring()
     env.step(actor, crit)
     assert int(r["n_replan"][row]) == k0 + 1                          # once
+    # a hidden enemy (not visible to us) is not "near": no event from it
+    bring()
+    assert bool(rt.near_groups(env, torch.tensor([row])).any())
+    vis = u["vis"].clone()
+    u["vis"][b, u["side"][b] == 3 - s] = False
+    assert not bool(rt.near_groups(env, torch.tensor([row])).any())
+    u["vis"][:] = vis
     off = dataclasses.replace(rt.gcfg, replan_near_m=0.0)
     rt.gcfg = off
     assert not bool(rt.near_groups(env, torch.tensor([row])).any())

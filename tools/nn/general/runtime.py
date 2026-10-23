@@ -737,7 +737,8 @@ class Runtime:
 
     def group_enemy_d(self, env, rows):
         """(d [M, G] the distance from each of our groups' centres (r["main"], the mean place of their standing units)
-        to the nearest standing enemy unit (not routing; inf: none), n [M, G] the groups' standing units) of rows [M]."""
+        to the nearest standing enemy unit the side sees (not routing; inf: none), n [M, G] the groups' standing units)
+        of rows [M]."""
         G = self.G
         main = self.r["main"][rows]
         b, s = rows % self.B, rows // self.B + 1
@@ -750,7 +751,10 @@ class Runtime:
         n = mem.sum(1)
         cent = torch.einsum("mng,mnc->mgc", mem, p) / n.clamp(min=1)[..., None]
         d = (cent[:, :, None, :] - p[:, None, :, :]).norm(dim=-1)                           # [M, G, N]
-        d = d.masked_fill(~(standing & ~own & (side > 0))[:, None, :], float("inf"))
+        # only the enemies the side sees (the state's vis: visible to the other side; the game's companion drops the
+        # unseen as gone): a re-plan must not tell the network of a hidden enemy
+        seen = u["vis"][b] if "vis" in u else torch.ones_like(standing)
+        d = d.masked_fill(~(standing & ~own & (side > 0) & seen)[:, None, :], float("inf"))
         return d.min(-1).values, n
 
     def after(self, env, r_rows, finished):

@@ -54,7 +54,7 @@ flowchart TB
 | Layout | `deploy.py` | a rule: a line by the formations' widths on the group's tile, facing the enemy's centre; groups on one tile stand one behind the other; everything inside the zone |
 | Unit task | `runtime.Runtime.task` | for each own unit: its group card (the mix of the places' cards by its shares; by default zeros, `--general-task-group 0`: the executor did not listen to it, KL 0.003; the width kept, older points load), its group's mission kind card (of the executor's table), the group's target (direction from where the unit faces, cos and sin; distance / 100 m, at most 20; a "none" flag) — 2 × card + 4 numbers |
 | Executor | `executor.GeneralActor` | today's unit network; the task goes through a linear layer with zero weights and is added to the unit's token (as the commitment's input); enemies get nothing |
-| Re-planning | `runtime.Runtime.replan` | every 30 s of battle; sooner when a group is broken (more than half of its units rout or are destroyed), a lord falls (ours or theirs) or a standing enemy comes within 250 m of the centre of one of our groups that had none so near at the plan (`--general-replan-near-m`, 0 — off; the log's `replan_near`, the companion's reason `near`), but not sooner than 3 s after the plan. Between plans the groups, missions and targets are locked |
+| Re-planning | `runtime.Runtime.replan` | every 30 s of battle; sooner when a group is broken (more than half of its units rout or are destroyed), a lord falls (ours or theirs) or a standing enemy the side sees comes within 250 m of the centre of one of our groups that had none so near at the plan (`--general-replan-near-m`, 0 — off; the log's `replan_near`, the companion's reason `near`), but not sooner than 3 s after the plan. Between plans the groups, missions and targets are locked |
 | Reward | `tools/nn/train/reward.py` | as now (v2); the bonus for carrying a mission out is not in the reward (only in the executor's units' advantage) |
 | Plan value | `General.value` | predicts the plan's return from the plan's cards (detached); with `--general-return critic` the advantage's base is the unit critic, and it learns beside it |
 | Missions that tell apart | `distinct.py`, `runtime.behave` | (`--general-distinct W`) a classifier guesses a group's mission kind from its units' behaviour; the executor's bonus, in units of its advantage's spread |
@@ -443,7 +443,9 @@ units), later over earlier:
   the mean over the pairs "our shooter — a unit of the target group" of a hit's expected damage by the simulator's rule
   (`melee.per_hit`, as in `missile.volley`: the projectile's damage and armour-piercing against the target's armour,
   health of a man and resistances — missile and physical, together at most 90 %; damage beyond a killed man is lost;
-  the target's shield cuts small arms — the teacher assumes a frontal shot); a pair beyond the shooter's range + 100 m
+  the target's shield cuts small arms — the teacher assumes a frontal shot; the armour-piercing share pierces the
+  shield as in the simulator: the block chance × (1 − 0.5 × armour-piercing / all damage),
+  `missile_shield_piercing_coefficient` of the game's database); a pair beyond the shooter's range + 100 m
   (`APPROACH_M`: a short step in, ~20–25 s at a walk — inside one re-plan) — 0. So the value = a shot's damage × the
   share of targets in reach. Equal ones (within 0.1 %) — the nearest; none in reach — the nearest. Why: in the human's
   battle against g31 by the nearest group 96 % of the slingers' fire (armour-piercing 1) went at greatswords of

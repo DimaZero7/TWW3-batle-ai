@@ -31,7 +31,8 @@ missile + physical + ward, melee: physical + ward, at most 90 % - and the damage
 loses the mean) as a share of j's man (0..1: a hit that kills is 1), of the units' cards in the tokens (the game's
 database, the same in the simulator and the companion):
 * shot_i: a projectile of i (its missile damage and armour-piercing; 0 for a unit without a missile range), less j's
-  shield where i stands within SHIELD_DEG of j's front (or j's facing not seen now: the front assumed);
+  shield where i stands within SHIELD_DEG of j's front (or j's facing not seen now: the front assumed), the shield
+  pierced by the armour-piercing share as in the simulator (SHIELD_PIERCE);
 * blow_i: a melee blow of i (its melee damage and armour-piercing; no hit chance, no bonus against large or infantry).
 Only for a pair of opposite sides (a friend's damage means nothing), both known. "j in i's range" is in_range_i
 already. SIZE = (FEATURES + SPELL) x 2 + DAMAGE.
@@ -112,8 +113,20 @@ CARD = {"m_damage": (("missile", "damage"), "log", 500), "m_ap": (("missile", "a
 CARD_COL = {k: _column(path, 50) for k, (path, _, _) in CARD.items()}
 RESIST_CAP = 0.9                # the resistances' sum, at most (CA; the simulator's rule)
 # a shield blocks projectiles from within this of the unit's front (config/nn/game_rules.json, the game's database)
-SHIELD_DEG = float(json.loads((project.ROOT / "config/nn/game_rules.json").read_text(encoding="utf-8"))["battle"]
-                   ["shield_defence_angle_missile"])
+_BATTLE = json.loads((project.ROOT / "config/nn/game_rules.json").read_text(encoding="utf-8"))["battle"]
+SHIELD_DEG = float(_BATTLE["shield_defence_angle_missile"])
+# ... and armour-piercing projectiles pierce it: the block chance x (1 - this x the armour-piercing share of the
+# damage) - the game's missile_shield_piercing_coefficient, as the simulator's missile.shield_pierce (on with
+# config/nn/sim.json missile.shield_ap_pierce)
+SHIELD_PIERCE = (float(_BATTLE.get("missile_shield_piercing_coefficient", 0.0))
+                 if json.loads((project.ROOT / "config/nn/sim.json").read_text(encoding="utf-8"))["missile"]
+                 .get("shield_ap_pierce") else 0.0)
+
+
+def shield_left(m_damage, m_ap):
+    """The share of a shield's block chance left against projectiles of base damage m_damage and armour-piercing m_ap
+    (SHIELD_PIERCE; the simulator's missile.shield_pierce)."""
+    return 1 - SHIELD_PIERCE * m_ap / (m_damage + m_ap).clamp(min=1e-6)
 
 
 def card(tok, name):
@@ -137,7 +150,7 @@ def damage(tok, cos_j, front_known):
     col = (lambda n: card(tok, n)[:, :, None])
     shot = smelee.per_hit(col("m_damage"), col("m_ap"), armour, hp_man, res_m, single=single)
     front = ~front_known | (cos_j >= math.cos(math.radians(SHIELD_DEG)))
-    shot = shot * (1 - card(tok, "shield")[:, None, :] * front.float())
+    shot = shot * (1 - card(tok, "shield")[:, None, :] * shield_left(col("m_damage"), col("m_ap")) * front.float())
     shoots = (tok[..., RANGE] > 0)[:, :, None] & ((col("m_damage") + col("m_ap")) > 0)
     shot = torch.where(shoots, shot, torch.zeros_like(shot))
     blow = smelee.per_hit(col("damage"), col("ap"), armour, hp_man, res_p, single=single)

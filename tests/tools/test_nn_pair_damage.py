@@ -43,7 +43,8 @@ def hit_share(att, tgt, missile=True, shield=0.0):
     t = torch.tensor
     h = smelee.per_hit(t(float(a["damage"])), t(float(a["ap_damage"])), t(float(tgt["armour"])),
                        t(float(tgt["hp_per_man"])))
-    return float(h) * (1 - shield) / tgt["hp_per_man"]
+    left = 1 - pairs.SHIELD_PIERCE * a["ap_damage"] / (a["damage"] + a["ap_damage"])   # the armour-piercing pierces
+    return float(h) * (1 - shield * left) / tgt["hp_per_man"]
 
 
 def test_the_cards_are_read_back_from_the_tokens():
@@ -56,7 +57,9 @@ def test_the_cards_are_read_back_from_the_tokens():
     assert float(pairs.card(tok, "hp_man")[0, 1]) == pytest.approx(80, abs=1e-2)
     assert float(pairs.card(tok, "shield")[0, 1]) == pytest.approx(0.35, abs=1e-6)
     assert float(pairs.card(tok, "res_missile")[0, 1]) == pytest.approx(0.20, abs=1e-6)
-    assert pairs.SHIELD_DEG == 60.0                                      # config/nn/game_rules.json
+    assert pairs.SHIELD_DEG == 60.0 and pairs.SHIELD_PIERCE == 0.5      # config/nn/game_rules.json, sim.json
+    left = pairs.shield_left(torch.tensor([7.0, 2.0]), torch.tensor([1.0, 6.0]))
+    assert left.tolist() == pytest.approx([1 - 0.5 / 8, 1 - 0.5 * 6 / 8])  # (the Ratling Gun's 6 of 8: 0.625)
 
 
 def test_a_hit_is_the_simulators_damage_as_a_share_of_the_enemys_man():

@@ -63,12 +63,14 @@ def shot_hp(x, z, rng, m_damage, m_ap, small_arms, armour, hp_man, shield, resis
     """[M, N (shooter i), N (target j)] the HP a projectile of unit i takes from unit j when it hits, the simulator's
     rule (missile.volley: melee.per_hit of the projectile's damage and armour-piercing against j's armour, health of a
     man and resistance; a lone man loses the mean; a shield blocks small arms from the front - the teacher assumes the
-    front), 0 where j is beyond i's range + approach (centre to centre) or i has no range. The fields [M, N] are the
+    front - less what the armour-piercing part pierces, missile.shield_pierce), 0 where j is beyond i's range + approach (centre to centre) or i has no range. The fields [M, N] are the
     state's (sim/state.py); resist: the resistance against i's projectiles (missile + physical, at most 0.9)."""
     from tools.nn.sim import melee as smelee
     hit = smelee.per_hit(m_damage.float()[:, :, None], m_ap.float()[:, :, None], armour.float()[:, None, :],
                          hp_man.float()[:, None, :], resist.float()[:, None, :], single=(men0 <= 1)[:, None, :])
-    hit = hit * (1 - shield.float()[:, None, :] * small_arms.float()[:, :, None])
+    from tools.nn.model import pairs as mpairs
+    left = mpairs.shield_left(m_damage.float(), m_ap.float())[:, :, None]          # (the armour-piercing pierces it)
+    hit = hit * (1 - shield.float()[:, None, :] * left * small_arms.float()[:, :, None])
     d = torch.hypot(x.float()[:, :, None] - x.float()[:, None, :], z.float()[:, :, None] - z.float()[:, None, :])
     reach = (rng.float()[:, :, None] > 0) & (d <= rng.float()[:, :, None] + approach)
     return hit * reach.float()

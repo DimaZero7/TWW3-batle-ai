@@ -92,3 +92,33 @@ def test_a_battle_against_human_plays():
     for _ in range(3):
         env.step(actor, crit)
     assert bool((env.ctrl == league.CODE["human"]).any())
+
+
+def custom(side1_units, attacker=2, gap=200.0):
+    """Side 1 (human, west) of side1_units [(key, general, dx, z)], side 2 the usual army (east)."""
+    units = [{"key": k, "general": g, "x": -gap / 2 + dx, "z": zz, "b": 90} for k, g, dx, zz in side1_units]
+    east = {"faction": "wh_main_emp_empire", "units": [
+        {"key": "wh_main_emp_cha_general_0", "general": True, "x": gap / 2 + 40, "z": 0, "b": 270}]
+        + [{"key": "wh_main_emp_inf_spearmen_0", "x": gap / 2, "z": zz, "b": 270} for zz in (-40, 0, 40)]}
+    return scenario.build([{"attacker": attacker, "sides": {1: {"faction": "wh_main_emp_empire", "units": units},
+                                                             2: east}}])
+
+
+SPEAR, ARCHER, LORD = "wh_main_emp_inf_spearmen_0", "wh2_dlc13_emp_inf_archers_0", "wh_main_emp_cha_general_0"
+
+
+@pytest.mark.parametrize("units", [
+    [(LORD, True, -40, 0), (SPEAR, False, 0, -40), (SPEAR, False, 0, 0), (SPEAR, False, 0, 40)],   # no shooters
+    [(LORD, True, -40, 0), (ARCHER, False, 0, -30), (ARCHER, False, 0, 30)],                     # no infantry
+    [(SPEAR, False, 0, 0)],                                                                       # one unit
+    [(LORD, True, 0, 0)],                                                                         # the lord alone
+], ids=["no_shooters", "no_infantry", "one_unit", "lord_alone"])
+def test_a_battle_against_human_plays_with_any_army(units):
+    P = load()
+    st = custom(units)
+    for _ in range(160):                                                     # 80 s
+        o = O.merge(opponents.human(st), opponents.ai_like(st), st.u["side"] == 2)
+        O.check(o, st.N)
+        assert torch.isfinite(o.x).all() and torch.isfinite(o.z).all()
+        battle.step(st, o, P)
+    assert torch.isfinite(st.u["x"]).all()
