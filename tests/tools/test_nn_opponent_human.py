@@ -1,6 +1,8 @@
-"""tools/nn/train/opponents.py `human`: the scripted defence in depth modelled on the human's battle against g31 - the
-line holds, the reserve waits behind it and goes in one at a time where the line is worst, the shooters stand off a
-flank; registered at the end of the league's opponents (the others' codes kept), not in the mix; a battle plays.
+"""tools/nn/train/opponents.py `human`: the scripted defence in depth modelled on the human's battles against g31 and
+g34 - the line wider than the enemy's holds and steps once to meet it, the reserve waits behind it until the enemy's
+first rout and goes in one at a time where the line is worst, the shooters shoot the enemy's shooters first and stand
+off a flank, forward along it once the melee begins; registered at the end of the league's opponents (the others'
+codes kept), not in the mix; a battle plays.
 torch: the training container, on the CPU."""
 import pytest
 
@@ -34,22 +36,65 @@ def test_human_is_registered_at_the_end_and_not_in_the_mix():
     assert [league.CODE[drills.opponent(n)] for n in drills.NAMES] == list(range(7, 7 + len(drills.NAMES)))
 
 
-def test_the_line_holds_the_reserve_waits_behind_and_the_shooters_go_to_a_flank():
-    st = army()
+def centred(gap=600):
+    """army() with side 1's line (slots 1-3) at z -40, 0, 40 and its reserve (4, 5) at -80, 80: both centres on z 0,
+    the forward exactly +x."""
+    st = army(gap=gap)
+    st.u["z"][0, 1:6] = torch.tensor([-40.0, 0.0, 40.0, -80.0, 80.0])
+    return st
+
+
+def test_the_line_widens_the_reserve_waits_behind_and_the_shooters_go_to_a_flank():
+    st = centred()
     o = opponents.human(st)
     O.check(o, st.N)
-    # side 1: slot 0 the general, 1-5 spearmen (1-3 the line: 60 % of 5), 6 the archer
-    assert (o.kind[0, 1:4] == O.HOLD).all()                                  # the line stands
+    # side 1: slot 0 the general, 1-5 spearmen (1-3 the line: 58 % of 5), 6 the archer; forward +x, "left" +z
+    # the enemy's span 160 m (its spearmen -80..80): the line's posts 1.3 x 160 = 208 m across its centre z 0, in the
+    # order the units stand, level with it (the middle one is there: holds)
+    assert int(o.kind[0, 1]) == O.MOVE and int(o.kind[0, 3]) == O.MOVE and int(o.kind[0, 2]) == O.HOLD
+    zs = st.u["z"][0, st.N // 2:]
+    half = 1.3 * float(zs.max() - zs.min()) / 2                             # (the builder's places: ~160 m)
+    assert 100 < half < 105 and o.z[0, [1, 3]].tolist() == pytest.approx([-half, half], abs=0.01)
+    assert (o.x[0, [1, 3]] - (-300.0)).abs().max() < 0.01
     assert (o.kind[0, 4:6] == O.MOVE).all() and (o.x[0, 4:6] < -300 - 30).all()   # the reserve behind the line
-    assert int(o.kind[0, 6]) == O.MOVE and float(o.z[0, 6]) == pytest.approx(0 + 50, abs=3)   # 50 m beyond the end
-    assert abs(float(o.x[0, 6]) - float(st.u["x"][0, 1:4].mean())) < 10.0  # ... level with it (the forward: to the enemy)
+    # the archer (at z 0: the left end): 50 m beyond the end of the widened line (its half 104)
+    assert int(o.kind[0, 6]) == O.MOVE and float(o.z[0, 6]) == pytest.approx(half + 50, abs=0.5)
+    assert abs(float(o.x[0, 6]) - (-300.0)) < 1.0                           # ... level with it (the forward: to the enemy)
     side1 = st.u["side"][0] == 1
     assert not bool((o.kind[0][side1] == O.ATTACK).any())                   # no attack before contact
-    # the line's units: the first 60 % of the melee slots, whatever their places
-    assert opponents.Human().line_share == 0.6
+    assert opponents.Human().line_share == 0.58 and opponents.Human().widen == 1.3
+    # inside the map: a map of half-size 120 m keeps every post 30 m inside its edge
+    st.bounds = 120.0
+    o = opponents.human(st)
+    moving = o.kind[0] == O.MOVE
+    assert bool(moving.any()) and float(o.z[0][moving].abs().max()) <= 90.0 + 1e-4
 
 
-def test_the_reserve_goes_in_one_at_a_time_where_the_line_is_worst():
+def test_the_line_steps_once_to_meet_the_enemy():
+    """The enemy's nearest melee unit within step_far_m (175) of the line's centre and farther than step_near_m (120):
+    the free line walks step_m (57) forward of its posts; a step in force is kept; within 120 m - no step."""
+    st = centred()
+    u = st.u
+    H = st.N // 2
+    u["x"][0, H:] = u["x"][0, H:] - 450.0                     # the enemy at x -150 +- : 150 m from our line at -300
+    o = opponents.human(st)
+    for i in (1, 2, 3):
+        assert int(o.kind[0, i]) == O.MOVE and not bool(o.run[0, i])
+        assert float(o.x[0, i]) == pytest.approx(-300.0 + 57.0, abs=0.5)
+    # in force (its point 57 m ahead): kept as it is, whatever the posts now
+    u["order_kind"][0, 1:4] = O.MOVE
+    u["ox"][0, 1:4], u["oz"][0, 1:4] = -243.0, 7.0                     # (x 57 m ahead of -300)
+    o = opponents.human(st)
+    assert (o.kind[0, 1:4] == O.MOVE).all() and torch.allclose(o.x[0, 1:4], torch.full((3,), -243.0))
+    assert torch.allclose(o.z[0, 1:4], torch.full((3,), 7.0))
+    # the enemy within 120 m: no step (posts level with the line)
+    u["order_kind"][0, 1:4] = O.HOLD
+    u["x"][0, H:] = u["x"][0, H:] + 50.0 - 100.0              # 100 m off
+    o = opponents.human(st)
+    assert float(o.x[0, 1:4].max()) < -300.0 + 10.0
+
+
+def test_the_reserve_waits_for_the_enemys_first_rout_then_goes_in_one_at_a_time_where_the_line_is_worst():
     st = army(gap=600)
     u = st.u
     H = st.N // 2
@@ -61,14 +106,37 @@ def test_the_reserve_goes_in_one_at_a_time_where_the_line_is_worst():
         u["hp"][0, mine] = hp
     o = opponents.human(st)
     O.check(o, st.N)
+    assert not bool((o.kind[0, 4:6] == O.ATTACK).any())                     # no enemy has routed: the reserve waits
+    assert int(o.kind[0, 1]) == O.ATTACK and int(o.target[0, 1]) == H + 1   # the line fights its enemy
+    u["r"][0, H + 5] = True                                                  # an enemy unit routs
+    o = opponents.human(st)
     sent = [i for i in (4, 5) if int(o.kind[0, i]) == O.ATTACK]
     assert len(sent) == 1 and int(o.target[0, sent[0]]) == H + 3            # one reserve unit, at the worst place
-    assert int(o.kind[0, 1]) == O.ATTACK and int(o.target[0, 1]) == H + 1   # the line fights its enemy
     # its attack in force, not there yet: no second one
     u["order_kind"][0, sent[0]], u["order_target"][0, sent[0]] = O.ATTACK, H + 3
     o = opponents.human(st)
     other = 9 - sent[0]
     assert int(o.kind[0, sent[0]]) == O.ATTACK and int(o.kind[0, other]) != O.ATTACK
+
+
+def test_the_shooters_shoot_the_enemys_shooters_first_then_walk_along_the_flank():
+    st = centred()
+    u = st.u
+    H = st.N // 2
+    rng = float(u["range"][0, 6])
+    assert rng > 0
+    # the enemy's archer (H + 6) within our archer's range: it is the target
+    u["x"][0, H + 6], u["z"][0, H + 6] = float(u["x"][0, 6]) + rng - 10.0, float(u["z"][0, 6])
+    o = opponents.human(st)
+    assert int(o.kind[0, 6]) == O.ATTACK and int(o.target[0, 6]) == H + 6
+    # out of range again, our line in melee: the post flank_fwd_m (65) forward along the flank
+    u["x"][0, H + 6] = 300.0
+    before = opponents.human(st)
+    u["m"][0, 1], u["m"][0, H + 1] = True, True                              # (the flags: nobody moved)
+    u["target"][0, 1], u["target"][0, H + 1] = H + 1, 1
+    after = opponents.human(st)
+    assert int(after.kind[0, 6]) == O.MOVE
+    assert float(after.x[0, 6]) - float(before.x[0, 6]) == pytest.approx(65.0, abs=1.0)
 
 
 def test_a_battle_against_human_plays():
