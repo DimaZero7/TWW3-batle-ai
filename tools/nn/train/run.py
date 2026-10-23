@@ -308,7 +308,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "kind_stick": "general_kind_stick", "task_mask": "general_task_mask",
                  "task_mask_parts": "general_task_mask_parts",
                  "shoot_share": "general_shoot_share", "melee_stay": "general_melee_stay",
-                 "waver_share": "general_waver_share",
+                 "waver_share": "general_waver_share", "shoot_line_m": "general_shoot_line_m",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
                  "replan_near_m": "general_replan_near_m", "teach_stall_s": "general_teach_stall_s",
@@ -1714,6 +1714,9 @@ def parser():
                     help="general: 1 'withdraw' not for a group fighting in melee that has not wavered (some unit in "
                          "melee, under general-waver-share of it wavering or worse); the teacher and the executor's "
                          "mask (a steady unit in melee: no move / withdraw) keep the rule too; 0: withdraw anywhere")
+    ap.add_argument("--general-shoot-line-m", type=float, default=20.0,
+                    help="general: shooters under 'shoot' go no farther than this ahead of our infantry groups under "
+                         "'hold' (the executor's mask part shoot_line); 0: off")
     ap.add_argument("--general-waver-share", type=float, default=0.5,
                     help="general: a group has wavered (withdraw allowed in melee) when at least this share of its "
                          "units waver, rout or are shattered")

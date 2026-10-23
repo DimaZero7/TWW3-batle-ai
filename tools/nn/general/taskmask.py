@@ -33,6 +33,14 @@ on the chained heads' parts (tools/nn/model/chain.py: kind -> target -> sector -
               of it (those it fights; none: no attack - hold or keep). The human's battle against g34: a hold led a
               fighting unit back to its point (22 orders), a withdraw of a group with one wavering unit of 8-14 led
               its steady ones out of melee (63 of 72 withdraw orders)
+    shoot     shoot_line (GeneralConfig.shoot_line_m > 0): while our infantry groups hold (a group under "hold", under
+              half of it shooters - the teacher's wait for the farthest group, or the general's own hold), a unit
+              under "shoot" goes no farther forward (the side's frame) than the most forward centre of those groups
+              + shoot_line_m (Runtime.task: "task_line", LINE_NONE where none): the sectors that reach behind that
+              line, the fine cells behind it (MaskedChainHeads), the attack of a shooter only at enemies in its range
+              now (of a unit without missiles: at enemies behind the line), no keep of an attack or a move beyond the
+              line in force (a firing shooter keeps: the volley lock). The human's battle against g34: the infantry
+              waited 66 s, the shooting groups went 107-140 m ahead of it alone and took the blow first
 Each piece is a part (PARTS; GeneralConfig.task_mask_parts, run.py --general-task-mask-parts); by default only those
 that cost nothing at minute 0 (config.MASK_PARTS: the movement ones, the general's shoot_group and the volley lock -
 the ones that forbid fighting, withdraw_attack, attack_target, shoot_melee/target, cost g13 0.2-1.2 of the rating;
@@ -65,7 +73,8 @@ KIND = {k.name: k.index for k in gconfig.MISSION_KINDS}
 ATTACK_M = 150.0         # attack / flank: the sectors may come up to this far from the target group's centre at least
 HOLD_FIGHT = 3.0         # hold: the attack only at enemies within this x the reach of the point (the measure's 0)
 AWAY_M = gmission.AWAY_M  # withdraw: towards the point only this far from the nearest enemy
-KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main", "task_lock")
+KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main", "task_lock", "task_line")
+LINE_NONE = 1e4          # "task_line" where no line holds the unit (m: beyond any map)
 # the volley lock (shoot_volley, volley_lock()): a volley seen at this decision (volley_ready x reload under this, s)
 # frees the decision; the simulator's men load fully only after ~1.1-1.3x the passport's reload (observation.py VOLLEY):
 # the lock's longest cycle aim + VOLLEY_SLACK x reload + one decision (a shooter that aims and never fires is let go);
@@ -88,7 +97,8 @@ PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in fo
          "screen_move",       # screen: the sectors near the segment
          "shoot_group",       # the general: "shoot" only for a group of shooters (net.General.shoot_ok)
          "shoot_volley",      # shoot: a firing shooter only keeps its order until its volley (volley_lock)
-         "melee_stay")        # any: a steady unit in melee does not move off (on with GeneralConfig.melee_stay)
+         "melee_stay",        # any: a steady unit in melee does not move off (on with GeneralConfig.melee_stay)
+         "shoot_line")        # shoot: not ahead of our holding infantry (on with GeneralConfig.shoot_line_m > 0)
 
 
 def fighting(mem, melee, waver, share=0.5, alive=None):
@@ -117,31 +127,35 @@ def parse_parts(text):
 
 def parts_of(gcfg):
     """The parts in force of a GeneralConfig (none without task_mask): task_mask_parts, and melee_stay with
-    GeneralConfig.melee_stay (a rule field: an older checkpoint gets it too, whatever its saved parts)."""
+    GeneralConfig.melee_stay and shoot_line with GeneralConfig.shoot_line_m > 0 (rule fields: an older checkpoint gets
+    them too, whatever its saved parts)."""
     if not getattr(gcfg, "task_mask", False):
         return frozenset()
     p = parse_parts(getattr(gcfg, "task_mask_parts", "all"))
     if getattr(gcfg, "melee_stay", False):
         p = p | {"melee_stay"}
+    if getattr(gcfg, "shoot_line_m", 0.0) > 0:
+        p = p | {"shoot_line"}
     return p
 
 
-def fields(kind_u, point, reach, target_u, main, on, lock=None):
+def fields(kind_u, point, reach, target_u, main, on, lock=None, line=None):
     """The task's numbers of the observation (module doc): kind_u [R, N] the unit's group's mission kind, point [R, N, 2]
     its point in the side's frame (m), reach [R, N] (0: no point), target_u [R, N] the target index, main [R, N] the
     plan's group numbers of every slot, on [R, N] the units with a task; lock [R, N] the volley lock (volley_lock();
-    None: nobody)."""
+    None: nobody); line [R, N] the forward limit of shoot_line (m in the side's frame; None or LINE_NONE: none)."""
     small = torch.int8
     lock = torch.zeros_like(on) if lock is None else lock & on
+    line = torch.full_like(reach, LINE_NONE) if line is None else torch.where(on, line, torch.full_like(line, LINE_NONE))
     return {"task_mk": torch.where(on, kind_u, torch.full_like(kind_u, -1)).to(small),
             "task_pt": torch.where(on[..., None], torch.nan_to_num(point), torch.zeros_like(point)).float(),
             "task_reach": torch.where(on, reach, torch.zeros_like(reach)).float(),
             "task_tg": torch.where(on, target_u, torch.full_like(target_u, -1)).to(small),
-            "task_main": main.to(small), "task_lock": lock.bool()}
+            "task_main": main.to(small), "task_lock": lock.bool(), "task_line": line.float()}
 
 
-def _reload_column():
-    """The token's column of the passport's reload_s / RELOAD_SCALE (passport.features: found by its value, not its
+def _missile_column(name, scale):
+    """The token's column of the passport's missile `name` / scale (passport.features: found by its value, not its
     place)."""
     from tools.nn.model import passport
     base = {"men": 1, "hp_total": 1, "hp_per_man": 1, "mass": 1, "armour": 0, "leadership": 0, "multiplayer_cost": 0,
@@ -149,15 +163,17 @@ def _reload_column():
             "melee": {"attack": 0, "defence": 0, "charge_bonus": 0, "damage": 0, "ap_damage": 0, "bonus_v_large": 0,
                       "bonus_v_infantry": 0, "attack_interval_s": 0, "splash_max_attacks": 1},
             "shield": {"missile_block_chance": 0}}
-    a = passport.features(dict(base, missile={"range_m": 100, "reload_s": 0}))
-    b = passport.features(dict(base, missile={"range_m": 100, "reload_s": RELOAD_SCALE}))
+    a = passport.features(dict(base, missile={"range_m": 100, "reload_s": 1}))
+    b = passport.features(dict(base, missile=dict({"range_m": 100, "reload_s": 1}, **{name: scale})))
     (i,) = [k for k in range(len(a)) if a[k] != b[k]]
-    assert abs(b[i] - 1.0) < 1e-6, "passport.features: the reload's scale changed"
+    assert abs(b[i] - 1.0) < 1e-6, f"passport.features: the scale of {name} changed"
     return ob.INDEX[f"passport_{i}"]
 
 
 RELOAD_SCALE = 20.0
-RELOAD_COL = _reload_column()
+RELOAD_COL = _missile_column("reload_s", RELOAD_SCALE)
+RANGE_SCALE = 500.0
+RANGE_COL = _missile_column("range_m", RANGE_SCALE)
 
 
 def cycle_s(tok):
@@ -257,7 +273,11 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     vl = sh & ("shoot_volley" in P) & (lk.bool() if lk is not None else torch.zeros_like(sh))   # the volley lock
     sh, wd = sh & use("shoot_melee", "shoot_target"), wd & use("withdraw_attack", "withdraw_move")
     st = stay(obs, mk, on, waver_share) if "melee_stay" in P else torch.zeros_like(on)   # melee_stay
-    on = att | hold | scr | sh | wd | vl | st                                 # the units under a part in force
+    ln_v = obs.get("task_line")
+    line = (is_k("shoot") & ("shoot_line" in P) & (ln_v.float() < LINE_NONE / 2) if ln_v is not None
+            else torch.zeros_like(on))
+    limit = ln_v.float() if ln_v is not None else torch.full_like(px, LINE_NONE)
+    on = att | hold | scr | sh | wd | vl | st | line                          # the units under a part in force
     big = torch.full(px.shape + px.shape[-1:], 1e9, device=px.device)                          # [B, N, N]
     # targets: the target group's units (attack, flank, a shooter's shoot); hold: the enemies near the point
     member = (main[:, None, :] == tg[:, :, None]) & (tg[:, :, None] >= 0) & foe[:, None, :]       # [B, N (i), N (j)]
@@ -278,6 +298,11 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     off_now = ((tok[..., ob.INDEX["order_move"]].float() > 0.5) | (tok[..., ob.INDEX["order_withdraw"]].float() > 0.5))
     k_st = ~((ar == MOVE) | (ar == WITHDRAW) | ((ar == KEEP) & (off_now & free)[..., None]))
     kind = torch.where(st[..., None], k_st, kind)
+    # shoot_line: no keep of an attack (a shooter not firing walks to its range) or of a move beyond the line in force
+    firing = tok[..., ob.INDEX["firing"]].float() > 0.5
+    o_fwd = px + tok[..., ob.INDEX["order_fwd"]].float() * ob.POS
+    beyond = ((att_now & ~firing) | (off_now & (o_fwd > limit))) & line & ~st
+    kind = kind & ~((ar == KEEP) & (beyond & free)[..., None])
     # sectors (their centres in the side's frame, with half a diagonal of slack)
     c = sc.centres(cfg, mk.device)
     cx, cz = c[:, 0], c[:, 1]
@@ -292,6 +317,12 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     sec = torch.ones_like(dcP, dtype=torch.bool)
     melee_j = tok[..., ob.INDEX["melee"]].float() > 0.5
     tgt = torch.where(st[..., None], foe[:, None, :] & melee_j[:, None, :] & (D <= STAY_M), tgt)
+    # shoot_line: a shooter's attack only at enemies in its range now, of a unit without missiles at enemies behind it
+    rng = tok[..., RANGE_COL].float() * RANGE_SCALE
+    in_rng = D <= rng[..., None]
+    behind = px[:, None, :] <= limit[..., None]
+    t_line = foe[:, None, :] & torch.where((shooter & (rng > 0))[..., None], in_rng, behind)
+    tgt = torch.where((line & ~st)[..., None], tgt & t_line, tgt)
     s_att = dcP <= torch.maximum(duP, torch.full_like(duP, ATTACK_M))[..., None] + h
     s_hold = dcP <= reach[..., None] + h
     # screen: the segment from the point A (the target group's centre) to the seen enemy nearest to A
@@ -310,8 +341,22 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     sec = torch.where((hold & has_pt & ("hold_move" in P))[..., None], s_hold, sec)
     sec = torch.where((scr & has_pt & any_foe)[..., None], s_scr, sec)
     sec = torch.where((wd & any_foe & ("withdraw_move" in P))[..., None], s_wd, sec)
+    s_line = (cx - sc.step(cfg) / 2) <= limit[..., None]                     # the sector reaches behind the line
+    sec = torch.where((line & ~st)[..., None], sec & s_line, sec)
     del sec_ok   # (the heads AND it in; the fall-back is theirs)
-    return {"kind": kind, "target": tgt, "sector": sec, "on": on, "fb_target": by_group & ~seen_t}
+    return {"kind": kind, "target": tgt, "sector": sec, "on": on, "fb_target": by_group & ~seen_t,
+            "line": torch.where(line & ~st, limit, torch.full_like(limit, LINE_NONE))}
+
+
+def fine_line(cfg, m, sector, fine_ok):
+    """[B, N, fine^2] the fine cells of the chosen sector [B, N] that shoot_line leaves (their forward centre behind the
+    line m["line"]; every one where no line, or where it would close all of fine_ok)."""
+    if m is None or "line" not in m:
+        return fine_ok
+    cells = sc.cells(cfg, sector.device)[..., 0]                                  # [S, fine^2] forward
+    behind = cells[sector] <= m["line"][..., None]
+    ok = fine_ok & behind
+    return torch.where(ok.any(-1, keepdim=True), ok, fine_ok)
 
 
 def apply(m, ctrl, free, ok, sec_ok):
@@ -383,6 +428,7 @@ class MaskedChainHeads(chain.ChainHeads):
         s_at = s.gather(1, idx)                                                   # [B, N, ds]
         fine, bad = chain._cap(self.fine(torch.cat([c, s_at], -1)), bad)
         fine_ok = cells_in.gather(1, a_sector[..., None].expand(-1, -1, cells_in.shape[-1]))
+        fine_ok = fine_line(cfg, tm, a_sector, fine_ok)
         fine = fine.masked_fill(~fine_ok, NEG)
         a_fine = chain._pick(fine, greedy, temperature) if action is None else a_fine_given
         commit, bad = chain._cap(self.commit(c), bad)

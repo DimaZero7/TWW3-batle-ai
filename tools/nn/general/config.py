@@ -107,6 +107,11 @@ class GeneralConfig:
     waver_share: float = 0.5   # ... a group has wavered when at least this share of its units (alive) waver, rout or
     #                            are shattered (taskmask.fighting); one wavering unit of 8-14 freed the whole group
     #                            (the human's battle against g34: 63 of 72 withdraw orders went to steady units)
+    shoot_line_m: float = 20.0  # the executor's shooters under "shoot" go no farther than this ahead of the front of our
+    #                            infantry groups under "hold" (the most forward centre; taskmask part shoot_line, on
+    #                            with this field > 0: the sectors, cells, targets and the keep of a move or attack in
+    #                            force); the human's battle against g34: the infantry waited 66 s while the shooting
+    #                            groups went 107-140 m ahead alone and took the blow first; 0: off
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet
@@ -172,6 +177,8 @@ class GeneralConfig:
             raise ValueError(f"general kinds {self.kinds}: 1..{len(MISSION_KINDS)} (config.MISSION_KINDS names them)")
         if self.kind_stick < 0:
             raise ValueError(f"general kind_stick {self.kind_stick}: >= 0")
+        if self.shoot_line_m < 0:
+            raise ValueError(f"general shoot_line_m {self.shoot_line_m}: >= 0 (0: off)")
         if not 0.0 < self.waver_share <= 1.0:
             raise ValueError(f"general waver_share {self.waver_share}: a share in (0, 1]")
         if not 0.0 <= self.shoot_share <= 1.0:

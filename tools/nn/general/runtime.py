@@ -1106,9 +1106,31 @@ class Runtime:
             reach = torch.where(uok, reach, torch.zeros_like(reach))
             kind_u = r["kind"][rows].gather(1, mi)
             lock = None if t is None else self._volley(rows, obs_r, on & (kind_u == gtaskmask.KIND["shoot"]), t)
-            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock))
+            line = self.shoot_line(rows, obs_r, main, cent, on, kind_u)
+            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock, line))
             self._count_masks(rows, dict(obs_r, **out))
         return out
+
+    def shoot_line(self, rows, obs, main, cent, on, kind_u):
+        """[R, N] the forward limit (m, the side's frame) of our units under "shoot" while our infantry groups hold
+        (taskmask part shoot_line, GeneralConfig.shoot_line_m): the most forward centre cent [R, 2G, 2] of our groups
+        under "hold" with under half of their units shooters (the token's ammunition and range), + shoot_line_m;
+        taskmask.LINE_NONE where none (no such group, not "shoot", the rule off)."""
+        G = self.G
+        none = torch.full(main.shape, gtaskmask.LINE_NONE, device=self.dev)
+        lead = float(getattr(self.gcfg, "shoot_line_m", 0.0))
+        if lead <= 0 or not self.gcfg.kinds > gtaskmask.KIND["shoot"]:
+            return none
+        tok = obs["tokens"]
+        shooter = (tok[..., ob.INDEX["ammo"]].float() > 0) & (tok[..., gtaskmask.RANGE_COL].float() > 0)
+        own = obs["own"] & obs["attend"]
+        mem = (main[..., None] == torch.arange(G, device=self.dev)) & own[..., None]          # [R, N, G]
+        n = mem.sum(1).float()
+        n_sh = (mem & shooter[..., None]).sum(1).float()
+        hold = (self.r["kind"][rows] == gtaskmask.KIND["hold"]) & (n > 0) & (n_sh < 0.5 * n)   # [R, G]
+        front = cent[:, :G, 0].masked_fill(~hold, -float("inf")).max(-1).values               # [R]
+        lim = (front + lead)[:, None].expand_as(none)
+        return torch.where(on & (kind_u == gtaskmask.KIND["shoot"]) & hold.any(-1, keepdim=True), lim, none)
 
     def _volley(self, rows, obs, shoot, t):
         """The volley lock [R, N] of rows at the battle time t [R] (taskmask.volley_lock; its clock kept in vl_t0; a
