@@ -476,7 +476,15 @@ class Runtime:
                                tiles=tiles, tiles_ok=tiles_ok, engage=engage, hold_m=self.teach_hold_m,
                                facing=f("b"), flank=self.teach_flank,
                                fast=ggroups.roles(self.b["num"][b], self.b["lab"][b]) == ggroups.ROLES.index("fast"),
-                               **self._teach_fight(f))
+                               **self._teach_fight(f), shot=self._teach_shot(f))
+
+    @staticmethod
+    def _teach_shot(f):
+        """[M, N, N] the HP a shot of unit i takes from unit j in reach (teacher.shot_hp) of the state's fields f(name):
+        the resistance missile + physical, at most 0.9 (the simulator's missile.physical_resist, config/nn/sim.json)."""
+        resist = (f("resist_missile").float() + f("resist_physical").float()).clamp(max=0.9)
+        return gteacher.shot_hp(f("x"), f("z"), f("range"), f("m_damage"), f("m_ap"), f("small_arms"), f("armour"),
+                                f("hp_man"), f("shield"), resist, f("men0"))
 
     def _teach_fight(self, f):
         """The teacher's melee rule's inputs (teacher.choose melee, waver) of the state's fields f(name) -> [M, N]:

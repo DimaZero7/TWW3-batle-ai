@@ -430,7 +430,15 @@ units), later over earlier:
   (by the groups' centres). S27 waited and met the enemy (80 hold orders in the first 100 s against the general's 8,
   `build/diag_skv`); the old teacher sent everyone to attack from the first second. The switch comes at the next
   re-plan (every 30 s or on an event);
-- a group of mostly shooters (range and ammunition) — `shoot` the nearest enemy group;
+- a group of mostly shooters (range and ammunition) — `shoot` the enemy group its shot takes the most health from:
+  the mean over the pairs "our shooter — a unit of the target group" of a hit's expected damage by the simulator's rule
+  (`melee.per_hit`, as in `missile.volley`: the projectile's damage and armour-piercing against the target's armour,
+  health of a man and resistances — missile and physical, together at most 90 %; damage beyond a killed man is lost;
+  the target's shield cuts small arms — the teacher assumes a frontal shot); a pair beyond the shooter's range + 100 m
+  (`APPROACH_M`: a short step in, ~20–25 s at a walk — inside one re-plan) — 0. So the value = a shot's damage × the
+  share of targets in reach. Equal ones (within 0.1 %) — the nearest; none in reach — the nearest. Why: in the human's
+  battle against g31 by the nearest group 96 % of the slingers' fire (armour-piercing 1) went at greatswords of
+  armour 95;
 - one group — not shooters, without the lord, nearest to our largest shooting group — `screen` it;
 - the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group, but only
   if the group does not fight in melee (or someone in it wavers). Fighting and holding — `hold` of the tile it stands
