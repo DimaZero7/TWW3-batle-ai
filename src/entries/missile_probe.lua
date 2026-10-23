@@ -20,6 +20,9 @@
 -- at the go walks into melee with it (fire into a melee: from behind our men, at an angle, along the contact).
 -- With lane.friend_fire the friend fires at will from the go too (two shooters in one place), its ammo and firing flag
 -- are sampled in 'f', and it stops firing when the lane ends.
+-- config.soldiers_every_s (optional, > 0): 'probe_soldiers' - every man's place (ManList, x and z in decimetres: the
+-- living men) of each lane's shooter and friend: once soldiers_place_ms after the teleport, once at the go (before
+-- the first shot), then every soldiers_every_s seconds while lanes run.
 -- Every tick_ms 'probe_sample': per running lane the shooter's ammo, men, firing flag, place, bearing,
 -- moving; the target's men, health (CCO HealthValue), unary hit points, place, bearing, moving. A lane ends
 -- when the shooter is out of ammo or the target dead (and settle_s more for the projectiles in the air), when
@@ -31,6 +34,7 @@ local errors = require('apps.core.errors')
 local telemetry = require('apps.telemetry.adapter')
 local orders = require('apps.orders.adapter')
 local facing = require('apps.orders.facing')
+local formation = require('apps.units.formation_adapter')
 local map = require('apps.map.adapter')
 
 local M = {}
@@ -68,7 +72,7 @@ end
 -- config: build, speed, tick_ms, deadline_s, settle_ms, lanes = {{name, shooter, target, x, z, s_b, d, t_angle,
 -- t_rot, s_width, t_width, mode, target_mode, start_d, step_m, step_s, move_fwd, move_lat, move_run, max_s,
 -- idle_s, settle_s, s_move_fwd, s_move_lat, s_move_run, friend, friend_fwd, friend_lat, friend_width,
--- friend_engage, friend_fire, reorder_s}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
+-- friend_engage, friend_fire, reorder_s}}, soldiers_every_s, soldiers_place_ms, park = {{name, x, z, bearing}}. globals: common, battle_vector.
 function M.main(bm, config, globals)
     if _G.tww3_bai_missile_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', units = {}, lanes = {}}
@@ -113,6 +117,21 @@ function M.main(bm, config, globals)
             x = p and round(p:get_x()), z = p and round(p:get_z()),
             b = round(read(function() return u:bearing() end), 0), mv = read(function() return u:is_moving() end)}
     end
+
+    -- every man's place of each lane's shooter and friend (config.soldiers_every_s; module doc)
+    local function soldiers(tag)
+        local rows = {}
+        for _, lane in ipairs(state.lanes) do
+            local row = {lane = lane.name, t = lane.t0 and now_ms() - lane.t0 or nil}
+            for key, it in pairs({s = lane.s, f = lane.f}) do
+                local men = formation.soldiers(cco, it.unit)
+                row[key] = men.status == 'ok' and men.xz_dm or {unavailable = men.reason}
+            end
+            rows[#rows + 1] = row
+        end
+        emit('probe_soldiers', {tag = tag, t = now_ms(), lanes = rows})
+    end
+    local function soldiers_on() return (config.soldiers_every_s or 0) > 0 end
 
     local function place(it, x, z, bearing, width)
         orders.teleport(it.uc, vec(x, z), facing.snap(bearing), width)
@@ -199,6 +218,10 @@ function M.main(bm, config, globals)
             end
         end
         if #rows > 0 then emit('probe_sample', {lanes = rows}) end
+        if busy and soldiers_on() and now - (state.soldiers_at or 0) >= config.soldiers_every_s * 1000 then
+            state.soldiers_at = now
+            soldiers('every')
+        end
         flush()
         if not busy then finish('completed') end
     end
@@ -225,6 +248,10 @@ function M.main(bm, config, globals)
             end
         end
         emit('probe_go', {lanes = #state.lanes})
+        if soldiers_on() then
+            state.soldiers_at = now_ms()
+            soldiers('go')
+        end
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         flush()
@@ -259,6 +286,10 @@ function M.main(bm, config, globals)
             finish('deadline')
         end), 'tww3_bai_missile_probe_deadline')
         bm:add_infotext('BAI: MISSILE PROBE')
+        if soldiers_on() then
+            bm:callback(guarded(function() soldiers('placed') end), config.soldiers_place_ms or 2500,
+                'tww3_bai_missile_probe_soldiers')
+        end
         bm:callback(guarded(go), config.settle_ms, 'tww3_bai_missile_probe_go')
         flush()
     end

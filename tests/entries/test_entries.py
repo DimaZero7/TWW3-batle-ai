@@ -2023,6 +2023,39 @@ class TestMissileProbe:
         samples = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
         assert samples and all(x["f"].get("ammo") == 1970 and x["f"].get("fire") == x["s"].get("fire") for x in samples)
 
+    def test_the_mens_places_after_the_teleport_at_the_go_and_every_few_seconds(self, lua, tmp_path):
+        # stacked (tools/nn/missile_probe.py soldiers_every_s): 'probe_soldiers' with every man's place of the shooter
+        # and the friend - once after the teleport (soldiers_place_ms), once at the go, then every soldiers_every_s
+        lua.execute("""
+            own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_hg_1', 'hg', 0, 0),
+                   fake.unit('own_hg_1b', 'hg', 0, 0)}
+            enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_sspear_1', 'sspear', 0, 0)}
+            own[2].ammo, own[3].ammo = 1980, 1970
+            bm = fake.manager({own, enemy})
+            CONFIG = {build = 'test', speed = 20, tick_ms = 500, deadline_s = 100, settle_ms = 4000,
+                soldiers_every_s = 5, soldiers_place_ms = 2500,
+                lanes = {{name = 'L1', shooter = 'own_hg_1', target = 'enemy_sspear_1', x = 0, z = -80, s_b = 0,
+                          d = 80, t_angle = 0, t_rot = 0, s_width = 30, t_width = 30, mode = 'fire',
+                          target_mode = 'stand', max_s = 12, idle_s = 12, settle_s = 2, friend = 'own_hg_1b',
+                          friend_fwd = 0, friend_lat = 0, friend_width = 30, friend_fire = true}},
+                park = {{name = 'own_lord', x = -700, z = -400, bearing = 0}, {name = 'enemy_lord', x = 700,
+                         z = -400, bearing = 0}}}
+            GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+            STATE = require('entries.missile_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 80 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        snaps = [r for r in rows if r["event"] == "probe_soldiers"]
+        tags = [r["tag"] for r in snaps]
+        assert tags[:2] == ["placed", "go"] and tags.count("every") >= 2
+        go = next(r for r in rows if r["event"] == "probe_go")
+        assert snaps[0]["t"] < go["t"] if "t" in go else True
+        lane = snaps[1]["lanes"][0]
+        assert lane["lane"] == "L1" and len(lane["s"]) == 4 and len(lane["f"]) == 4    # the fake's 2 men, x and z each
+
     def test_layout_and_frame(self, lua):
         L = lua.eval("""require('entries.missile_probe').layout({x = 10, z = 0, s_b = 0, t_angle = 90, t_rot = 180},
             100)""")

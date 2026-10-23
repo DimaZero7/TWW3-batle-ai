@@ -140,13 +140,16 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
     grows with the distance - arrows and bolts ~8 deg at 60 m and ~25 deg at 160 m, a bullet ~3 deg at 100 m) from the
     muzzle to 0.75 of the target man's height (0.6 for very large ones). Only the men of OTHER own units block -
     cylinders of their radius and height (x 1.0 with the mod); the unit's own men never block, even in a mixed
-    formation, but in melee with the target; enemies do not.
+    formation, but in melee with the target; enemies do not. A body that holds the firing point or stands nearer than
+    its radius to the muzzle horizontally (beside, behind - no matter) blocks the shot at any arc. The path is a broken
+    line along the arc, chords of 16 m.
   - Path blocked: no shot, the man loses his target and at once takes a new one chosen without the path - usually the
     same. The neighbour's formation stands still, so the blocked men stay blocked cycle after cycle.
   - The unit's line of fire (the choice of the arc, for each target unit): three rays from its front (ends and middle)
     to the target along the trajectory; clear when 2 of 3 are. Closed: bullets (trajectory `low`) do not shoot at that
     target; arrows, bolts and slings (`dual_low_fixed`) shoot at 45 deg if the target is beyond 10 m. An own unit
-    whose formation overlaps ours (two units in one place) does not close the line: no lob, direct fire, and only the
+    whose formation is inside ours (the circumscribed circles intersect and the turned rectangles touch somewhere)
+    does not close the line: no lob, direct fire, and only the
     men's check works. The lob does not change the aim or the reload.
   - Readiness: a man fires as soon as he has reloaded (volley threshold 0), if the unit has ammunition and the target
     is in the arc.
@@ -155,8 +158,13 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
     of the target's height. The neighbour's men's places come from its formation: they stand in files, so a man's
     path either lies in a file's band (min(2r / file spacing, 1) of the paths) and is blocked when that band holds a
     man of the neighbour where the arc is below the heads (the share of the rank spacing that window covers, at most
-    1), or lies between the files and passes every rank. The same share every volley; the neighbour's men's centres
-    are no nearer than the two bodies' radii. Bullets passing below the friends' heads by the spread hit them
+    1), or lies between the files and passes every rank. The same share every volley. Bodies do not pass through each
+    other: a neighbour's man stands no nearer than the two men's radii (the database's entity radius, 0.6 + 0.6 =
+    1.2 m); those nearer are pushed along the line between the two onto that circle. So the window ahead starts at the
+    band's mean distance to the circle, and the men pushed onto it within the path's band (30 deg each side) block
+    where the arc is below the heads. A body at the very muzzle would block at any arc, but there are none (the probe:
+    not one nearer than 0.6 m). Our arc is the exact parabola, not 16 m chords (a small
+    difference). Bullets passing below the friends' heads by the spread hit them
     (`friend_catch`). Simplifications: the 45 deg lob changes only who blocks whom (accuracy, spread and flight time
     are the low arc's); the readiness is whole-unit volleys (`missile.volley_load` 1, see "Reload").
     · the game's rules · high.
@@ -165,15 +173,18 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
 
     | Unit | Game, 60 s | Game, 1st volley | Simulator, 60 s | Simulator, 1st volley |
     |---|---|---|---|---|
-    | Archers | 0.80 | 0.81 | 0.74 | 0.88 |
-    | Handgunners | 0.41 | 0.40 | 0.38-0.41 | 0.38-0.41 |
-    | Crossbowmen | 0.32 | 0.35 | 0.80 | 0.80 |
+    | Archers | 0.80 | 0.81 | 0.71-0.74 | 0.71-0.74 |
+    | Handgunners | 0.41 | 0.40 | 0.33-0.41 | 0.33-0.41 |
+    | Crossbowmen | 0.32 | 0.35 | 0.56-0.58 | 0.56-0.58 |
 
-    Archers and handgunners agree. Crossbowmen do not: the bolt and the arrow share one trajectory (45 m/s), and the
-    crossbowmen's denser formation (spacing 1.4 x 1.7 m against 2.0 x 2.1) gives 0.80 by these rules, not 0.32.
-    Suspected: the muzzle height in the firing animation (ours is one, 1.5 m, measured on handgunners), a stance
-    change delay on a new attempt. Archers over 60 s are below their first volley here: the pair thins the target
-    faster and the re-aim at a thinned target starts sooner (`missile.reaim_broken_cat_share`).
+    (the pair's centres on one point or the places of the game's record.) A man's distance to the neighbour's nearest
+    man in the game: at the start a median 1.08 m for archers and 1.02-1.04 m for handgunners and crossbowmen (the
+    share nearer than 1.2 m 0.63 and 0.85-0.88), by 60 s 1.28 and 1.19-1.20 (0.16 and 0.45-0.51): the units slowly
+    drift apart. Formations pushed apart by this rule give almost the same at the start (archers 1.20 / 0.68, the dense
+    ones 1.01 / 0.94). The units' drift apart over time is not modelled (a known simplification). The men's places at
+    the start agree, yet our crossbowmen lose less than the game's and the handgunners more: no longer the places but
+    these two units' projectile paths themselves (suspected: the firing point's height in the animation, ours one,
+    1.5 m).
 - **Fire at will may shoot into melee** (`allow_fire_at_will_into_melee` 1). · DB · high.
   - Ours: agreement; 57 % of arena shots went at enemies in melee when there were some.
 

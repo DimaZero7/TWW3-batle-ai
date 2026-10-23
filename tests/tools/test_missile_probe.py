@@ -1,6 +1,7 @@
 """The missile probe's plans, battle files and measures (tools/nn/missile_probe.py). The simulator twin needs torch
 (run in the container)."""
 import numpy as np
+import pytest
 
 from tools.nn import missile_probe as mp
 
@@ -150,4 +151,29 @@ def test_the_stacked_plan_two_firing_units_on_one_point_with_their_own_names():
                 assert l["friend"] != l["shooter"] and l["friend"].removeprefix("own_") in own
                 assert l["f_key"] == l["s_key"]
     assert " fire" in mp.cell(pairs[0]) and " fire" not in mp.cell(plan[0][0])
+
+
+def test_the_stacked_plan_records_the_mens_places_and_the_gaps_are_read(tmp_path):
+    """stacked asks the entry for every man's place (soldiers_every_s); soldier_gaps reads a run's probe_soldiers:
+    each man of both units to the other unit's nearest man, the shares nearer than 0.6 / 1.2 m and the median."""
+    import json
+    cfg, _, _, _ = mp.run_config("stacked", 1)
+    assert cfg["soldiers_every_s"] == 5 and 0 < cfg["soldiers_place_ms"] < cfg["settle_ms"]
+    assert "soldiers_every_s" not in mp.run_config("lof", 1)[0]
+    lane = dict(cfg["lanes"][1])
+    (tmp_path / "manifest.json").write_text(json.dumps({"config": {"plan": "stacked", "battle": 1, "lanes": [lane]}}))
+    s = [0, 0, 20, 0]                                  # decimetres: two men 2 m apart
+    f = [3, 0, 40, 0]                                  # 0.3 m from the first, 2.0 m from the second
+    events = [{"event": "probe_sample", "lanes": [{"lane": lane["name"], "t": 0, "s": {"x": 0, "z": 0}, "tg": {}}]},
+              {"event": "probe_soldiers", "tag": "placed", "t": 1000, "lanes": [{"lane": lane["name"], "s": s, "f": f}]},
+              {"event": "probe_soldiers", "tag": "every", "t": 9000,
+               "lanes": [{"lane": lane["name"], "t": 5000, "s": s, "f": {"unavailable": "call_failed"}}]}]
+    (tmp_path / "events.jsonl").write_text(chr(10).join(json.dumps(e) for e in events))
+    rows = mp.soldier_gaps([tmp_path])
+    assert len(rows) == 1 and rows[0]["tag"] == "placed" and rows[0]["t"] is None and rows[0]["n"] == 4
+    # the pooled gaps: s1 -> f1 0.3, s2 -> f1 1.7, f1 -> s1 0.3, f2 -> s2 2.0
+    g = sorted(list(mp.nearest_gaps(np.array([[0, 0], [2, 0]]), np.array([[0.3, 0], [4, 0]])))
+               + list(mp.nearest_gaps(np.array([[0.3, 0], [4, 0]]), np.array([[0, 0], [2, 0]]))))
+    assert g == pytest.approx([0.3, 0.3, 1.7, 2.0])
+    assert rows[0]["share_lt_0.6"] == 0.5 and rows[0]["share_lt_1.2"] == 0.5 and rows[0]["median"] == pytest.approx(1.0)
 

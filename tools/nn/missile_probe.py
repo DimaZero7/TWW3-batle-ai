@@ -71,6 +71,7 @@ Plans (each battle 4-5 lanes):
            the pair loses to the other's men.
 
     python -m tools.nn.missile_probe plan [--plan dist]
+    python -m tools.nn.missile_probe soldiers [runs...]     # stacked: our men's distance to the friend's nearest men
     python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # one battle's build
     python -m tools.nn.missile_probe run --plan dist [--battles 1,2]           # build + launch each, in turn
     python -m tools.nn.missile_probe report [runs...] [--sim] [--out FILE]     # the game (and its sim twin)
@@ -317,11 +318,19 @@ def layout(specs):
     return lanes, park, arena, ranks
 
 
+# Plans that record every man's place (the entry's probe_soldiers): seconds between snapshots after the go (one more
+# soldiers_place_ms after the teleport, one at the go before the first shot)
+SOLDIERS_EVERY_S = {"stacked": 5}
+SOLDIERS_PLACE_MS = 2500
+
+
 def run_config(plan, index):
     """(entry config, model seconds, arena, ranks) of battle `index` (1-based) of a plan."""
     specs = battles(plan)[index - 1]
     lanes, park, arena, ranks = layout(specs)
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TICK_MS, "lanes": lanes, "park": park}
+    if plan in SOLDIERS_EVERY_S:
+        config.update(soldiers_every_s=SOLDIERS_EVERY_S[plan], soldiers_place_ms=SOLDIERS_PLACE_MS)
     model_s = max(l["max_s"] + l["settle_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena, ranks
 
@@ -378,6 +387,50 @@ def load_run(run_dir):
         elif r["event"] == "probe_lane_end":
             lanes[r["lane"]]["end"] = r
     return [x for x in lanes.values() if x["samples"]]
+
+
+def load_soldiers(run_dir):
+    """{lane: [(tag, t s since the lane's go or None before it, {"s": [n, 2] m, "f": [m, 2] m or None})]} of one run's
+    probe_soldiers snapshots (the entry: every living man's x, z in decimetres)."""
+    out = {}
+    for line in (Path(run_dir) / "events.jsonl").read_text(encoding="utf-8").splitlines():
+        if '"probe_soldiers"' not in line:
+            continue
+        r = json.loads(line)
+        for x in r["lanes"]:
+            men = {}
+            for who in ("s", "f"):
+                v = x.get(who)
+                men[who] = (np.asarray(v, float).reshape(-1, 2) / 10 if isinstance(v, list) and len(v) else None)
+            out.setdefault(x["lane"], []).append((r["tag"], None if x.get("t") is None else x["t"] / 1000, men))
+    return out
+
+
+def nearest_gaps(a, b):
+    """[len(a)] each man of a's distance (m) to the nearest man of b."""
+    d = np.sqrt(((a[:, None, :] - b[None, :, :]) ** 2).sum(-1))
+    return d.min(1)
+
+
+GAP_EDGES = (0.6, 1.2)            # m: the friends' check radius and two bodies' radii (radius 0.6 each)
+
+
+def soldier_gaps(run_dirs):
+    """Rows {run, lane, shooter, tag, t, n, share_lt_0.6, share_lt_1.2, median}: per snapshot of each pair lane, every
+    man of both units to the other unit's nearest man (both directions pooled)."""
+    rows = []
+    for d in run_dirs:
+        specs = {ln["spec"]["name"]: ln["spec"] for ln in load_run(d)}
+        for lane, snaps in load_soldiers(d).items():
+            sp = specs.get(lane) or {}
+            for tag, t, men in snaps:
+                if men["s"] is None or men["f"] is None:
+                    continue
+                g = np.concatenate([nearest_gaps(men["s"], men["f"]), nearest_gaps(men["f"], men["s"])])
+                rows.append({"run": Path(d).name, "lane": lane, "shooter": SHORT.get(sp.get("s_key"), "?"), "tag": tag,
+                             "t": t, "n": int(len(g)), **{f"share_lt_{e:g}": float((g < e).mean()) for e in GAP_EDGES},
+                             "median": float(np.median(g))})
+    return rows
 
 
 def series(samples, who, key):
@@ -758,7 +811,7 @@ def report(run_dirs, sim=False, out=OUT, device="cpu", copies=4, label="sim", mi
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", choices=("report", "plan", "run"), default="report")
+    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "soldiers"), default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/missile-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="dist")
     parser.add_argument("--battles", help="run: battle numbers, comma separated (default: all of the plan)")
@@ -776,6 +829,18 @@ def main(argv=None):
         for p in ([args.plan] if args.plan else PLANS):
             for i, b in enumerate(battles(p), 1):
                 print(p, i, [cell(dict(l, s_key=UNITS[l["shooter"]][0], t_key=UNITS[l["target"]][0])) for l in b])
+        return 0
+    if args.command == "soldiers":
+        rows = soldier_gaps(args.runs or runs()[-2:])
+        print(f"{'run/lane':22} {'shooter':8} {'snapshot':8} {'t s':>6} {'men':>4} {'<0.6 m':>7} {'<1.2 m':>7} {'median':>7}")
+        for r in rows:
+            t = "-" if r["t"] is None else f"{r['t']:.1f}"
+            print(f"{r['run'] + '/' + r['lane']:22} {r['shooter']:8} {r['tag']:8} {t:>6} {r['n']:>4} "
+                  f"{r['share_lt_0.6']:>7.2f} {r['share_lt_1.2']:>7.2f} {r['median']:>7.2f}")
+        out = args.out.with_name("soldiers.json") if args.out != OUT else project.BUILD / "missile" / "soldiers.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(rows, indent=1), encoding="utf-8")
+        print(out)
         return 0
     if args.command == "run":
         which = [int(x) for x in args.battles.split(",")] if args.battles else None
