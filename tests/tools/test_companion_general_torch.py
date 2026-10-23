@@ -191,9 +191,10 @@ def test_the_game_general_plans_and_tasks_as_the_simulators_runtime():
     # (a fresh general splits every unit ~evenly over the places: sharp makes its choices clear of float noise)
     seen = parity(general_actor(task_w=0.5, sharp=30.0, cards_w=0.5))
     plans = seen["plans"]
-    # the plan at the start, the timer every 30 s of battle, the lord's fall and the broken group in between
+    # the plan at the start, the timer every 30 s of battle, the lord's fall, the broken group and the enemy come near
+    # a group in between
     assert plans[0]["reason"] == "deploy" and len(plans) == seen["plans_s"] >= 9, (len(plans), seen["plans_s"])
-    assert seen["reasons"] == {"deploy", "timer", "lord", "broken"}, seen["reasons"]
+    assert seen["reasons"] == {"deploy", "timer", "lord", "broken", "near"}, seen["reasons"]
     assert seen["tasks"] > 1000 and seen["max_err"] < 1e-4
     assert all(set(g["units"]) <= seen["own"] for p in plans for g in p["groups"])
     # some unit under fire and some in melee at the plans (the fight's numbers are read in both)

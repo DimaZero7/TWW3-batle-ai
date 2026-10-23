@@ -24,7 +24,9 @@ from tools.nn.train import checkpoint
 from tools.nn.train import drills
 
 LEARNER = 0
-OPPONENTS = ("self", "past", "nearest", "hold_shoot", "hold", "ai_like") + tuple(drills.opponent(n) for n in drills.NAMES)
+# (a new opponent goes at the END: the codes of the others stay; "human": opponents.human, not in the mix)
+OPPONENTS = (("self", "past", "nearest", "hold_shoot", "hold", "ai_like") + tuple(drills.opponent(n) for n in drills.NAMES)
+             + ("human",))
 CODE = {name: i + 1 for i, name in enumerate(OPPONENTS)}     # controller codes; 0 = the learner
 MIX = {"self": 0.1, "past": 0.15, "nearest": 0.2, "hold_shoot": 0.1, "hold": 0.05, "ai_like": 0.4}
 

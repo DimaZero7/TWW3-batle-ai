@@ -592,7 +592,20 @@ flowchart TB
   bias of every head (whom to look at) and to the attack target's logit (whom to hit). Not into the attention's
   values: that needs an attention of our own instead of `scaled_dot_product_attention`, slower. The network computes
   them itself from the tokens and places, so the companion and the simulator give the same (a test); nothing new to
-  send.
+  send. After them come 4 spell numbers (`pairs.SPELL`, below) and 2 numbers of **damage** (`pairs.DAMAGE`, only for a
+  pair with an enemy; 24 numbers in all, 22 before): which share of j's man one hit of i takes — by the simulator's
+  damage rule (`sim/melee.py` `per_hit`, the volley and the melee use it: the base damage less the armour roll, the
+  armour-piercing part whole, the resistances — a projectile's "missile + physical + ward", a blow's "physical +
+  ward", together at most 90 %; damage beyond the killed man's health is lost; a lone man — the mean), 0..1 (a hit
+  that kills is 1). `shot_i` — i's projectile (the missile damage and armour-piercing of its card; 0 for a unit
+  without missiles) less j's shield when i stands within 60° of j's front (`shield_defence_angle_missile` of the game's
+  database; j's front not seen now — a frontal shot assumed), the shield pierced by the armour-piercing share as in
+  the simulator (the block chance × (1 − 0.5 × armour-piercing / all damage)); `blow_i` — i's melee blow (melee damage and
+  armour-piercing; no hit chance and no bonuses against large or infantry — the single blow's rule has none). "j in
+  i's range" is there already (`in_range_i`). All from the cards in the tokens (the game's database), never the
+  battle's time. Older checkpoints get zero weights for the new numbers (`pad_inputs` in `PairBias` and in the
+  target) and compute the same bit for bit: g29_general m40 — 238,144 logits on 8 decisions of 4 battles, old and new
+  code, difference 0 (the test `test_nn_pair_damage.py` — on a built network).
 - **Surgery: an older checkpoint in the new network.** A v2 checkpoint without the pair features (its config has no
   `pairs`, default true) loads into the new network: its new layers stay zero (`policy.PAIR_PARAMS`), and it computes
   exactly the same. Check: itK3 in the new code against the old code (HEAD before the change) on 80 decisions of 16

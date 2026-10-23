@@ -307,9 +307,11 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "center": "general_center", "sharp": "general_sharp", "stick": "general_stick",
                  "kind_stick": "general_kind_stick", "task_mask": "general_task_mask",
                  "task_mask_parts": "general_task_mask_parts",
-                 "shoot_share": "general_shoot_share",
+                 "shoot_share": "general_shoot_share", "melee_stay": "general_melee_stay",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
+                 "replan_near_m": "general_replan_near_m", "teach_stall_s": "general_teach_stall_s",
+                 "teach_wait_s": "general_teach_wait_s",
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
                  "group_centre": "general_group_centre",
                  "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
@@ -1707,6 +1709,9 @@ def parser():
     ap.add_argument("--general-shoot-share", type=float, default=0.5,
                     help="general: with --general-task-mask 1, 'shoot' only for a group whose shooters (a missile range "
                          "on the card) are at least this share of its units (a rule, saved with the checkpoint)")
+    ap.add_argument("--general-melee-stay", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 'withdraw' not for a group fighting in melee that has not wavered (some unit in "
+                         "melee, none wavering or worse); the teacher keeps the rule too; 0: withdraw anywhere")
     ap.add_argument("--general-groups", default="rule", choices=("rule", "net"),
                     help="general: the group collection - 'rule' (tools/nn/general/groups.py: roles, then clusters by "
                          "place, both sides alike; the attention's collection learns nothing) or 'net' (the learned slot "
@@ -1759,7 +1764,16 @@ def parser():
                          "place.py's placement as before (the general still forms groups and gives missions)")
     ap.add_argument("--general-replan-s", type=float, default=30.0, help="general: seconds of battle between plans")
     ap.add_argument("--general-replan-min-s", type=float, default=3.0,
-                    help="general: an event's re-plan (a group broken, a lord fallen) not sooner than this after a plan")
+                    help="general: an event's re-plan (a group broken, a lord fallen, the enemy near) not sooner than "
+                         "this after a plan")
+    ap.add_argument("--general-teach-stall-s", type=float, default=60.0,
+                    help="general: the teacher's wait runs out (all attack, a re-plan) when its farthest waiting "
+                         "group has come no nearer the enemy for this long (s; 0: off)")
+    ap.add_argument("--general-teach-wait-s", type=float, default=120.0,
+                    help="general: ... or when the wait has gone on this long since it began (s; 0: off)")
+    ap.add_argument("--general-replan-near-m", type=float, default=250.0,
+                    help="general: the re-plan's event 'the enemy near' - a standing enemy unit within this (m) of one "
+                         "of our groups' centres that was farther at the plan; 0: no such event")
     ap.add_argument("--general-entropy-kind", type=float, default=0.001,
                     help="general: the entropy bonus on the mission kind's choice (simplification 4: on; each head "
                          "apart: the kind's ~ln 10 and the target's ~ln 36 are not one sum)")

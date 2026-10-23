@@ -8,7 +8,10 @@ training (docs/en/training/general.md "How it runs").
   in their zone (a kite battle, a drill) or the config's deploy "script" - the general still plans its groups and
   missions.
 * Re-planning ("Пересмотр замысла"): every replan_s of battle, and on an event - one of our groups broken (more than
-  `broken` of its units at the plan routs or is destroyed), a lord fallen (ours or theirs) - but not sooner than
+  `broken` of its units at the plan routs or is destroyed), a lord fallen (ours or theirs), a standing enemy unit come
+  within replan_near_m of one of our groups' centres that was farther at the plan (the teacher's hold -> attack of all
+  attacking groups together, teacher.py "wait"), the teacher's wait run out (wait_clock: the farthest group's distance
+  to the enemy not shorter for teach_stall_s, or waiting teach_wait_s since it began) - but not sooner than
   replan_min_s after the last plan. Between plans the groups, missions and targets are locked. A re-plan runs the whole
   network again on the armies now (men and health left), the side's observation's tiles and the places' cards of the
   last plan (inertia); the routing take no part in the groups. Every unit's place (net.POS_FEATURES: where it stands,
@@ -78,10 +81,11 @@ from tools.nn.model import sectors as msectors
 from tools.nn.model.frame import Frame
 from tools.nn.sim import orders as O
 
+WAIT_STEP_M = 10.0                      # the teacher's wait (wait_clock): the farthest group nearer by this is progress
 LEARNER, PAST = 0, 2                    # league.LEARNER, league.CODE["past"] (league imports drills: kept light here)
 # the log's counters (Counts): summed on the device, read once an update (take_stats)
 COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy", "deploys", "deploys_net", "laid_units",
-          "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended", "distinct_bonus",
+          "replan_timer", "replan_broken", "replan_lord", "replan_near", "replan_wait", "battles", "replans_ended", "distinct_bonus",
           "distinct_groups", "churn_units", "churn_moved", "kind_kept_groups", "kind_switched", "target_own",
           "target_enemy", "target_tile", "exec_bonus", "exec_bonus_abs", "exec_units", "pairs_ok", "pairs_all",
           "teach_plans", "battle_min", "shoot_groups", "shoot_noshooter", "shoot_units", "shoot_units_nomissile",
@@ -213,7 +217,8 @@ class Runtime:
              "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo), "teach": z(R, dt=Bo),
              "new": z(R, dt=Bo), "teach_use": z(R, G, dt=Bo), "x_sum": z(R, G), "x_n": z(R, G),
              "fire_t0": z(R) - 1.0, "vl_t0": z(R, N) - 1.0, "vl_at": z(R) - 1.0, "vl_lock": z(R, N, dt=Bo),
-             "q_t0": z(R), "q_tr0": z(R), "q_trh": z(R) + float("nan")}
+             "q_t0": z(R), "q_tr0": z(R), "q_trh": z(R) + float("nan"), "near0": z(R, G, dt=Bo),
+             "w_t0": z(R) - 1.0, "w_best": z(R) + float("inf"), "w_bt": z(R), "w_go": z(R, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
@@ -407,6 +412,7 @@ class Runtime:
         r["members"][rows] = members
         r["lords"][rows] = torch.stack([own_alive, foe_alive], -1)
         r["t_plan"][rows] = env.st.t[b].float()
+        r["near0"][rows] = self.near_groups(env, rows)            # (the re-plan's event "the enemy near")
         if self.q_h > 0:
             # the kinds' outcomes (module doc): the side's trade at the plan's start (the ended plans read theirs above)
             r["q_t0"][rows] = env.st.t[b].float()
@@ -470,12 +476,64 @@ class Runtime:
         side = f("side")
         standing = (side > 0) & (f("men") > 0) & ~f("gone") & ~f("r")
         t0 = self.r["fire_t0"][rows]
-        engage = (t0 >= 0) & (env.st.t[b].float() - t0 >= self.teach_fire_s)
-        return gteacher.choose(main, active, f("x"), f("z"), side == s[:, None], standing,
+        now = env.st.t[b].float()
+        engage = (t0 >= 0) & (now - t0 >= self.teach_fire_s)
+        engage = engage | self.r["w_go"][rows]                  # the wait ran out (wait_clock): attack, whatever the distance
+        info = {}
+        out = gteacher.choose(main, active, f("x"), f("z"), side == s[:, None], standing,
                                (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds,
                                tiles=tiles, tiles_ok=tiles_ok, engage=engage, hold_m=self.teach_hold_m,
                                facing=f("b"), flank=self.teach_flank,
-                               fast=ggroups.roles(self.b["num"][b], self.b["lab"][b]) == ggroups.ROLES.index("fast"))
+                               fast=ggroups.roles(self.b["num"][b], self.b["lab"][b]) == ggroups.ROLES.index("fast"),
+                               **self._teach_fight(f), shot=self._teach_shot(f), info=info)
+        if "wait" in info:
+            # the wait's clock: begins at the first plan that waits (the farthest group's best distance afresh), stops
+            # when no group waits
+            waits = info["wait"].any(-1)
+            r = self.r
+            begin = waits & (r["w_t0"][rows] < 0)
+            r["w_t0"][rows] = torch.where(begin, now, torch.where(waits, r["w_t0"][rows], torch.full_like(now, -1.0)))
+            r["w_best"][rows] = torch.where(begin, torch.full_like(now, float("inf")), r["w_best"][rows])
+            r["w_bt"][rows] = torch.where(begin, now, r["w_bt"][rows])
+        return out
+
+    def wait_clock(self, env):
+        """The teacher's wait's fuse (after() every decision; GeneralConfig.teach_stall_s, teach_wait_s): the rows whose
+        plan waits note the farthest of their groups' distance to the nearest standing enemy (near_groups' measure);
+        the wait runs out (w_go: from then on the teacher attacks whatever the distance) when it has not shortened by
+        WAIT_STEP_M for teach_stall_s (the enemy stands and so do we) or the wait has gone on teach_wait_s. -> [2B] the
+        rows whose wait ran out now."""
+        r = self.r
+        rows = torch.arange(2 * self.B, device=self.dev)
+        t = env.st.t[rows % self.B].float()
+        on = r["has"] & (r["w_t0"] >= 0) & ~r["w_go"]
+        d, n = self.group_enemy_d(env, rows)
+        far = torch.where(n > 0, d, torch.full_like(d, -1.0)).max(-1).values
+        far = torch.where(torch.isfinite(far) & (far >= 0), far, r["w_best"])
+        better = on & (far < r["w_best"] - WAIT_STEP_M)
+        r["w_best"] = torch.where(better, far, r["w_best"])
+        r["w_bt"] = torch.where(better, t, r["w_bt"])
+        stall = float(getattr(self.gcfg, "teach_stall_s", 0.0))
+        longest = float(getattr(self.gcfg, "teach_wait_s", 0.0))
+        go = on & (((stall > 0) & (t - r["w_bt"] >= stall)) | ((longest > 0) & (t - r["w_t0"] >= longest)))
+        r["w_go"] = r["w_go"] | go
+        return go
+
+    @staticmethod
+    def _teach_shot(f):
+        """[M, N, N] the HP a shot of unit i takes from unit j in reach (teacher.shot_hp) of the state's fields f(name):
+        the resistance missile + physical, at most 0.9 (the simulator's missile.physical_resist, config/nn/sim.json)."""
+        resist = (f("resist_missile").float() + f("resist_physical").float()).clamp(max=0.9)
+        return gteacher.shot_hp(f("x"), f("z"), f("range"), f("m_damage"), f("m_ap"), f("small_arms"), f("armour"),
+                                f("hp_man"), f("shield"), resist, f("men0"))
+
+    def _teach_fight(self, f):
+        """The teacher's melee rule's inputs (teacher.choose melee, waver) of the state's fields f(name) -> [M, N]:
+        the units in melee and those wavering or worse - only with GeneralConfig.melee_stay (else none: the lord's
+        group withdraws as before)."""
+        if not getattr(self.gcfg, "melee_stay", False):
+            return {}
+        return {"melee": f("m").bool(), "waver": f("ms").float() >= gunits.WAVERING_MS}
 
     def teach_clock(self):
         """The teacher's clock runs (after()): taught battles, or mission branches against the teacher."""
@@ -600,6 +658,7 @@ class Runtime:
             self._draw_teach(idx)                 # --general-teacher P: the battles whose learner plans it makes
         rows = torch.cat([idx, idx + self.B])
         self.r["fire_t0"][rows] = -1.0            # (the teacher's clock: our shooters' first volley)
+        self.r["w_t0"][rows], self.r["w_go"][rows] = -1.0, False      # (the wait's fuse, wait_clock)
         self.r["vl_t0"][rows], self.r["vl_at"][rows], self.r["vl_lock"][rows] = -1.0, -1.0, False   # (the volley lock)
         self.r["has"][rows] = False
         self.r["owner"][rows] = -1
@@ -648,7 +707,12 @@ class Runtime:
         lds = env.st.lord_dead_s[b]
         fell = torch.stack([lds.gather(1, (s - 1)[:, None])[:, 0] >= 0, lds.gather(1, (2 - s)[:, None])[:, 0] >= 0], -1)
         lord = (r["lords"] & fell).any(-1)
-        event = live & (age >= self.gcfg.replan_min_s) & (broken | lord) & ~timer
+        near = torch.zeros_like(lord)
+        if getattr(self.gcfg, "replan_near_m", 0.0) > 0:
+            near = (self.near_groups(env, rows) & ~r["near0"]).any(-1)
+        # the teacher's wait ran out (wait_clock: w_go since the plan, which still waits; the taught plans)
+        wait = r["w_go"] & (r["w_t0"] >= 0) & r["teach"]
+        event = live & (age >= self.gcfg.replan_min_s) & (broken | lord | near | wait) & ~timer
         due = timer | event
         if not bool(due.any()):
             return
@@ -656,7 +720,42 @@ class Runtime:
         self.stats.add("replan_timer", (timer & mine).sum())
         self.stats.add("replan_broken", (event & broken & mine).sum())
         self.stats.add("replan_lord", (event & lord & ~broken & mine).sum())
+        self.stats.add("replan_near", (event & near & ~lord & ~broken & mine).sum())
+        self.stats.add("replan_wait", (event & wait & ~near & ~lord & ~broken & mine).sum())
         self.plan(env, due.nonzero().squeeze(1), deploy=False, obs=obs, reason="replan")
+
+    def near_groups(self, env, rows):
+        """[M, G] our groups of the plans in force of rows [M] (r["main"]) with a standing enemy unit (not routing:
+        the morale state below 6) within replan_near_m of their centre (the mean place of their standing units) in the
+        battles' state now; all False with replan_near_m 0."""
+        G = self.G
+        lim = float(getattr(self.gcfg, "replan_near_m", 0.0))
+        if lim <= 0:
+            return torch.zeros(rows.shape[0], G, dtype=torch.bool, device=self.dev)
+        d, n = self.group_enemy_d(env, rows)
+        return (n > 0) & (d < lim)
+
+    def group_enemy_d(self, env, rows):
+        """(d [M, G] the distance from each of our groups' centres (r["main"], the mean place of their standing units)
+        to the nearest standing enemy unit the side sees (not routing; inf: none), n [M, G] the groups' standing units)
+        of rows [M]."""
+        G = self.G
+        main = self.r["main"][rows]
+        b, s = rows % self.B, rows // self.B + 1
+        u = env.st.u
+        side = u["side"][b]
+        standing = (side > 0) & (u["men"][b] > 0) & ~u["gone"][b] & (u["ms"][b].float() < 5.5)   # (as replan's "out")
+        own = side == s[:, None]
+        p = torch.stack([u["x"][b].float(), u["z"][b].float()], -1)                       # [M, N, 2]
+        mem = ((main[..., None] == torch.arange(G, device=self.dev)) & (standing & own)[..., None]).float()
+        n = mem.sum(1)
+        cent = torch.einsum("mng,mnc->mgc", mem, p) / n.clamp(min=1)[..., None]
+        d = (cent[:, :, None, :] - p[:, None, :, :]).norm(dim=-1)                           # [M, G, N]
+        # only the enemies the side sees (the state's vis: visible to the other side; the game's companion drops the
+        # unseen as gone): a re-plan must not tell the network of a hidden enemy
+        seen = u["vis"][b] if "vis" in u else torch.ones_like(standing)
+        d = d.masked_fill(~(standing & ~own & (side > 0) & seen)[:, None, :], float("inf"))
+        return d.min(-1).values, n
 
     def after(self, env, r_rows, finished):
         """After a decision's simulator steps: the learner rows' reward r_rows [R] added to their plans; the plans of
@@ -684,6 +783,7 @@ class Runtime:
             u = env.st.u
             fire = (u["fire"][b] & (u["side"][b] == s[:, None]) & (u["men"][b] > 0) & ~u["r"][b]).any(-1)
             r["fire_t0"] = torch.where((r["fire_t0"] < 0) & fire, env.st.t[b].float(), r["fire_t0"])
+            self.wait_clock(env)
         if bool(finished.any()):
             rows = torch.cat([finished, finished]).nonzero().squeeze(1)
             self._finish(rows, done=True)

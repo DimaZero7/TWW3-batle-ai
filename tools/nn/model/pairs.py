@@ -24,23 +24,44 @@ for each enemy the caster sees how far he is inside his spell's range or how muc
 the range: the caster walks into range, tools/nn/sim/magic.py; the price of walking up is the press's own). SIZE =
 (FEATURES + SPELL) x 2.
 
+Then DAMAGE (23.10.2026, appended last: older networks load with zero weights for them and compute what they did, bit
+for bit): what a hit of i takes from j, by the simulator's damage rule (sim/melee.py per_hit, the one missile.volley
+and the melee use: the base damage less the armour roll, the armour-piercing part whole, the resistances - missile:
+missile + physical + ward, melee: physical + ward, at most 90 % - and the damage beyond a killed man lost; a lone man
+loses the mean) as a share of j's man (0..1: a hit that kills is 1), of the units' cards in the tokens (the game's
+database, the same in the simulator and the companion):
+* shot_i: a projectile of i (its missile damage and armour-piercing; 0 for a unit without a missile range), less j's
+  shield where i stands within SHIELD_DEG of j's front (or j's facing not seen now: the front assumed), the shield
+  pierced by the armour-piercing share as in the simulator (SHIELD_PIERCE);
+* blow_i: a melee blow of i (its melee damage and armour-piercing; no hit chance, no bonus against large or infantry).
+Only for a pair of opposite sides (a friend's damage means nothing), both known. "j in i's range" is in_range_i
+already. SIZE = (FEATURES + SPELL) x 2 + DAMAGE.
+
 The network uses them in two places, each a linear layer started at zero (so a network trained without them computes
 exactly what it did: the loaded weights are kept and the new ones are 0, policy.Actor.load_state_dict):
 * PairBias: + a number per attention head to the distance bias of every units' attention block (who to look at);
 * the target pointer (chain.py): + a number to the logit of attacking j (who to attack).
 """
+import copy
+import json
+import math
+
 import numpy as np
 import torch
 from torch import nn
 
+from tools import config as project
 from tools.nn.model import observation as ob
 from tools.nn.model import passport
+from tools.nn.sim import melee as smelee
 
 FEATURES = ("reach_i", "reach_j", "in_range_i", "in_range_j", "closing", "bearing_cos_i", "bearing_sin_i",
             "bearing_cos_j", "bearing_sin_j")
 SPELL = ("spell_reach_i", "spell_in_i")
+DAMAGE = ("shot_i", "blow_i")  # opposite sides only
 OLD_SIZE = 2 * len(FEATURES)   # before SPELL (16.10.2026)
-SIZE = 2 * (len(FEATURES) + len(SPELL))       # x (same side, opposite sides)
+SPELL_SIZE = 2 * (len(FEATURES) + len(SPELL))  # before DAMAGE (23.10.2026)
+SIZE = SPELL_SIZE + len(DAMAGE)                # x (same side, opposite sides) + the damage (opposite sides)
 REACH_CAP = 2.0                # distance / range, at most
 CLOSE_CAP = 2.0                # closing speed / VEL, within +-
 RANGE_SCALE = 500.0            # the passport's range_m / 500 (passport.features)
@@ -60,6 +81,81 @@ def _range_column():
 
 
 RANGE = _range_column()
+
+_BASE = dict(men=1, hp_total=1, hp_per_man=1, mass=1, armour=0, leadership=0, multiplayer_cost=0, caste="", size="",
+             speed={"walk": 0, "run": 0, "charge": 0}, shield={"missile_block_chance": 0}, damage_resist={},
+             melee={"attack": 0, "defence": 0, "charge_bonus": 0, "damage": 0, "ap_damage": 0, "bonus_v_large": 0,
+                    "bonus_v_infantry": 0, "attack_interval_s": 0, "splash_max_attacks": 1},
+             missile={"range_m": 100})
+
+
+def _column(path, value):
+    """The token's column of the passport number at path (a key path of the passport dict): the one column that moves
+    when that number is set to value (passport.features: found by its value, not its place)."""
+    p = copy.deepcopy(_BASE)
+    d = p
+    for k in path[:-1]:
+        d = d[k]
+    d[path[-1]] = value
+    a, b = np.array(passport.features(_BASE)), np.array(passport.features(p))
+    (i,) = np.nonzero(a != b)[0]
+    return ob.INDEX[f"passport_{i}"]
+
+
+# the cards' numbers of the damage rule (DAMAGE): (column, how the token holds it - "log" passport._log(v, top), else
+# v / scale)
+CARD = {"m_damage": (("missile", "damage"), "log", 500), "m_ap": (("missile", "ap_damage"), "log", 500),
+        "damage": (("melee", "damage"), "log", 500), "ap": (("melee", "ap_damage"), "log", 500),
+        "armour": (("armour",), "lin", 200), "hp_man": (("hp_per_man",), "log", 10000), "men": (("men",), "log", 200),
+        "shield": (("shield", "missile_block_chance"), "lin", 100),
+        "res_all": (("damage_resist", "all"), "lin", 100), "res_physical": (("damage_resist", "physical"), "lin", 100),
+        "res_missile": (("damage_resist", "missile"), "lin", 100)}
+CARD_COL = {k: _column(path, 50) for k, (path, _, _) in CARD.items()}
+RESIST_CAP = 0.9                # the resistances' sum, at most (CA; the simulator's rule)
+# a shield blocks projectiles from within this of the unit's front (config/nn/game_rules.json, the game's database)
+_BATTLE = json.loads((project.ROOT / "config/nn/game_rules.json").read_text(encoding="utf-8"))["battle"]
+SHIELD_DEG = float(_BATTLE["shield_defence_angle_missile"])
+# ... and armour-piercing projectiles pierce it: the block chance x (1 - this x the armour-piercing share of the
+# damage) - the game's missile_shield_piercing_coefficient, as the simulator's missile.shield_pierce (on with
+# config/nn/sim.json missile.shield_ap_pierce)
+SHIELD_PIERCE = (float(_BATTLE.get("missile_shield_piercing_coefficient", 0.0))
+                 if json.loads((project.ROOT / "config/nn/sim.json").read_text(encoding="utf-8"))["missile"]
+                 .get("shield_ap_pierce") else 0.0)
+
+
+def shield_left(m_damage, m_ap):
+    """The share of a shield's block chance left against projectiles of base damage m_damage and armour-piercing m_ap
+    (SHIELD_PIERCE; the simulator's missile.shield_pierce)."""
+    return 1 - SHIELD_PIERCE * m_ap / (m_damage + m_ap).clamp(min=1e-6)
+
+
+def card(tok, name):
+    """[B, N] the card's number `name` (CARD) of every token, back in the game's units (damage, armour, health of a
+    man, men; shield and resistances as shares 0-1)."""
+    _, kind, top = CARD[name]
+    c = tok[..., CARD_COL[name]].float()
+    if kind == "log":
+        return torch.expm1(c * math.log1p(top)).clamp(min=0)
+    return c * top / (100.0 if name in ("shield", "res_all", "res_physical", "res_missile") else 1.0)
+
+
+def damage(tok, cos_j, front_known):
+    """[B, N, N, 2] (DAMAGE: shot_i, blow_i) the share of j's man a hit of i takes (module doc) of the tokens [B, N, T];
+    cos_j [B, N, N] i's place as j faces (bearing_cos_j), front_known [B, N, N] where that bearing is known."""
+    armour, hp_man = card(tok, "armour")[:, None, :], card(tok, "hp_man").clamp(min=1.0)[:, None, :]
+    single = (card(tok, "men") < 1.5)[:, None, :]
+    ward = card(tok, "res_all") + card(tok, "res_physical")
+    res_m = (ward + card(tok, "res_missile")).clamp(max=RESIST_CAP)[:, None, :]
+    res_p = ward.clamp(max=RESIST_CAP)[:, None, :]
+    col = (lambda n: card(tok, n)[:, :, None])
+    shot = smelee.per_hit(col("m_damage"), col("m_ap"), armour, hp_man, res_m, single=single)
+    front = ~front_known | (cos_j >= math.cos(math.radians(SHIELD_DEG)))
+    shot = shot * (1 - card(tok, "shield")[:, None, :] * shield_left(col("m_damage"), col("m_ap")) * front.float())
+    shoots = (tok[..., RANGE] > 0)[:, :, None] & ((col("m_damage") + col("m_ap")) > 0)
+    shot = torch.where(shoots, shot, torch.zeros_like(shot))
+    blow = smelee.per_hit(col("damage"), col("ap"), armour, hp_man, res_p, single=single)
+    blow = torch.where((col("damage") + col("ap")) > 0, blow, torch.zeros_like(blow))
+    return (torch.stack([shot, blow], -1) / hp_man[..., None]).clamp(0.0, 1.0)
 
 
 def features(obs_t):
@@ -104,7 +200,9 @@ def features(obs_t):
     s_reach = torch.where(casts[:, :, None], (d / s_safe[:, :, None]).clamp(max=REACH_CAP), torch.zeros_like(d))
     s_in = (casts[:, :, None] & (d <= sr[:, :, None])).to(dt)
     sp = torch.where(both[..., None], torch.stack([s_reach, s_in], -1), torch.zeros_like(d)[..., None])
-    out = torch.cat([feats * same, feats * (1 - same), sp * same, sp * (1 - same)], -1)
+    dmg = damage(tok, cos_j, seen_now & apart).to(dt)
+    dmg = torch.where(both[..., None], dmg, torch.zeros_like(dmg))
+    out = torch.cat([feats * same, feats * (1 - same), sp * same, sp * (1 - same), dmg * (1 - same)], -1)
     return torch.nn.functional.pad(out, (0, 0, 1, 0, 1, 0))                       # the context token
 
 
@@ -121,16 +219,25 @@ def spell_range(obs_t):
     return torch.where(owned, rng.to(a.dtype), torch.zeros_like(rng, dtype=a.dtype)).max(-1).values
 
 
+def zero_linear(n_out):
+    """nn.Linear(SIZE, n_out, bias=False) with zero weights, drawing the random numbers a layer of SPELL_SIZE inputs
+    drew (its init, then zeroed): a fresh network's other weights stay those of the code before DAMAGE, seed for seed
+    (the tests' fixed seeds; the weights here are 0 either way)."""
+    lin = nn.Linear(SPELL_SIZE, n_out, bias=False)
+    lin.weight = nn.Parameter(torch.zeros(n_out, SIZE))
+    lin.in_features = SIZE
+    return lin
+
+
 class PairBias(nn.Module):
     """The pair features -> + a number per attention head (started at zero: nothing changes until trained)."""
 
     def __init__(self, heads):
         super().__init__()
-        self.lin = nn.Linear(SIZE, heads, bias=False)
-        nn.init.zeros_(self.lin.weight)
+        self.lin = zero_linear(heads)
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
-        """A network saved before SPELL: zero weights for it (computes what it did)."""
+        """A network saved before SPELL or DAMAGE: zero weights for them (computes what it did)."""
         from tools.nn.model.encoder import pad_inputs
         pad_inputs(state_dict, prefix + "lin.weight", SIZE)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)

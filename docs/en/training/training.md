@@ -211,6 +211,7 @@ every 1 s and 0.5 s steps it cannot exceed 0.5 s.
 | `hold_shoot` | 10 % | holds and shoots; a melee unit counter-charges an enemy within 80 m; as the attacker everyone attacks after 5 minutes |
 | `hold` | 5 % | holds (shoots at will, fights back); met only as the defender |
 | `drill_<name>` | `--drills` | a drill's enemy on that drill's battles ([drills](#drills)) |
+| `human` | 0 % (not in the mix) | a defence in depth modelled on the human's battle against the general g31 (`build/diag_human_g31`): a line of infantry (the first 60 % of the melee units by slot) stands and takes the blow, in melee it fights its enemy; the rest are a reserve 60 m behind the line's centre (40 m apart across), sent in one at a time (while one is on its way the next waits) to the line's unit in melee in the worst "health × morale"; the shooters go to a post 50 m beyond the nearer end of the line, level with it, stand and shoot at will, step back 30 m from a melee unit within 40 m; the lord at the reserve's post, attacks an enemy within 40 m; no attack of its own before contact (as the attacker, after 5 minutes without a fight everyone attacks, as `hold_shoot`). The numbers are mine, from one battle, not a fit (`opponents.Human`). Its code is the last of `league.OPPONENTS`: the others' codes did not move |
 
 Within each opponent's share the layout cycles the learner's side, so every opponent meets every
 army in both roles. The exception is the opponents in `--defend-only` (comma-separated, default

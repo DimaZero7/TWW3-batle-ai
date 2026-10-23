@@ -324,3 +324,115 @@ def test_flank_in_melee_counts_by_the_side_the_contact_began_on():
     assert _flank_m(u) == pytest.approx(0.0)
     with pytest.raises(ValueError):
         _flank_m(u, "side")
+
+
+def test_the_teachers_attacking_groups_wait_for_the_farthest_and_attack_together():
+    """The wait by the farthest attacking group: g0 200 m from the enemy, g1 400 m - both hold (by each group alone g0
+    would attack now); the enemy within 250 m of both: both attack at once; the shooters' clock: both attack."""
+    N = 4
+    # ours: 0 spear (g0, 200 m from e0), 1 spear (g1, 400 m); theirs: 2-3 (e0)
+    x = torch.tensor([[0.0, -200, 200, 210]])
+    z = torch.tensor([[0.0, 300, 0, 0]])
+    main = torch.tensor([[0, 1, G, G]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, G]] = True
+    own = torch.tensor([[True, True, False, False]])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    no = torch.zeros(1, N, dtype=torch.bool)
+    tiles = torch.tensor([[[0.0, 0.0], [-200.0, 300.0]] + [[5000.0, 5000.0]] * (C - 2)])
+    tiles_ok = torch.tensor([[True, True] + [False] * (C - 2)])
+    kw = dict(tiles=tiles, tiles_ok=tiles_ok, engage=torch.tensor([False]), flank=False)
+    kind, target, _ = teacher.choose(main, active, x, z, own, standing, no, no, G, CFG.kinds, **kw)
+    assert int(kind[0, 0]) == K["hold"] and int(kind[0, 1]) == K["hold"]          # g0 waits for g1
+    assert int(target[0, 0]) == 2 * G and int(target[0, 1]) == 2 * G + 1           # each its own tile
+    x2, z2 = x.clone(), z.clone()
+    x2[0, 2:] = torch.tensor([-50.0, -40.0])
+    z2[0, 2:] = torch.tensor([150.0, 150.0])                                       # within 250 m of both
+    kind, target, _ = teacher.choose(main, active, x2, z2, own, standing, no, no, G, CFG.kinds, **kw)
+    assert int(kind[0, 0]) == K["attack"] and int(kind[0, 1]) == K["attack"]
+    assert int(target[0, 0]) == G and int(target[0, 1]) == G
+    kind, _, _ = teacher.choose(main, active, x, z, own, standing, no, no, G, CFG.kinds,
+                                **dict(kw, engage=torch.tensor([True])))
+    assert int(kind[0, 0]) == K["attack"] and int(kind[0, 1]) == K["attack"]
+
+
+def test_the_teacher_gives_no_withdraw_to_the_lords_group_in_melee():
+    """The lord threatened: his group withdraws only out of melee; fighting in melee and holding (none wavering:
+    taskmask.fighting) it holds the tile it stands on; a unit wavering lets it withdraw. melee None: as before."""
+    N = 5
+    # ours: 0 lord + 1 spear (g0), 2 spear (g1); theirs: 3 (e0, 40 m from the lord), 4 (e1)
+    x = torch.tensor([[0.0, 20, 300, 40, 900]])
+    z = torch.zeros(1, N)
+    main = torch.tensor([[0, 0, 1, G, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, G, G + 1]] = True
+    own = torch.tensor([[True] * 3 + [False] * 2])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    no = torch.zeros(1, N, dtype=torch.bool)
+    lord = torch.tensor([[True, False, False, False, False]])
+    tiles = torch.tensor([[[0.0, 0.0], [300.0, 0.0]] + [[5000.0, 5000.0]] * (C - 2)])
+    tiles_ok = torch.tensor([[True, True] + [False] * (C - 2)])
+    args = (main, active, x, z, own, standing, no, lord, G, CFG.kinds)
+    kw = dict(tiles=tiles, tiles_ok=tiles_ok)
+    kind, target, _ = teacher.choose(*args, **kw)                               # no melee known: withdraw
+    assert int(kind[0, 0]) == K["withdraw"] and int(target[0, 0]) == 1
+    out = torch.tensor([[False] * N])
+    kind, _, _ = teacher.choose(*args, **kw, melee=out, waver=out)              # out of melee: withdraw
+    assert int(kind[0, 0]) == K["withdraw"]
+    melee = torch.tensor([[False, True, False, True, False]])                   # the spear of g0 fights
+    kind, target, use = teacher.choose(*args, **kw, melee=melee, waver=out)
+    assert int(kind[0, 0]) == K["hold"] and int(target[0, 0]) == 2 * G + 0 and bool(use[0, 0])   # its own tile
+    waver = torch.tensor([[False, True, False, False, False]])
+    kind, _, _ = teacher.choose(*args, **kw, melee=melee, waver=waver)          # the spear wavers: withdraw
+    assert int(kind[0, 0]) == K["withdraw"]
+    kind, _, _ = teacher.choose(*args, melee=melee, waver=out)                   # no tiles: no withdraw either
+    assert int(kind[0, 0]) != K["withdraw"]
+
+
+def test_the_teachers_shooters_pick_the_target_their_shots_hurt_most():
+    """teacher.shot_hp + shoot_target: slingers (base 7, armour-piercing 1) between greatswords of armour 95 (nearer)
+    and militia of armour 25 shoot the militia; a target beyond range + APPROACH_M counts 0; equal values: the
+    nearest; nothing in reach: the nearest; a shield blocks small arms (the simulator's per_hit, sim/melee.py)."""
+    from tools.nn.sim import melee as smelee
+    N = 4
+    # ours: 0-1 slingers (g0); theirs: 2 greatswords (e0, 120 m), 3 militia (e1, 160 m)
+    x = torch.tensor([[0.0, 10, 120, 160]])
+    z = torch.zeros(1, N)
+    main = torch.tensor([[0, 0, G, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, G, G + 1]] = True
+    own = torch.tensor([[True, True, False, False]])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    shooter = torch.tensor([[True, True, False, False]])
+    no = torch.zeros(1, N, dtype=torch.bool)
+    f = (lambda *v: torch.tensor([list(v)], dtype=torch.float32))
+    rng, dmg, ap = f(150, 150, 0, 0), f(7, 7, 0, 0), f(1, 1, 0, 0)
+    small = torch.tensor([[True, True, False, False]])
+    armour, hp_man, shield, resist, men0 = f(0, 0, 95, 25), f(60, 60, 80, 60), f(0, 0, 0, 0), f(0, 0, 0, 0), f(80,
+                                                                                                              80, 60, 90)
+    shot = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0)
+    want = smelee.per_hit(torch.tensor(7.0), torch.tensor(1.0), torch.tensor(25.0), torch.tensor(60.0))
+    assert abs(float(shot[0, 0, 3]) - float(want)) < 1e-5 and float(shot[0, 0, 2]) < float(shot[0, 0, 3])
+    args = (main, active, x, z, own, standing, shooter, no, G, CFG.kinds)
+    kind, target, _ = teacher.choose(*args)                                     # without shot: the nearest
+    assert int(kind[0, 0]) == K["shoot"] and int(target[0, 0]) == G
+    kind, target, _ = teacher.choose(*args, shot=shot)
+    assert int(kind[0, 0]) == K["shoot"] and int(target[0, 0]) == G + 1         # the militia
+    # the militia out of reach (range 150 + 100 m): the greatswords
+    x_far = x.clone()
+    x_far[0, 3] = 400.0
+    shot_far = teacher.shot_hp(x_far, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0)
+    assert float(shot_far[0, 0, 3]) == 0 and float(shot_far[0, 0, 2]) > 0
+    _, target, _ = teacher.choose(main, active, x_far, z, own, standing, shooter, no, G, CFG.kinds, shot=shot_far)
+    assert int(target[0, 0]) == G
+    # both alike: the nearest; nothing in reach: the nearest
+    same = teacher.shot_hp(x, z, rng, dmg, ap, small, f(0, 0, 25, 25), f(60, 60, 60, 60), shield, resist, men0)
+    _, target, _ = teacher.choose(*args, shot=same)
+    assert int(target[0, 0]) == G
+    _, target, _ = teacher.choose(*args, shot=torch.zeros(1, N, N))
+    assert int(target[0, 0]) == G
+    # a shield of 0.9 on the militia blocks the slings: the greatswords again
+    shielded = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, f(0, 0, 0, 0.9), resist, men0)
+    _, target, _ = teacher.choose(*args, shot=shielded)
+    assert int(target[0, 0]) == G
+    assert teacher.APPROACH_M == 100.0

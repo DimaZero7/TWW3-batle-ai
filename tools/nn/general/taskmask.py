@@ -81,6 +81,14 @@ PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in fo
          "shoot_volley")      # shoot: a firing shooter only keeps its order until its volley (volley_lock)
 
 
+def fighting(mem, melee, waver):
+    """[P, G] the groups that fight in melee and hold (GeneralConfig.melee_stay: no "withdraw" for them): some member
+    in melee, none wavering or worse. mem [P, N, G] the groups' members, melee [P, N] the units in melee (the state's
+    melee flag), waver [P, N] wavering or worse (the morale state >= 5: units.WAVERING_MS). Net.melee_ok and the
+    teacher read the same rule."""
+    return (mem & melee.bool()[..., None]).any(1) & ~(mem & waver.bool()[..., None]).any(1)
+
+
 def parse_parts(text):
     """frozenset of PARTS of a comma list ("all": every part; "" or "none": none); an unknown name: ValueError."""
     text = (text or "").strip()

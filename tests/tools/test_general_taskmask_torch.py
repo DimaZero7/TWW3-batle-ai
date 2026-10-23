@@ -353,3 +353,33 @@ def test_the_runtimes_volley_clock_gives_the_same_lock_at_the_same_time_and_rest
     assert bool(vol(shooting(volley_ready=0.1), 14)[0, 2])
     vol(o, 2)                                                             # the time went back: a new battle
     assert float(rt.r["vl_t0"][1, 2]) == 2.0 and float(rt.r["vl_t0"][0, 2]) == -1.0
+
+
+def test_the_general_gives_no_withdraw_to_a_group_that_fights_in_melee_and_holds():
+    """GeneralConfig.melee_stay (net.melee_ok, taskmask.fighting): "withdraw" closed for a group with a unit in melee
+    and none wavering or worse; open when one wavers, out of melee, or with the rule off; the other kinds open."""
+    from tools.nn.general import units as gunits
+    from tools.nn.general.net import General
+    gen = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2), TINY.sectors, TINY.grid_half)
+    P, Nn = 1, 6
+    num = torch.zeros(P, Nn, ai.SIZE)
+    fight = torch.zeros(P, Nn, 2)
+    fight[0, [0, 2, 4], 1] = 1.0                                     # units 0, 2, 4 in melee
+    num[0, 3, gunits.WAVERING] = 1.0                                 # unit 3 wavers
+    own = torch.tensor([[True] * 5 + [False]])
+    inp = {"num": num, "on": torch.ones(P, Nn, dtype=torch.bool), "own": own, "fight": fight}
+    # g0: 0, 1 (one in melee); g1: 2, 3 (one in melee, one wavering); g2: empty; g3: 4 (in melee)
+    c = {"main": torch.tensor([[0, 0, 1, 1, 3, G]])}
+    w = K["withdraw"]
+    ok = gen.melee_ok(inp, c)
+    assert not ok[0, 0, w] and ok[0, 1, w] and not ok[0, 3, w] and ok[0, 2, w]
+    assert bool(ok[..., [K["attack"], K["hold"], K["screen"]]].all())
+    off = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, melee_stay=False), TINY.sectors,
+                  TINY.grid_half)
+    assert bool(off.melee_ok(inp, c).all())
+    assert bool(gen.melee_ok({k: v for k, v in inp.items() if k != "fight"}, c).all())   # no fight input: no rule
+    assert gconfig.of_dict({"groups": "rule", "threat": True}, warn=False).melee_stay  # an older checkpoint: the rule on
+    # the executor of a withdraw (the default parts): the attack stays open to a unit that fights
+    o = obs_of(POS, {0: ("withdraw", (-700.0, 0.0), 100.0, 2)}, attacking=[0])
+    m = taskmask.masks(TINY, o, torch.ones(1, CENTRES.shape[0], dtype=torch.bool), taskmask.parts_of(gconfig.GeneralConfig()))
+    assert bool(m["kind"][0, 0, ATTACK]) and bool(m["kind"][0, 0, KEEP])

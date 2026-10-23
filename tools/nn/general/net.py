@@ -451,7 +451,7 @@ class General(nn.Module):
         pair = self.pair_ok.to(g.device)                                      # [K, 2G + C] the kinds' target types
         # a kind may be chosen when some target there is of a type it takes (screen: another group of ours ...)
         k_ok = (base_t[:, :, None, :] & pair[None, None]).any(-1)            # [P, G, K]
-        k_ok = k_ok & self.shoot_ok(inp, c)
+        k_ok = k_ok & self.shoot_ok(inp, c) & self.melee_ok(inp, c)
         k_logits = self.kind_q(g[:, :G]) @ self.kinds.t() / math.sqrt(d)      # [P, G, K]
         k_logits = k_logits + self.kind_bonus(inp, c, k_logits)
         kind, lp_k, ent_k = categorical(k_logits, k_ok, act.get("kind"), greedy)
@@ -508,6 +508,25 @@ class General(nn.Module):
         n = mem.sum(1).float()
         share = float(getattr(self.cfg, "shoot_share", 0.5))
         out[..., shoot] = (n_sh > 0) & (n_sh >= share * n)                               # [P, G]
+        return out
+
+    def melee_ok(self, inp, c):
+        """[P, G, K] the kinds a group may take by its fight (GeneralConfig.melee_stay): no "withdraw" for a group that
+        fights in melee and has not wavered (taskmask.fighting: some unit taking part in melee - inp "fight", the
+        state's melee flag - none wavering or worse - inp "num"'s wavering column); every other kind always. All True
+        without melee_stay, without the kind or without inp "fight"."""
+        G, K = self.cfg.places, self.cfg.kinds
+        out = torch.ones(c["main"].shape[0], G, K, dtype=torch.bool, device=c["main"].device)
+        wd = next((k.index for k in MISSION_KINDS if k.name == "withdraw"), K)
+        f = inp.get("fight")
+        if not getattr(self.cfg, "melee_stay", False) or wd >= K or f is None:
+            return out
+        from tools.nn.general import taskmask
+        from tools.nn.general import units as gunits
+        on = inp["on"] & inp["own"]
+        mem = (c["main"][..., None] == torch.arange(G, device=on.device)) & on[..., None]     # [P, N, G]
+        waver = inp["num"][..., gunits.WAVERING] > 0.5
+        out[..., wd] = ~taskmask.fighting(mem, f[..., 1] > 0.5, waver)
         return out
 
     def centres(self, inp, c):

@@ -161,6 +161,53 @@ def test_the_plan_is_locked_between_replans_and_replans_on_its_events():
     assert rt.stats["replan_lord"] == n0 + 2                         # both sides: their lord, our lord
 
 
+def test_a_replan_comes_once_when_the_enemy_comes_near_a_group():
+    """GeneralConfig.replan_near_m: a standing enemy unit within 250 m of one of our groups' centres that was farther
+    at the plan - a re-plan (not sooner than replan_min_s after the plan), once: the new plan knows it near."""
+    env = battles(B=2, mix={"self": 1.0})
+    actor, crit = nets()
+    env.step(actor, crit)
+    rt = env.general_rt
+    r = rt.r
+    assert rt.gcfg.replan_near_m == 250.0
+    row = 0
+    b, s = row % env.B, row // env.B + 1
+    u = env.st.u
+    near = rt.near_groups(env, torch.tensor([row]))[0]
+    g = int(torch.nonzero(r["active"][row][:rt.G] & ~near)[0])       # a group with no enemy near (the start: far)
+    mem = (r["main"][row] == g) & (u["side"][b] == s)
+    cx, cz = float(u["x"][b][mem].mean()), float(u["z"][b][mem].mean())
+    foe = int(torch.nonzero((u["side"][b] == 3 - s) & (u["men"][b] > 0))[0])
+
+    def bring():
+        u["x"][b, foe], u["z"][b, foe] = cx + 100.0, cz
+    n0, k0 = rt.stats["replan_near"], int(r["n_replan"][row])
+    bring()
+    env.step(actor, crit)
+    assert rt.stats["replan_near"] == n0                              # a second after the plan: not yet
+    r["t_plan"][row] -= 5.0
+    bring()
+    env.step(actor, crit)
+    assert rt.stats["replan_near"] >= n0 + 1 and int(r["n_replan"][row]) == k0 + 1
+    assert bool(r["near0"][row].any())                                # the new plan knows it near
+    n1 = rt.stats["replan_near"]
+    r["t_plan"][row] -= 5.0
+    bring()
+    env.step(actor, crit)
+    assert int(r["n_replan"][row]) == k0 + 1                          # once
+    # a hidden enemy (not visible to us) is not "near": no event from it
+    bring()
+    assert bool(rt.near_groups(env, torch.tensor([row])).any())
+    vis = u["vis"].clone()
+    u["vis"][b, u["side"][b] == 3 - s] = False
+    assert not bool(rt.near_groups(env, torch.tensor([row])).any())
+    u["vis"][:] = vis
+    off = dataclasses.replace(rt.gcfg, replan_near_m=0.0)
+    rt.gcfg = off
+    assert not bool(rt.near_groups(env, torch.tensor([row])).any())
+    assert n1 >= n0 + 1
+
+
 def test_the_task_is_for_own_units_in_a_group_only():
     env = battles(B=4)
     actor, crit = nets()
@@ -328,3 +375,47 @@ def test_a_decision_with_a_general_refuses_a_cuda_graph_before_any_read_back(mon
         env.step(actor, crit)
     monkeypatch.setattr(runtime, "capturing", lambda: False)
     env.step(actor, crit)
+
+
+def test_the_teachers_wait_runs_out_against_an_enemy_that_stands():
+    """GeneralConfig.teach_stall_s / teach_wait_s (Runtime.wait_clock): the enemy stands 400 m off and holds, our
+    shooters never fire - the teacher's groups hold at first, then (the farthest no nearer for 60 s, or 120 s of
+    waiting) a re-plan and every attacking group attacks: not later than 120 s into the wait."""
+    env = battles(B=2, mix={"hold": 1.0})
+    actor, crit = nets()
+    env.step(actor, crit)
+    rt = env.general_rt
+    rt.set_teacher(1.0)
+    u = env.st.u
+    hold, att = gconfig.MISSION_KINDS[1].index, gconfig.MISSION_KINDS[0].index
+    assert rt.gcfg.teach_stall_s == 60.0 and rt.gcfg.teach_wait_s == 120.0
+
+    def apart():
+        # the enemy 400 m beyond the learner's farthest unit (along x), our side without shooters
+        for row in torch.nonzero(rt.r["owner"] == 0).flatten().tolist():
+            b, s = row % env.B, row // env.B + 1
+            own = u["side"][b] == s
+            foe = (u["side"][b] > 0) & ~own
+            sign = 1.0 if float(u["x"][b][foe].mean()) >= float(u["x"][b][own].mean()) else -1.0
+            edge = float((u["x"][b][own] * sign).max())
+            u["x"][b, foe] = u["x"][b, foe] - sign * float((u["x"][b][foe] * sign).min()) + sign * (edge + 400.0)
+            u["range"][b, own] = 0.0
+    apart()
+    rows = torch.nonzero(rt.r["has"] & (rt.r["owner"] == 0)).flatten()
+    assert rows.numel()
+    rt.r["t_plan"][rows] -= 31.0                         # a plan now: the teacher's, with the enemy far
+    env.step(actor, crit)
+    r = rt.r
+    row = int(rows[0])
+    waited = bool(((r["kind"][row] == hold) & r["teach_use"][row]).any())
+    assert waited and float(r["w_t0"][row]) >= 0
+    t0 = float(r["w_t0"][row])
+    went = None
+    for _ in range(125):
+        env.step(actor, crit)
+        if bool(r["w_go"][row]) and bool(((r["kind"][row] == att) & r["teach_use"][row]).any()):
+            went = float(env.st.t[row % env.B]) - t0
+            break
+    assert went is not None and went <= 121.0, went
+    assert not bool(((r["kind"][row] == hold) & r["teach_use"][row] & (r["target"][row] >= 2 * rt.G)).any())
+    assert rt.stats["replan_wait"] + rt.stats["replan_timer"] >= 1

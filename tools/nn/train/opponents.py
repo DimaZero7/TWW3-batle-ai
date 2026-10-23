@@ -21,6 +21,12 @@ of the side it plays.
                 enemies), after the first fight every unit goes in; before contact the line widens to lap
                 the enemy's line, and free units go round to the rear of enemies already fighting (Line
                 below has the numbers and where they come from)
+    human       modelled on the human's battle against the general g31 (build/human/runs/20261023-163812,
+                build/diag_human_g31): a defence in depth - a line of infantry (line_share of the melee units)
+                stands and takes the blow, the rest wait in reserve behind it and go in one at a time where the
+                line is worst (health x morale of its units in melee), the shooters go out to a flank of the line
+                and shoot from the side; no attack of its own before contact (an attacker after patience_s: all
+                go in, as hold_shoot). Human below has the numbers (mine, from that one battle: no fit)
 """
 import math
 from dataclasses import dataclass
@@ -647,4 +653,152 @@ def ai_like(st, p=Line()):
                                                                        | (kind == O.WITHDRAW)))
 
 
-SCRIPTS = {"nearest": nearest, "hold_shoot": hold_shoot, "hold": hold, "ai_like": ai_like}
+@dataclass(frozen=True)
+class Human:
+    """The numbers of `human` (the human's battle against g31: his line stood, his reserve went in where his line
+    bent, his slingers stood off its flank; the numbers are mine, from that one battle - not a fit)."""
+    line_share: float = 0.6       # the line: this share of the side's melee units (not the lord), by slot order
+    reserve_back_m: float = 60.0  # the reserve's (and the lord's) post this far behind the line's centre
+    reserve_space_m: float = 40.0  # ... the reserve units this far apart across the side's forward
+    flank_m: float = 50.0         # shooters: a post this far beyond the nearer end of the line, level with it
+    skirmish_m: float = 40.0      # ... a free shooter steps back (away and back) from an enemy melee unit this close
+    withdraw_m: float = 30.0      # ... this far
+    lord_fight_m: float = 40.0    # the lord attacks an enemy this close
+    patience_s: float = PATIENCE_S  # an attacker that has not fought by this time: everyone attacks (or it loses on time)
+    post_slack_m: float = 8.0     # a unit within this of its post holds there
+
+
+def human(st, p=Human()):
+    """Orders [B, N] of the defence in depth for both sides (see Human and the module doc)."""
+    u = st.u
+    side, x, z = u["side"], u["x"], u["z"]
+    alive = (side > 0) & (u["men"] > 0) & ~u["gone"]
+    standing = alive & ~u["r"]
+    dx = x[:, None, :] - x[:, :, None]                         # [b, i, j]: from i to j
+    dz = z[:, None, :] - z[:, :, None]
+    d = torch.sqrt(dx * dx + dz * dz)
+    foe = (side[:, :, None] != side[:, None, :]) & (side[:, :, None] > 0) & standing[:, None, :]
+    d_foe = torch.where(foe, d, torch.full_like(d, BIG))
+    near_d, near_i = d_foe.min(2)
+    has = near_d < BIG
+    lord = u["lord"]
+    shooter_slot = (side > 0) & (u["range"] > 0) & ~lord        # by the card (an empty quiver stays a shooter)
+    melee_slot = (side > 0) & (u["range"] <= 0) & ~lord
+    fighting = u["m"] & standing
+    attacker = side == st.attacker[:, None]
+    # the line and the reserve: the first line_share of each side's melee slots (a fixed split: a dead line unit
+    # leaves its gap, the reserve stays the reserve)
+    line_slot = torch.zeros_like(melee_slot)
+    for s in (1, 2):
+        mine = melee_slot & (side == s)
+        rank = torch.cumsum(mine.long(), 1) - 1
+        n = mine.sum(1, keepdim=True)
+        line_slot = line_slot | (mine & (rank < torch.ceil(p.line_share * n.float()).long()))
+    line = line_slot & standing
+    reserve = melee_slot & ~line_slot & standing
+    shooter = shooter_slot & standing
+    # the side's forward (its line's centre to the enemy's centre), the line's centre and half width
+    fx, fz, cx, cz, half, fought = (torch.zeros_like(x) for _ in range(6))
+    for s in (1, 2):
+        mine = side == s
+        ref = line & mine
+        ref = torch.where(ref.any(1, keepdim=True), ref, standing & ~lord & mine)
+        ref = torch.where(ref.any(1, keepdim=True), ref, standing & mine)
+        ox, oz = _centroid(x, z, ref)
+        ex, ez = _centroid(x, z, standing & (side == 3 - s))
+        vx, vz = ex - ox, ez - oz
+        n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
+        fx = torch.where(mine, (vx / n)[:, None], fx)
+        fz = torch.where(mine, (vz / n)[:, None], fz)
+        cx = torch.where(mine, ox[:, None], cx)
+        cz = torch.where(mine, oz[:, None], cz)
+        fought = torch.where(mine, ((fighting | (alive & (u["k"] > 0))) & mine).any(1, keepdim=True).float(), fought)
+    lx, lz = -fz, fx                                           # the side's left
+    lat = (x - cx) * lx + (z - cz) * lz
+    for s in (1, 2):
+        mine = side == s
+        h = torch.where(line & mine, lat.abs(), torch.zeros_like(lat)).max(1, keepdim=True).values
+        half = torch.where(mine, h, half)
+    fought = fought > 0
+    o = O.hold(st.B, st.N, st.device)
+    kind, tx, tz, target, run = o.kind, x.clone(), z.clone(), o.target, o.run
+
+    def put(mask, k, px=None, pz=None, tg=None, r=False):
+        nonlocal kind, tx, tz, target, run
+        kind = torch.where(mask, torch.full_like(kind, k), kind)
+        if px is not None:
+            tx, tz = torch.where(mask, px, tx), torch.where(mask, pz, tz)
+        if tg is not None:
+            target = torch.where(mask, tg, target)
+        run = torch.where(mask, torch.full_like(run, r), run)
+
+    def go_to(mask, px, pz, r=True):
+        away = torch.sqrt((px - x) ** 2 + (pz - z) ** 2) > p.post_slack_m
+        put(mask & away, O.MOVE, px, pz, r=r)
+        put(mask & ~away, O.HOLD, x, z)
+
+    # the enemy each unit fights (else its nearest)
+    opp = u["target"].clamp(min=0)
+    opp_ok = fighting & (u["target"] >= 0) & foe.gather(2, opp[:, :, None]).squeeze(2)
+    opp_i = torch.where(opp_ok, opp, near_i)
+    # the line: holds where it stands (fights back when attacked); in melee it fights its enemy
+    put(line & fighting & has, O.ATTACK, tg=opp_i, r=True)
+    # the reserve: posts behind the line's centre, spread across
+    rrank = torch.zeros_like(x)
+    rn = torch.zeros_like(x)
+    for s in (1, 2):
+        mine = reserve & (side == s)
+        rrank = torch.where(mine, (torch.cumsum(mine.long(), 1) - 1).to(x.dtype), rrank)
+        rn = torch.where(side == s, mine.sum(1, keepdim=True).to(x.dtype), rn)
+    off = (rrank - (rn - 1) / 2) * p.reserve_space_m
+    bx, bz = cx - fx * p.reserve_back_m, cz - fz * p.reserve_back_m
+    cur = u["order_target"].clamp(min=0)
+    sent = (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0) & foe.gather(2, cur[:, :, None]).squeeze(2)
+    committed = reserve & (sent | fighting)
+    free_res = reserve & ~committed
+    go_to(free_res & has, bx + lx * off, bz + lz * off)
+    put(committed & fighting & has, O.ATTACK, tg=opp_i, r=True)
+    put(committed & ~fighting & sent, O.ATTACK, tg=cur, r=True)
+    # ... one at a time (none on its way): to the line's unit in melee in the worst state (health x morale)
+    cond = u["hp"].float() * u["mp"].float().clamp(0.0, 1.0)
+    ar = torch.arange(st.N, device=x.device)[None, :]
+    for s in (1, 2):
+        mine = side == s
+        on_way = (committed & ~fighting & mine).any(1)                                   # [B]
+        bad = torch.where(line & fighting & mine & opp_ok, cond, torch.full_like(cond, BIG))
+        worst_c, worst = bad.min(1)
+        need = (worst_c < BIG) & ~on_way
+        wx, wz = x.gather(1, worst[:, None]), z.gather(1, worst[:, None])                # [B, 1]
+        dr = torch.where(free_res & mine, torch.sqrt((x - wx) ** 2 + (z - wz) ** 2), torch.full_like(x, BIG))
+        rd, ri = dr.min(1)
+        pick = (ar == ri[:, None]) & (need & (rd < BIG))[:, None]
+        put(pick, O.ATTACK, tg=opp_i.gather(1, worst[:, None]).expand_as(opp_i), r=True)
+    # the shooters: a post beyond the nearer end of the line, level with it; hold there (fire at will); step back
+    # from an enemy melee unit that comes close; in melee they fight
+    sgn = torch.where(lat >= 0, torch.ones_like(lat), -torch.ones_like(lat))
+    px, pz = cx + lx * sgn * (half + p.flank_m), cz + lz * sgn * (half + p.flank_m)
+    go_to(shooter & ~fighting & has, px, pz)
+    melee_foe = foe & (u["range"] <= 0)[:, None, :] & ~fighting[:, None, :]
+    md, mi = torch.where(melee_foe, d, torch.full_like(d, BIG)).min(2)
+    ax, az = x - x.gather(1, mi), z - z.gather(1, mi)
+    an = torch.sqrt(ax * ax + az * az).clamp(min=1e-6)
+    wx, wz = ax / an - fx, az / an - fz                        # away from it, and back
+    wn = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
+    wx, wz = torch.where(wn > 1e-3, wx / wn, -fx), torch.where(wn > 1e-3, wz / wn, -fz)
+    put(shooter & ~fighting & (md <= p.skirmish_m), O.WITHDRAW, x + wx * p.withdraw_m, z + wz * p.withdraw_m, r=True)
+    # the lord: at the reserve's post; attacks an enemy that comes close
+    the_lord = lord & standing
+    go_to(the_lord & ~fighting & has, bx, bz)
+    put(the_lord & has & (fighting | (near_d <= p.lord_fight_m)), O.ATTACK, tg=opp_i, r=True)
+    # an attacker that has not fought by patience_s: everyone attacks
+    late = attacker & ~fought & (st.t[:, None] >= p.patience_s) & standing & has & ~shooter
+    put(late, O.ATTACK, tg=opp_i, r=True)
+
+    ok = standing & has
+    kind = torch.where(ok | (kind == O.HOLD), kind, torch.full_like(kind, O.HOLD))
+    target = torch.where(kind == O.ATTACK, target, torch.full_like(target, -1))
+    return O.Orders(kind=kind, x=tx, z=tz, target=target, run=run & ((kind == O.ATTACK) | (kind == O.MOVE)
+                                                                       | (kind == O.WITHDRAW)))
+
+
+SCRIPTS = {"nearest": nearest, "hold_shoot": hold_shoot, "hold": hold, "ai_like": ai_like, "human": human}

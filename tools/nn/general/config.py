@@ -96,6 +96,11 @@ class GeneralConfig:
     #                            the default: those that cost nothing at minute 0 (docs "Task masks": the ablation)
     shoot_share: float = 0.5   # ... "shoot" for a group whose shooters are at least this share of its units (net.shoot_ok;
     #                            "at least one" let 61-66 % of the units under shoot be infantry without missiles)
+    melee_stay: bool = True    # "withdraw" not for a group that fights in melee and has not wavered (net.melee_ok,
+    #                            taskmask.fighting: some unit in melee, none wavering or worse); the teacher keeps the same
+    #                            rule (a rule, not a weight: an older checkpoint gets it too). The human's battle against
+    #                            g31: the whole infantry with the lord got "withdraw" in melee, 46 orders, those units
+    #                            killed 0.03 men/s against 0.19; False: withdraw anywhere
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet
@@ -106,8 +111,15 @@ class GeneralConfig:
     #                            place.py's placement as before (the general still forms groups and gives missions)
     # --- re-planning ("Пересмотр замысла") ---
     replan_s: float = 30.0     # the plan is made again every this many seconds of battle ...
-    replan_min_s: float = 3.0  # ... and on an event (a group broken, a lord fallen), but not sooner than this after
-    #                            the last plan
+    replan_min_s: float = 3.0  # ... and on an event (a group broken, a lord fallen, the enemy near), but not sooner
+    #                            than this after the last plan
+    replan_near_m: float = 250.0  # ... the event "the enemy near": a standing enemy unit within this of one of our
+    #                            groups' centres that was farther at the plan (teacher.HOLD_M: the teacher's waiting
+    #                            groups attack together at once, not at the next 30 s plan); 0: no such event
+    teach_stall_s: float = 60.0  # the teacher's wait's fuse (runtime.wait_clock): its farthest waiting group's distance
+    #                            to the enemy not shorter for this long (the enemy stands, so do we) - all attack, and
+    #                            a re-plan on it; 0: off (with only "attack together" a standing enemy was never met)
+    teach_wait_s: float = 120.0  # ... or the wait going on this long since it began; 0: off
     broken: float = 0.5        # a group is broken when more than this share of its units routs or is destroyed
     # --- the executor's task input ("Задание отряда") ---
     dist_m: float = 100.0      # a target's distance from the unit / this ...
