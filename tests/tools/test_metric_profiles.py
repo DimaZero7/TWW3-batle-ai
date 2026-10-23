@@ -211,6 +211,44 @@ class TestWiring:
         with pytest.raises(ValueError):
             step.build("n4", "prev", {"options": {}}, profile="nope")
 
+    def test_the_step_routes_no_script_metrics_to_test5(self, tmp_path, monkeypatch):
+        (tmp_path / "test5" / "prev").mkdir(parents=True)
+        (tmp_path / "test5" / "prev" / "m25.pt").write_bytes(b"x")
+        monkeypatch.setattr(step, "TEST5", tmp_path / "test5")
+        monkeypatch.setattr(step, "RUNS", tmp_path / "runs")
+        lines, info = step.build("n4", "prev", {"options": {"lr": 1}}, sets=["no-script-metrics=1"])
+        t5, run = lines[1].split(" -- ")
+        assert "--no-script-metrics" in t5 and "script-metrics" not in run and info["no_script_metrics"]
+        lines, info = step.build("n4", "prev", {"test5": {"no-script-metrics": True}, "options": {}},
+                                 sets=["no-script-metrics=0"])
+        assert "script-metrics" not in lines[1] and not info["no_script_metrics"]
+        lines, _ = step.build("n4", "prev", {"options": {}, "steps": {"g": {"no-script-metrics": True}}}, step_name="g")
+        assert "--no-script-metrics" in lines[1].split(" -- ")[0]
+        # no script battles: the evaluations cost nothing, no references; the exam's proxy still counts
+        assert step.wall_minutes(40, 40, True, 1, scripts=False)[0] == pytest.approx((40 * 60 + step.EXAM_S
+                                                                                       + step.STARTUP_S) / 60)
+
+    def test_the_card_of_a_step_without_script_metrics(self, tmp_path):
+        exam = {"battles": 96, "pairs": [2, 3, 1], "wins12": 6.5, "trade": {"value": 0.05, "se": 0.02},
+                "enemy": "build/v2/itS27_4.pt", "lord_dead_own": 0.25}
+        win = {"pinned/attack": {"games": 300, "wins": 120, "win_rate": 0.4},
+               "pinned/defend": {"games": 100, "wins": 60, "win_rate": 0.6},
+               "pinned/all": {"games": 400, "wins": 180, "win_rate": 0.45}, "lord_dead_own": 0.2, "games": 900}
+        before = {"skill": {"rating": None, "pairs": {}, "pair_gold": {}, "advantage": {}, "margin": {}},
+                  "profile": "mandatory+exam", "no_script_metrics": True}
+        after = dict(before, skill=dict(before["skill"], exam=exam), window=win)
+        rep = {"init": "x.pt", "before": before, "after": after, "trend": {"0": before, "40": after},
+               "no_script_metrics": True, "profile": "mandatory+exam"}
+        (tmp_path / "report.json").write_text(json.dumps(rep), encoding="utf-8")
+        lines, data = card.card(tmp_path, prev=tmp_path)
+        text = chr(10).join(lines)
+        rows = {r["key"]: r for r in data["rows"]}
+        assert rows["rating"]["values"] == [None, None] and rows["gold_ai_like"]["values"] == [None, None]
+        assert rows["pinned_win"]["values"] == [None, 0.45] and rows["lord_train"]["values"] == [None, 0.2]
+        assert rows["lord_exam"]["values"] == [None, 0.25] and rows["exam_trade"]["values"] == [None, 0.05]
+        assert "att 0.40 def 0.60, n 400" in text and "no script metrics" in text and data["no_script_metrics"]
+        assert rows["lord"]["values"] == [None, None]         # the script cells' row: "-", not a failure
+
     def test_the_card_says_what_was_computed(self):
         pts = [("0", {"profile": "mandatory+drills"}), ("5", {"profile": "mandatory+drills"})]
         assert card.computed(pts) == "computed: mandatory+drills (tools/nn/train/profiles.py)"

@@ -20,6 +20,11 @@ time. It never runs anything itself.
 as the --init, the --reference and the --critic-init (its own critic and Adam: run.py resumes from it). --step NAME
 takes the chain file's "steps" entry NAME over the standing options: its "options" set or replace them, its "drop"
 removes them, its "minutes", "every", "profile" and "canary" replace test5's; --set / --drop come after it.
+
+test5's own switches (TEST5_FLAGS) go through --set too, but to test5, not run.py: `--set no-script-metrics=1` (or the
+chain file's test5 / step entry "no-script-metrics": true) -> test5 --no-script-metrics: no battles against the scripts,
+no script baselines (the step does not wait for them on a new simulator version), the mandatory set is own lord deaths
+(the exam's proxy, the training window against the pinned version); --set no-script-metrics=0 turns it off again.
 """
 import argparse
 import json
@@ -39,6 +44,8 @@ EVAL_S = 200.0            # one full evaluation with the baselines cached (n3: 1
 MISS_S = 600.0            # extra on a reference cache miss: tools/nn/train/refs.py on the CPU (~10 min, 8 cores)
 STARTUP_S = 120.0         # the container, the compile warm-up
 EXAM_S = 420.0            # the exam's proxy (profile exam, tools/nn/train/exam_sim.py): once, in the final evaluation
+# test5's own switches given by --set key=value (a true value -> the bare flag `--key` to test5; not run.py options)
+TEST5_FLAGS = ("no-script-metrics",)
 
 
 def load_chain(path=CHAIN):
@@ -130,11 +137,13 @@ def baseline_cache():
     return v, missing
 
 
-def wall_minutes(minutes, every, miss, exam=0):
+def wall_minutes(minutes, every, miss, exam=0, scripts=True):
     """A rough end-to-end estimate: training + the evaluations (before, every point, after) + the exam's proxy
-    (`exam` times) + start-up."""
+    (`exam` times) + start-up. scripts False (test5 --no-script-metrics): the evaluations cost nothing but the exam's
+    proxy, no script references."""
     evals = (int(minutes / every) if every else 0) + 2
-    return (minutes * 60 + evals * EVAL_S + exam * EXAM_S + (MISS_S if miss else 0) + STARTUP_S) / 60, evals
+    return (minutes * 60 + (evals * EVAL_S if scripts else 0) + exam * EXAM_S + (MISS_S if miss and scripts else 0)
+            + STARTUP_S) / 60, evals
 
 
 def named_step(chain, name):
@@ -151,7 +160,7 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
           profile=None, step_name=None):
     """(script lines, info) of the step."""
     named = named_step(chain, step_name)
-    t5 = dict(chain.get("test5", {}), **{k: v for k, v in named.items() if k in ("minutes", "every", "profile")})
+    t5 = dict(chain.get("test5", {}), **{k: v for k, v in named.items() if k in ("minutes", "every", "profile") + TEST5_FLAGS})
     if "canary" in named:
         t5["baseline_canary"] = named["canary"]
     profile = t5.get("profile") if profile is None else profile
@@ -166,6 +175,8 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
     for k in named.get("drop") or ():
         standing.pop(k, None)
     options = apply_sets(standing, sets, drops)
+    flags = {k: v for k, v in t5.items() if k in TEST5_FLAGS}
+    flags.update({k: options.pop(k) for k in TEST5_FLAGS if k in options})       # --set wins over the chain file
     head = ["--critic-init", rel(critic)] if critic else []
     run_opts = head + ["--reference", rel(init)] + option_args(options) + list(extra)
     test5_args = ["--label", label, "--init", rel(init), "--updates", "0", "--minutes", f"{minutes:g}", "--every", f"{every:g}"]
@@ -173,13 +184,14 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
         test5_args += ["--baseline-canary", str(canary)]
     if profile and profile != profiles.FULL:
         test5_args += ["--profile", profile]
+    test5_args += [f"--{k}" for k in TEST5_FLAGS if flags.get(k) not in (None, False, 0, "0", "")]
     cmd = (f"DOCK_NAME={shlex.quote(prefix + label)} bash tools/nn/dock.sh tools.nn.train.test5 "
            + " ".join(shlex.quote(a) for a in test5_args) + " -- " + " ".join(shlex.quote(a) for a in run_opts))
     lines = [f'cd "{posix(ROOT)}"', cmd]
     info = {"label": label, "prev": prev_label, "init": rel(init), "critic": rel(critic) if critic else None,
             "minutes": minutes, "every": every, "canary": canary, "container": prefix + label, "options": options,
             "extra": list(extra), "out": f"build/nn-train/test5/{label}", "profile": profile or profiles.FULL,
-            "step": step_name}
+            "step": step_name, "no_script_metrics": "--no-script-metrics" in test5_args}
     return lines, info
 
 
@@ -207,7 +219,11 @@ def main(argv=None):
     print("\n".join(lines))
     print()
     print(f"chain: {info['prev']} -> {info['label']}: init {info['init']}, critic {info['critic'] or 'NONE (warm start of the critic!)'}")
-    version, missing = baseline_cache()
+    scripts = not info["no_script_metrics"]
+    version, missing = baseline_cache() if scripts else (None, [])
+    if not scripts:
+        print("baseline cache: not needed (--no-script-metrics: no script battles; the baselines on demand: "
+              ".venv/Scripts/python -m tools.ops.baselines --run)")
     if version is not None:
         if missing:
             print(f"baseline cache: MISS for {', '.join(missing)} (simulator version {version}): the step plays them "
@@ -215,8 +231,9 @@ def main(argv=None):
         else:
             print(f"baseline cache: hit (simulator version {version})")
     exam = int("exam" in profiles.parse(info["profile"], profiles.TEST5, profiles.TEST5_ALIASES))
-    wall, evals = wall_minutes(info["minutes"], info["every"], bool(missing), exam)
-    print(f"expected wall time ~{wall:.0f} min: {info['minutes']:g} min training + {evals} evaluations x ~{EVAL_S / 60:.1f} min"
+    wall, evals = wall_minutes(info["minutes"], info["every"], bool(missing), exam, scripts)
+    print(f"expected wall time ~{wall:.0f} min: {info['minutes']:g} min training + {evals} evaluations x "
+          + (f"~{EVAL_S / 60:.1f} min" if scripts else "~0 min (no script battles)")
           + (f" + the exam's proxy ~{EXAM_S / 60:.0f} min" if exam else "")
           + (f" + ~{MISS_S / 60:.0f} min of script references" if missing else ""))
     if args.write:

@@ -13,7 +13,10 @@ skilled script's beside), each drill's TRANSFER to normal battles (APPLIED share
 and MISTAKE share, lower is better, network / ai_like), the teachers' shares, own lord dead, the
 order kinds hold / move / attack, missile time in melee, timeouts, the evaluation's seconds, the KL
 distance from the start; where the exam's proxy was played (profile exam, tools/nn/train/exam_sim.py) its trade
-(± 95 %), wins per 12 and pairs 2-0/1-1/0-2. The last column is the change from the first point to the last: a mark
+(± 95 %), wins per 12, pairs 2-0/1-1/0-2 and own lord deaths in its battles; the training window since the last point
+(test5 "window", run.py log): the win rate against the pinned version (--past-pin) and own lord deaths in the
+training's battles. A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
+says so under the table. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
 are listed under the table; --prev adds the previous step's end point and the change from it. The
@@ -41,7 +44,7 @@ Z = 2.0
 def point_from_eval(res):
     """The report's point of a raw evaluation (the subset of test5.metrics the card reads)."""
     out = {"skill": skill.summary(res)}
-    for k in ("drills", "transfer", "distance", "teach_auto", "teach_normal", "profile"):
+    for k in ("drills", "transfer", "distance", "window", "teach_auto", "teach_normal", "profile", "no_script_metrics"):
         if res.get(k):
             out[k] = res[k]
     out["seconds"] = res.get("seconds")
@@ -127,6 +130,19 @@ def rows(point):
         a, b, c = e["pairs"]
         out.append(("exam_wins", f"exam vs {enemy}: wins /12 (pairs 2-0/1-1/0-2)", e.get("wins12"), None,
                     "{:.1f}" + f" ({a}/{b}/{c})"))
+    w = point.get("window") or {}
+    pin = w.get("pinned/all") or {}
+    if pin.get("games"):                         # the training window against the pinned version (test5 window, --past-pin)
+        roles = "".join(f" {r[:3]} {w[f'pinned/{r}']['win_rate']:.2f}" for r in ("attack", "defend")
+                        if (w.get(f"pinned/{r}") or {}).get("games"))
+        out.append(("pinned_win", "window: win vs pinned (training, since the last point)", pin.get("win_rate"),
+                    _binom(pin.get("win_rate"), pin.get("games")), "{:.3f}" + f" ({roles.strip()}, n {pin['games']})"))
+    if w.get("lord_dead_own") is not None:
+        out.append(("lord_train", "own lord dead, training window (all its battles)", w["lord_dead_own"],
+                    _binom(w["lord_dead_own"], w.get("games")), "{:.3f}"))
+    if e and e.get("lord_dead_own") is not None:
+        out.append(("lord_exam", "own lord dead, exam's proxy", e["lord_dead_own"], _binom(e["lord_dead_own"], e.get("battles")),
+                    "{:.3f}"))
     for d, v in (point.get("drills") or {}).items():
         sk = _g(v, "scripts", "skilled", "win_rate")
         out.append((f"drill_{d}", f"drill {d}: win" + (f" (skilled {sk:.2f})" if sk is not None else ""),
@@ -192,8 +208,12 @@ def anomalies(pts):
         if d is not None and d < 0 and beyond:
             out.append(f"rating fell beyond noise min {m0} -> {m1}: {r0['rating'][2]:+.2f} -> {r1['rating'][2]:+.2f}")
     first, last = table[0][1], table[-1][1]
-    for key, title, x in (("move", "move share", MOVE_X), ("lord", "own lord dead", LORD_X)):
-        a, b = first[key][2], last[key][2]
+    for key, title, x in (("move", "move share", MOVE_X), ("lord", "own lord dead", LORD_X),
+                          ("lord_train", "own lord dead (training window)", LORD_X),
+                          ("lord_exam", "own lord dead (exam's proxy)", LORD_X)):
+        # the first point that has the row (the training window and the exam's proxy are not at minute 0)
+        a = next((r[key][2] for _, r in table if key in r and r[key][2] is not None), None)
+        b = last[key][2] if key in last else None
         if a is not None and b is not None and a > 0 and b >= x * a and b - a >= 0.05:
             out.append(f"{title} x{b / a:.1f}: {a:.2f} -> {b:.2f}")
     for m, r in table:
@@ -253,14 +273,20 @@ def card(folder, prev=None):
         lines.append(f"| {title} | " + " | ".join(vals) + f" | {(f'{d:+.3f}' + (' ' + mark if mark else '') if d is not None else '-')}{extra} |")
         data.append(row)
     anomaly = anomalies(pts)
-    lines += ["", computed(pts, rep), "anomalies: " + ("; ".join(anomaly) if anomaly else "none")]
+    lines += ["", computed(pts, rep)]
+    if (rep or {}).get("no_script_metrics") or any(p.get("no_script_metrics") for _, p in pts):
+        lines.append("no script metrics (test5 --no-script-metrics): the rating, the pair gold and the script battles' "
+                     "rows are not computed (\"-\"); judge by the exam's proxy, the pinned window and own lord deaths")
+    lines += ["anomalies: " + ("; ".join(anomaly) if anomaly else "none")]
     capacity = (rep or {}).get("capacity")
     if capacity:
         lines.append(f"capacity: {capacity.get('verdict')} - {'; '.join(capacity.get('reasons') or [])}")
     if rep and rep.get("train_s"):
         lines.append(f"training: {rep['train_s'] / 60:.0f} min, {rep.get('updates')} updates")
     return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity,
-                   "computed": computed(pts, rep)}
+                   "computed": computed(pts, rep),
+                   "no_script_metrics": bool((rep or {}).get("no_script_metrics")
+                                             or any(p.get("no_script_metrics") for _, p in pts))}
 
 
 def main(argv=None):

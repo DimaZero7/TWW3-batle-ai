@@ -18,7 +18,7 @@ flowchart LR
 | Is anything left from the last step? | `.venv/Scripts/python -m tools.ops.leftovers` — our containers, the GPU lock, wait loops, the game, the GPU's load; exit 1 when something is left; `--kill` ends wait loops older than 10 min, `--unlock` removes a stale lock (stale: no training container, one named `orch-` from the chain's options file or running `tools.nn.train.test5` / `run.py`; an agent's container does not hold it), `--stop NAME` stops one of our containers (30 s to exit; it removes a lock the stopped training left). `test5` itself frees the lock on SIGTERM (`docker stop`) at once, in the signal handler, before the stack unwinds | `docker ps`, `ls build/*.lock`, `ps` by hand, and the misses: nine containers at once (training 2x slower), a trap that deleted another job's lock |
 | The next step's command | `.venv/Scripts/python -m tools.ops.step --label n4 --from n3_consolidate [--minutes 25] [--set drills=0.1] [--drop teach-normal] [--write build/steps/n4.sh] [-- run.py options]` | sed-editing the previous step's script (a wrong critic or reference goes unnoticed) |
 | Waiting for a run or a test | `bash tools/ops/wait.sh -t 5400 build/steps/n4.log '^written:\|Traceback'` — a timeout, case-insensitive, exit 2 on time | `until grep …; do sleep 60; done` — ran for hours when `FAILED` came in capitals |
-| A simulator or drill change is ready, the previous step still trains | `.venv/Scripts/python -m tools.ops.baselines --build <main checkout>/build --run` from the worktree with the change — the new version's references on the CPU, ~8 min ([the cache](#the-baselines-cache-and-the-canary)) | the step waited 25–50 min for them at its "before" evaluation |
+| A simulator or drill change is ready, the previous step still trains | a step with `--set no-script-metrics=1` does not wait for the baselines; when the metrics against the scripts are needed, `.venv/Scripts/python -m tools.ops.baselines --build <main checkout>/build --run` from the worktree with the change — the new version's references on the CPU, ~8 min ([the cache](#the-baselines-cache-and-the-canary)) | the step waited 25–85 min for them at its "before" evaluation |
 | Judging the step | `.venv/Scripts/python -m tools.ops.card build/nn-train/test5/n4 --prev build/nn-train/test5/n3_consolidate` | reading ~200 lines of `trend.md` for ten numbers |
 | Computing only what is needed | `--profile drills,transfer` of `tools.ops.step`, `test5` and `tools.nn.gate summary` ([metric profiles](#metric-profiles)) | every evaluation computed everything: drills, transfer, liveliness, capacity |
 | Where the simulator differs from the game after a gate | `DOCK_NAME=agent-gap bash tools/nn/dock.sh tools.ops.gapcard build/nn-gate/<time>` ([gap card](#game-vs-sim-gap-card-toolsopsgapcardpy)) | one-off replay scripts in `build/…` for every question |
@@ -38,6 +38,17 @@ with the profile `exam`; + ~10 min on a cache miss; ahead of it: [`tools.ops.bas
 nothing: the orchestrator starts the script in the background and waits on its log. `--profile`
 (default: the options file's `test5.profile`, else `full`) goes to `test5`: which metrics each
 evaluation computes ([metric profiles](#metric-profiles)).
+
+`--set no-script-metrics=1` goes to `test5`, not to `run.py` (`--no-script-metrics`; so does the key
+`"no-script-metrics": true` in the options file's `test5` or in a step; `--set no-script-metrics=0` turns it off): the
+evaluations play no battles against the scripts, the script baselines are neither looked for nor played, there is no
+rating and no pair gold. What stays: own lord deaths (in the exam's proxy's battles and in the training's own battles),
+[the exam's proxy](training.md#the-exams-proxy) (the profile `exam`), the training's win window against the pinned
+opponent (`--past-pin`), and the drills when the profile `drills` is chosen (then only the drills' check scripts are
+looked for). The profiles measured in the battles against the scripts (`behaviour`, `liveliness`, `fatigue`,
+`transfer`, `capacity`) drop out — `test5` prints which; an adaptive `--teach-normal` does not work with the flag (it
+needs `transfer`). A point without the proxy costs ~0 s, so in the general's chain the evaluation is at the last point
+only (`--every` equal to `--minutes`). The metrics against the scripts on demand: a separate step without the flag.
 
 `--from <file>.pt` is a line's point outside `test5` (e.g. `build/v2/itS27_4.pt`, a copy of its run's `latest.pt`): it
 is also the `--reference` and the `--critic-init` (its own critic and Adam). `--step NAME` takes a named step of the
@@ -61,8 +72,12 @@ instead of ~190), the KL distance from the start. The last column is the change 
 point to the last, marked `*` beyond the noise (two standard errors where the number has one:
 rating, pair gold, drill wins, lord deaths; |change| ≥ 0.05 otherwise). Where [the exam's proxy](training.md#the-exams-proxy)
 was played, two more rows: the trade against `itS27_4` (± 95 %) and the wins per 12 with the pairs 2-0/1-1/0-2 ("-" at
-the other points). Below: anomalies (a rating
-fall beyond noise between two points, the move share or lord deaths ×1.5, timeouts above 5 %, a
+the other points), and own lord deaths in its battles. With a pinned opponent (`--past-pin`): the training window since
+the last point, the wins against it (all / attack / defence, the number of battles) and own lord deaths in all the
+training's battles (minute 0 has no window). A step with `--no-script-metrics`: the rows of the rating, the pair gold and
+the script battles are "-", a line under the table says so. Below: anomalies (a rating
+fall beyond noise between two points, the move share or lord deaths ×1.5 — in the script battles, the training window
+and the proxy, timeouts above 5 %, a
 drill's win falling ≥ 0.15), the capacity verdict, the training's minutes and updates. `--prev`
 adds the previous step's end point and the change from it; `--json` the data.
 
@@ -83,7 +98,7 @@ means does not depend on the profile: the profile only says whether it is comput
 
 | Where | Always (mandatory) | Profiles (`--profile a,b`; `full` all but the ones named only on their own, `mandatory` none) |
 |---|---|---|
-| `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full`. Only when named (not part of `full`): `exam` - [the exam's proxy](training.md#the-exams-proxy), ~7 min, at the step's last point (`--exam-at`), e.g. `mandatory,exam` or `full,exam` |
+| `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds; with `--no-script-metrics` own lord deaths only (the exam's proxy, the training window), [the chain step](#the-chain-step-toolsopssteppy) | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full`. Only when named (not part of `full`): `exam` - [the exam's proxy](training.md#the-exams-proxy), ~7 min, at the step's last point (`--exam-at`), e.g. `mandatory,exam` or `full,exam` |
 | `python -m tools.nn.gate summary <folder> --profile …` | outcomes, pairs, pair gold, own lord deaths (from the recordings) | `liveliness` (default), `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap` — each recording's numbers (as in the gap card) |
 | `tools.ops.gapcard` | win, trade, own and enemy gold lost, own loss and trade 30 s before the end, own army destroyed by the end, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap`; default `full` |
 
@@ -161,6 +176,12 @@ drill's two check scripts (naive and skilled). These script battles ("references
 | `drill_<drill>_128_broad<share>[_embed<share>]_<version>.json` | `kiting`, `counter`, `hold_fire`: naive and skilled, 128 battles each | the simulator version and `tools/nn/train/drills` (`version.drill_version`) |
 
 A change to any of those files misses the cache.
+
+**The baselines on demand.** Only an evaluation with battles against the scripts needs them. A step with
+`--set no-script-metrics=1` (`test5 --no-script-metrics`) neither looks for nor plays them, so a new simulator version
+does not hold it up (the step used to wait 66–85 min of CPU for them before its first evaluation). When the metrics
+against the scripts are needed: first `.venv/Scripts/python -m tools.ops.baselines --run` (below), then a step without
+the flag.
 
 **A miss is played on the CPU.** Before its first evaluation `test5` starts the missing files
 (`tools/nn/train/refs.py`): each script's baseline and each drill check script is a process of its own

@@ -67,7 +67,19 @@ The exam's proxy (--profile ...,exam; opt-in, "full" leaves it out; tools/nn/tra
 each (12 R in all), our network defending, in the fighters lab; ~7 min a point at R 8. --exam-at last (default): only in
 the step's final evaluation ("after"; the next step's "before" reuses it), all: at every point. A row of the skill
 block: "exam vs itS27_4 ...: pairs 2-0/1-1/0-2 (expected), wins /12, trade ± 95%" (report.json: skill.exam; the
-evaluation: "exam" with the per-battle lists).
+evaluation: "exam" with the per-battle lists, and own lord deaths in its battles, "lord_dead_own").
+
+--no-script-metrics: no battles against the scripts at all. The mandatory set is then own lord deaths only (in the
+exam's proxy where it plays, and in the training's own battles, the window below); the rating, the pair gold and the
+other blocks of the script battles (behaviour, liveliness, fatigue, transfer, capacity) are not computed, the script
+baselines are neither looked for nor played (a new simulator version does not hold the step up; they come on demand:
+tools.ops.baselines --run). The drills (profile drills) and the exam's proxy (profile exam) play as without it. An
+evaluation point without the exam's proxy then costs nothing. The step is judged by the exam's proxy, the window
+against the pinned version (run.py --past-pin) and own lord deaths.
+
+The training window (every point but minute 0, with or without the flag; report.json -> "window"): over the training
+updates since the last point (run.py's log.jsonl) the learner's games / wins against the pinned version per role
+("pinned/attack", "pinned/defend", "pinned/all"; only with --past-pin) and own lord deaths in all its battles.
 
 A trend run: --updates 0 --minutes M --every K trains M minutes and runs the same evaluation every K
 minutes of training too (its time not counted), keeping each network (m<minute>.pt) and evaluation
@@ -203,11 +215,28 @@ def eval_key(actor, args, cadence):
     if "exam" in prof:                           # the exam's proxy: its battles (only then, old keys stay)
         r, enemy, _ = exam_args(args)
         key["exam"] = {"R": r, "enemy": Path(enemy).as_posix(), "seeds": list(exam_sim.SEEDS)}
+    if no_scripts(args):                         # no script battles (only then, old keys stay)
+        key["no_script_metrics"] = True
+        key["opponents"] = []
     return json.loads(json.dumps(key))                  # as it reads back from a file
 
 
+def no_scripts(args):
+    """test5 --no-script-metrics: no battles against the scripts, no script baselines (module doc)."""
+    return bool(getattr(args, "no_script_metrics", False))
+
+
+# The profiles measured in the battles against the scripts: --no-script-metrics leaves them out.
+SCRIPT_PROFILES = ("behaviour", "liveliness", "fatigue", "transfer", "capacity")
+
+
+def without_scripts(prof):
+    """(kept, dropped) of the profiles `prof` under --no-script-metrics: the drills and the exam's proxy stay."""
+    return (tuple(p for p in prof if p not in SCRIPT_PROFILES), tuple(p for p in prof if p in SCRIPT_PROFILES))
+
+
 # What an evaluation gets from the training around it (test5's hook, the "after"): not part of the measurement.
-TRAINING_KEYS = ("distance", "teach", "teach_auto", "teach_normal", "update")
+TRAINING_KEYS = ("distance", "teach", "teach_auto", "teach_normal", "update", "window")
 
 
 def reusable(init, key):
@@ -230,8 +259,11 @@ def evaluation(actor, args, device, cadence, last=False):
     (the exam's proxy plays there; at every point with --exam-at all)."""
     t = time.time()
     prof = chosen(args)
-    res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
-                        together=True, paired=True, baseline=True, cadence=cadence, measure=set(prof))
+    if no_scripts(args):                         # --no-script-metrics: no battles against the scripts
+        res = {"by_opponent": {}, "battles": {}, "no_script_metrics": True}
+    else:
+        res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
+                            together=True, paired=True, baseline=True, cadence=cadence, measure=set(prof))
     if args.drill_eval and "drills" in prof:
         # the drills (tools/nn/train/drills, the verified ones): win rate and gold trade per drill
         res["drills"] = evaluate.play_drills(actor, args.drill_eval, device, cadence=cadence)
@@ -263,6 +295,38 @@ def distance(run_dir, since, until):
     return {"start_kl": round(mean("start_kl"), 4), "start_kl_last": round(rows[-1].get("start_kl", 0.0), 4),
             "anchor_kl": round(mean("anchor_kl"), 4), "rolls": rows[-1].get("anchor_rolls", 0),
             "updates": [rows[0]["update"], rows[-1]["update"]]}
+
+
+def window(run_dir, since, until):
+    """The training's own battles over the updates (since, until] of a run (run.py's log.jsonl rows "games",
+    "win_rate", "lord_dead_own"): {"pinned/attack" | "pinned/defend" | "pinned/all": {games, wins, win_rate}} against
+    the pinned version (run.py --past-pin; absent without it), "lord_dead_own": own lord deaths in all the learner's
+    ended battles (the updates' shares weighted by their battles), "games", "updates". None without a log or rows."""
+    path = Path(run_dir) / "log.jsonl"
+    if not path.exists():
+        return None
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = [r for r in rows if since < r.get("update", 0) <= until]
+    if not rows:
+        return None
+    out, acc = {}, {}
+    for r in rows:
+        g, w = r.get("games") or {}, r.get("win_rate") or {}
+        for k in ("pinned/attack", "pinned/defend"):
+            if g.get(k):
+                G, W = acc.get(k, (0, 0.0))
+                acc[k] = (G + g[k], W + w.get(k, 0.0) * g[k])
+    if acc:
+        acc["pinned/all"] = (sum(G for G, _ in acc.values()), sum(W for _, W in acc.values()))
+    for k, (G, W) in acc.items():
+        out[k] = {"games": int(G), "wins": int(round(W)), "win_rate": round(W / G, 4) if G else None}
+    n = [sum((r.get("games") or {}).values()) for r in rows]
+    lords = [(r.get("lord_dead_own"), b) for r, b in zip(rows, n) if r.get("lord_dead_own") is not None and b]
+    total = sum(b for _, b in lords)
+    out["lord_dead_own"] = round(sum(x * b for x, b in lords) / total, 4) if total else None
+    out["games"] = int(sum(n))
+    out["updates"] = [rows[0]["update"], rows[-1]["update"]]
+    return out
 
 
 def teacher(run_dir, since, until):
@@ -354,13 +418,17 @@ def metrics(res):
         out["transfer"] = res["transfer"]
     if res.get("distance") is not None:
         out["distance"] = res["distance"]
+    if res.get("window"):
+        out["window"] = res["window"]
+    if res.get("no_script_metrics"):
+        out["no_script_metrics"] = True
     if res.get("teach"):
         out["teach"] = res["teach"]
     if res.get("teach_auto"):
         out["teach_auto"] = res["teach_auto"]
     if res.get("teach_normal"):
         out["teach_normal"] = res["teach_normal"]
-    for opp, o in res["by_opponent"].items():
+    for opp, o in (res.get("by_opponent") or {}).items():
         for role, x in o["roles"].items():
             if not x.get("games"):
                 continue
@@ -424,7 +492,8 @@ def table(before, after):
     if by:
         lines += ["", "| by faction | before → after |", "|---|---|"]
         lines += [f"| {title} | {' → '.join(cells)} |" for title, cells in by]
-    return (skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
+    return (skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ")
+            + window_block([before, after], ["before → after"], " → ") + lines
             + lively_block([before, after], ["before → after"], " → ")
             + drill_block([before, after], ["before → after"], " → ")
             + teach_block([before, after], ["before → after"], " → ")
@@ -532,6 +601,39 @@ def skill_block(points, heads, join=None):
              "|---" * (len(heads) + 1) + "|"] + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows] + [""])
 
 
+def window_rows(points):
+    """[(title, cells)]: the training window against the pinned version and own lord deaths (the training's battles,
+    the exam's proxy's) over metrics() points; [] when no point has any."""
+    f = (lambda v, fmt="{:.3f}": "-" if v is None else fmt.format(v))
+    win = [p.get("window") or {} for p in points]
+    exam = [(p.get("skill") or {}).get("exam") or {} for p in points]
+    rows = []
+
+    def pin(w, role):
+        x = w.get(f"pinned/{role}") or {}
+        return "-" if not x.get("games") else f"{x['win_rate']:.3f} (n {x['games']})"
+    if any(w.get("pinned/all") for w in win):
+        rows += [(f"training window: win vs pinned, {role} (since the last point)", [pin(w, role) for w in win])
+                 for role in ("all", "attack", "defend")]
+    if any(w.get("lord_dead_own") is not None for w in win):
+        rows.append(("training window: own lord dead (all its battles)", [f(w.get("lord_dead_own")) for w in win]))
+    if any(e.get("lord_dead_own") is not None for e in exam):
+        rows.append(("exam's proxy: own lord dead", [f(e.get("lord_dead_own")) for e in exam]))
+    return rows
+
+
+def window_block(points, heads, join=None):
+    """Lines of window_rows: a column per point, or one column joined by `join`; [] when there are none."""
+    rows = window_rows(points)
+    if not rows:
+        return []
+    if join is not None:
+        rows = [(t, [join.join(c)]) for t, c in rows]
+    return (["", "the training window (run.py log, --past-pin) and own lord deaths:", "",
+             "| window | " + " | ".join(heads) + " |", "|---" * (len(heads) + 1) + "|"]
+            + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows] + [""])
+
+
 def distance_block(points):
     """Lines: the distance from the start next to the rating, a column per minute ([] when no point has it)."""
     if not any(m.get("distance") for _, m in points[1:]):
@@ -559,6 +661,7 @@ def trend(points):
                   key=lambda o: OPPONENTS.index(o) if o in OPPONENTS else 99)
     lines = skill_block([m.get("skill") for _, m in points], [f"min {m}" for m in mins])
     lines += distance_block(points)
+    lines += window_block([m for _, m in points], [f"min {m}" for m in mins])
     lines += ["| metric (attack / defend) | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
     f = (lambda fmt, v: "-" if v is None else fmt.format(v))
     for name, title, fmt in ROWS:
@@ -613,6 +716,10 @@ def main():
     ap.add_argument("--exam-at", default="last", choices=("last", "all"),
                     help="the exam's proxy: in the step's final evaluation only (last; the next step's 'before' "
                          "reuses it) or at every point (all, ~7 min each at R 8)")
+    ap.add_argument("--no-script-metrics", action="store_true",
+                    help="no battles against the scripts and no script baselines: the mandatory set is own lord deaths "
+                         "(the exam's proxy, the training window); the rating and the pair gold are not computed "
+                         "(module doc)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args, rest = ap.parse_known_args()
     try:
@@ -636,11 +743,18 @@ def rating_of(res):
 def references(args):
     """The missing script references (the script baselines, the drills' check scripts) start on the CPU in
     parallel processes (tools/nn/train/refs.py, with the canary) while the GPU plays the network's own
-    battles; the evaluation waits for them where it reads them (evaluate.REFS_READY)."""
+    battles; the evaluation waits for them where it reads them (evaluate.REFS_READY). --no-script-metrics: no script
+    baselines (only the drills' check scripts, with profile drills); nothing at all -> refs is not called. -> the
+    Pending or None."""
     drill = bool(args.drill_eval) and "drills" in chosen(args)
+    scripts = () if no_scripts(args) else OPPONENTS
+    if not scripts and not drill:
+        evaluate.REFS_READY = None
+        return None
     pending = refs.start(canary=evaluate.CANARY, pairs=evaluate.pair_count(args.eval), drill_battles=args.drill_eval,
-                         scripts=OPPONENTS, drills=None if drill else ())
+                         scripts=scripts, drills=None if drill else ())
     evaluate.REFS_READY = pending.wait if pending else None
+    return pending
 
 
 def test(args, rest):
@@ -660,10 +774,18 @@ def test(args, rest):
     if extra:
         print(f"drills evaluated beside READY: {', '.join(extra)}", flush=True)
     need = profiles.test5_needs(targs.drill_teach, bool(normal_names) and fixed_normal is None)
+    if no_scripts(args) and any(p in SCRIPT_PROFILES for p in need):
+        raise SystemExit("--no-script-metrics: " + "; ".join(why for p, why in need.items() if p in SCRIPT_PROFILES)
+                         + " - the battles against the scripts are needed")
     missing = {p: why for p, why in need.items() if p not in chosen(args)}
     if missing:                                  # the adaptive teachers read these blocks from every evaluation
         args.profiles = tuple(p for p in profiles.TEST5 if p in chosen(args) or p in missing)
         print("metric profiles: added " + "; ".join(f"{p} ({why})" for p, why in missing.items()), flush=True)
+    if no_scripts(args):
+        args.profiles, dropped = without_scripts(chosen(args))
+        print("no script metrics: no battles against the scripts, no script baselines; the mandatory set is own lord "
+              "deaths (the exam's proxy, the training window)"
+              + (f"; left out (measured in the script battles): {', '.join(dropped)}" if dropped else ""), flush=True)
     print(f"metric profiles: {profiles.text(chosen(args), profiles.TEST5)}", flush=True)
     cadence = cad.of_args(targs)                 # the evaluations decide as the training does
     drills.BROAD = targs.drill_broad              # the drill evaluations play the training's mix of clean / broad frames
@@ -722,6 +844,7 @@ def test(args, rest):
         res = evaluation(actor, args, device, cadence)
         res["update"] = update
         res["distance"] = distance(run_log, last[0], update)
+        res["window"] = window(run_log, last[0], update)
         res["teach"] = teacher(run_log, last[0], update)
         observe(res)
         last[0] = update
@@ -744,6 +867,7 @@ def test(args, rest):
     finally:
         drills.HEAVY_ON[0] = False
     after["distance"] = distance(run_dir, last[0], summary["updates"])
+    after["window"] = window(run_dir, last[0], summary["updates"])
     after["teach"] = teacher(run_dir, last[0], summary["updates"])
     observe(after)
     if auto is not None or nauto is not None:
@@ -761,7 +885,7 @@ def test(args, rest):
     lines = table(mb, ma)
     report = {"label": args.label, "init": args.init, "updates": summary["updates"], "train_s": summary["seconds"],
               "eval_battles": args.eval, "profile": profiles.text(chosen(args), profiles.TEST5), "protocol": PROTOCOL, "options": rest, "train_args": vars(targs), "training": summary, "run": str(run_dir),
-              "before": mb, "after": ma, "table": lines}
+              "before": mb, "after": ma, "table": lines, "no_script_metrics": no_scripts(args)}
     cap = (capacity.report(out, args.prev_report, run_dir, start=before, end=after, rep=report)
            if "capacity" in chosen(args) else None)
     report["capacity"] = cap
