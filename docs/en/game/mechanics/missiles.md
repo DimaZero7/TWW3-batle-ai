@@ -116,6 +116,7 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   bows fire over friends more safely. · [Steam][ff] · medium.
   - Ours: measured share of hits landing on our own units in contact: arrows 0.26, sling 0.56
     (`missile.friendly_fire`). The sling (flatter) causing more agrees with the community.
+  - A hit on a friend takes the full damage, no cut (`can_damage_allies` 1 for all our shooters). Ours: the same.
 - **Friends are enlarged in the clear-shot test**: friendly entities count 2.2× wider and 1.15×
   taller (allies 1.7× / 1.0×) so shooters cannot fire just past a screen; a unit's own models are
   ignored (`missile_ignore_own_unit_for_friendly_fire` 1). · [twwstats][tws] (WH2 descriptions),
@@ -131,10 +132,34 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   1.3.0 let overlapping friends count as one unit for line of fire; abused by stacking, reverted in
   1.3.1. 8.0: shooters with a blocked line no longer walk up into melee. · [twwstats][tws],
   [PCGamesN][pcg131], [8.0 notes][p80] · high.
-  - Ours (`missile.arc_los`): the check along the bullet's arc - a friendly unit covers the line only if the arc does
-    not pass over its men's heads; the muzzle 1.5 m and the aim point 0.8 m are measured ([probe](../units/missile-probe.md));
-    bullets below the heads by the spread hit the friends. With the True Sight mod this is "fire through any gap their
-    projectiles can physically pass through" (the mod's description). · measured · high.
+  - With the True Sight mod this flag alone does not decide who shoots: the unit's line and each man's path do
+    (next item).
+- **Shooting past friends** (with the True Sight mod). · the game's rules · high.
+  - The unit's line of fire: three rays from its front (its ends and middle) to the target along the projectile's
+    trajectory; the line is clear when 2 of 3 are. Only the men of OTHER own units block (bodies at their real size);
+    the unit's own men and enemies do not.
+  - Line closed: bullets (handguns, pistols, jezails - trajectory `low`, no arc) do not shoot at that target; arrows,
+    bolts and slings (trajectory `dual_low_fixed`, with an arc) shoot at 45 deg if the target is beyond 10 m.
+  - Each man: if a man of another own unit stands in his projectile's path, that shot is skipped - he waits for the
+    next cycle. No limit by ranks: the unit's projectiles fly through its own men, every rank fires at any depth. The
+    exception - a unit in melee with its target: then its own men block too.
+  - Two units in one place is a legal state: the neighbour does not send the unit to the arc (the rays start at its
+    front), but the men whose projectile goes through the neighbour's men stay silent.
+  - Readiness: a man fires as soon as he has reloaded (volley threshold 0, the unit does not wait for the others), if
+    the unit has ammunition, the target is in the arc and the projectile's path is clear.
+  - Ours (`missile.friend_los`; `missile.friend_lines`, `clear_shot`): the same, but the readiness. The trajectory -
+    the projectile's low arc (the muzzle 1.5 m and the aim point 0.8 m are measured, `missile.arc_los`;
+    [probe](../units/missile-probe.md)) or the 45 deg arc when lobbing. A path is blocked by a neighbour's man whose head
+    the projectile passes below; the neighbour's men stand in ranks and files, so a path over n of its ranks passes with
+    (1 - min(2r / file spacing, 1))^n; its men's centres are no nearer than the two bodies' radii (bodies do not
+    overlap). Bullets passing below the friends' heads by the spread hit them (`friend_catch`). The readiness is still
+    ours: whole-unit volleys (`missile.volley_load` 1, see "Reload"). · the game's rules · high.
+  - What it gives (the simulator, the first volley, as a share of the same unit alone): two handgunner units in one
+    place - 0.56 each (1.0 without the rule); archers 0.84, crossbowmen 0.64: an arrow rises above a neighbour's head
+    only after ~1 m, and a neighbour right in front of a man catches it; handgunners 3 m behind other handgunners - 0
+    (line closed); handgunners behind spearmen 40 m ahead at a target 90 m off - 1.0 (the arc over their heads); archers
+    behind spearmen at a target 16 m off - the whole volley at 45 deg. For archers inside another unit the numbers are
+    not checked in the game.
 - **Fire at will may shoot into melee** (`allow_fire_at_will_into_melee` 1). · DB · high.
   - Ours: agreement; 57 % of arena shots went at enemies in melee when there were some.
 

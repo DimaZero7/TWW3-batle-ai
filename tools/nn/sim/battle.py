@@ -562,8 +562,19 @@ def step(st, orders, params=None, dt=None):
     u["quiet"] = (u["quiet"] - dt).clamp(min=0)
     can = ready & ~turning & (u["aim"] >= u["aim_s"]) & ~quiet
     m_target = torch.where(can, aim_at, torch.full_like(aim_at, -1))
-    # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
-    m_target, clear, catch = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params, with_catch=True)
+    # the line of fire past friends (missile.py clear_shot; missile.friend_los: the game's rules - a closed line holds
+    # direct fire and lifts arcing fire to 45 deg, a friend's man in a man's path costs that man his shot)
+    los = {}
+    aimed_at = m_target
+    m_target, clear, catch = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params, with_catch=True,
+                                                contact=touch_geo, info=los)
+    if los:
+        # bookkeeping (no effect on the battle): the fire the friends' men took away and the forced 45 deg arcs
+        cap = torch.where((aimed_at >= 0) & (u["a"] > 0), u["men"] * dt / u["reload"].clamp(min=1e-6),
+                          torch.zeros_like(u["men"]))
+        u["fc_cap"] = cap
+        u["fc_skip"] = cap * torch.where(los["held"], torch.ones_like(cap), los["blocked"])
+        u["fc_lob"] = cap * los["lob"].float() * (1 - los["blocked"])
     # a standing unit's men fire only at a target centre within their fire arc (missile.arc_share; the database's
     # battle_entities fire arc): out-of-arc men lose the volley like blocked ones (they reload too)
     if ms_cal.get("per_man_arc"):

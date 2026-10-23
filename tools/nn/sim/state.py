@@ -232,6 +232,11 @@ INTERNAL = {
                 "the rest's wounds are the unit's less these)"),
     "loaded_s": ("f", "seconds a shooter has been loaded for its next volley, waiting for its late men to aim "
                       "(missile.reaim; 0 while reloading)"),
+    "fc_cap": ("f", "this step's fire it had (bookkeeping, missile.friend_los): men x dt / reload of a shooter that could "
+                    "shoot at a target, before the friends' check (tools/nn/train/behaviour.py: the friends' shares)"),
+    "fc_skip": ("f", "... of it the friends' men took away: all of it while it holds fire for them, else the share of "
+                     "its men they block"),
+    "fc_lob": ("f", "... of it shot at 45 deg because its line was closed (arcing fire)"),
     "skr": ("b", "in a skirmish run now (skirmish.py): started at sk_m, kept until sk_stop_m, in melee or routing ended"),
     "sk_in": ("b", "an enemy coming that attacks another unit was within sk_m last step (skirmish.py: such an enemy starts "
                    "a run only as it comes within the gap)"),
