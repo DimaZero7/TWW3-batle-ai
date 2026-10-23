@@ -197,6 +197,16 @@ class TestSlots:
         assert n["pinned" if share else "past"] >= 4 and n["past" if share else "pinned"] == 0
         g = env.take_slot_stats()
         assert g[1, 0] == n["pinned"] and g[0, 0] == n["past"]
+        # ... and by matchup (take_pin_stats): the learner's role and factions, the same games and wins
+        by = env.take_pin_stats()
+        assert all(k.split("/")[0] == "pinned" and k.split("/")[1] in ("attack", "defend")
+                   and k.split("/")[2] in ("EMP-EMP", "EMP-SKV", "SKV-EMP", "SKV-SKV") for k in by)
+        assert sum(gm for gm, _, _ in by.values()) == n["pinned"]
+        for role in ("attack", "defend"):
+            gm, wn, _ = stats.get(f"pinned/{role}", (0, 0, 0.0))
+            assert sum(v[0] for k, v in by.items() if k.split("/")[1] == role) == gm
+            assert sum(v[1] for k, v in by.items() if k.split("/")[1] == role) == wn
+        assert all(-1.5 <= t <= 1.5 for _, _, t in by.values()) and env.take_pin_stats() == {}
         with pytest.raises(ValueError):
             env.activate(1)                                          # the pool never takes the pinned slot
         with pytest.raises(ValueError):
@@ -286,7 +296,7 @@ class TestResume:
         args = ["--name", "pin", "--init", str(init), "--battles", "8", "--steps", "4", "--updates", "4", "--minutes",
                 "3", "--device", "cpu", "--no-eval", "--mix", '{"past": 0.5, "nearest": 0.5}', "--limit", "6",
                 "--bank", "8", "--max-units", "4", "--past-pin", str(pin), "--past-pin-share", "1.0", "--critic-warmup", "0"]
-        _, _, out = run.train(run.parser().parse_args(args))
+        _, trained, out = run.train(run.parser().parse_args(args))
         q = json.loads((out / "pool" / "q.json").read_text(encoding="utf-8"))
         assert not any(e["path"].endswith("pin.pt") for e in q["entries"])          # not in the pool
         assert sum(e["games"] for e in q["entries"]) == 0      # share 1: every past battle the pinned one's, no q changes
@@ -295,6 +305,16 @@ class TestResume:
             for k, g in json.loads(line)["games"].items():
                 games[k] = games.get(k, 0) + g
         assert games.get("pinned/attack", 0) + games.get("pinned/defend", 0) > 0
+        # the pinned battles by matchup, per update and in the summary (report.json "training")
+        rows = [json.loads(line) for line in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
+        by = {}
+        for r in rows:
+            for k, c in (r.get("pinned_matchups") or {}).items():
+                by[k] = by.get(k, 0) + c["games"]
+                assert set(c) == {"games", "wins", "win_rate", "gold_trade"}
+        pinned = games.get("pinned/attack", 0) + games.get("pinned/defend", 0)
+        assert sum(by.values()) == pinned and all(k.startswith(("pinned/attack/", "pinned/defend/")) for k in by)
+        assert {k: c["games"] for k, c in trained["pinned_matchups"].items()} == by
         assert not any(k.startswith("past/") for k in games) and any(k.startswith("nearest/") for k in games)
         with pytest.raises(SystemExit):                                              # no past battles: nothing to pin
             run.train(run.parser().parse_args(["pin2" if a == "pin" else '{"nearest": 1.0}' if a.startswith('{"past"')

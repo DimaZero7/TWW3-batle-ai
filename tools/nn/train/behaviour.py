@@ -13,6 +13,13 @@ facts() reads the simulator's state after a step and says, per unit [B, N]:
                    as the share of the excess, (n - crowd) / n, so the whole pile weighs n - crowd
     aim            the enemy slot it attacks or fights (-1 none)
 
+The friends in the way (Tracker; the simulator's fc_cap / fc_skip / fc_lob, missile.friend_los), apart for direct fire
+(bullets) and arcing fire (arrows, bolts, slings), over the learner's shooters:
+    friend_skip_share_direct / _arc   the share of the fire they had (men x time / reload, aimed at a target) that the
+                                      men of their other units took away (holding fire for a closed line, or the men
+                                      whose own path a friend's man blocked)
+    forced_lob_share_arc              of the fire left, the share shot at 45 deg because the unit's line was closed
+
 The test protocol's metrics (Tracker, tools/nn/train/test5.py) read it.
 
 Liveliness (Tracker, measured only; docs/en/training/training.md "Liveliness"): units that change
@@ -90,7 +97,11 @@ def facts(st, params, crowd=CROWD):
                           (on_mine - crowd) / on_mine.clamp(min=1), torch.zeros_like(on_mine))
 
     missile = (u["range"] > 0) & (u["ammo0"] > 0) & ~u["lord"]
-    return {"melee": melee, "flanked": melee & (u["flank_hit"] >= 1), "missile_melee": melee & missile,
+    # the friends in the way (module doc; the simulator's bookkeeping, zeros without missile.friend_los)
+    zero = torch.zeros_like(u["men"])
+    fc = {k: u.get(f"fc_{k}", zero) for k in ("cap", "skip", "lob")}
+    return {"fc": fc, "direct": u["direct"],
+            "melee": melee, "flanked": melee & (u["flank_hit"] >= 1), "missile_melee": melee & missile,
             "missile": stand & missile, "flank_attack": flank_attack, "crowded": crowded, "aim": aim}
 
 
@@ -113,6 +124,10 @@ def track(st, params, mine, live, sums, marks, mem=None):
            "flank_attack_s": (f["flank_attack"] & m).float().sum(1) * dt,
            "crowd_steps": ((f["crowded"] > 0) & m).any(1).float(),
            "crowded_units": (f["crowded"] * m.float()).sum(1)}
+    for tag, kind in (("d", f["direct"]), ("a", ~f["direct"])):
+        w = (m & kind).float()
+        for k, v in f["fc"].items():
+            add[f"fc_{k}_{tag}"] = (v * w).sum(1)
     new = ability_marks(st.u)
     add["abilities"] = ((new > marks + 1e-3) & m[..., None]).float().sum((1, 2))
     if mem is not None:
@@ -187,7 +202,7 @@ class Tracker:
     """Per battle [B] sums over the learner's units (mine [B, N]) while the battle runs: seconds in
     melee, flanked, missile units in melee, flank attacks; decisions with a pile; ability uses."""
     FIELDS = ("steps", "melee_s", "flanked_s", "missile_melee_s", "missile_s", "flank_attack_s", "crowd_steps",
-              "crowded_units", "abilities")
+              "crowded_units", "abilities", "fc_cap_d", "fc_skip_d", "fc_lob_d", "fc_cap_a", "fc_skip_a", "fc_lob_a")
     LIVELY = ("unit_s", "changes", "switches", "flips", "move_s", "repoints", "repoint_m", "eng_switches", "eng_s",
               "opp_eng_switches", "opp_unit_s")
 
@@ -219,7 +234,18 @@ class Tracker:
                 "flank_attack_share": float(s["flank_attack_s"].sum() / melee),
                 "crowding_share": float(s["crowd_steps"].sum() / steps),
                 "crowded_units_per_min": float(s["crowded_units"].sum() / minutes),
-                "abilities_per_battle": float(s["abilities"].sum() / n), **self.lively(sel, s)}
+                "abilities_per_battle": float(s["abilities"].sum() / n), **self.friends(s), **self.lively(sel, s)}
+
+    @staticmethod
+    def friends(s):
+        """The friends in the way (module doc) over the summed battles s; None where there was no such fire."""
+        def share(num, den):
+            den = float(den)
+            return float(num) / den if den > 1e-9 else None
+        cap_d, skip_d = s["fc_cap_d"].sum(), s["fc_skip_d"].sum()
+        cap_a, skip_a = s["fc_cap_a"].sum(), s["fc_skip_a"].sum()
+        return {"friend_skip_share_direct": share(skip_d, cap_d), "friend_skip_share_arc": share(skip_a, cap_a),
+                "forced_lob_share_arc": share(s["fc_lob_a"].sum(), cap_a - skip_a)}
 
     def lively(self, sel, s):
         """The liveliness metrics (the module's docstring) over the battles sel; {} without them."""

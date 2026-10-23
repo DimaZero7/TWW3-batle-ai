@@ -230,6 +230,13 @@ def decay_share(minutes, seconds, run_share):
     return seconds / (minutes * 60) if minutes else run_share
 
 
+def pinned_matchups(stats):
+    """{"pinned/<role>/<own>-<enemy>": {games, wins, win_rate, gold_trade}} of (games, wins, mean gold trade) counts
+    (rollout.Battles.take_pin_stats; run.py --past-pin)."""
+    return {k: {"games": g, "wins": w, "win_rate": round(w / g, 3), "gold_trade": round(t, 4)}
+            for k, (g, w, t) in sorted(stats.items()) if g}
+
+
 def rates(stats):
     return {k: round(w / g, 3) for k, (g, w, _) in stats.items() if g}
 
@@ -954,6 +961,7 @@ def _train(args, every=None, teacher=None, normal=None):
                   + f"; {'resumed (' + str(len(gq)) + ' groups)' if loaded else 'fresh'}", flush=True)
         env.general_rt.take_stats()
     env.take_stats()
+    env.take_pin_stats()
     env.orders_per_minute()
     env.kinds()
     env.lords()
@@ -967,6 +975,7 @@ def _train(args, every=None, teacher=None, normal=None):
     builder = bankproc.Ahead() if args.bank_ahead else None
     ahead = builder.submit(draw()) if builder is not None else None
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
+    pin_total = {}                                  # --past-pin: (games, wins, gold trade summed) by matchup
     floor_w = None                                # the entropy floor's current weight (--entropy-target)
     paused = 0.0
     rolls, rolled_at = 0, 0.0                     # --anchor-roll: renewals of the reference, training s of the last
@@ -1145,6 +1154,10 @@ def _train(args, every=None, teacher=None, normal=None):
             next_keep += args.keep_every
         decisions += env.B * args.steps
         stats = env.take_stats()
+        pin_m = env.take_pin_stats()          # --past-pin: the pinned version's battles by matchup ({} without)
+        for k, (g, w, t) in pin_m.items():
+            G, W, T = pin_total.get(k, (0, 0, 0.0))
+            pin_total[k] = (G + g, W + w, T + t * g)
         # the learner's results against each slot's version -> the pool's quality scores (before a slot changes); the
         # pinned slot (--past-pin, the last one) stays out of the pool
         for k, (g, w) in enumerate(env.take_slot_stats()[:slots]):
@@ -1174,6 +1187,8 @@ def _train(args, every=None, teacher=None, normal=None):
                "past": slot_path[env.active].name, "past_deferred": deferred,
                "pool": {"n": len(pool), "wide": int((pool.probs() > 0.05).sum()),
                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
+        if pin_m:
+            row["pinned_matchups"] = pinned_matchups(pin_m)
         if taught:
             row["teach"] = taught
         if torch.cuda.is_available():
@@ -1287,6 +1302,8 @@ def _train(args, every=None, teacher=None, normal=None):
                "win_rate_all": {k: round(w / g, 3) for k, (g, w, _) in sorted(total.items()) if g},
                "games": {k: g for k, (g, _, _) in sorted(total.items())},
                "mean_battle_s": {k: round(s / g) for k, (g, _, s) in sorted(total.items()) if g}, "best_score": best}
+    if pin_total:
+        summary["pinned_matchups"] = pinned_matchups({k: (g, w, t / g) for k, (g, w, t) in pin_total.items() if g})
     print("trained:", json.dumps(summary), flush=True)
     return actor, summary, out
 

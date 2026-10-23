@@ -71,6 +71,20 @@ With missile.arc_los (07.10.2026) the line is the bullet's arc (arc_lines): a fr
 whose arc does not clear its men's heads (a flat shot keeps its speed, so a far target's arc rises higher - the probes:
 a target ~70 m behind friends 40 m ahead stops the fire, ~85-90 m does not); the shots of the clearing lines that pass
 below the friends' heads by the spread hit them (friend_catch; the game: 0.22-0.27 hits a shot of a covered unit).
+
+Friends in the way (missile.friend_los, the game's rules; it replaces the line of fire above - the obstructed ratio
+then decides nothing - and the catch stays arc_lines'): friend_rays, friend_lines, clear_shot.
+- The unit's line: three rays from its front (ends and middle) to the target along the projectile's low arc; the line
+  is clear when 2 of 3 are. Closed: direct fire (bullets) does not shoot at that target (the next one in range, else it
+  holds); arcing fire (arrows, bolts, slings) shoots at 45 deg if the target is beyond lob_min_m (10 m), else as direct.
+- Each man: his path (the low arc, or the 45 deg arc when lobbing) blocked by a man of another own unit costs him the
+  shot (he reloads and waits for the next cycle). The unit's own men never block (every rank shoots) but for a unit in
+  melee with its target. Enemies never block.
+- A path is blocked by a friend's man whose body (radius and height x the mod's 1.0) it passes below the head of; a
+  friend's men stand in files and ranks, so a path over n of its ranks passes with (1 - min(2 r / file spacing, 1))^n;
+  their centres begin no nearer than the two bodies' radii. The rays start at the front, so a friend standing in the
+  same place (no deeper) does not close the line - but its men in front of a man's path block him.
+- Hits on friends take the full damage (can_damage_allies 1 for all our shooters).
 """
 import math
 
@@ -812,29 +826,232 @@ def friend_catch(u, pw, target, params):
     return _lines(u, pw, target, params, True)[1]
 
 
-def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, with_catch=False):
-    """Direct fire's line of fire (module docstring): (target [B, N], clear [B, N] share of the men
+# The friends' men in the way (missile.friend_los; module docstring "Friends in the way"): the depth nodes of a
+# shooter's men (Gauss-Legendre over his depth) and their weights; the unit's rays across its front (ends and middle).
+_NODES = ((-0.7745967, 5 / 18), (0.0, 8 / 18), (0.7745967, 5 / 18))
+_RAYS = (-0.5, 0.0, 0.5)
+
+
+def _path_block(lo, hi, xa, xb, rk):
+    """The length of the friends' centre interval [lo, hi] along a path whose bodies (radius rk) reach its blocked
+    part - the path below their heads before xa and after xb (the arc's two crossings of their height)."""
+    span = (hi - lo).clamp(min=0)
+    near = (torch.minimum(hi, xa + rk) - lo).clamp(min=0)
+    far = (hi - torch.maximum(lo, xb - rk)).clamp(min=0)
+    return torch.minimum(near + far, span)
+
+
+def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True):
+    """(men [B, N] or None, closed [B, N] bool or None) of shooter i at its target (slot, -1: zeros) past the men of
+    its other own units (missile.friend_los, module docstring "Friends in the way"):
+    men - the share of i's men whose path a friend's man blocks: the low arc of its projectile, the 45 deg arc for the
+    shooters of lob [B, N] (the forced arc of clear_shot; None: nobody);
+    closed - the unit's line of fire: of the three rays from its front (its ends and middle) along the low arc, fewer
+    than rays_clear clear (a ray is blocked when a friend's man blocks it with a chance of 0.5 or more).
+    A path is blocked by a friend's man whose body (his radius x projectile_friendly_fire_man_radius_coefficient, his
+    height x ..._man_height_coefficient: 1.0 with True Sight) it passes below the head of: the arc (missile.arc_los's
+    muzzle and aim point; without arc_los a straight line) crosses the friends' height at xa and xb, so the men whose
+    centres lie before xa + r or after xb - r along it block it; a friend's men stand in its files and ranks, so a path
+    over n of his ranks passes him with (1 - min(2 r / file spacing, 1))^n; his men's centres begin no nearer than the
+    two bodies' radii (bodies do not overlap). The men of i's own unit never block, but for a unit in melee with its
+    target (contact [B, N, N]); the unit's rays start at its front, so a friend standing in the same place (no deeper)
+    does not close its line."""
+    ms = params.sim["missile"]
+    arc = ms.get("arc_los")
+    fcfg = ms["friend_los"]
+    hm = float(arc["muzzle_m"]) if arc else float(fcfg.get("muzzle_m", 1.5))
+    ha = float(arc["aim_m"]) if arc else float(fcfg.get("aim_m", 0.8))
+    coef_h = float(params.battle.get("projectile_friendly_fire_man_height_coefficient", 1.15))
+    coef_r = float(params.battle.get("projectile_friendly_fire_man_radius_coefficient", 2.2))
+    N = u["men"].shape[1]
+    dev = u["men"].device
+    t = target.clamp(min=0)[:, :, None]
+    th = pw["theta"].gather(2, t)                                       # [B, i, 1] bearing to the target
+    dist = pw["dist"].gather(2, t).clamp(min=1e-3)
+    edge = pw["reach_j"].gather(2, t)                                   # to the target's near edge
+    eye = torch.eye(N, dtype=torch.bool, device=dev)[None]
+    rel = pw["theta"] - th
+    along = torch.where(eye, torch.zeros_like(rel), pw["dist"] * torch.cos(rel))   # [B, i, k]
+    across = torch.where(eye, torch.zeros_like(rel), pw["dist"] * torch.sin(rel))
+    alive = (u["men"] > 0) & ~u["gone"]
+    friend = ((u["side"][:, :, None] == u["side"][:, None, :]) & ~eye & (u["side"][:, None, :] > 0)
+              & alive[:, None, :])
+    own = torch.zeros_like(friend)
+    if contact is not None:
+        fights = contact.gather(2, t).squeeze(2) & (target >= 0)          # [B, i]: in melee with its target
+        own = eye & fights[:, :, None]
+    b = u["b"] * geometry.DEG
+    sp_h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))
+    sp_v = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))
+    rad = u["radius"] * coef_r
+    lone = u["men0"] <= 1
+    # the friends k: their men's centres along the line (+-span) and their bodies across it (+-half), their spacing
+    phi = b[:, None, :] - th
+    c, s = torch.cos(phi).abs(), torch.sin(phi).abs()
+    front, depth = pw["front"][:, None, :], pw["depth"][:, None, :]
+    rk = rad[:, None, :]
+    lone_k = lone[:, None, :]
+    s_al = torch.where(lone_k, 2 * rk, c * sp_v[:, None, :] + s * sp_h[:, None, :]).clamp(min=1e-3)
+    s_lat = c * sp_h[:, None, :] + s * sp_v[:, None, :]
+    span = torch.where(lone_k, torch.zeros_like(s_al), (depth / 2 * c + front / 2 * s - s_al / 2).clamp(min=0))
+    half = torch.where(lone_k, rk, (front / 2 * c + depth / 2 * s - s_lat / 2).clamp(min=0) + rk)
+    rank_cover = torch.where(lone_k, torch.ones_like(s_al), (2 * rk / s_lat.clamp(min=1e-3)).clamp(max=1.0))
+    q = (u["height"] * coef_h)[:, None, :] - hm                         # the friends' heads above the muzzle
+    # the shooter i: its men's centres along the line (+-span_i) and across it (width_i)
+    phi_i = b[:, :, None] - th
+    ci, si = torch.cos(phi_i).abs(), torch.sin(phi_i).abs()
+    fi, di = pw["front"][:, :, None], pw["depth"][:, :, None]
+    hi_, vi_ = sp_h[:, :, None], sp_v[:, :, None]
+    lone_i = lone[:, :, None]
+    span_i = torch.where(lone_i, torch.zeros_like(fi),
+                         (di / 2 * ci + fi / 2 * si - (ci * vi_ + si * hi_) / 2).clamp(min=0))
+    width_i = torch.where(lone_i, torch.zeros_like(fi), (fi * ci + di * si - (ci * hi_ + si * vi_)).clamp(min=0))
+    ri = rad[:, :, None]
+    v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
+    dh = ha - hm
+
+    def place(y):
+        """The path of i's man y m ahead of i's centre along the line: (L, the friends' centre interval along it lo..hi,
+        how far across the path has come towards the target's centre at each friend)."""
+        L = (dist - y).clamp(min=1.0)
+        lo = torch.maximum(along - span - y, ri + rk)
+        hi = torch.minimum(along + span - y, edge - y)
+        return L, lo, hi, (1 - (along - y) / L).clamp(min=0)
+
+    def block(L, lo, hi, high=None):
+        """[B, i, k] the chance a path that crosses friend k (place) passes below one of its men's heads; high [B, i, 1]
+        bool: the shooters on the 45 deg arc (None: all on the low arc)."""
+        if arc is None:
+            tan, a = dh / L, torch.zeros_like(L)                         # a straight line
+        else:
+            tan = _arc_tan(v, L, dh)
+            a = ((tan * L - dh) / (L * L)).clamp(min=0)                 # height hm + tan x - a x^2: through the aim
+        if high is not None:
+            tan = torch.where(high, torch.ones_like(tan), tan)
+            a = torch.where(high, ((L - dh) / (L * L)).clamp(min=0), a)
+        disc = tan * tan - 4 * a * q
+        sq = torch.sqrt(disc.clamp(min=0))
+        aa = (2 * a).clamp(min=1e-9)
+        big = torch.full_like(disc, FAR)
+        xa_q = torch.where(disc >= 0, (tan - sq) / aa, big)
+        xb_q = torch.where(disc >= 0, (tan + sq) / aa, big)
+        # a straight line: below the heads up to q / tan when it rises, everywhere when it does not
+        rising = tan > 1e-9
+        xa_l = torch.where(q <= 0, -big, torch.where(rising, q / tan.clamp(min=1e-9), big))
+        curved = a > 1e-12
+        xa = torch.where(curved, xa_q, xa_l)
+        xb = torch.where(curved, xb_q, big)
+        crossed = _path_block(lo, hi, xa, xb, rk) / s_al
+        return 1 - torch.pow(1 - rank_cover, crossed)
+
+    def cover(shrink, s_off=None):
+        """[B, i, k] the path s_off m across i's line passes through friend k's bodies (None: the share of i's men
+        across its width whose paths do)."""
+        if s_off is not None:
+            return ((across - s_off * shrink).abs() <= half).float()
+        sh = shrink.clamp(min=1e-3)
+        lo_s, hi_s = (across - half) / sh, (across + half) / sh
+        w = width_i.expand_as(lo_s)
+        share = (torch.minimum(hi_s, w / 2) - torch.maximum(lo_s, -w / 2)).clamp(min=0) / w.clamp(min=1e-3)
+        return torch.where(w > 1e-3, share.clamp(max=1.0), ((lo_s <= 0) & (hi_s >= 0)).float())
+
+    on = target >= 0
+    zero3 = torch.zeros_like(along)
+    share = closed = None
+    if men:
+        who = friend | own
+        high = None if lob is None else lob[:, :, None]
+        share = torch.zeros_like(u["men"])
+        for g, w in _NODES:
+            L, lo, hi, shrink = place(g * span_i)
+            cov = torch.where(who, cover(shrink), zero3)
+            share = share + w * (1 - torch.prod(1 - cov * block(L, lo, hi, high), dim=2))
+        share = torch.where(on, share, torch.zeros_like(share))
+    if rays:
+        L, lo, hi, shrink = place(span_i)
+        front_block = torch.where(friend, block(L, lo, hi), zero3)
+        shut = torch.zeros_like(u["men"])
+        for r in _RAYS:
+            ray = 1 - torch.prod(1 - cover(shrink, r * width_i) * front_block, dim=2)
+            shut = shut + (ray >= 0.5).float()
+        closed = ((len(_RAYS) - shut) < int(fcfg.get("rays_clear", 2))) & on
+    return share, closed
+
+
+def friend_rays(u, pw, target, params):
+    """[B, N] bool: shooter i's line of fire at its target is closed by the men of its other own units (_friends:
+    fewer than rays_clear of the three rays from its front clear)."""
+    return _friends(u, pw, target, params, men=False)[1]
+
+
+def friend_lines(u, pw, target, params, contact=None, lob=None):
+    """[B, N] the share of shooter i's men whose path to its target a man of another own unit blocks (_friends): the
+    low arc, the 45 deg arc for the shooters of lob [B, N]; contact: a unit in melee with its target - its own men too."""
+    return _friends(u, pw, target, params, contact=contact, lob=lob, rays=False)[0]
+
+
+def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, with_catch=False, contact=None,
+               info=None):
+    """The line of fire past friends (module docstring): (target [B, N], clear [B, N] share of the men
     that shoot) and, with_catch, the shots' catch by friends between ([B, N, N], None without missile.arc_los).
-    A direct-fire unit blocked at its target beyond the obstructed ratio takes the next
+    With missile.friend_los (the game's rules, "Friends in the way"): a unit whose line of fire is closed (friend_rays)
+    at its target - direct fire always, arcing fire within lob_min_m of it - takes the next target in range; closed
+    there too, it holds fire (-1); arcing fire with a closed line beyond lob_min_m shoots at 45 deg; the men whose own
+    path a friend's man blocks miss that shot (clear = 1 - their share). contact [B, N, N]: units in melee (a unit in
+    melee with its target: its own men block too). info (a dict): filled with blocked [B, N] (the share of the men a
+    friend blocks at the final target), held [B, N] (holding fire for friends) and lob [B, N] (the forced 45 deg arc).
+    Without friend_los: direct fire only, a unit blocked at its target beyond the obstructed ratio takes the next
     target in range; blocked there too, it holds fire (-1). Other shooters: as given, clear 1."""
-    ratio = params.battle.get("unit_firing_line_of_sight_considered_obstructed_ratio", 0.75)
+    ms = params.sim["missile"]
     direct = u["direct"]
-    arc_on = params.sim["missile"].get("arc_los") is not None
-    blocked, catch = _lines(u, pw, target, params, arc_on)
-    bad = direct & (target >= 0) & (blocked >= ratio)
-    exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
+    arc_on = ms.get("arc_los") is not None
     per_man = per_man_mask(u, params)
     reach = reach_of(params)
-    again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude, per_man=per_man,
-                          reach=reach)
-    target = torch.where(bad, again, target)
-    blocked2, catch2 = _lines(u, pw, target, params, arc_on)
-    blocked = torch.where(bad, blocked2, blocked)
-    if catch is not None:
-        catch = torch.where(bad[:, :, None], catch2, catch)
-    held = direct & (target >= 0) & (blocked >= ratio)
-    target = torch.where(held, torch.full_like(target, -1), target)
-    clear = torch.where(direct, 1 - blocked, torch.ones_like(blocked))
+    fcfg = ms.get("friend_los")
+    catch = None
+    if fcfg:
+        lob_min = float(fcfg.get("lob_min_m", 10.0))
+
+        def judge(tg):
+            """(lob, bad) [B, N]: the unit's line at tg is closed (friend_rays) - arcing fire beyond lob_min_m lobs,
+            the rest may not shoot at it."""
+            closed = friend_rays(u, pw, tg, params)
+            d = pw["dist"].gather(2, tg.clamp(min=0)[:, :, None]).squeeze(2)
+            lob = ~direct & closed & (d > lob_min)
+            return lob, closed & ~lob
+        lob, bad = judge(target)
+        exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
+        again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude, per_man=per_man,
+                              reach=reach)
+        target = torch.where(bad, again, target)
+        lob2, bad2 = judge(target)
+        lob = torch.where(bad, lob2, lob)
+        held = bad & ((target < 0) | bad2)
+        target = torch.where(held, torch.full_like(target, -1), target)
+        lob = lob & (target >= 0)
+        # the men whose own path a friend blocks, at the final target and on its arc (one pass)
+        blocked = friend_lines(u, pw, target, params, contact, lob=lob)
+        clear = 1 - blocked
+        if with_catch and arc_on:
+            # the bullets that pass below a friend's heads by the spread hit him (friend_catch): direct fire only
+            catch = _lines(u, pw, target, params, True)[1]
+        if info is not None:
+            info.update(blocked=blocked, held=held, lob=lob)
+    else:
+        ratio = params.battle.get("unit_firing_line_of_sight_considered_obstructed_ratio", 0.75)
+        blocked, catch = _lines(u, pw, target, params, arc_on)
+        bad = direct & (target >= 0) & (blocked >= ratio)
+        exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
+        again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude, per_man=per_man,
+                              reach=reach)
+        target = torch.where(bad, again, target)
+        blocked2, catch2 = _lines(u, pw, target, params, arc_on)
+        blocked = torch.where(bad, blocked2, blocked)
+        if catch is not None:
+            catch = torch.where(bad[:, :, None], catch2, catch)
+        held = direct & (target >= 0) & (blocked >= ratio)
+        target = torch.where(held, torch.full_like(target, -1), target)
+        clear = torch.where(direct, 1 - blocked, torch.ones_like(blocked))
     if per_man is not None:
         # only the ranks within range of the target's nearest men shoot (rank_share)
         share = rank_share(u, pw, *reach).gather(2, target.clamp(min=0)[:, :, None]).squeeze(2)

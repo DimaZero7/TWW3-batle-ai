@@ -92,7 +92,7 @@ from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.compiled import compiled
 from tools.nn.sim.params import load
-from tools.nn.train import drills, league, opponents, randomise, reward, scenes
+from tools.nn.train import drills, league, matchups, opponents, randomise, reward, scenes
 from tools.nn.train import dr as uncertain
 from tools.nn.train import cadence as cad
 from tools.nn.train.drills import teach as drill_teach
@@ -105,6 +105,10 @@ MEMORY = ("last_x", "last_z", "last_t", "seen", "dead", "prev_x", "prev_z", "pre
 ROLES = ("attack", "defend")
 # Outcome counters: the opponents, the untrained network as "past" on its own, the pinned past version (pin_slot) too.
 STAT_NAMES = league.OPPONENTS + ("untrained", "pinned")
+# The pinned version's battles by matchup (take_pin_stats): the factions as tools/nn/train/matchups.py names them (EMP,
+# SKV), any other "other".
+PIN_FACTIONS = tuple(matchups.SHORT.values()) + ("other",)
+PIN_CODE = {key: i for i, key in enumerate(matchups.SHORT)}
 UNTRAINED = len(league.OPPONENTS) + 1
 PINNED = len(league.OPPONENTS) + 2
 # A teacher with a share of 0 runs its script every this many decisions only (the agreement is still measured)
@@ -478,6 +482,10 @@ class Battles:
         self.teach_gen = torch.Generator(device=self.device).manual_seed(seed + 7919)
         self.teach_draw = torch.zeros(self.B, device=self.device)
         self.stats = torch.zeros(2 * (len(STAT_NAMES) + 1), 3, device=self.device)    # games, wins, seconds
+        # the pinned version's battles (pin_slot) by the learner's role and matchup: games, wins, gold trade summed
+        F = len(PIN_FACTIONS)
+        self.pin_stats = torch.zeros(2 * F * F, 3, device=self.device)
+        self._fac_key, self._fac_t = None, None
         # by (opponent, the learner's role)
         self.row_attacks = None
         self.orders_stats = torch.zeros(2, device=self.device)                         # changes, unit-steps
@@ -1028,7 +1036,45 @@ class Battles:
         self.slot_stats.index_add_(0, slot, torch.stack([dp, dp * won], 1))
         defends = (self.st.attacker[rb] != rs + 1).long()
         self.stats.index_add_(0, 2 * code + defends, torch.stack([d, d * won, d * self.st.t[rb]], 1))
+        if self.pin is not None:
+            # the pinned version's battles by matchup (take_pin_stats): the gold trade as the evaluation's matchups
+            # (matchups._cell: (enemy gold destroyed - own gold lost) / budget, reward.gold_sides at the end)
+            dq = d * (past & self.slot_pinned[slot]).float()
+            gold = reward.gold_sides(self.st.u, self.weights.rout_share)[rb]               # [R, side] gold lost
+            own_lost = gold.gather(1, rs[:, None]).squeeze(1)
+            enemy_lost = gold.gather(1, (1 - rs)[:, None]).squeeze(1)
+            trade = (enemy_lost - own_lost) / reward.budget(self.st.u)[rb]
+            fac = self._fac_codes()[rb]                                                   # [R, side]
+            own_f, enemy_f = fac.gather(1, rs[:, None]).squeeze(1), fac.gather(1, (1 - rs)[:, None]).squeeze(1)
+            F = len(PIN_FACTIONS)
+            self.pin_stats.index_add_(0, (defends * F + own_f) * F + enemy_f, torch.stack([dq, dq * won, dq * trade], 1))
         self.battle_count += finished.sum()
+
+    def _fac_codes(self):
+        """[B, 2] long: each battle's factions (side 1, side 2) as PIN_FACTIONS indices; made again when the battles'
+        setup changed (a restart takes new armies into setup.factions in place: _reset clears the key)."""
+        key = id(self.setup.factions)
+        if self._fac_key != key or self._fac_t is None or len(self._fac_t) != self.B:
+            other = len(PIN_FACTIONS) - 1
+            self._fac_t = torch.tensor([[PIN_CODE.get(f, other) for f in pair] for pair in self.setup.factions],
+                                       dtype=torch.long, device=self.device).reshape(-1, 2)
+            self._fac_key = key
+        return self._fac_t
+
+    def take_pin_stats(self):
+        """{"pinned/<role>/<own>-<enemy>": (games, wins, mean gold trade)} of the pinned version's battles since the
+        last call (role and own faction the learner's; matchups.py's names: pinned/attack/EMP-SKV)."""
+        s = self.pin_stats.cpu().clone().numpy()
+        self.pin_stats.zero_()
+        F = len(PIN_FACTIONS)
+        out = {}
+        for j, role in enumerate(ROLES):
+            for a, own in enumerate(PIN_FACTIONS):
+                for e, enemy in enumerate(PIN_FACTIONS):
+                    g, w, trade = s[(j * F + a) * F + e]
+                    if g > 0:
+                        out[f"pinned/{role}/{own}-{enemy}"] = (int(round(g)), int(round(w)), float(trade / g))
+        return out
 
     # Battles and timeouts so far: counted on the GPU (reading them back every decision waited for it).
     @property
@@ -1122,6 +1168,7 @@ class Battles:
         if not bool(finished.any()):
             return
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
+        self._fac_key = None                          # new armies: the factions' codes again (_fac_codes)
         if self.men is not None:
             idx = self._fit_men(finished, idx)
         # a restarting past battle takes the active slot (or the pinned one: pin_slot)
