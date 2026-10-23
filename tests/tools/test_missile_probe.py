@@ -131,3 +131,23 @@ def test_the_fire_past_friends_and_standing_range_plans():
     assert all(l["target_mode"] == "stand" and not l.get("friend") for l in rs)
     assert sorted(round(l["d"] + off) for l in rs if l["shooter"] == "militia") == [100, 105, 110]
     assert sorted(round(l["d"] + off) for l in rs + ht if l["shooter"] == "stars") == [80, 85, 90]
+
+
+def test_the_stacked_plan_two_firing_units_on_one_point_with_their_own_names():
+    """stacked: the friend is the same unit at the shooter's centre and fires too; its script name is not the shooter's
+    and it is in the army; the pair is told apart in the tables."""
+    plan = mp.battles("stacked")
+    assert [len(b) for b in plan] == [5, 5]
+    pairs = [l for b in plan for l in b if l.get("friend")]
+    assert all(l["friend"] == l["shooter"] and l["friend_fwd"] == 0 and l["friend_lat"] == 0 and l["friend_fire"]
+               for l in pairs)
+    assert sorted(l["shooter"] for l in pairs) == ["archers", "hg", "hg", "xb", "xb"]
+    for k in (1, 2):
+        cfg, _, arena, _ = mp.run_config("stacked", k)
+        own = {u["slot"] for u in arena["sides"]["own"]["units"]}
+        for l in cfg["lanes"]:
+            if l.get("friend"):
+                assert l["friend"] != l["shooter"] and l["friend"].removeprefix("own_") in own
+                assert l["f_key"] == l["s_key"]
+    assert " fire" in mp.cell(pairs[0]) and " fire" not in mp.cell(plan[0][0])
+

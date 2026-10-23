@@ -18,6 +18,8 @@
 -- shooter, facing as it does, held (the line of fire past friends); its row is sampled as 'f'. With
 -- lane.friend_engage (metres) the friend is placed that far in front of the target's centre instead, facing it, and
 -- at the go walks into melee with it (fire into a melee: from behind our men, at an angle, along the contact).
+-- With lane.friend_fire the friend fires at will from the go too (two shooters in one place), its ammo and firing flag
+-- are sampled in 'f', and it stops firing when the lane ends.
 -- Every tick_ms 'probe_sample': per running lane the shooter's ammo, men, firing flag, place, bearing,
 -- moving; the target's men, health (CCO HealthValue), unary hit points, place, bearing, moving. A lane ends
 -- when the shooter is out of ammo or the target dead (and settle_s more for the projectiles in the air), when
@@ -66,7 +68,7 @@ end
 -- config: build, speed, tick_ms, deadline_s, settle_ms, lanes = {{name, shooter, target, x, z, s_b, d, t_angle,
 -- t_rot, s_width, t_width, mode, target_mode, start_d, step_m, step_s, move_fwd, move_lat, move_run, max_s,
 -- idle_s, settle_s, s_move_fwd, s_move_lat, s_move_run, friend, friend_fwd, friend_lat, friend_width,
--- friend_engage, reorder_s}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
+-- friend_engage, friend_fire, reorder_s}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
 function M.main(bm, config, globals)
     if _G.tww3_bai_missile_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', units = {}, lanes = {}}
@@ -132,6 +134,7 @@ function M.main(bm, config, globals)
         if not lane.running then return end
         lane.running = false
         orders.stop_firing(lane.s.uc)
+        if lane.f and lane.friend_fire then orders.stop_firing(lane.f.uc) end
         orders.halt(lane.t.uc)
         emit('probe_lane_end', {lane = lane.name, why = why, t = now_ms() - lane.t0,
             first_ms = lane.first_ms and lane.first_ms - lane.t0})
@@ -175,7 +178,13 @@ function M.main(bm, config, globals)
                     emit('probe_reform', {lane = lane.name, t = now - lane.t0, men = t.men})
                 end
                 local row = {lane = lane.name, t = now - lane.t0, d = lane.d, s = s, tg = t}
-                if lane.f then row.f = unit_row(lane.f.unit) end
+                if lane.f then
+                    row.f = unit_row(lane.f.unit)
+                    if lane.friend_fire then
+                        row.f.ammo = read(function() return lane.f.unit:ammo_left() end)
+                        row.f.fire = read(cco, lane.f.unit, 'IsFiringMissiles')
+                    end
+                end
                 rows[#rows + 1] = row
                 local over = (s.ammo == 0) or (t.men == 0)
                 if over and not lane.over_ms then lane.over_ms = now end
@@ -202,6 +211,7 @@ function M.main(bm, config, globals)
             elseif lane.mode == 'fire' then
                 orders.set_fire_at_will(lane.s.uc, true)
             end
+            if lane.f and lane.friend_fire then orders.set_fire_at_will(lane.f.uc, true) end
             if lane.s_move_fwd or lane.s_move_lat then
                 local mx, mz = M.frame(lane.x, lane.z, lane.s_b or 0, lane.s_move_fwd or 0, lane.s_move_lat or 0)
                 orders.move(lane.s.uc, vec(mx, mz), lane.s_move_run == true)

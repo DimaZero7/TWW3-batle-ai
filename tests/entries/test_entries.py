@@ -1993,6 +1993,36 @@ class TestMissileProbe:
         samples = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
         assert samples and all("f" in x for x in samples)
 
+    def test_a_firing_friend_fires_at_will_is_sampled_and_stops_at_the_lane_end(self, lua, tmp_path):
+        # stacked (tools/nn/missile_probe.py): friend_fire - the friend in the shooter's place fires at will from the go,
+        # its ammo and firing flag are in the samples' 'f', and it stops firing when the lane ends
+        lua.execute("""
+            own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_hg_1', 'hg', 0, 0),
+                   fake.unit('own_hg_1b', 'hg', 0, 0)}
+            enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_sspear_1', 'sspear', 0, 0)}
+            own[2].ammo, own[3].ammo = 1980, 1970
+            bm = fake.manager({own, enemy})
+            CONFIG = {build = 'test', speed = 20, tick_ms = 500, deadline_s = 100, settle_ms = 4000,
+                lanes = {{name = 'L1', shooter = 'own_hg_1', target = 'enemy_sspear_1', x = 0, z = -80, s_b = 0,
+                          d = 80, t_angle = 0, t_rot = 0, s_width = 30, t_width = 30, mode = 'fire',
+                          target_mode = 'stand', max_s = 10, idle_s = 10, settle_s = 2, friend = 'own_hg_1b',
+                          friend_fwd = 0, friend_lat = 0, friend_width = 30, friend_fire = true}},
+                park = {{name = 'own_lord', x = -700, z = -400, bearing = 0}, {name = 'enemy_lord', x = 700,
+                         z = -400, bearing = 0}}}
+            GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+            STATE = require('entries.missile_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 12 do bm:tick(500); bm:pump() end
+            assert(own[2].free_fire == true and own[3].free_fire == true)
+            for _ = 1, 60 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+            assert(own[3].free_fire == false)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        samples = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
+        assert samples and all(x["f"].get("ammo") == 1970 and x["f"].get("fire") == x["s"].get("fire") for x in samples)
+
     def test_layout_and_frame(self, lua):
         L = lua.eval("""require('entries.missile_probe').layout({x = 10, z = 0, s_b = 0, t_angle = 90, t_rot = 180},
             100)""")

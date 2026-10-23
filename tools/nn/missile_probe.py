@@ -65,6 +65,10 @@ Plans (each battle 4-5 lanes):
   shots    crossbows and handguns at a lone Warlock Engineer ~30 m off; crossbows ~100 m off twice and handguns ~140 m
            off, two of them given a new attack order on the same target after reorder_s (1 battle): the spread near
            (does it stop shrinking?) and hits a shot volley by volley (do they grow, does a new order reset them?).
+  stacked  two identical shooter units on one point (the friend placed at the shooter's centre, the same width, firing
+           at will too: friend_fire) against the same unit alone - crossbows and handguns twice, archers once, at
+           skavenslave spearmen (180 men) ~100 / ~90 m centre to centre (2 battles of 5 lanes): the fire each unit of
+           the pair loses to the other's men.
 
     python -m tools.nn.missile_probe plan [--plan dist]
     python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # one battle's build
@@ -124,7 +128,7 @@ SETTLE_MS = 4000
 TICK_MS = 500
 PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
          "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand",
-         "lonerank", "shots")
+         "lonerank", "shots", "stacked")
 # The game places a lane's target with its front, not its centre, at d (the recordings: centre ~9-10 m farther, the
 # skavenslaves' and the flagellants' half depth plus the shooter's own offset): plans that want a centre distance take
 # d = centre - CENTRE_OFFSET (the analysis reads the recorded places anyway).
@@ -249,6 +253,16 @@ def battles(plan):
         return [[lane("xb", "warlock", 27, t_width=5), lane("hg", "warlock", 27, t_width=5),
                  lane("xb", "warlock", 100, t_width=5, reorder_s=120), lane("hg", "warlock", 137, t_width=5, reorder_s=100),
                  lane("xb", "warlock", 100, t_width=5)]]
+    if plan == "stacked":
+        # d = centre - CENTRE_OFFSET: handguns ~90 m, crossbows and archers ~100 m centre to centre; every lane at least
+        # 60 s after its first shot (max_s 80, idle_s 40)
+        d = {"hg": 80.5, "xb": 90.5, "archers": 90.5}
+
+        def one(s, pair=False):
+            fr = dict(friend=s, friend_fwd=0, friend_lat=0, friend_width=30, friend_fire=True) if pair else {}
+            return lane(s, "sspear", d[s], max_s=80, idle_s=40, **fr)
+        return [[one("xb"), one("xb", True), one("hg"), one("hg", True), one("archers", True)],
+                [one("hg", True), one("archers"), one("xb", True), one("hg"), one("xb")]]
     if plan == "lof":
         fr = dict(friend="spear", friend_fwd=40, friend_width=30)
         return [[lane("militia", "slave", 60, friend_lat=0, **fr), lane("militia", "slave", 60, friend_lat=15, **fr),
@@ -283,7 +297,7 @@ def layout(specs):
         row = dict(spec, name=f"L{k}", x=round(x, 1), z=Z0, s_b=0.0, shooter=add(spec["shooter"], k),
                    target=add(spec["target"], k, spec.get("t_men")), s_key=s_key, t_key=t_key)
         if spec.get("friend"):
-            row["friend"] = add(spec["friend"], k)
+            row["friend"] = add(spec["friend"], f"{k}b")       # (not the shooter's name when it is the same unit)
             row["f_key"] = UNITS[spec["friend"]][0]
         if t_key in (UNITS["general"][0], UNITS["warlord"][0]):
             row["t_width"] = 5
@@ -528,7 +542,7 @@ def cell(spec):
     if spec.get("friend") and spec.get("friend_engage"):
         name += f" melee({spec['friend_engage']})"
     elif spec.get("friend"):
-        name += f" friend({spec.get('friend_fwd')},{spec.get('friend_lat')})"
+        name += f" friend({spec.get('friend_fwd')},{spec.get('friend_lat')}){' fire' if spec.get('friend_fire') else ''}"
     if spec.get("s_move_fwd") or spec.get("s_move_lat"):
         name += f" sgo({spec.get('s_move_fwd', 0)},{spec.get('s_move_lat', 0)}){' run' if spec.get('s_move_run') else ''}"
     if spec["mode"] != "fire":
@@ -670,7 +684,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
                             {"x": float(r["x"][b, T]), "z": float(r["z"][b, T]), "b": float(r["b"][b, T]),
                              "men": float(r["men"][b, T]), "hp": float(r["hp_abs"][b, T])}, None,
                             None if F < 0 else {"x": float(r["x"][b, F]), "z": float(r["z"][b, F]),
-                                                "men": float(r["men"][b, F]), "hp": float(r["hp_abs"][b, F])}))
+                                                "men": float(r["men"][b, F]), "hp": float(r["hp_abs"][b, F]),
+                                                "ammo": float(r["a"][b, F])}))
         out.append({"run": "sim", "spec": ln["spec"], "samples": samples, "end": None})
     return out
 
