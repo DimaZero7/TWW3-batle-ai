@@ -329,3 +329,63 @@ class TestEntropyDecay:
         assert run.schedule(0.01, 0.003, run.decay_share(60.0, 7200.0, 0.0)) == pytest.approx(0.003)
         args = run.parser().parse_args([])
         assert args.entropy_decay == 0.0 and args.past_slots == 3 and args.past_every == 6 and args.resume
+
+
+class TestChainPool:
+    """A chain step's pool (league.open_pool, run.py): it carries on from the previous step's pool/q.json beside
+    --init or --critic-init (--pool-fresh: not); --pool-no-untrained keeps the untrained network out."""
+
+    def prev_run(self, tmp_path):
+        run = tmp_path / "runs" / "test5_prev"
+        (run / "pool").mkdir(parents=True)
+        (run / "latest.pt").write_bytes(b"")
+        a, b, rnd = files(tmp_path, 3)
+        state = {"clock": 33, "eta": 0.01, "entries": [
+            {"path": str(rnd), "q": -0.9, "added": 0, "games": 40, "wins": 38, "untrained": True},
+            {"path": str(a), "q": -0.3, "added": 10, "games": 20, "wins": 12, "untrained": False},
+            {"path": str(b), "q": 0.0, "added": 30, "games": 2, "wins": 0, "untrained": False}]}
+        (run / "pool" / "q.json").write_text(json.dumps(state), encoding="utf-8")
+        return run, state, (a, b, rnd)
+
+    def test_a_new_step_carries_on_from_the_previous_steps_q(self, tmp_path):
+        run, state, (a, b, rnd) = self.prev_run(tmp_path)
+        made = []
+        init = tmp_path / "test5" / "prev" / "m40.pt"                     # (a network folder without a pool)
+        for i, src in enumerate(({"init": run / "latest.pt"}, {"init": init, "critic": run / "latest.pt"})):
+            root = tmp_path / f"new{i}" / "pool"
+            pool, notes = league.open_pool(root, size=12, untrained=lambda: made.append(1) or tmp_path / "rnd.pt", **src)
+            assert [e["q"] for e in pool.entries] == [-0.9, -0.3, 0.0] and pool.clock == 33
+            assert pool.probs()[2] > pool.probs()[0] and notes and not made     # not all equal; no new untrained
+            assert json.loads((root / "q.json").read_text(encoding="utf-8"))["clock"] == 33
+        assert json.loads((run / "pool" / "q.json").read_text(encoding="utf-8")) == state    # the old one untouched
+
+    def test_no_untrained_drops_it_and_a_fresh_or_own_pool_is_left_as_it_was(self, tmp_path):
+        run, _, (a, b, rnd) = self.prev_run(tmp_path)
+        pool, _ = league.open_pool(tmp_path / "n1" / "pool", init=run / "latest.pt", untrained=lambda: rnd,
+                                   no_untrained=True)
+        assert [e["q"] for e in pool.entries] == [-0.3, 0.0] and not any(e["untrained"] for e in pool.entries)
+        # --pool-fresh: a new pool - the untrained network (or, with no_untrained, the init alone) and the init
+        init = tmp_path / "init.pt"
+        init.write_bytes(b"")
+        pool, _ = league.open_pool(tmp_path / "n2" / "pool", init=run / "latest.pt", untrained=lambda: rnd,
+                                   inherit=False)
+        assert [bool(e["untrained"]) for e in pool.entries] == [True, False]
+        pool, _ = league.open_pool(tmp_path / "n3" / "pool", init=init, untrained=lambda: rnd, no_untrained=True)
+        assert len(pool) == 1 and pool.entries[0]["path"] == league.Pool.key(init)
+        pool, _ = league.open_pool(tmp_path / "n4" / "pool", untrained=lambda: rnd, no_untrained=True)
+        assert len(pool) == 1 and pool.entries[0]["untrained"]                 # nothing else to play: kept
+        # a folder with its own q.json (--pool-dir, a resumed run) keeps it
+        own = tmp_path / "n3" / "pool"
+        pool, notes = league.open_pool(own, init=run / "latest.pt", untrained=lambda: rnd, extra=[a])
+        assert not notes and [e["path"] for e in pool.entries] == [league.Pool.key(init), league.Pool.key(a)]
+
+    def test_the_flags_and_the_general_steps_of_the_chain(self):
+        from pathlib import Path
+        from tools.nn.train import run
+        ns = run.parser().parse_args(["--pool-no-untrained", "--pool-fresh"])
+        assert ns.pool_no_untrained and ns.pool_fresh
+        ns = run.parser().parse_args([])
+        assert not ns.pool_no_untrained and not ns.pool_fresh
+        chain = json.loads((Path(__file__).resolve().parents[2] / "config" / "train-chain.json").read_text(
+            encoding="utf-8"))
+        assert chain["steps"]["general"]["options"]["pool-no-untrained"] is True

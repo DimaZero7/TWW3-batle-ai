@@ -667,16 +667,16 @@ def _train(args, every=None, teacher=None, normal=None):
     entropy_end = args.entropy if args.entropy_end is None else args.entropy_end
     anchor_end = args.anchor if args.anchor_end is None else args.anchor_end
     # The pool of past versions with quality scores (league.Pool); --pool-dir: shared by the parts of a night (it
-    # carries on from its q.json: the untrained network and --init only go into a new pool)
-    pool = league.Pool(Path(args.pool_dir) if args.pool_dir else out / "pool", size=args.pool, seed=args.seed,
-                       eta=args.pool_eta)
-    if not len(pool):
-        pool.add(checkpoint.random_for(actor.cfg), untrained=True)
-        if args.init:
-            pool.add(args.init)
-    for extra in filter(None, (args.pool_extra or "").split(",")):
-        pool.add(extra)
-    pool.write()
+    # carries on from its q.json: the untrained network and --init only go into a new pool); a chain step's new pool
+    # carries on from the previous step's (league.inherit_pool: the --init's or --critic-init's run folder has
+    # pool/q.json; --pool-fresh: not); --pool-no-untrained: no untrained network in it
+    pool, notes = league.open_pool(
+        Path(args.pool_dir) if args.pool_dir else out / "pool", size=args.pool, seed=args.seed, eta=args.pool_eta,
+        init=args.init, critic=args.critic_init, untrained=lambda: checkpoint.random_for(actor.cfg),
+        inherit=not args.pool_fresh and not args.pool_dir, no_untrained=args.pool_no_untrained,
+        extra=list(filter(None, (args.pool_extra or "").split(","))))
+    for note in notes:
+        print(note, flush=True)
     print(pool.text(), flush=True)
     # The past slots (rollout.Battles): each holds a version; a battle keeps its slot's version from its start
     slots = max(1, args.past_slots)
@@ -1475,6 +1475,12 @@ def parser():
                                          "in keeps its q)")
     ap.add_argument("--pool-dir", help="the pool's folder (snapshots and q.json, league.Pool): shared by the parts of a "
                                        "night, a part carries on from its q.json (default: the run's own pool/)")
+    ap.add_argument("--pool-no-untrained", action="store_true",
+                    help="no untrained network in the pool (a new one gets --init alone; an inherited one loses it): "
+                         "in a step of the chain it took up to 11 %% of the battles at an equal p")
+    ap.add_argument("--pool-fresh", action="store_true",
+                    help="a new pool from scratch: do not carry on from the previous step's pool/q.json beside "
+                         "--init or --critic-init")
     ap.add_argument("--pool-eta", type=float, default=0.01,
                     help="the quality score's step: a win against version i lowers its q by this / (N p_i) (OpenAI 0.01)")
     ap.add_argument("--past-slots", type=int, default=3,

@@ -109,6 +109,51 @@ def layout(B, n_scenes, mix=None, opponent=None, scene_attacker=None, attack_onl
     return Layout(np.concatenate(scene), np.concatenate(side), np.concatenate(opp))
 
 
+def inherit_pool(root, sources):
+    """A chain step's new pool carries on from the previous step's (run.py; --pool-fresh: not): the first of sources
+    (checkpoints: --init, --critic-init) whose folder has pool/q.json - a run's latest.pt beside its pool - is copied
+    into root (its versions' files stay where they are: q.json keeps their paths). Only into a folder without its own
+    q.json. -> the q.json copied, or None."""
+    import shutil
+    root = Path(root)
+    if (root / Pool.STATE).exists():
+        return None
+    for src in sources:
+        if not src:
+            continue
+        q = Path(src).parent / "pool" / Pool.STATE
+        if q.is_file() and q.parent.resolve() != root.resolve():
+            root.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(q, root / Pool.STATE)
+            return q
+    return None
+
+
+def open_pool(root, size=8, seed=0, eta=0.01, init=None, critic=None, untrained=None, inherit=True,
+              no_untrained=False, extra=()):
+    """(Pool, notes) of a run (run.py): root's q.json if there (--pool-dir: the parts of a night), else the previous
+    step's (inherit_pool from init / critic, inherit=True), else a new pool with the untrained network
+    (untrained(): its file; not with no_untrained while there is an init) and init; no_untrained also takes an
+    inherited untrained one out; the extra checkpoints go in (one already in keeps its q)."""
+    notes = []
+    if inherit:
+        q = inherit_pool(root, (init, critic))
+        if q is not None:
+            notes.append(f"pool: carries on from {Pool.key(q)}")
+    pool = Pool(root, size=size, seed=seed, eta=eta)
+    if no_untrained and pool.drop_untrained():
+        notes.append("pool: the untrained network taken out (--pool-no-untrained)")
+    if not len(pool):
+        if not (no_untrained and init) and untrained is not None:
+            pool.add(untrained(), untrained=True)
+        if init:
+            pool.add(init)
+    for e in extra:
+        pool.add(e)
+    pool.write()
+    return pool, notes
+
+
 class Pool:
     """Past versions of the learner with quality scores, as OpenAI Five's (arXiv 1912.06680, appendix N): a version
     is drawn with probability p_i ~ exp(q_i); a new one comes in with the highest q of the pool; every battle the
@@ -216,6 +261,12 @@ class Pool:
         tmp.write_text(json.dumps({"clock": self.clock, "eta": self.eta, "entries": self.entries}, indent=1),
                        encoding="utf-8", newline="\n")
         os.replace(tmp, self.root / self.STATE)
+
+    def drop_untrained(self):
+        """Take the untrained network out (run.py --pool-no-untrained); -> how many left."""
+        n = len(self.entries)
+        self.entries = [e for e in self.entries if not e.get("untrained")]
+        return n - len(self.entries)
 
     def top(self, k=5):
         """[(name, q, p, age in updates)] of the k most probable versions."""
