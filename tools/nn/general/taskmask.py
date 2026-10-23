@@ -26,6 +26,13 @@ on the chained heads' parts (tools/nn/model/chain.py: kind -> target -> sector -
               one decision; the decision of the volley is free (an order there costs least: the men reload on), then
               the next cycle locks again. Not in melee, nor with a seen enemy within VOLLEY_FREE_M (the unit may step
               back or turn): every order is a new aim in the game and in the simulator (missile.aim_reset_on_order)
+    any       melee_stay (GeneralConfig.melee_stay; the general's rule net.melee_ok and the teacher's): a unit in melee
+              (the token's flag) and not wavering or worse, of a group that holds (fighting(): under waver_share of
+              its units wavering or worse) - or of any group, its mission not "withdraw" - gets no move, no withdraw
+              and no keep of a move / withdraw in force; its attack only at the seen enemies in melee within STAY_M
+              of it (those it fights; none: no attack - hold or keep). The human's battle against g34: a hold led a
+              fighting unit back to its point (22 orders), a withdraw of a group with one wavering unit of 8-14 led
+              its steady ones out of melee (63 of 72 withdraw orders)
 Each piece is a part (PARTS; GeneralConfig.task_mask_parts, run.py --general-task-mask-parts); by default only those
 that cost nothing at minute 0 (config.MASK_PARTS: the movement ones, the general's shoot_group and the volley lock -
 the ones that forbid fighting, withdraw_attack, attack_target, shoot_melee/target, cost g13 0.2-1.2 of the rating;
@@ -67,6 +74,8 @@ VOLLEY_OPEN_S = 0.5
 VOLLEY_SLACK = 1.3
 VOLLEY_FREE_M = 50.0
 VOLLEY_STEP_S = 1.0
+STAY_M = 60.0            # melee_stay: the enemies in melee this close (centre to centre) are those the unit fights (a
+#                          line's unit is 30-40 m wide, a contact from a flank ~40 m; a mask's rule, not a game number)
 # the masks' parts (GeneralConfig.task_mask_parts, run.py --general-task-mask-parts): each one alone switchable
 PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in force)
          "withdraw_move",     # withdraw: the sectors away from the nearest enemy (or towards the point)
@@ -78,15 +87,20 @@ PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in fo
          "hold_move",         # hold: the sectors within the point's reach
          "screen_move",       # screen: the sectors near the segment
          "shoot_group",       # the general: "shoot" only for a group of shooters (net.General.shoot_ok)
-         "shoot_volley")      # shoot: a firing shooter only keeps its order until its volley (volley_lock)
+         "shoot_volley",      # shoot: a firing shooter only keeps its order until its volley (volley_lock)
+         "melee_stay")        # any: a steady unit in melee does not move off (on with GeneralConfig.melee_stay)
 
 
-def fighting(mem, melee, waver):
+def fighting(mem, melee, waver, share=0.5, alive=None):
     """[P, G] the groups that fight in melee and hold (GeneralConfig.melee_stay: no "withdraw" for them): some member
-    in melee, none wavering or worse. mem [P, N, G] the groups' members, melee [P, N] the units in melee (the state's
-    melee flag), waver [P, N] wavering or worse (the morale state >= 5: units.WAVERING_MS). Net.melee_ok and the
-    teacher read the same rule."""
-    return (mem & melee.bool()[..., None]).any(1) & ~(mem & waver.bool()[..., None]).any(1)
+    in melee, under `share` (GeneralConfig.waver_share) of its members wavering or worse. mem [P, N, G] the groups'
+    members, melee [P, N] the units in melee (the state's melee flag), waver [P, N] wavering or worse (the morale state
+    >= 5: units.WAVERING_MS); alive [P, N, G] the members the share counts (with the routing ones; None: mem).
+    Net.melee_ok, the teacher and the executor's melee_stay read the same rule."""
+    alive = mem if alive is None else alive
+    n = alive.sum(1).float()
+    n_w = (alive & waver.bool()[..., None]).sum(1).float()
+    return (mem & melee.bool()[..., None]).any(1) & (n_w < share * n)
 
 
 def parse_parts(text):
@@ -102,10 +116,14 @@ def parse_parts(text):
 
 
 def parts_of(gcfg):
-    """The parts in force of a GeneralConfig (none without task_mask)."""
+    """The parts in force of a GeneralConfig (none without task_mask): task_mask_parts, and melee_stay with
+    GeneralConfig.melee_stay (a rule field: an older checkpoint gets it too, whatever its saved parts)."""
     if not getattr(gcfg, "task_mask", False):
         return frozenset()
-    return parse_parts(getattr(gcfg, "task_mask_parts", "all"))
+    p = parse_parts(getattr(gcfg, "task_mask_parts", "all"))
+    if getattr(gcfg, "melee_stay", False):
+        p = p | {"melee_stay"}
+    return p
 
 
 def fields(kind_u, point, reach, target_u, main, on, lock=None):
@@ -188,11 +206,32 @@ def _d(ax, az, bx, bz):
 
 
 @torch.no_grad()
-def masks(cfg, obs, sec_ok, parts=None):
+def stay(obs, mk, on, share=0.5):
+    """[B, N] the units melee_stay holds in their fight (module doc): own units with a task (on), in melee, not wavering
+    or worse, whose mission is not "withdraw" of a group that has wavered (fighting(): the group's alive units by
+    task_main, at least `share` of them wavering or worse)."""
+    tok = obs["tokens"]
+    waver = ((tok[..., ob.INDEX["state_wavering"]] + tok[..., ob.INDEX["state_routing"]]
+              + tok[..., ob.INDEX["state_shattered"]]).float() > 0.5)
+    melee = tok[..., ob.INDEX["melee"]].float() > 0.5
+    own = obs.get("own", obs["ctrl"])
+    alive = own & obs.get("attend", own)
+    main = obs["task_main"].long()
+    G = int(main.max().clamp(min=0)) + 1
+    ar = torch.arange(G, device=main.device)
+    mem = (main[..., None] == ar) & alive[..., None]                                   # [B, N, G]
+    held = fighting(mem, melee, waver, share)                                         # [B, G] (any member in melee)
+    held_u = held.gather(1, main.clamp(0, G - 1)) & (main >= 0)
+    wd = mk == KIND["withdraw"]
+    return on & melee & ~waver & (~wd | held_u)
+
+
+def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     """{"kind" [B, N, 5], "target" [B, N, N], "sector" [B, N, S], "on" [B, N]} the task's allowed choices (True: allowed;
     to AND with the heads' own masks) and the units under a mask, of the observation obs (with KEYS) and the sectors
     inside the map sec_ok [B, S]; "fb_target" [B, N] the units whose target group is not seen (targets left free).
-    parts: the PARTS in force (None: every one); a unit counts as under a mask ("on") when a part of its kind is."""
+    parts: the PARTS in force (None: every one); a unit counts as under a mask ("on") when a part of its kind is;
+    waver_share: GeneralConfig.waver_share (melee_stay's group rule)."""
     P = frozenset(PARTS) if parts is None else parts
     mk = obs["task_mk"].long()
     ctrl = obs["ctrl"]
@@ -217,7 +256,8 @@ def masks(cfg, obs, sec_ok, parts=None):
     lk = obs.get("task_lock")
     vl = sh & ("shoot_volley" in P) & (lk.bool() if lk is not None else torch.zeros_like(sh))   # the volley lock
     sh, wd = sh & use("shoot_melee", "shoot_target"), wd & use("withdraw_attack", "withdraw_move")
-    on = att | hold | scr | sh | wd | vl                                      # the units under a part in force
+    st = stay(obs, mk, on, waver_share) if "melee_stay" in P else torch.zeros_like(on)   # melee_stay
+    on = att | hold | scr | sh | wd | vl | st                                 # the units under a part in force
     big = torch.full(px.shape + px.shape[-1:], 1e9, device=px.device)                          # [B, N, N]
     # targets: the target group's units (attack, flank, a shooter's shoot); hold: the enemies near the point
     member = (main[:, None, :] == tg[:, :, None]) & (tg[:, :, None] >= 0) & foe[:, None, :]       # [B, N (i), N (j)]
@@ -234,6 +274,10 @@ def masks(cfg, obs, sec_ok, parts=None):
     ar = torch.arange(K, device=mk.device)
     kind = ~(((ar == ATTACK) & no_attack[..., None]) | ((ar == KEEP) & (no_attack & att_now & free)[..., None]))
     kind = torch.where(vl[..., None], ar == KEEP, kind)                        # the volley lock: only keep
+    # melee_stay: no move, no withdraw, no keep of a move / withdraw in force; the attack only at the enemies it fights
+    off_now = ((tok[..., ob.INDEX["order_move"]].float() > 0.5) | (tok[..., ob.INDEX["order_withdraw"]].float() > 0.5))
+    k_st = ~((ar == MOVE) | (ar == WITHDRAW) | ((ar == KEEP) & (off_now & free)[..., None]))
+    kind = torch.where(st[..., None], k_st, kind)
     # sectors (their centres in the side's frame, with half a diagonal of slack)
     c = sc.centres(cfg, mk.device)
     cx, cz = c[:, 0], c[:, 1]
@@ -246,6 +290,8 @@ def masks(cfg, obs, sec_ok, parts=None):
     ex, ez = px.gather(1, jE), pz.gather(1, jE)
     dcE = _d(cx, cz, ex[..., None], ez[..., None])
     sec = torch.ones_like(dcP, dtype=torch.bool)
+    melee_j = tok[..., ob.INDEX["melee"]].float() > 0.5
+    tgt = torch.where(st[..., None], foe[:, None, :] & melee_j[:, None, :] & (D <= STAY_M), tgt)
     s_att = dcP <= torch.maximum(duP, torch.full_like(duP, ATTACK_M))[..., None] + h
     s_hold = dcP <= reach[..., None] + h
     # screen: the segment from the point A (the target group's centre) to the seen enemy nearest to A
@@ -297,7 +343,8 @@ class MaskedChainHeads(chain.ChainHeads):
         ctrl, ok = obs_t["ctrl"], obs_t["target_ok"]
         free = obs_t.get("free", ctrl)
         sec_ok = cells_in.any(-1)                                                 # [B, S]
-        tm = masks(cfg, obs_t, sec_ok, getattr(self, "parts", None)) if has(obs_t) else None
+        tm = (masks(cfg, obs_t, sec_ok, getattr(self, "parts", None), getattr(self, "waver_share", 0.5))
+              if has(obs_t) else None)
         # hold, move, attack, withdraw, keep (tools/nn/sim/orders.py KINDS order); a held unit only keeps
         allowed = torch.stack([~ctrl | free, free, free & ok.any(-1, keepdim=True), free, ctrl], -1)
         t_ok = ok[:, None, :]

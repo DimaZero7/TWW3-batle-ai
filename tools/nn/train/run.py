@@ -308,6 +308,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "kind_stick": "general_kind_stick", "task_mask": "general_task_mask",
                  "task_mask_parts": "general_task_mask_parts",
                  "shoot_share": "general_shoot_share", "melee_stay": "general_melee_stay",
+                 "waver_share": "general_waver_share",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
                  "replan_near_m": "general_replan_near_m", "teach_stall_s": "general_teach_stall_s",
@@ -1711,7 +1712,11 @@ def parser():
                          "on the card) are at least this share of its units (a rule, saved with the checkpoint)")
     ap.add_argument("--general-melee-stay", type=lambda v: bool(int(v)), default=True,
                     help="general: 1 'withdraw' not for a group fighting in melee that has not wavered (some unit in "
-                         "melee, none wavering or worse); the teacher keeps the rule too; 0: withdraw anywhere")
+                         "melee, under general-waver-share of it wavering or worse); the teacher and the executor's "
+                         "mask (a steady unit in melee: no move / withdraw) keep the rule too; 0: withdraw anywhere")
+    ap.add_argument("--general-waver-share", type=float, default=0.5,
+                    help="general: a group has wavered (withdraw allowed in melee) when at least this share of its "
+                         "units waver, rout or are shattered")
     ap.add_argument("--general-groups", default="rule", choices=("rule", "net"),
                     help="general: the group collection - 'rule' (tools/nn/general/groups.py: roles, then clusters by "
                          "place, both sides alike; the attention's collection learns nothing) or 'net' (the learned slot "

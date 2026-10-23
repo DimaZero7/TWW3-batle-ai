@@ -216,7 +216,7 @@ def test_the_general_gives_shoot_only_to_a_group_with_a_shooter():
 def test_the_parts_switch_each_mask_alone():
     assert taskmask.parse_parts("all") == frozenset(taskmask.PARTS)
     default = taskmask.parts_of(gconfig.GeneralConfig())                # the harmless ones (docs: the ablation)
-    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) and "attack_target" not in default
+    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) | {"melee_stay"} and "attack_target" not in default
     assert not default & {"withdraw_attack", "shoot_melee", "shoot_target"} and "withdraw_move" in default
     assert taskmask.parse_parts("") == frozenset() == taskmask.parse_parts("none")
     with pytest.raises(ValueError):
@@ -240,7 +240,7 @@ def test_the_executor_heads_follow_the_rules_parts():
     import dataclasses
     actor = executor.wrap(policy.Actor(TINY).eval(), gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2,
                                                                            task_mask_parts="hold_move,screen_move"))
-    assert actor.heads.parts == frozenset({"hold_move", "screen_move"})
+    assert actor.heads.parts == frozenset({"hold_move", "screen_move", "melee_stay"})   # (melee_stay: its own field)
     actor.set_rules(dataclasses.replace(actor.gcfg, task_mask=False))
     assert actor.heads.parts == frozenset()
 
@@ -383,3 +383,99 @@ def test_the_general_gives_no_withdraw_to_a_group_that_fights_in_melee_and_holds
     o = obs_of(POS, {0: ("withdraw", (-700.0, 0.0), 100.0, 2)}, attacking=[0])
     m = taskmask.masks(TINY, o, torch.ones(1, CENTRES.shape[0], dtype=torch.bool), taskmask.parts_of(gconfig.GeneralConfig()))
     assert bool(m["kind"][0, 0, ATTACK]) and bool(m["kind"][0, 0, KEEP])
+
+
+def test_a_group_has_wavered_only_when_half_of_its_units_waver():
+    """taskmask.fighting with GeneralConfig.waver_share (0.5): one wavering unit of four leaves the group holding in
+    melee (the human's battle against g34: one of 8-14 freed the whole group); two of four - it has wavered; the share
+    counts the alive (routing) members given apart from those standing."""
+    mem = torch.ones(1, 4, 1, dtype=torch.bool)
+    melee = torch.tensor([[True, False, False, False]])
+    one = torch.tensor([[False, True, False, False]])
+    two = torch.tensor([[False, True, True, False]])
+    assert bool(taskmask.fighting(mem, melee, one, 0.5)[0, 0])
+    assert not bool(taskmask.fighting(mem, melee, two, 0.5)[0, 0])
+    assert not bool(taskmask.fighting(mem, torch.zeros_like(melee), one, 0.5)[0, 0])     # nobody in melee
+    standing = mem.clone()
+    standing[0, 2:, 0] = False                                        # 2, 3 rout (not standing, alive)
+    rout = torch.tensor([[False, False, True, True]])
+    assert not bool(taskmask.fighting(standing, melee, rout, 0.5, alive=mem)[0, 0])
+    assert gconfig.GeneralConfig().waver_share == 0.5
+    with pytest.raises(ValueError):
+        gconfig.GeneralConfig(waver_share=0.0)
+
+
+def melee_obs(kind, waver=(), order_move=(), target=G):
+    """Our unit 0 in melee with the enemy 3 (20 m off), units 0, 1 of group 0 under `kind`; waver: our wavering
+    units; order_move: our units whose order in force is a move."""
+    pos = list(POS)
+    pos[3] = (-280.0, 0.0)
+    point = (-500.0, 0.0) if kind in ("hold", "withdraw") else None
+    tg = 2 * G + 1 if kind in ("hold", "withdraw") else target
+    o = obs_of(pos, {0: (kind, point, 100.0, tg), 1: (kind, point, 100.0, tg)})
+    tok = o["tokens"]
+    tok[0, [0, 3], ob.INDEX["melee"]] = 1.0
+    for i in waver:
+        tok[0, i, ob.INDEX["state_wavering"]] = 1.0
+    for i in order_move:
+        tok[0, i, ob.INDEX["order_move"]] = 1.0
+    o["attend"] = torch.ones(1, N, dtype=torch.bool)
+    return o
+
+
+def test_a_steady_unit_in_melee_does_not_move_off_under_any_mission_but_a_wavered_withdraw():
+    """melee_stay (the executor's part): a steady unit in melee gets no move / withdraw (nor keep of a move in force),
+    its attack only at the enemy it fights - under hold (the human's battle: a hold led it back to its point), attack,
+    and withdraw of a group that has not wavered; a withdraw of a group half wavering frees it; a wavering unit is
+    free; the part off: as before."""
+    sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
+    parts = taskmask.parts_of(gconfig.GeneralConfig())
+    assert "melee_stay" in parts
+    assert "melee_stay" not in taskmask.parts_of(gconfig.GeneralConfig(melee_stay=False))
+    for kind in ("hold", "attack", "withdraw"):
+        o = melee_obs(kind, order_move=[0])
+        m = taskmask.masks(TINY, o, sec_ok, parts)
+        k = m["kind"][0, 0]
+        assert not k[MOVE] and not k[WITHDRAW] and not k[KEEP] and bool(k[ATTACK]) and bool(k[HOLD]), kind
+        assert m["target"][0, 0].tolist() == [False, False, False, True, False, False], kind
+        assert bool(m["on"][0, 0])
+        kind_a, tgt, _, fb = taskmask.apply(m, o["ctrl"], o["free"], o["target_ok"], sec_ok)
+        assert not bool(fb[0, 0]) and bool(tgt[0, 0, 3]) and not bool(kind_a[0, 0, MOVE])
+        # unit 1 (not in melee): its mission's masks as before
+        assert bool(m["kind"][0, 1, MOVE])
+    # keep of an attack / hold in force stays open
+    m = taskmask.masks(TINY, melee_obs("hold"), sec_ok, parts)
+    assert bool(m["kind"][0, 0, KEEP])
+    # withdraw of a group with one of two wavering (half): the group has wavered - unit 0 may go
+    m = taskmask.masks(TINY, melee_obs("withdraw", waver=[1]), sec_ok, parts)
+    assert bool(m["kind"][0, 0, MOVE]) and bool(m["kind"][0, 0, WITHDRAW])
+    # ... under hold, the same group: unit 0 still stays (only a withdraw frees it)
+    m = taskmask.masks(TINY, melee_obs("hold", waver=[1]), sec_ok, parts)
+    assert not bool(m["kind"][0, 0, MOVE])
+    # a wavering unit itself: free of the rule
+    m = taskmask.masks(TINY, melee_obs("hold", waver=[0]), sec_ok, parts)
+    assert bool(m["kind"][0, 0, MOVE])
+    # the part off: hold moves it as before
+    m = taskmask.masks(TINY, melee_obs("hold"), sec_ok, parts - {"melee_stay"})
+    assert bool(m["kind"][0, 0, MOVE])
+
+
+def test_the_general_closes_withdraw_to_a_large_group_with_one_wavering_unit():
+    """net.melee_ok with waver_share: a group of 8 with one unit in melee and one wavering holds (no withdraw); with
+    4 of 8 wavering - withdraw open."""
+    from tools.nn.general import units as gunits
+    from tools.nn.general.net import General
+    gen = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2), TINY.sectors, TINY.grid_half)
+    Nn = 9
+    num = torch.zeros(1, Nn, ai.SIZE)
+    fight = torch.zeros(1, Nn, 2)
+    fight[0, 0, 1] = 1.0
+    num[0, 1, gunits.WAVERING] = 1.0
+    own = torch.tensor([[True] * 8 + [False]])
+    inp = {"num": num, "on": torch.ones(1, Nn, dtype=torch.bool), "own": own, "fight": fight}
+    c = {"main": torch.tensor([[0] * 8 + [G]])}
+    w = K["withdraw"]
+    assert not bool(gen.melee_ok(inp, c)[0, 0, w])
+    num[0, 1:4, gunits.WAVERING] = 1.0
+    num[0, 4, gunits.WAVERING] = 1.0
+    assert bool(gen.melee_ok(inp, c)[0, 0, w])

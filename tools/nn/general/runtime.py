@@ -533,7 +533,9 @@ class Runtime:
         group withdraws as before)."""
         if not getattr(self.gcfg, "melee_stay", False):
             return {}
-        return {"melee": f("m").bool(), "waver": f("ms").float() >= gunits.WAVERING_MS}
+        alive = (f("side") > 0) & (f("men") > 0) & ~f("gone")
+        return {"melee": f("m").bool(), "waver": f("ms").float() >= gunits.WAVERING_MS,
+                "waver_share": self.gcfg.waver_share, "alive": alive}
 
     def teach_clock(self):
         """The teacher's clock runs (after()): taught battles, or mission branches against the teacher."""
@@ -1130,7 +1132,7 @@ class Runtime:
         S = self.S
         sec_ok = (msectors.inside(self.mcfg, g).any(-1) if g is not None
                   else torch.ones(rows.shape[0], S, dtype=torch.bool, device=self.dev))
-        m = gtaskmask.masks(self.mcfg, obs, sec_ok, gtaskmask.parts_of(self.gcfg))
+        m = gtaskmask.masks(self.mcfg, obs, sec_ok, gtaskmask.parts_of(self.gcfg), self.gcfg.waver_share)
         _, _, _, fb = gtaskmask.apply(m, ctrl, obs.get("free", ctrl), obs["target_ok"], sec_ok)
         self.stats.add("mask_free", free.sum())
         self.stats.add("mask_units", (m["on"] & free).sum())

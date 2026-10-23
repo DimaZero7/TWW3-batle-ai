@@ -14,8 +14,8 @@ The rule (on the groups' standing units, the state's truth), later rules over ea
                   nearest group 96 % of the slingers' fire (armour-piercing 1) went at greatswords of armour 95;
   one screen      the non-shooting group without the lord nearest to our largest shooting group screens it;
   the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group -
-                  unless the group fights in melee and holds (some unit in melee, none wavering: taskmask.fighting, the
-                  general's mask GeneralConfig.melee_stay): then it holds the tile it stands on (the lord rides with
+                  unless the group fights in melee and holds (some unit in melee, under GeneralConfig.waver_share of
+                  its alive units wavering or worse: taskmask.fighting, the general's mask GeneralConfig.melee_stay): then it holds the tile it stands on (the lord rides with
                   the infantry by the group rule; the human's battle against g31: "withdraw" to the whole infantry in
                   melee, 46 orders, those units killed 0.03 men/s against 0.19). No rule gives "withdraw" to a group
                   that fights and holds;
@@ -98,7 +98,8 @@ def own_tile(cent, tiles, tiles_ok):
 
 
 def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=None, tiles_ok=None, engage=None,
-           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None, shot=None, info=None):
+           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None, shot=None, info=None,
+           waver_share=0.5, alive=None):
     """-> (kind [M, G], target [M, G], use [M, G]: our groups the rule gives a mission) of plans [M]: main [M, N] the
     plan's group numbers, active [M, 2G], the units' x, z, own, standing, shooter, lord [M, N]; kinds: the network's
     number of kinds (a rule whose kind is beyond it is not used); tiles [M, C, 2] the coarse tiles' world centres,
@@ -107,7 +108,9 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     flank: the flank rule on, fast [M, N] the units of the role "fast" (groups.roles; None: no fast groups); melee,
     waver [M, N] the units in melee and those wavering or worse (None: nobody - the lord's group withdraws always);
     shot [M, N, N] the HP a shot of unit i takes from unit j in reach (shot_hp; None: shooters shoot the nearest);
-    info: a dict that gets "wait" [M, G] (the groups the wait holds) when the wait rule runs."""
+    info: a dict that gets "wait" [M, G] (the groups the wait holds) when the wait rule runs; waver_share
+    (GeneralConfig.waver_share) and alive [M, N] (the units alive, the routing ones too; None: standing) - a group
+    holds in melee while under waver_share of its alive units waver or worse (taskmask.fighting)."""
     M, N = main.shape
     dev = main.device
     ar = torch.arange(2 * G, device=dev)
@@ -158,7 +161,9 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     has_o = other.max(-1).values > 0
     fights = torch.zeros_like(own_g)
     if melee is not None:
-        fights = gtaskmask.fighting(mem[:, :, :G], melee, torch.zeros_like(melee) if waver is None else waver)
+        alive_m = None if alive is None else (main[..., None] == ar[:G]) & alive[..., None]
+        fights = gtaskmask.fighting(mem[:, :, :G], melee, torch.zeros_like(melee) if waver is None else waver,
+                                    waver_share, alive_m)
     wd = own_g & lord_g & threat[:, None] & has_o & on("withdraw") & ~fights
     kind = torch.where(wd, torch.full_like(kind, k_of("withdraw")), kind)
     target = torch.where(wd, o_idx, target)
