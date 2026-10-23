@@ -77,7 +77,7 @@ class TestDamage:
         st.u["order_target"][0, 0] = H
         rate, h, _, _ = melee.strikes(st.u, pw, contact, P, z)
         g, sp = P.units[GENERAL], P.units[SPEAR]
-        p = (35 + g["melee"]["attack"] - sp["melee"]["defence"]) / 100
+        p = (35 + g["melee"]["attack"] - sp["melee"]["defence"] - P.sim["melee"]["hit_roll_offset"]) / 100
         share = melee.per_hit(T(g["melee"]["damage"] / 4), T(g["melee"]["ap_damage"] / 4), T(float(sp["armour"])),
                               T(float(sp["hp_per_man"])))
         assert float(h[0, 0, H]) == pytest.approx(float(share), rel=1e-4)
@@ -210,7 +210,7 @@ class TestCharge:
         st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
         g, sp = P.units[GENERAL]["melee"], P.units[SPEAR]["melee"]
         rate = float(melee.strikes(st.u, pw, contact, P, ch)[0][0, H, 0])
-        p = min(90, 35 + g["attack"] + g["charge_bonus"] - sp["defence"]) / 100
+        p = (min(90, 35 + g["attack"] + g["charge_bonus"] - sp["defence"]) - P.sim["melee"]["hit_roll_offset"]) / 100
         d, a, cb = g["damage"], g["ap_damage"], g["charge_bonus"]
         share = melee.per_hit(T((d + cb * d / (d + a)) / 4), T((a + cb * a / (d + a)) / 4),
                               T(float(P.units[SPEAR]["armour"])), T(float(P.units[SPEAR]["hp_per_man"])))
@@ -323,7 +323,7 @@ class TestMeleeCore2:
         st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
         rate, _, _, F, swing = melee.strikes(st.u, pw, contact, P, z, first=True)
         u = P.units[SWORD]["melee"]
-        p = (35 + u["attack"] - P.units[CLANRATS]["melee"]["defence"]) / 100
+        p = (35 + u["attack"] - P.units[CLANRATS]["melee"]["defence"] - P.sim["melee"]["hit_roll_offset"]) / 100
         assert float(F[0, H, 0]) > 1
         assert float(swing[0, H, 0]) == pytest.approx(float(rate[0, H, 0]) * (p * u["attack_interval_s"]
                                                                                + P.sim["melee"]["miss_s"]), rel=1e-4)
@@ -360,7 +360,7 @@ class TestMeleeCore2:
         z = torch.zeros_like(st.u["men"])
         st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
         u = PS.units[SWORD]["melee"]
-        p = (35 + u["attack"] - PS.units[CLANRATS]["melee"]["defence"]) / 100
+        p = (35 + u["attack"] - PS.units[CLANRATS]["melee"]["defence"] - PS.sim["melee"]["hit_roll_offset"]) / 100
 
         def rate_at(t, ran_in=True, params=PS, melee_s=None):
             st.u["contact_s"] = torch.full_like(st.u["men"], t + PS.dt)

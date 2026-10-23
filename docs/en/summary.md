@@ -129,7 +129,10 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   an angle; far from the enemy it flees from all standing enemies (weight 1 / distance), to its own edge
   only when none stands ([where a router runs](training/simulator.md#where-a-router-runs)).
 - **Lords:** as fragile as in the game (no own aura, always "losing" in melee), a blow split over 4 men,
-  the lord duel by the game's formula, abilities (the game's AI uses them by the measured rule), "Wounds".
+  the lord duel by the game's formula, abilities (the game's AI uses them by the measured rule), "Wounds"; a routing
+  lord is struck from the rear by the game's rule, a lone man in a pursuit strikes in full, with the whole charge and
+  only within his own reach (in the game's records the enemy General on a routing one 0.22 blows a second, by the
+  rule 0.22, before 0.04). The hit chance (score - 1) / 100 by the game's rules.
 - **Fatigue** by the database (10 ticks a second, melee tires under an attack order; the charge +34 on the sprint in,
   no surcharge after the blow; in melee without an attack — ready, a lord tiring as in an attack while he strikes — measured; shooting 11.4 — measured;
   a standing unit rests at −18, an enemy near gives no readiness by itself — the `fatrun` probe and 1150 recorded

@@ -10,7 +10,8 @@ import math
 
 import torch
 
-from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, magic, melee, missile, morale, movement, skirmish
+from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
+from tools.nn.sim import skirmish
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -283,6 +284,10 @@ def step(st, orders, params=None, dt=None):
                                              (u["brk_s"] - dt).clamp(min=0)))
         striker = striker & ~((kind == O.HOLD) & (u["brk_s"] > 0) & form)
     strike = touch & striker[:, :, None]
+    # A lone man chasing a lone router (the enemy lord after our lord) strikes him only within his own reach - the
+    # regular contact -, not across the pursuit's box gap (the routing mob strings out beyond its box, a lone man does
+    # not); the router's melee flag keeps the chase (lone_rout.strike_cut, config/nn/sim.json contact.lone_rout own_reach)
+    strike = strike & ~lone_rout.strike_cut(cal["contact"], u["men0"], chase_touch, touch_geo)
     engaged = standing & (touch & standing[:, None, :]).any(2)
     # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving in
     # contact for contact.pin_s seconds; a unit without a missile weapon for contact.pin_melee_s (absent: 0, not held:

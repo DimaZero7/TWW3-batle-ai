@@ -362,7 +362,7 @@ class TestMelee:
         st.u["order_target"][0, 0] = st.N // 2   # attacking the lord: the whole rate
         st.u["contact_s"] = torch.full_like(st.u["men"], 100.0)
         rate, hit, _, _ = melee.strikes(st.u, pw, contact, P, z)
-        p = float(melee.hit_chance(torch.tensor(20.0), torch.tensor(45.0)))
+        p = float(melee.hit_chance(torch.tensor(20.0), torch.tensor(45.0), offset=P.sim["melee"]["hit_roll_offset"]))
         cap = P.sim["contact"]["lord_max_attackers"]
         per_s = p / (p * 5.7 + P.sim["melee"]["miss_s"])
         assert float(rate[0, 0, 1]) == pytest.approx(cap * per_s * float(hit[0, 0, 1]), rel=1e-4)
@@ -472,8 +472,9 @@ class TestMelee:
         st.u["order_kind"][0, H:H + 2] = O.ATTACK               # attacking him
         st.u["order_target"][0, H:H + 2] = 0
         rate, hit, _, F = melee.strikes(st.u, pw, contact, P, z)
-        assert float(rate[0, H, 0]) == pytest.approx(0.40 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
-        p = 0.35 + (20 - 45) / 100
+        roll = P.sim["melee"]["hit_roll_offset"] / 100                # the game's rules: (score - 1) / 100
+        assert float(rate[0, H, 0]) == pytest.approx((0.40 - roll) * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
+        p = 0.35 + (20 - 45) / 100 - roll
         per_s = p / (p * 5.7 + P.sim["melee"]["miss_s"])
         k = P.sim["contact"]["lord_rival_others"]
         assert float(rate[0, H + 1, 0]) == pytest.approx(k * float(F[0, H + 1, 0]) * per_s * float(hit[0, H + 1, 0]),
@@ -505,7 +506,7 @@ class TestMelee:
         cb, md = sw["melee"]["charge_bonus"], cr["melee"]["defence"]
 
         def rule(bonus):
-            p = (35 + sw["melee"]["attack"] + bonus - md) / 100
+            p = (35 + sw["melee"]["attack"] + bonus - md - P.sim["melee"]["hit_roll_offset"]) / 100
             d, a = sw["melee"]["damage"], sw["melee"]["ap_damage"]
             hit = melee.per_hit(torch.tensor(d + bonus * d / (d + a)), torch.tensor(a + bonus * a / (d + a)),
                                 torch.tensor(float(cr["armour"])), torch.tensor(float(cr["hp_per_man"])),

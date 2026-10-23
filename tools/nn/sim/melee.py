@@ -15,8 +15,9 @@ Per pair of units in contact (i strikes j), per second:
                       of it (measured: the melee probe's held units 0.49-0.52 of the rule, move lanes 0.70 of
                       attacking), except its blows reflecting a charge (contact.hold_reflect_full); a lone man (a lord)
                       under HOLD strikes in full (the damage plan)
-    hit chance p    = 35 + attack + charge bonus x charge left + bonus v target - defence x direction, within
-                      8-90 % (the database rule, CA Feature Focus #2: weight 1, melee_hit_chance_*)
+    hit chance p    = 35 + attack + charge bonus x charge left + bonus v target - defence x direction (rounded half
+                      away from zero), within 8-90, less melee.hit_roll_offset (1), / 100 (the game's rules; the
+                      database's melee_hit_chance_*)
     hits a second   = p / (p x interval + miss_s) a fighting man: the interval runs after a hit, a miss costs
                       melee.miss_s (build/hitchance: 121 battles of formations); a lone man striking a lone man
                       (lord against lord): p / interval (the lone lord duels: a blow every 4 s, 41 % hit)
@@ -34,7 +35,8 @@ Per pair of units in contact (i strikes j), per second:
                       F without the opening wave (contact.first_strike_steady)
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database, weight 1;
-a lone man: contact.lord_direction of it - the lord swarm probe). A unit brings to each side of its formation no
+a standing lone man: contact.lord_direction of it - the lord swarm probe's measure, the game's rules have no separate
+branch for lone men -, a routing lone man: lone_rout.direction, in full). A unit brings to each side of its formation no
 more men than that side holds. A lone man fought by the enemy lord takes lord_rival_others of the infantry's rate.
 Charge (battle.py): an attack order, a run-up and the charge's own clock, linear to 0 over charge_decay_duration
 (13 s); its first blows are the first strike above; nothing beyond the bonus (no impact, no ramp: CA,
@@ -42,18 +44,33 @@ build/charge/spec.md). A braced unit with
 charge_reflection strikes a charger in front of it (within bracing_attack_angle) whose charge is still at least
 charge_reflect_min_charge_factor_threshold at charge_reflect_damage_multiplier of its damage (database).
 Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate of the
-rule and no charge (measured); a chaser that keeps up engulfs it (contact.pursue_envelop), its men running in from
-their ranks since the rout (contact.pursue_envelop_run).
+rule and no charge (measured; the game's rules give every pursuit blow the whole charge - a known gap); a lone
+striker on a router at the rule in full, on his routing attack target with the whole charge (the game's rules:
+lone_rout, config/nn/sim.json contact.lone_rout); a chaser that keeps up engulfs it (contact.pursue_envelop), its men running in
+from their ranks since the rout (contact.pursue_envelop_run).
 """
 import torch
 
-from tools.nn.sim import geometry, knobs
+from tools.nn.sim import fatigue, geometry, knobs, lone_rout
 from tools.nn.sim import orders as O
 
 
-def hit_chance(attack, defence, slope=1.0, base=35.0, lo=8.0, hi=90.0):
-    """The hit chance 0-1 (slope: the database's melee_hit_chance_normalisation_coefficient, 1)."""
-    return torch.clamp(base + slope * (attack - defence), lo, hi) / 100
+def hit_chance(attack, defence, slope=1.0, base=35.0, lo=8.0, hi=90.0, offset=0.0):
+    """The hit chance 0-1 (slope: the database's melee_hit_chance_normalisation_coefficient, 1): the clamped score less
+    offset, / 100 (the game's rules: (score - 1) / 100 - melee.hit_roll_offset 1)."""
+    return (torch.clamp(base + slope * (attack - defence), lo, hi) - offset) / 100
+
+
+def round_half_away(x):
+    """x rounded to the nearest whole number, halves away from zero (13.5 -> 14, -2.5 -> -3)."""
+    return torch.sign(x) * torch.floor(x.abs() + 0.5)
+
+
+def directional_defence(defence, factor):
+    """The defence a blow meets: defence x factor (the flank's 0.6, the rear's 0.3), rounded half away from zero where
+    the factor cuts it (the game's rules); unchanged where factor is 1."""
+    cut = defence * factor
+    return torch.where(factor < 1.0, round_half_away(cut), cut)
 
 
 def armour_cut(armour):
@@ -455,6 +472,17 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     pursuit = cc.get("pursuit_rate")
     if pursuit is not None:
         ch = torch.where(routing_j, torch.zeros_like(ch), ch)
+        k_chase = lone_rout.charge(cc, B)
+        if k_chase is not None:
+            # A lone striker whose attack target routs (the enemy lord chasing our lord) strikes it with his whole
+            # charge bonus x the database's pursuit_charge_bonus_modifier, no decay (the game's rules; lone_rout.charge).
+            # Formations keep the measured pursuit without it (contact.pursuit_why).
+            slot_j = torch.arange(u["men"].shape[1], device=ch.device)[None, None, :]
+            chase = lone_rout.chasing(single_i, u["order_kind"][:, :, None], u["order_target"][:, :, None], slot_j,
+                                      routing_j, O.ATTACK)
+            # (the stat without the fatigue: effects() has laid its multiplier on u["charge_bonus"])
+            full = k_chase / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
+            ch = torch.where(chase, full.expand_as(ch), ch)
     large_j = u["large"][:, None, :]
     bonus = torch.where(large_j, u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
     extra = u["charge_bonus"][:, :, None] * ch + bonus
@@ -462,10 +490,13 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # Defence from the flank / rear: x0.6 / x0.3 (the database, weight 1); against a lone man (a lord)
     # contact.lord_direction of the loss (measured in the lord swarm probe: infantry on his back or flank hurts him
     # hardly more than on his front).
-    w = torch.where(single_j, torch.full_like(coef, float(cc.get("lord_direction", 1.0))), torch.ones_like(coef))
-    defence = u["defence"][:, None, :] * (1 - w * (1 - coef))
+    # The game's rules have no separate branch for lone men (the measure above is kept for a standing one); a routing
+    # lone man runs with his back to his chasers and does not turn to them: lone_rout.direction of the rule
+    # (config/nn/sim.json contact.lone_rout; absent: lord_direction). The cut defence is rounded half away from zero.
+    w = torch.where(single_j, lone_rout.direction(cc, routing_j.expand_as(coef), coef.dtype), torch.ones_like(coef))
+    defence = directional_defence(u["defence"][:, None, :].expand_as(coef), 1 - w * (1 - coef))
     p = hit_chance(attack, defence, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
-                   B["melee_hit_chance_min"], B["melee_hit_chance_max"])
+                   B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
     dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]
     share = dmg / (dmg + ap).clamp(min=1e-6)
     # Charge reflection (database): a braced unit with charge_reflection (standing: slower than melee.braced_speed)
@@ -535,6 +566,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             # a router in its rout's exit (battle.py, contact.rout_pin_s), still among the men it fought, is struck at
             # contact.rout_pin_rate of the rule (the recordings: 0.77 of a standing unit's loss in melee)
             share = torch.where((u["rpin_s"] > 0)[:, None, :], float(cc["rout_pin_rate"]), share)
+        # a lone man striking a lone router (the enemy lord chasing our lord): lone_rout's share (config/nn/sim.json
+        # contact.lone_rout; absent: the formations' pursuit_rate)
+        share = lone_rout.share(cc, share, single_i)
         rate = torch.where(routing_j, rate * share, rate)
     # A lone man (a lord) fought by infantry takes the sum of what the men around him strike (no
     # more than lord_max_attackers of them, however many units: the lord swarm probe). Fought by

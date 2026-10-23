@@ -5,10 +5,10 @@ Each man looks at the men round him (cells.py). He may strike an enemy man of a 
 the database's formed combat distance (entity_action_attack_formed_combat_distance, 2.5 m) plus that man's radius. He
 keeps the man he fights while that one stays in reach, else takes the nearest (one of his unit's attack target first).
 His blow (CA Feature Focus #2, the database; the same formulas as the simulator's melee.py, per man):
-  hit chance   35 + attack + charge bonus x his unit's charge left + bonus v the target's size - defence x direction,
-               within 8-90 %; direction: the struck man's facing (to the man he fights, else his unit's), the striker
+  hit chance   35 + attack + charge bonus x his unit's charge left + bonus v the target's size - defence x direction
+               (rounded half away from zero), within 8-90, less the simulator's melee.hit_roll_offset, / 100; direction: the struck man's facing (to the man he fights, else his unit's), the striker
                within 45 deg of it the front, beyond 135 deg the rear (defence x0.6 flank, x0.3 rear; a routing man: rear;
-               a lone man: contact.lord_direction)
+               a lone man: contact.lord_direction, a routing lone man the simulator's lone_rout.direction)
   clock        the passport's attack interval after every swing, hit or miss (lab.json melee.swing_per_interval; off: the
                simulator's melee.miss_s after a miss); it runs only while
                an enemy man is in reach (lab.json melee)
@@ -20,7 +20,8 @@ His blow (CA Feature Focus #2, the database; the same formulas as the simulator'
   blow share   a man in reach lands lab.json melee.blow_share of the formula's blows (measured; the clock runs as for
                a swing)
   the unit's share  the simulator's measured unit-level rates stay: a held formation hold_rate, a router struck at
-               pursuit_rate (rout_pin_rate in its exit), a unit attacking another enemy unit_incidental /
+               pursuit_rate (rout_pin_rate in its exit; a router struck by a lone man lone_rout.share, his
+               blows on his routing attack target with the whole charge: lone_rout.charge), a unit attacking another enemy unit_incidental /
                fresh_incidental / lord_incidental, infantry on a lord also fought by a lord lord_rival_others - a blow
                lands with that chance
   pick         (lab.json melee.pick, "nearest" by default) whom a man strikes: "nearest" - the man he fights while in
@@ -35,7 +36,8 @@ import math
 import torch
 
 from tools.nn.fighters import scans as SC, state as S
-from tools.nn.sim import geometry
+from tools.nn.sim import fatigue, geometry, lone_rout
+from tools.nn.sim import melee as SM
 from tools.nn.sim import orders as O
 
 
@@ -63,6 +65,8 @@ def gates(u, params, permit, pw, charge_now, incidental=None):
         share = torch.full_like(g, float(cc["pursuit_rate"]))
         if cc.get("rout_pin_s") and cc.get("rout_pin_rate") is not None and "rpin_s" in u:
             share = torch.where((u["rpin_s"] > 0)[:, None, :], float(cc["rout_pin_rate"]), share)
+        # a lone man on a lone router (the simulator's lone_rout.share; config/nn/sim.json contact.lone_rout)
+        share = lone_rout.share(cc, share, single_i)
         g = torch.where(routing_j, share, g)
     slot = torch.arange(N, device=g.device)[None, None, :]
     order_t = u["order_target"][:, :, None]
@@ -288,6 +292,13 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
             ch = torch.where(routing_t, full, ch)
         else:
             ch = torch.where(routing_t, torch.zeros_like(ch), ch)
+        k_chase = lone_rout.charge(params.sim["contact"], R)
+        if k_chase is not None:
+            # (the simulator's lone_rout.charge) a lone man's blow on his routing attack target: the whole charge
+            chase = lone_rout.chasing(gat("men0") <= 1, gat("order_kind"), gat("order_target"), tu, routing_t, O.ATTACK)
+            # (the stat without the fatigue: the simulator's fatigue.effects has laid its multiplier on u)
+            full = (k_chase / fatigue.stat_mult(u, params, "stat_charge_bonus")).gather(1, F.uid)
+            ch = torch.where(chase, full, ch)
     extra = gat("charge_bonus") * ch + bonus
     attack = gat("attack") + extra
     # direction: the striker seen from the struck man against his facing
@@ -314,10 +325,12 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     coef = torch.where(routing_t, float(R["melee_defence_direction_penalty_coefficient_rear"]), coef)
     F.dir_k = torch.where(fire, (cosang < front_c).long() + (cosang <= rear_c).long(), torch.full_like(F.tgt, -1))
     lone_t = tgu("men0") <= 1
-    w = torch.where(lone_t, torch.full_like(coef, float(cc.get("lord_direction", 1.0))), torch.ones_like(coef))
-    defence = tgu("defence") * (1 - w * (1 - coef))
-    p = torch.clamp(float(R["melee_hit_chance_base"]) + float(R["melee_hit_chance_normalisation_coefficient"])
-                    * (attack - defence), float(R["melee_hit_chance_min"]), float(R["melee_hit_chance_max"])) / 100
+    # (a routing lone man does not turn to his chasers: the simulator's lone_rout.direction)
+    w = torch.where(lone_t, lone_rout.direction(cc, routing_t, coef.dtype), torch.ones_like(coef))
+    defence = SM.directional_defence(tgu("defence"), 1 - w * (1 - coef))
+    p = SM.hit_chance(attack, defence, float(R["melee_hit_chance_normalisation_coefficient"]),
+                      float(R["melee_hit_chance_base"]), float(R["melee_hit_chance_min"]),
+                      float(R["melee_hit_chance_max"]), float(params.sim["melee"].get("hit_roll_offset", 0.0)))
     gen = None                     # (the draws: state.rnd)
     hit = fire & (S.rnd(F, M, 101) < p)
     # the unit-level share of blows that land, the reflection

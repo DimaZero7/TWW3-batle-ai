@@ -131,6 +131,17 @@ EFFECT_FIELDS = {"scalar_speed": ("walk", "run", "charge_speed"), "stat_melee_at
                  "stat_charge_bonus": ("charge_bonus",), "stat_melee_damage_ap": ("ap_damage",)}
 
 
+def stat_mult(u, params, stat):
+    """[B, N] the fatigue state's multiplier of one stat (effects() below lays it on u in the step; 1 where the table has
+    none): a rule that takes the stat without the fatigue divides by it (the pursuit's charge, lone_rout.charge)."""
+    table = params.sim["fatigue"].get("effects") or {}
+    if "fat" not in u:
+        return torch.ones_like(u["attack"])
+    mult = [float(table.get(lv, {}).get(stat, 1.0)) for lv in LEVELS]
+    level = u["fat"].long().clamp(0, len(LEVELS) - 1)
+    return torch.tensor(mult, dtype=u["attack"].dtype, device=u["attack"].device)[level]
+
+
 def effects(u, params):
     """Lay the fatigue state's stat multipliers on u for this step (the game's database,
     unit_fatigue_effects_tables, copied to config/nn/sim.json fatigue.effects; missing rows x1).

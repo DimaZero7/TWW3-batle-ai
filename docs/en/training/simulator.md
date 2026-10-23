@@ -216,7 +216,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
 | Visibility | everything is visible (`vis`, kept for later) | a flat empty map |
 
-**The hit chance: the database rule at weight 1.** Before, attack − defence counted at 0.1: with a flat ~35 %
+**The hit chance: the database rule at weight 1**, by the game's rules (score - 1) / 100 (`melee.hit_roll_offset`), the flank's and rear's cut defence rounded half away from zero. Before, attack − defence counted at 0.1: with a flat ~35 %
 the same 12–17 men on a 30 m front gave all four pairs' losses, while by the rule the pairs needed 13 to 43 men
 at once ([measurements](measurements.md)). The answer was that a miss costs time (`melee.miss_s` 0.5 s: the
 attack interval runs after a hit): with it the 121 recorded formation battles fit the rule at weight 1
@@ -1153,6 +1153,48 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   second 0.0068 — 0.0108 — 0.0100, the enemy lord's 0.0039 — 0.0036 — 0.0044, our lord dead 0.50 — 0.42 —
   0.46, the enemy's 0.17 — 0.06 — 0.12, routs a unit ours / theirs 1.48 / 0.96 — 1.11 / 1.10 — 1.15 / 1.21;
   all within the noise.
+- **A routing lord and a lone man's pursuit** (by the game's rules; every number and condition in one block,
+  `config/nn/sim.json` `contact.lone_rout`, the conditions in `tools/nn/sim/lone_rout.py`). Before, the rule "a lord's
+  back does not matter" (`lord_direction` 0) and the formations' pursuit share 0.43 applied to a routing lord too, and a
+  pursuit had no charge: the enemy lord struck a routing lord weaker than a standing one, the game 2.5 times harder.
+  - **The game's rules.** The hit chance = (35 + attack + charge - defence, within 8-90, less 1) / 100
+    (`melee.hit_roll_offset` 1 - for every blow). The direction is decided for every blow: where the striking man stands
+    against the defender's facing - front within 45°, flank 45-135°, rear beyond; defence from the flank x0.6, from the
+    rear x0.3, rounded half away from zero (45 x 0.3 = 13.5 -> 14); the multiplier counts only when the striker himself
+    faces his target. Lords by the same rule (only the attribute `flanking_immune` turns it off; our lords have none). A
+    router has no separate branch: he runs with his back to his chasers and does not turn to his striker. A unit whose
+    attack target routs strikes in the pursuit with every blow of every man at the whole charge (the bonus x
+    `pursuit_charge_bonus_modifier` 1.0, no decay over 13 s, no fatigue) - in the chance and the damage; the blows'
+    interval as always, no damage multiplier on routers.
+  - **Ours.** A routing lone man - from the rear by the rule in full (`direction` 1). A lone man strikes a router (a lord
+    or a unit) at the rule in full (`share` 1), his routing attack target with the whole charge without the fatigue
+    (`charge` 1). A lone man chasing a lone router strikes him only within his own reach - the regular contact, not the
+    formations' 16 m pursuit gap (`own_reach` 1: a routing mob strings out beyond its box, a lone man does not); the
+    chase still keeps the router's melee flag, as before.
+  - **Where the rule and the measure disagree the measure is kept** (a gap): a standing lord - `lord_direction` 0 (the
+    lord swarm probe: infantry on his back or flank hurt him no more than on his front); a formation on a router - the
+    share 0.43 without the charge (`contact.pursuit_rate`, the records of 171 battles; by the rule the whole share and
+    the whole charge).
+  - **The rule against the game's records** (the 36 exam battles, `build/diag_lordfix/blows.py`; seconds with nobody
+    else near and no projectiles): the enemy General on our routing General within 3 m - 0.22 blows a second (13 blows
+    in 59 s, +-0.06), by the rule 0.89 / 4 = 0.22; the old rule gave 0.043. On our standing General in a duel 0.087 (29
+    in 356 s), by the rule 0.39 / 4 = 0.10. Within 4 m 0.16, within 6 m 0.10: the blows come within reach only. By the
+    rule: the Warlord on a routing General - 35 + 50 + 35 - 14 -> 90, p 0.89, a blow ~241 HP every 4 s ~ 54 HP/s (the
+    game 52.8); the General on a routing Warlord ~57. OPEN: a blow on the router 261 HP (median 263) against 262 on
+    him standing - the charge's ~23 HP does not show in the blow's size (a blow's spread +-60 HP).
+
+  The step replay of the 36 exam battles (`build/diag_lordfix/sr_lord.py`; the same seconds in the game and the
+  simulator, the situation by the game), our lord's health lost, HP/s:
+
+  | Situation (by the game) | Game | Before | After |
+  |---|---|---|---|
+  | routing, melee flag, the enemy lord within 6 m (166 s) | 27.2 | 12.0 | 31.7 |
+  | the same, within 3 m (96 s) | 33.4 | 15.4 | 41.8 |
+  | routing, melee flag, no enemy lord near (150 s) | 5.7 | 10.3 | 14.6 |
+  | standing, a duel with the enemy lord within 6 m (3700 s) | 12.9 | 11.5 | 11.2 |
+
+  OPEN: a routing lord with no enemy lord near loses more in the simulator than in the game (14.6 against 5.7; 10.3
+  before the change) - formations' infantry on a routing lord (the 0.43 share, the pursuit across 16 m of boxes).
 - **The lord as fragile as in the game** (four rules, each a switch in `config/nn/sim.json` with its reason).
   1. **His own aura does not reach the lord** (`morale.lord_own_aura` false): his units get +4, he does not.
      Measured: a lord at full health, calm, with a unit of his within 120 m stands at MoralePercent 1.129
@@ -1267,7 +1309,10 @@ and 3, `build/routgap`, `build/holes/router_keep.py`). Each is a switch in `conf
 
 A unit touching only routing enemies used to deal them **nothing**: the contact clock counts standing
 enemies only, so its share of men brought to bear stayed 0. Now a router is struck by every man in
-contact at `contact.pursuit_rate` **0.43** of the rule, from the rear, without the charge. Measured
+contact at `contact.pursuit_rate` **0.43** of the rule, from the rear, without the charge (a lone man
+(a lord) on a router: in full, on his routing attack target with the whole charge, on a lone router only within
+his own reach, [a routing lord](#lords); by the game's rules a formation's pursuit has the whole charge in every
+blow too - the measure is kept for formations, a gap). Measured
 (171 battles): a target chased by one unit (centres within 12 m) loses 18.1 HP/s routing (6,090 s)
 against 28.4 standing in melee (54,292 s): 0.64 (95 % CI 0.56–0.75); the first 5 s of a pursuit hit as
 hard as later (17.9 against 18.2), so no charge burst. Fitted with the same measure on the gate
@@ -2264,6 +2309,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 
 ## What is missing
 
+- **The exam's map edge.** The arena's battles are on Crossroads flat; the game's units leave the map on the minimap frame (X +-768 m, Z -800...736 m, [the map](../game/maps/crossroads-flat.md)): so in all 6 exam seeds (176 departures) and in the gate recordings. The simulator has a square of +-1020 m (`map_half_m`; the general's input is scaled by the same number). The database has no map size (width and height 0) and the scenario does not store it - not changed for now. By the game's rules a routing man who crosses the edge is taken off his unit without dying (he loses no health and is not counted killed); when the last one leaves, the outcome is "left routing"; in the game's records such a unit is 0 men. In the simulator it is `gone` - as it should be; the trade and "the lord fell" (`lord_dead_s`) count it lost whole.
 - **Walkers in the exam replay stand by the enemy.** Units under the game's recorded far move spend 319–322 /
   308–317 s a battle by a standing enemy (centres within 12 m) in the exam v2 replay (`build/compare/itS24`,
   `itS24ai`, 10 battles × 6 copies) and stand 0.56 / 0.59 of that time (the game 129 s and 0.19 / 92 s and 0.19).
