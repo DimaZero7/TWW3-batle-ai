@@ -77,13 +77,16 @@ then decides nothing - and the catch stays arc_lines'): friend_rays, friend_line
 - The unit's line: three rays from its front (ends and middle) to the target along the projectile's low arc; the line
   is clear when 2 of 3 are. Closed: direct fire (bullets) does not shoot at that target (the next one in range, else it
   holds); arcing fire (arrows, bolts, slings) shoots at 45 deg if the target is beyond lob_min_m (10 m), else as direct.
-- Each man: his path (the low arc, or the 45 deg arc when lobbing) blocked by a man of another own unit costs him the
-  shot (he reloads and waits for the next cycle). The unit's own men never block (every rank shoots) but for a unit in
-  melee with its target. Enemies never block.
-- A path is blocked by a friend's man whose body (radius and height x the mod's 1.0) it passes below the head of; a
-  friend's men stand in files and ranks, so a path over n of its ranks passes with (1 - min(2 r / file spacing, 1))^n;
-  their centres begin no nearer than the two bodies' radii. The rays start at the front, so a friend standing in the
-  same place (no deeper) does not close the line - but its men in front of a man's path block him.
+- Each man, after every reload: his path (the low arc to 0.75 of the target man's height, or the 45 deg arc when
+  lobbing) blocked by a man of another own unit costs him the shot - he loses his target, takes the same one again
+  and tries at the next reload; the friends stand still, so the same men stay blocked volley after volley. The unit's
+  own men never block (every rank shoots) but for a unit in melee with its target. Enemies never block.
+- A path is blocked by a friend's man (a cylinder: radius and height x the mod's 1.0) it passes below the head of. A
+  friend's men stand in files and ranks: a man's path lies in a file's band (2 r of the file spacing) or between two
+  files - then it passes every rank of that friend - and it is blocked when the band holds a man of the friend where
+  the arc is below the heads (the share of the rank spacing that window covers); their centres begin no nearer than
+  the two bodies' radii. The unit's line ignores a friend whose formation overlaps its own (two units in one place):
+  no lob for it, only the men's paths.
 - Hits on friends take the full damage (can_damage_allies 1 for all our shooters).
 """
 import math
@@ -851,16 +854,17 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
     A path is blocked by a friend's man whose body (his radius x projectile_friendly_fire_man_radius_coefficient, his
     height x ..._man_height_coefficient: 1.0 with True Sight) it passes below the head of: the arc (missile.arc_los's
     muzzle and aim point; without arc_los a straight line) crosses the friends' height at xa and xb, so the men whose
-    centres lie before xa + r or after xb - r along it block it; a friend's men stand in its files and ranks, so a path
-    over n of his ranks passes him with (1 - min(2 r / file spacing, 1))^n; his men's centres begin no nearer than the
-    two bodies' radii (bodies do not overlap). The men of i's own unit never block, but for a unit in melee with its
-    target (contact [B, N, N]); the unit's rays start at its front, so a friend standing in the same place (no deeper)
-    does not close its line."""
+    centres lie before xa + r or after xb - r along it block it; a friend's men stand in its files and ranks: a path in
+    a file's band (min(2 r / file spacing, 1) of the paths) meets a man there with the share of the rank spacing the
+    window covers (at most 1), a path between the files passes all the ranks - the same men blocked every volley;
+    his men's centres begin no nearer than the two bodies' radii (bodies do not overlap). The aim point: aim_frac
+    (0.75) of the target's height. The men of i's own unit never block, but for a unit in melee with its target
+    (contact [B, N, N]); the unit's rays ignore a friend whose formation rectangle overlaps i's (geometry.rect_gap < 0:
+    two units in one place)."""
     ms = params.sim["missile"]
     arc = ms.get("arc_los")
     fcfg = ms["friend_los"]
     hm = float(arc["muzzle_m"]) if arc else float(fcfg.get("muzzle_m", 1.5))
-    ha = float(arc["aim_m"]) if arc else float(fcfg.get("aim_m", 0.8))
     coef_h = float(params.battle.get("projectile_friendly_fire_man_height_coefficient", 1.15))
     coef_r = float(params.battle.get("projectile_friendly_fire_man_radius_coefficient", 2.2))
     N = u["men"].shape[1]
@@ -869,6 +873,8 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
     th = pw["theta"].gather(2, t)                                       # [B, i, 1] bearing to the target
     dist = pw["dist"].gather(2, t).clamp(min=1e-3)
     edge = pw["reach_j"].gather(2, t)                                   # to the target's near edge
+    # the aim point: aim_frac of the target man's height (0.75; the game's very large units 0.6 - none in our roster)
+    ha = float(fcfg.get("aim_frac", 0.75)) * u["height"].gather(1, target.clamp(min=0))[:, :, None]
     eye = torch.eye(N, dtype=torch.bool, device=dev)[None]
     rel = pw["theta"] - th
     along = torch.where(eye, torch.zeros_like(rel), pw["dist"] * torch.cos(rel))   # [B, i, k]
@@ -941,8 +947,9 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
         curved = a > 1e-12
         xa = torch.where(curved, xa_q, xa_l)
         xb = torch.where(curved, xb_q, big)
-        crossed = _path_block(lo, hi, xa, xb, rk) / s_al
-        return 1 - torch.pow(1 - rank_cover, crossed)
+        # a path in a file's band meets a man of it within the window with the share of the rank spacing it covers;
+        # between the files it passes every rank (the files stand in line: the same men blocked every volley)
+        return rank_cover * (_path_block(lo, hi, xa, xb, rk) / s_al).clamp(max=1.0)
 
     def cover(shrink, s_off=None):
         """[B, i, k] the path s_off m across i's line passes through friend k's bodies (None: the share of i's men
@@ -969,7 +976,11 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
         share = torch.where(on, share, torch.zeros_like(share))
     if rays:
         L, lo, hi, shrink = place(span_i)
-        front_block = torch.where(friend, block(L, lo, hi), zero3)
+        # (a friend whose formation overlaps i's does not count for the unit's line: two units in one place)
+        apart = geometry.rect_gap(u["x"], u["z"], u["b"], pw["front"], pw["depth"]) >= 0
+        lone_pair = lone[:, :, None] | lone[:, None, :]
+        apart = torch.where(lone_pair, pw["gap"] >= 0, apart)
+        front_block = torch.where(friend & apart, block(L, lo, hi), zero3)
         shut = torch.zeros_like(u["men"])
         for r in _RAYS:
             ray = 1 - torch.prod(1 - cover(shrink, r * width_i) * front_block, dim=2)

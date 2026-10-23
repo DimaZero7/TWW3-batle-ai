@@ -80,18 +80,18 @@ def test_rule2_a_close_screen_closes_the_line_bullets_hold():
 
 def test_rule2_arrows_clear_a_screen_ahead_and_lob_when_their_low_arc_cannot():
     """Arrows rise over the screen's heads within ~1 m (a far target: a steep low arc): the line is open. A near target
-    (16 m) gives a flat low arc that the screen closes: beyond 10 m they shoot at 45 deg, the whole volley."""
+    (30 m) gives a flat low arc that the screen closes: beyond 10 m they shoot at 45 deg, the whole volley."""
     far = [(ARCHER, -100, 0, 90)] + SCREEN(-89)
     st, pw, target = setup(far)
     low, _, closed = lines(st, pw, target)
     assert not bool(closed[0, 0]) and float(low[0, 0]) < 0.02
-    st, pw, target = setup(far, d=16.0)
+    st, pw, target = setup(far, d=30.0)
     low, high, closed = lines(st, pw, target)
     assert bool(closed[0, 0]) and float(high[0, 0]) < 0.02
     tg, clear, info = _clear(st, pw, target)
     assert int(tg[0, 0]) == st.N // 2 and bool(info["lob"][0, 0]) and float(clear[0, 0]) > 0.98
     # the same with bullets: no lob, they hold
-    st, pw, target = setup([(HG, -100, 0, 90)] + SCREEN(-89), d=16.0)
+    st, pw, target = setup([(HG, -100, 0, 90)] + SCREEN(-89), d=30.0)
     tg, _, info = _clear(st, pw, target)
     assert int(tg[0, 0]) == -1 and not bool(info["lob"][0, 0])
 
@@ -215,9 +215,73 @@ def test_rule2_a_closed_line_moves_the_fire_to_the_next_target_in_range():
 def test_rule2_slings_and_crossbows_lob_like_bows(key):
     """Slings and crossbows (trajectory dual_low_fixed) are arcing fire: a closed line at a target beyond 10 m - the
     whole volley at 45 deg; their passports are not direct fire."""
-    own = [(key, -100, 0, 90)] + SCREEN(-89)
-    st, pw, target = setup(own, d=16.0)
+    own = [(key, -100, 0, 90)] + SCREEN(-86 if key == SLINGER else -89)    # (the slingers' block is 14 m deep)
+    st, pw, target = setup(own, d=30.0)
     assert not bool(st.u["direct"][0, 0])
     assert bool(missile.friend_rays(st.u, pw, target, P)[0, 0])
     tg, clear, info = _clear(st, pw, target)
     assert int(tg[0, 0]) == st.N // 2 and bool(info["lob"][0, 0]) and float(clear[0, 0]) > 0.98
+
+
+def test_rule4_a_friend_overlapping_the_formation_does_not_close_the_line_no_lob():
+    """Two crossbow units ~1 m apart (one in the other, the probe's pair): their formations overlap, so the unit's line
+    ignores the other (open: no lob, the low arc), and only the men's own paths are checked; the same friend 2 m beyond
+    the front (not overlapping) closes the line and the unit lobs."""
+    st, pw, target = setup([(XBOW, -100, 0, 90), (XBOW, -99, 0.5, 90)])
+    assert float(geometry.rect_gap(st.u["x"], st.u["z"], st.u["b"], pw["front"], pw["depth"])[0, 0, 1]) < 0
+    assert not bool(missile.friend_rays(st.u, pw, target, P)[0, 0])
+    tg, clear, info = _clear(st, pw, target)
+    assert int(tg[0, 0]) == st.N // 2 and not bool(info["lob"][0, 0]) and 0.0 < 1 - float(clear[0, 0]) < 0.9
+    depth = float(pw["depth"][0, 0])
+    st, pw, target = setup([(XBOW, -100, 0, 90), (XBOW, -100 + depth + 2, 0, 90)], d=30.0)
+    assert bool(missile.friend_rays(st.u, pw, target, P)[0, 0])
+    assert bool(_clear(st, pw, target)[2]["lob"][0, 0])
+
+
+def test_rule2_the_aim_point_is_three_quarters_of_the_target_mans_height():
+    """The path ends at aim_frac (0.75) of the target man's height: a lower aim point (a flatter path) is blocked more."""
+    pair = [(ARCHER, -100, 0, 90), (ARCHER, -100, 0, 90)]          # (arrows: the window below the heads is short)
+    st, pw, target = setup(pair, d=100.0)
+    at = missile.friend_lines(st.u, pw, target, P)
+    low_aim = P.with_cal("missile", friend_los=dict(P.sim["missile"]["friend_los"], aim_frac=0.1))
+    assert float(missile.friend_lines(st.u, pw, target, low_aim)[0, 0]) > float(at[0, 0])
+
+
+def _volleys(st, slot, steps, between=None):
+    """The projectiles unit `slot` loosed in each volley over `steps` steps (drops 1.5 s apart are one volley);
+    between(st, k): called before step k."""
+    out, last, quiet = [], float(st.u["a"][0, slot]), 99
+    for k in range(steps):
+        if between is not None:
+            between(st, k)
+        battle.step(st, replay.hold(st), P)
+        a = float(st.u["a"][0, slot])
+        if a < last - 0.5:
+            if quiet > 3:
+                out.append(0.0)
+            out[-1] += last - a
+            quiet = 0
+        else:
+            quiet += 1
+        last = a
+    return out
+
+
+def test_rule3_the_same_men_stay_blocked_volley_after_volley():
+    """Units standing still: every reload the same share of the men finds its path blocked (no new draw each cycle) -
+    the pair's volleys keep their size while the lone unit's are whole."""
+    st = scenario.build([army([(HG, -100, 0, 90), (HG, -100, 0, 90)], [(SLAVES, -10, 0, 270)])], P)
+    v = _volleys(st, 0, 100)
+    assert len(v) >= 3 and max(v[:3]) - min(v[:3]) <= 0.1 * max(v[:3]) and v[0] < 0.75 * 90
+
+
+def test_rule2_the_path_is_checked_again_after_every_reload():
+    """The friend walks off after the first volley: the next volley finds every path clear - the whole unit fires."""
+    st = scenario.build([army([(HG, -100, 0, 90), (HG, -100, 0, 90)], [(SLAVES, -10, 0, 270)])], P)
+
+    def away(st, k):
+        if k == 14:                                   # after the first volley (~2-4 s), well before the next (13 s)
+            st.u["z"][0, 1] = 200.0
+    v = _volleys(st, 0, 60, away)
+    assert len(v) >= 2 and v[0] < 0.75 * 90 and v[1] > 0.95 * float(st.u["men"][0, 0])
+
