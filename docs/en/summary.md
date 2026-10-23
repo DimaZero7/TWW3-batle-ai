@@ -252,8 +252,8 @@ to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
   for the passives; a passive shows its condition and "on now"; the passport comes from a table, a unit stores the
   slot's 6 numbers and the ability's index; [details](training/model.md#abilities-each-unit-each-of-its-ability-slots))
   → 3 attention
-  layers with a distance bias and pair features (who reaches whom, closing speed, flank / rear; also in the target
-  pointer) → GRU memory.
+  layers with a distance bias and pair features (who reaches whom, closing speed, flank / rear, which share of an
+  enemy's man a projectile and a blow take - by the simulator's damage rule; also in the target pointer) → GRU memory.
 - **Map sectors** 16 × 16 of 100 m: strength and count of own and visible enemy units, routers, the map
   edge; units look at the sectors through a separate attention layer.
 - **Chained heads:** order kind (hold / move / attack / withdraw / keep) → target → sector → 25 m cell →
@@ -291,9 +291,12 @@ executor (`--general-task-mask 1`, `taskmask.py`), by default only its movement:
 from X, under "hold" the sectors near the point, under "screen" near the segment to the enemy; the general gives
 "shoot" only to a group of shooters. The masks that forbid fighting (the attack closed under "withdraw", the target only
 from X under "attack X", no melee for infantry under "shoot") cost the rating −1.15 / −0.61 / −0.19 at minute 0 and
-are off (`--general-task-mask-parts`). After the atlas of g17r (the general added nothing: +0.88 with it, +0.89 without): a **rule** makes the groups (`--general-groups rule`, `groups.py`: roles - shooters, melee, the lord with heroes, fast; within a role by place, R 100 m; a lone lord joins infantry within 60 m; the learned collection gave one group for the army), the executor has **its own kind table** (its epochs do not move the general's choice; no group card in the task), the general's KL stop is the k3 estimate, the branches compare a kind with **every** allowed kind (each with its own target), the tiles' numbers are standardised over the map (the three dead ones replaced by shooters' and fast units' strength), the group's card gets threat numbers (the nearest enemy group's distance and strength, the shooter shares - only with ammunition, contact, the shares under fire and in melee; in the unit's slot the morale, "wavering", fatigue and ammunition share now) and the numbers of the tiles under its centre (`--general-group-tiles`: a direct path from the map to the choice, past the council); the points g15-g17r without these fields play as before; the attack's measure is to the target's centre, every measure × the cohesion
-with the group; the teacher waits first (holds its tile while the enemy is farther than 250 m and the shooters have
-fired less than 30 s). Line g1–g8 on the former design (262 target candidates, two
+are off (`--general-task-mask-parts`). A group that fights in melee and has not wavered gets no "withdraw" from the
+general (`--general-melee-stay`; the teacher neither). After the atlas of g17r (the general added nothing: +0.88 with it, +0.89 without): a **rule** makes the groups (`--general-groups rule`, `groups.py`: roles - shooters, melee, the lord with heroes, fast; within a role by place, R 100 m; a lone lord joins infantry within 60 m; the learned collection gave one group for the army), the executor has **its own kind table** (its epochs do not move the general's choice; no group card in the task), the general's KL stop is the k3 estimate, the branches compare a kind with **every** allowed kind (each with its own target), the tiles' numbers are standardised over the map (the three dead ones replaced by shooters' and fast units' strength), the group's card gets threat numbers (the nearest enemy group's distance and strength, the shooter shares - only with ammunition, contact, the shares under fire and in melee; in the unit's slot the morale, "wavering", fatigue and ammunition share now) and the numbers of the tiles under its centre (`--general-group-tiles`: a direct path from the map to the choice, past the council); the points g15-g17r without these fields play as before; the attack's measure is to the target's centre, every measure × the cohesion
+with the group; the teacher waits first (all attacking groups hold their tiles while the farthest of them is beyond
+250 m of the enemy and the shooters have fired less than 30 s, then attack together; a re-plan on the event "the enemy
+within 250 m of a group" too); the teacher's shooters shoot the group their shot takes most health from (with the
+target's armour and shield), not the nearest. Line g1–g8 on the former design (262 target candidates, two
 targets, no unit positions, abstract kinds) stayed uniformly random; by flags, the plan's advantage by the unit critic (`--general-return critic`) and the executor's bonus for
 missions that tell apart (`--general-distinct`, in units of the executor's advantage spread), the mission branches — a copy of the
 battle with another mission kind for one group, the exchange's difference is the kind choice's price; the other
