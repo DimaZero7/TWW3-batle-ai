@@ -30,13 +30,13 @@ def test_the_slot_is_the_tables_groups():
     for _, g, _ in ai.NUMBERS:
         groups[g] = groups.get(g, 0) + 1
     assert groups == {"side": 1, "cost": 1, "size": 5, "body": 4, "melee": 10, "defence": 8, "missile": 12,
-                      "properties": 4}
-    assert list(groups) == ["side", "cost", "size", "body", "melee", "defence", "missile", "properties"]
-    assert ai.SIZE == 45 and ai.LABELS == ("trajectory", "caste", "size")
+                      "properties": 4, "state": 4}
+    assert list(groups) == ["side", "cost", "size", "body", "melee", "defence", "missile", "properties", "state"]
+    assert ai.SIZE == 49 and ai.OLD_SIZE == 45 and ai.NAMES[ai.OLD_SIZE:] == ai.STATE and ai.LABELS == ("trajectory", "caste", "size")
     assert len(ai.CASTES) == 12 and len(ai.SIZES) == 4 and ai.TRAJECTORIES[1:] == ("direct", "high", "dual")
     assert "other" not in ai.CASTES + ai.SIZES + ai.TRAJECTORIES
     a = ai.build({1: OURS, 2: THEIRS})
-    assert a.numbers.shape == (80, 45) and a.labels.shape == (80, 3) and a.empty.shape == (80,)
+    assert a.numbers.shape == (80, 49) and a.labels.shape == (80, 3) and a.empty.shape == (80,)
     assert a.numbers.dtype == np.float32 and a.labels.dtype == np.int64
 
 
@@ -116,12 +116,13 @@ def test_labels(passports):
 
 def test_numbers_span(passports):
     """Every unit's numbers stay within SPAN and are finite; no column is a constant of all (but the side and the
-    come shares, 1 in our battles, and what none of ours has)."""
+    come shares, 1 in our battles, the fresh unit's state but the ammunition, and what none of ours has)."""
     rows = np.array([ai.slot(ai.final_stats(p, unit=k), True, k)[0] for k, p in passports.items()])
     lo, hi = ai.SPAN
     assert np.isfinite(rows).all() and rows.min() >= lo and rows.max() <= hi
     const = {ai.NAMES[i] for i in range(ai.SIZE) if np.ptp(rows[:, i]) == 0}
-    assert const == {"side", "men_come", "hp_come", "resist_all", "resist_magic", "resist_flame"}
+    assert const == {"side", "men_come", "hp_come", "resist_all", "resist_magic", "resist_flame", "morale", "wavering",
+                     "fatigue"}
 
 
 def test_the_scales_are_the_passports(passports):
@@ -208,4 +209,19 @@ def test_the_card_over_the_passport(passports):
 
 def test_stack():
     b = ai.stack([ai.build({1: OURS, 2: THEIRS}), ai.build({1: OURS, 2: THEIRS}, 2)])
-    assert b.numbers.shape == (2, 80, 45) and b.labels.shape == (2, 80, 3) and b.empty.shape == (2, 80)
+    assert b.numbers.shape == (2, 80, 49) and b.labels.shape == (2, 80, 3) and b.empty.shape == (2, 80)
+
+
+def test_the_state_group_is_a_fresh_units_before_the_battle(passports):
+    """Before the battle (and for a hidden enemy, units.dynamic) a slot's state is a fresh unit's: morale 1 (/ 2), not
+    wavering, fresh, its ammunition full (0 without a missile weapon); armed() - a shooter with ammunition left."""
+    a = ai.build({1: OURS, 2: THEIRS})
+    I = ai.INDEX
+    for i in np.nonzero(~a.empty)[0]:
+        row = a.numbers[i]
+        assert row[I["morale"]] == 0.5 and row[I["wavering"]] == 0 and row[I["fatigue"]] == 0
+        assert row[I["ammo_come"]] == (1.0 if row[I["range"]] > 0 else 0.0)
+    assert (ai.armed(a.numbers) == (a.numbers[:, I["range"]] > 0)).all()
+    empty = a.numbers.copy()
+    empty[:, I["ammo_come"]] = 0
+    assert not ai.armed(empty).any()                       # out of ammunition: no shooter

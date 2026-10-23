@@ -4,9 +4,10 @@
 Always as the general's side sees it: slots 0..39 its own army, 40..79 the enemy's; for side 2 the armies swap places
 (as the map's layers do, map_input.py). The slots' order means nothing (the lord need not be in slot 0): the army
 reader (army_reader.py) reads every slot with the same weights. An empty slot is flagged `empty` and holds zeros.
-Only what is known before the battle: no place, facing, battle state or visibility (the enemy's roster is shown).
+Only what is known before the battle: no place, facing or visibility (the enemy's roster is shown); the state group is a
+fresh unit's until units.dynamic puts the battle's in.
 
-A slot = NUMBERS (45 floats, the table's groups in its order) + LABELS (3 indices, each read as a learned vector):
+A slot = NUMBERS (49 floats, the table's groups in its order) + LABELS (3 indices, each read as a learned vector):
 
     group                 numbers                                                      scale
     side                  own 1 / enemy 0                                              flag
@@ -24,7 +25,17 @@ A slot = NUMBERS (45 floats, the table's groups in its order) + LABELS (3 indice
                           volley, projectile speed, fire arc each side, aim before     m/s / 100; deg / 180;
                           the first shot, silence after a new target                   s / 10; s / 10
     properties (4)        expendable, charge reflection, unbreakable, fires on the move  flags
+    state (4)             morale (MoralePercent), wavering or worse (morale state 5-7),  / 2 (within -1.5..1.5);
+                          fatigue state (0 fresh .. 5 exhausted), ammunition come /     flag; / 5; share
+                          full (0 without a missile weapon)
     labels                trajectory (TRAJECTORIES; 0 = no missile weapon), caste (CASTES, 12), size (SIZES, 4)
+
+The state group (STATE, appended last: a checkpoint read 45 numbers a slot, its reader gets zero weights for these,
+army_reader.py) is the battle's now (units.dynamic: the simulator's mp, ms, fat, a; the companion's from the game's
+state, tools/nn/companion/general.py) for own units and the enemies seen; before the battle and for a hidden enemy the
+fresh unit's: morale 1 (0.5), not wavering, fresh, its ammunition full (1; 0 without a missile weapon). A shooter is a
+shooter only while it has ammunition (armed(): range > 0 and ammunition come > 0, the simulator's rule: battle.py
+fires while `a` > 0) - the general's shooters' shares, the "shoot" mask and the tiles' shooters' strength.
 
 The scales are the unit network's passport's (tools/nn/model/passport.py) wherever it has the field; new ones: the
 come shares (0..1 already), the spread at 100 m (m / SPREAD_SCALE_M: handguns 0.30, crossbows 0.44, slings 0.60,
@@ -50,7 +61,7 @@ comes from the database's passport (config/nn/units.json) or is computed ("Сч�
 * men and health come: the card's now / the passport's full (1 in our battles).
 With no card (the simulator, our battles) the passport's numbers are the final ones: rank 0, nothing missing.
 
-    build(armies, side)        -> ArmyInput: numbers [80, 45] float32, labels [80, 3] int64, empty [80] bool
+    build(armies, side)        -> ArmyInput: numbers [80, 49] float32, labels [80, 3] int64, empty [80] bool
     stack([ArmyInput, ...])    -> the same with a batch axis
     python -m tools.nn.general.army_input        # the slot of every unit of units.json, one line each
 """
@@ -108,10 +119,15 @@ NUMBERS = (
     ("muzzle_velocity", "missile", 100), ("fire_arc", "missile", 180),
     ("aim", "missile", pp.AIM_S), ("silence", "missile", pp.AIM_S),
     *((name, "properties", "flag") for name, _ in PROPERTIES),
+    # the battle's state now (module doc; appended last: older checkpoints read the 45 above)
+    ("morale", "state", 2), ("wavering", "state", "flag"), ("fatigue", "state", 5), ("ammo_come", "state", "share"),
 )
 NAMES = tuple(n for n, _, _ in NUMBERS)
 INDEX = {n: i for i, n in enumerate(NAMES)}
-SIZE = len(NUMBERS)                   # 45
+SIZE = len(NUMBERS)                   # 49
+STATE = tuple(n for n, g, _ in NUMBERS if g == "state")
+OLD_SIZE = SIZE - len(STATE)          # 45: the slot before the state group
+MORALE_CLIP = 1.5                     # morale / 2 within +- this (the unit token's: observation.MORALE)
 SIDE = INDEX["side"]
 # what every number may span on real units (test_numbers_span): fire resistance may be negative
 SPAN = (-1.0, 1.5)
@@ -125,6 +141,12 @@ CARD_KEYS = frozenset({"rank", "men_now", "hp_now", "men_full", "hp_full", "hp_p
                        *(f"resist_{k}" for k in RESISTS), "range", "ammo", "missile_damage", "missile_ap", "reload",
                        "projectiles", "volley_shots", "muzzle_velocity", "fire_arc",
                        *(name for name, _ in PROPERTIES)})
+
+
+def armed(num):
+    """[...] bool: a shooter with ammunition left - range > 0 and ammunition come > 0 (module doc) - of slot numbers
+    num [..., SIZE] (numpy or torch)."""
+    return (num[..., INDEX["range"]] > 0) & (num[..., INDEX["ammo_come"]] > 0)
 
 
 class UnknownVariant(ValueError):
@@ -204,6 +226,8 @@ def base_stats(p, unit=""):
         "volley_shots": miss.get("shots_per_volley") or 0, "muzzle_velocity": miss.get("muzzle_velocity") or 0,
         "fire_arc": miss.get("fire_arc_deg") or 0,
         **{name: float(attr in attrs) for name, attr in PROPERTIES},
+        # the state of a fresh unit (module doc: the battle's now replaces it, units.dynamic)
+        "morale": 1.0, "wavering": 0.0, "fatigue": 0.0, "ammo_come": 1.0 if miss.get("ammo") else 0.0,
         "rank": 0,
         # not on the slot themselves: the spread's makings (the card shows none of them)
         "accuracy": (miss.get("accuracy", 0) + miss.get("marksmanship", 0)) if miss else 0,

@@ -75,12 +75,12 @@ def extra(cfg, pos_m, own, alive, vis, cost, hp, shooter, fast):
 
 def with_extra(cfg, tiles, u, own, alive, vis, num, lab, frame):
     """tiles [R, S, 8] with EXTRA's columns of the rows' state u [R, N] (x, z, cost, hp), own / alive / vis [R, N],
-    the slots' numbers num and labels lab (units.py: the missile range, the role) and the rows' frame."""
+    the slots' numbers num and labels lab (units.py: the missile range and ammunition, the role) and the rows' frame."""
     from tools.nn.general import army_input as ai
     from tools.nn.general import groups as ggroups
     f, l = frame.point(u["x"].float(), u["z"].float())
     pos = torch.nan_to_num(torch.stack([f, l], -1))
-    shooter = num[..., ai.INDEX["range"]] > 0
+    shooter = ai.armed(num)                      # (with ammunition left: an empty shooter is no shooter)
     fast = ggroups.roles(num, lab) == ggroups.ROLES.index("fast")
     ex = extra(cfg, pos, own, alive, vis, u["cost"].float(), u["hp"].float(), shooter, fast)
     out = tiles.clone()

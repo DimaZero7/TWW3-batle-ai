@@ -2,13 +2,15 @@
 reads every occupied slot of the army input (army_input.py) with the same weights - own and enemy alike - and gives
 each its unit card, "Карточки отрядов": [B, 80, D].
 
-    layer 1   h = ReLU(W1 numbers + b1 + E_trajectory[t] + E_caste[c] + E_size[s])     numbers 45 -> H
+    layer 1   h = ReLU(W1 numbers + b1 + E_trajectory[t] + E_caste[c] + E_size[s])     numbers 49 -> H
     layer 2   card = W2 h + b2 (no activation: the card)                                 H -> D
     effects   card += the unit's effect cards ("Анализ эффектов", not designed yet: `effects`, default 0)
 
 A label is read as a learned vector of the first layer (E_*: nn.Embedding H wide) - the same as its one-hot flags
 times their weights. The trajectory's index 0 ("no missile weapon") is a fixed zero vector (padding_idx). H = D = 256:
-45 x 256 + 256 + (4 + 12 + 4) x 256 + 256 x 256 + 256 = 82 688 weights (the design's estimate: 62 x 256 + 256 x 256).
+49 x 256 + 256 + (4 + 12 + 4) x 256 + 256 x 256 + 256 = 83 712 weights (the design's estimate: 62 x 256 + 256 x 256).
+A checkpoint of a reader of fewer numbers (45: before the state group, army_input.STATE) loads with zero weights for
+the new ones (_load_from_state_dict): its cards stay the same.
 
 Empty slots never pass through the network (they are taken out before it, `empty`): their card is 0 and they cannot
 touch the others' cards. The slots' order means nothing: the network works per slot, a permutation of the slots
@@ -54,6 +56,13 @@ class ArmyReader(nn.Module):
                     e.weight[e.padding_idx].zero_()
         nn.init.normal_(self.layer2.weight, 0.0, (1.0 / self.hidden) ** 0.5)
         nn.init.zeros_(self.layer2.bias)
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """A checkpoint whose reader read fewer numbers a slot (numbers appended since at the end: army_input's state
+        group, 45 -> 49) gets zero weights for the new ones: its cards stay what they were. In place."""
+        from tools.nn.model.encoder import pad_inputs
+        pad_inputs(state_dict, prefix + "layer1.weight", self.numbers)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def _table(self, n, kind=None):
         return nn.Embedding(n, self.hidden, padding_idx=0 if kind == "trajectory" else None)

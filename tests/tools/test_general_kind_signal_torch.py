@@ -176,7 +176,8 @@ def test_the_critics_groups_join_the_kind_term_and_the_extra_pass_moves_the_kind
     br = env.general_rt.brancher
     kq = forced(br, ready)
     w0 = snapshot(actor.general)
-    cfg = learn.LearnConfig(epochs=1, branches=1.0, minibatch=8, kind_own=True, kind_epochs=1)
+    # (no KL stop: whether the first extra minibatch passes 0.03 depends on the fresh network's draw)
+    cfg = learn.LearnConfig(epochs=1, branches=1.0, minibatch=8, kind_own=True, kind_epochs=1, target_kl=0.0)
     st1 = general_update(actor, batch, cfg, kq)
     one = snapshot(actor.general)
     for k in ("general_kind_loss", "general_kind_kl", "general_kind_critic_groups", "general_kind_critic_adv_std",

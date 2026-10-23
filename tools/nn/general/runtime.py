@@ -227,7 +227,7 @@ class Runtime:
         from tools.nn.general import army_input as ai
         z = (lambda *s, dt=torch.float32: torch.zeros(*s, dtype=dt, device=self.dev))
         return {"num": z(B, self.N, ai.SIZE), "lab": z(B, self.N, len(ai.LABELS), dt=torch.long),
-                "full": z(B, self.N, 2), "teach": z(B, dt=torch.bool), "epoch": z(B, dt=torch.long),
+                "full": z(B, self.N, 3), "teach": z(B, dt=torch.bool), "epoch": z(B, dt=torch.long),
                 "bid": z(B, dt=torch.long) - 1}
 
     def record(self, rows):
@@ -275,6 +275,8 @@ class Runtime:
         b, s = rows % B, rows // B + 1
         u = {k: env.st.u[k][b] for k in ("x", "z", "b", "side", "men", "hp", "hp0", "ms", "gone", "vis", "cost",
                                           "width", "sp_h", "sp_v", "m", "fire", "target")}
+        # the state group of the slots (army_input STATE: morale, fatigue, ammunition; units.dynamic)
+        u.update({k: env.st.u[k][b] for k in ("mp", "fat", "a") if k in env.st.u})
         present = u["side"] > 0
         own = present & (u["side"] == s[:, None])
         alive = present & (u["men"] > 0) & ~u["gone"]
@@ -500,7 +502,7 @@ class Runtime:
             c.add(name, ((tk == i) & own_g).sum())
         from tools.nn.general import army_input as ai
         lg = act[:, :G] & (owner == 0)[:, None]
-        sh = (inp["num"][..., ai.INDEX["range"]] > 0) & inp["on"]
+        sh = ai.armed(inp["num"]) & inp["on"]
         has_sh = ((res["main"][..., None] == torch.arange(G, device=self.dev)) & sh[..., None]).any(1)
         shoot = lg & (res["kind"] == gtaskmask.KIND["shoot"])
         c.add("shoot_groups", shoot.sum())

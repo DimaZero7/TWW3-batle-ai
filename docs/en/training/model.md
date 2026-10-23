@@ -219,7 +219,8 @@ unit's active effects (CCO `ActiveEffectList`). In the simulator "on" is its `fx
 battle or in the game (the companion) it is worked out from the token's own fields by the same
 conditions (health, the morale state, melee; own morale for half-morale), and a timed effect whose
 timer is not known (the Penitent) counts as off. A new effect appends its pair after the older pairs
-(before the volley input below).
+(before the volley input below). What an effect on does, as numbers - at the token's end
+([below](#what-the-effects-on-me-do-under-fire-the-melees-length-own-units-and-visible-enemies-the-last-inputs)).
 
 **Contact effects** (poison, the censer's contagion, suppressing fire; the catalogue's kind `contact`): "owned" by
 the unit whose weapon lays it (the catalogue's `inflicts`: the censer bearers, the poisoned Giant Rats, the Ratling
@@ -392,6 +393,37 @@ phases the bridge reads from `ActiveEffectList` (field `fx`), but the unit's own
 The bridge needs nothing new. An enemy only while seen (the game lists a visible unit's active effects). A checkpoint
 without these inputs (169) loads with zero weights for them (`observation.old_columns`, the student -
 `observe/tokens.widen`, Adam - `run.resume`).
+
+### What the effects on me do, under fire, the melee's length (own units and visible enemies, the last inputs)
+
+12 inputs at the token's very end (225 → 237): `observation.FX_STATS` (10) and `observation.FIGHT` (2).
+
+- **The numbers of the effects on the unit** (`fxs_<stat>_<how>`, `effects.stats_on`): the stats of the innate and
+  contact effects on the unit now ("on" of the effect pairs above: the simulator's `fx_on`, in the game
+  `exchange.effects_on`), summed as RECEIVED: multipliers multiply (the number = value - 1), additions add (/ 50 or
+  / 100 - the ability passport's scale). The 10 stats are all the catalogue's effects lay on the unit itself or on the
+  one hit (`on` self / hit): speed ×, attack +, defence +, damage × and its AP part ×, charge bonus ×, leadership +,
+  physical resistance +, projectile damage × and its AP part ×. A poisoned unit: speed -0.15, damage -0.15 (5
+  numbers), not only "effect no. 19"; contagion: leadership -0.2; the monks' Frenzy and Strength in Numbers: attack
+  +0.2, defence +0.16, leadership +0.12, speed -0.1 and so on. An aura (Hold the Line): its owner's here, the
+  neighbours' in RECEIVED. The list is append-only; a new stat of a catalogue effect fails the test
+  `test_every_stat_the_catalogue_lays_on_a_unit_is_a_column` until it is appended.
+- **Under fire** (`under_fire`, 0/1): a living unit of the other side not in melee fires (`fire`) with this unit its
+  target (`target`: the simulator's shot target, in the game the engine's target `t`). The general's FIGHT rule
+  (`Runtime.fight_of`). No `target` field: 0.
+- **The current melee's seconds** (`melee_s`): how long the present melee has gone on / 30 s, at most 1 (the charge
+  bonus fades in ~13 s). From the observations: the first decision that sees the unit in melee is the start
+  (`Memory.melee_t0`); out of melee or out of sight - from the start again. The companion counts the same (the same
+  observation memory).
+
+Visibility: own units always, enemies while seen (the game shows a visible unit's active effects, arrows and fight);
+a hidden enemy - zeros; the critic sees all. Nothing new from the simulator or the bridge: `fx_on`, `fire`, `target`,
+`m` are already in the state and in the game.
+
+Older networks load with zero weights for these 12 columns (`observation.TAIL`, `pad_inputs`; Adam - `run.resume`)
+and decide to the bit as before: g29 m40 and itS27_4, the old code against the new on the same simulator states (18
+battles x 30 decisions of both sides, logits, actions and memory - 14 M numbers), difference 0. The batch store
+(`rollout.squeeze_received`): the token is 12 numbers longer. Test: `tests/tools/test_nn_fx_fight_input.py`.
 
 ## Model
 

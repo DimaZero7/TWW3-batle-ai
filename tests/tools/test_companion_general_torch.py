@@ -13,6 +13,7 @@ torch = pytest.importorskip("torch")
 from tools.nn.companion import exchange, loop                      # noqa: E402
 from tools.nn.companion import general as cg                        # noqa: E402
 from tools.nn.general import config as gconfig, executor            # noqa: E402
+from tools.nn.general import army_input as ai                  # noqa: E402
 from tools.nn.general import runtime as gruntime                    # noqa: E402
 from tools.nn.model import config, policy                           # noqa: E402
 from tools.nn.model import observation as ob                        # noqa: E402
@@ -117,7 +118,7 @@ def parity(actor, seconds=240.0, seed=SEED, greedy=True, events=True):
     rt.learner, rt.greedy, rt.pending = actor, greedy, None
     gen = cg.GameGeneral(actor, gcfg, greedy=greedy, side=1, params=params)
     seen = {"move": 0, "mem_s": None, "mem_g": None, "battle": None, "plans": [], "plans_s": 0, "tasks": 0,
-            "reasons": set(), "max_err": 0.0, "kinds": set(), "fight": torch.zeros(2)}
+            "reasons": set(), "max_err": 0.0, "kinds": set(), "fight": torch.zeros(2), "state": torch.zeros(4)}
     sl = torch.as_tensor(slots)
     lord2 = int(slots[[i for i, n in enumerate(names) if sides[i] == 2 and n.endswith("lord")][0]])
 
@@ -166,6 +167,13 @@ def parity(actor, seconds=240.0, seed=SEED, greedy=True, events=True):
         # the same fight flags of every unit at the plan (net.FIGHT: the game's melee and firing flags and target)
         assert torch.equal(rg["in/fight"][0], rs["in/fight"][0][sl]), seen["move"]
         seen["fight"] += rs["in/fight"][0].sum(0)
+        # the same slots' state (army_input STATE: morale, wavering, fatigue, ammunition - from the bridge's mp, ms, fat, a)
+        cols = [ai.INDEX[k] for k in ai.STATE]
+        ng, ns = rg["in/num"][0][:, cols], rs["in/num"][0][sl][:, cols]
+        torch.testing.assert_close(ng, ns, rtol=0, atol=1e-6, msg=f"move {seen['move']}")
+        seen["state"] = torch.maximum(seen["state"], torch.stack([(ns[:, 0] < 0.5).any(), (ns[:, 1] > 0).any(),
+                                                                  (ns[:, 2] > 0).any(),
+                                                                  ((ns[:, 3] > 0) & (ns[:, 3] < 1)).any()]).float())
         # the same task, unit by unit
         assert torch.equal(task_g["task_on"][0], task_s["task_on"][0][sl])
         err = float((task_g["task"][0].double() - task_s["task"][0][sl].double()).abs().max())
@@ -190,6 +198,8 @@ def test_the_game_general_plans_and_tasks_as_the_simulators_runtime():
     assert all(set(g["units"]) <= seen["own"] for p in plans for g in p["groups"])
     # some unit under fire and some in melee at the plans (the fight's numbers are read in both)
     assert float(seen["fight"][0]) > 0 and float(seen["fight"][1]) > 0, seen["fight"]
+    # the slots' state moved off a fresh unit's at the plans: morale fell, wavering, tired, ammunition spent
+    assert seen["state"].tolist() == [1, 1, 1, 1], seen["state"]
 
 
 # --- the re-plans on the battle's time and its events, on the bridge's documents --------------------------------------

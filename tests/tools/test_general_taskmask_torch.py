@@ -191,12 +191,16 @@ def test_the_general_gives_shoot_only_to_a_group_with_a_shooter():
     P, Nn = 1, 7
     num = torch.zeros(P, Nn, ai.SIZE)
     num[0, [1, 3], ai.INDEX["range"]] = 0.3                           # units 1 and 3 have a missile weapon
+    num[0, [1, 3], ai.INDEX["ammo_come"]] = 1.0                       # ... and their ammunition
     inp = {"num": num, "on": torch.ones(P, Nn, dtype=torch.bool)}
     # g0: unit 0 (no shooter); g1: 1, 2 (one of two: half); g2: 3, 4, 5 (one of three); g3: empty
     c = {"main": torch.tensor([[0, 1, 1, 2, 2, 2, G]])}
     ok = gen.shoot_ok(inp, c)
     s = K["shoot"]
     assert not ok[0, 0, s] and ok[0, 1, s] and not ok[0, 2, s] and not ok[0, 3, s]
+    spent = num.clone()
+    spent[0, 1, ai.INDEX["ammo_come"]] = 0.0                          # unit 1 out of ammunition: no shooter
+    assert not gen.shoot_ok(dict(inp, num=spent), c)[0, 1, s]
     assert bool(ok[0, :, K["attack"]].all())
     third = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, shoot_share=0.3,
                                           task_mask_parts="shoot_group"), TINY.sectors, TINY.grid_half)

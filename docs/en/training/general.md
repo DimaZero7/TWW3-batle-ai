@@ -38,7 +38,7 @@ flowchart TB
 
 | Block of the design | Code | What it does |
 |---|---|---|
-| Armies | `units.py` (+ `army_input.py`) | the slots of all the battle's units: 45 numbers and 3 labels (as the "Armies" input); "come" = what is left now |
+| Armies | `units.py` (+ `army_input.py`) | the slots of all the battle's units: 49 numbers and 3 labels (as the "Armies" input); "come" = what is left now; the state (morale, wavering, fatigue, ammunition) — now: own units and the enemies seen |
 | Where a unit stands | `runtime.pos_of_obs` / `pos_of_state`, `net.POS_FEATURES` | 7 numbers a unit in the side's frame, as in the unit network's token: forward and sideways / 500 m, its facing (cos, sin), velocity forward and sideways / 5 m/s, "known". In a re-plan from the side's observation's tokens (an enemy where it was last seen; one never seen: zeros), at the deployment from the state (velocity 0). Nothing new from the game is needed: the game has the same fields (the bridge state's `x`, `z`, `b`) |
 | Army analysis | `army_reader.py` | one network for all slots → the unit's card (`card` wide) |
 | Map tiles | `tiles.py` | 256 sectors of 100 m with their 8 numbers, projected to the card's width + the tile's place + its centre (through the same layer as the units' positions: a unit and a tile compare by place). `--general-tile-feats v2` (default): the three numbers always 0 in the simulator (the enemy seen earlier; own and enemy routs) replaced by the strength of own shooters, of the enemy's shooters and of the enemy's fast units in the sector (`tiles.extra`, the strength's scale). `--general-tile-norm 1` (default): each number standardised over the map — less its mean over the tiles, / its spread, within ±5 (`General.tile_numbers`) |
@@ -49,7 +49,7 @@ flowchart TB
 | Mission kinds | `General.kinds`, `General.exec_kinds`, `config.MISSION_KINDS` | tables of learned cards with no input — **two**: `kinds` the general's (the kind choice's keys), `exec_kinds` the executor's (the task input; `--general-split-kinds 1`, default; a copy of `kinds` at the start): the executor's epochs do not move the general's choice; 6 kinds with a meaning ([below](#missions)): number, name, target types, what "done" is — in one place, `config.py` `MISSION_KINDS` |
 | Carrying missions out | `mission.py`, `runtime.execute` | every decision a measure 0…1 for each unit with a mission, from the simulator's state ([below](#missions)); the executor's bonus goes into the unit's advantage |
 | Teacher | `teacher.py` | (`--general-teacher P`) in a share of the battles a rule gives the missions, not the network; the general learns to imitate it (`--general-imitate`) ([below](#teacher)) |
-| Mission choice | `General.decide` | step by step: kind (the group's card against the kinds) → one target; targets: our groups (not itself), their groups, the tiles of a coarse 4 × 4 grid (`--general-target-grid`, a 400 m tile = the mean of its 16 sectors after the council; at least one sector inside the map): ≤ 36 candidates; the enemy's groups do not choose. A kind takes only its target types (the `pair_ok` mask: the other pairs' logits are −∞); a kind with no target there (screen without another group of ours) is not chosen. In a re-plan the group's last kind's logit gets +B (`--general-kind-stick`, [below](#more-differences-from-the-design)). `--general-threat 1` (default): our group's card gets its threat numbers through a linear layer from zero before the kind and target (`General.threat`): the nearest enemy group's distance (/ 500 m, at most 3), log of the strength ratio own : that group (cost × health come, ±3), the shooters' share in ours and in that group, the share of the group's units in contact (an enemy within 40 m), "an enemy group there is"; and by a second layer from zero (`General.fight`) the share of the group's units **under fire** (a standing enemy not in melee is firing with this unit its target: the state's firing flag `fire` and target `target`; in the simulator the flag is on from the aim, in the game `IsFiringMissiles` and the engine's target `t`) and the share **in melee** (the flag `m`) - every unit's input `fight` (`Runtime.fight_of`). `--general-group-tiles 1` (default): **every** group's card (ours before the kind and target, the enemy's as a target's key) gets the numbers of the tiles under its centre - the same 8 numbers the council reads (after the standardisation), the tiles within 1.5 tiles of the centre weighted by exp(−d²/2), by a layer from zero (`General.group_tiles`). The path from the tiles to the choice is direct, past the council |
+| Mission choice | `General.decide` | step by step: kind (the group's card against the kinds) → one target; targets: our groups (not itself), their groups, the tiles of a coarse 4 × 4 grid (`--general-target-grid`, a 400 m tile = the mean of its 16 sectors after the council; at least one sector inside the map): ≤ 36 candidates; the enemy's groups do not choose. A kind takes only its target types (the `pair_ok` mask: the other pairs' logits are −∞); a kind with no target there (screen without another group of ours) is not chosen. In a re-plan the group's last kind's logit gets +B (`--general-kind-stick`, [below](#more-differences-from-the-design)). `--general-threat 1` (default): our group's card gets its threat numbers through a linear layer from zero before the kind and target (`General.threat`): the nearest enemy group's distance (/ 500 m, at most 3), log of the strength ratio own : that group (cost × health come, ±3), the shooters' share in ours and in that group (a shooter only with ammunition: `army_input.armed`), the share of the group's units in contact (an enemy within 40 m), "an enemy group there is"; and by a second layer from zero (`General.fight`) the share of the group's units **under fire** (a standing enemy not in melee is firing with this unit its target: the state's firing flag `fire` and target `target`; in the simulator the flag is on from the aim, in the game `IsFiringMissiles` and the engine's target `t`) and the share **in melee** (the flag `m`) - every unit's input `fight` (`Runtime.fight_of`). `--general-group-tiles 1` (default): **every** group's card (ours before the kind and target, the enemy's as a target's key) gets the numbers of the tiles under its centre - the same 8 numbers the council reads (after the standardisation), the tiles within 1.5 tiles of the centre weighted by exp(−d²/2), by a layer from zero (`General.group_tiles`). The path from the tiles to the choice is direct, past the council |
 | Place choice | `General.decide` | in the battle's first plan only: a pointer to a tile of our zone |
 | Layout | `deploy.py` | a rule: a line by the formations' widths on the group's tile, facing the enemy's centre; groups on one tile stand one behind the other; everything inside the zone |
 | Unit task | `runtime.Runtime.task` | for each own unit: its group card (the mix of the places' cards by its shares; by default zeros, `--general-task-group 0`: the executor did not listen to it, KL 0.003; the width kept, older points load), its group's mission kind card (of the executor's table), the group's target (direction from where the unit faces, cos and sin; distance / 100 m, at most 20; a "none" flag) — 2 × card + 4 numbers |
@@ -111,8 +111,9 @@ plays with it. The general's code is the simulator's (`runtime.Runtime`), not a 
 (`GameBattles`) turns the bridge's state into "a simulator batch of one battle" - the units in the state file's order
 and exactly the fields `Runtime` reads:
 
-- position, bearing (`b`), men, health share, morale state, visibility - from the game's state; a missing reading
-  keeps the last one; men but no position - the unit has left the map (as the enemy's script reads it). The units'
+- position, bearing (`b`), men, health share, morale state, visibility, the exact morale (`mp`), the fatigue state
+  (`fat`), projectiles left (`a`) - from the game's state; a missing reading keeps the last one (before the first: a
+  fresh unit's - morale 1, fresh, full ammunition); men but no position - the unit has left the map (as the enemy's script reads it). The units'
   positions for the general in a re-plan come from the same observation the unit network reads (the velocity too);
 - start health, cost, formation - the simulator's numbers for the unit's key;
 - a lord fallen (dead, shattered or off the map) - as the simulator's `lord_dead_s`.
@@ -283,7 +284,8 @@ tile's, its centre. near(d, R) = 1 within R, linearly to 0 at 3R.
 - **The kinds' weights on the bonus** (`--general-exec-kind`, default `withdraw=2,screen=2`): the executor's bonus ×
   the kind's weight — "withdraw" and "screen" the executor carried out worst, they pay double; the others 1.
 - **"Shoot" only for a group of shooters** (`GeneralConfig.task_mask`): the kind `shoot` is open to the general only
-  when the units with a missile range on their card (`army_input` `range` > 0) are at least half of the group's units
+  when the units with a missile range on their card and ammunition left (`army_input.armed`: `range` > 0 and the
+  ammunition share > 0, as the simulator decides "may shoot" - `battle.py`, `a` > 0) are at least half of the group's units
   (`--general-shoot-share 0.5`, a rule kept in the point); else its logit is −∞ (`net.General.shoot_ok`). In the
   battle's analysis infantry without shooters got `shoot` — 28 % of the unit-seconds; with the rule "one shooter at
   least" 61–66 % of the units under `shoot` still had no missiles. Logged as `shoot_noshooter` (should be 0) and
@@ -923,7 +925,8 @@ Code: `tools/nn/general/army_input.py`, no torch.
 - **80 slots**: 0–39 the own army, 40–79 the enemy's; one unit a slot. Always as its own side sees it: for side 2 the
   armies swap places (as the map's layers do). The slots' order means nothing; the lord may stand anywhere. An empty
   slot is flagged `empty` and holds zeros. More than 40 units a side is an error.
-- **A slot is 45 numbers and 3 labels** (groups and order as in the "Unit slot" table of the design page):
+- **A slot is 49 numbers and 3 labels** (groups and order as in the "Unit slot" table of the design page; the group
+  "state" last):
 
 | group | numbers | what and how |
 |---|---|---|
@@ -935,6 +938,7 @@ Code: `tools/nn/general/army_input.py`, no torch.
 | defence and morale | 8 | armour / 200; shield, % / 100; leadership / 100; resistances to all, physical, missile, magic, fire, % / 100 (fire may be < 0) |
 | missile | 12 + label | range, m / 500; ammo (log 100); projectile damage and its AP part (log 500); reload, s / 20; **spread at 100 m**, m / 10; projectiles a shot / 10; shots a volley / 20; projectile speed, m/s / 100; fire arc each side, ° / 180; aim before the first shot and silence after a new target, s / 10 |
 | properties | 4 | flags: expendable, charge reflection, unbreakable, fires on the move |
+| state | 4 | **now** (`units.dynamic`): morale `MoralePercent` / 2 (within ±1.5, as in the token); wavering or worse (morale state 5–7) — flag; fatigue (state 0 fresh … 5 exhausted) / 5; ammunition share (projectiles left / the full unit's; 0 without a missile weapon) |
 | labels | 3 | trajectory (direct / high arc / direct with an arc over friends; 0 — no missile weapon), caste (12), size (4) |
 
   The scales are those of the unit network's passport (`tools/nn/model/passport.py`) wherever it has the field (test
@@ -958,6 +962,17 @@ Code: `tools/nn/general/army_input.py`, no torch.
     (√12 σ), so the number means the same. The match with the simulator: test `test_spread_agrees_with_the_simulator`;
   - walk and charge = database × (the card's run / the database's run) — a factor of 1 now;
   - come to the battle = now / full (1 in our battles; in a re-plan, what is left now).
+- **The state** (the last 4 numbers). Before the battle a fresh unit's: morale 1 (the number 0.5), not wavering, fresh,
+  full ammunition (1; 0 without a missile weapon). In the battle `units.dynamic` puts in the present ones from the
+  simulator's fields `mp`, `ms`, `fat`, `a` (in the game the same fields of the bridge's state, `companion/general.py`):
+  own units always, an enemy while seen; a hidden enemy and a field not read (NaN) keep the fresh unit's numbers (as
+  "come" = 1). The game shows all of it on a selected unit (the morale bar, the fatigue icon, the ammunition) — an
+  enemy's too, on Normal difficulty.
+- **A shooter only with ammunition** (`army_input.armed`: range > 0 and the ammunition share > 0, as the simulator: it
+  fires while `a` > 0). So count the shooters' shares of the threat numbers, the general's "shoot" mask
+  (`shoot_group`), the shooters' strength on the tiles (`tiles.with_extra`) and the counter `shoot_noshooter`. The
+  group collection by a rule (`groups.py`) still puts the units with a range among the "shooters": an empty shooter
+  stays in its group, but "shoot" is closed to it when fewer than half of its units are shooters with ammunition.
 
 In the battle the skeleton gathers the same numbers from the simulator with one table over all passports (`units.py`:
 `UnitTable`; test: equal to `army_input`'s).
@@ -967,13 +982,16 @@ In the battle the skeleton gathers the same numbers from the simulator with one 
 Code: `tools/nn/general/army_reader.py` (torch). One shared network of two dense layers for all slots — the same
 weights for own and enemy:
 
-- layer 1: ReLU(W1 · 45 numbers + b1 + the trajectory's vector + the caste's vector + the size's vector), 256 wide
+- layer 1: ReLU(W1 · 49 numbers + b1 + the trajectory's vector + the caste's vector + the size's vector), 256 wide
   (128 in the skeleton);
 - layer 2: card = W2 · h + b2, 256 numbers (the card's width in the skeleton), no activation;
 - the effect cards are added to the card (`effects`; the "Effects" input is not designed yet; 0 by default).
 
 A label is a learned vector of the first layer (`nn.Embedding`), the same as the variant's flags with their weights.
-"No missile weapon" is a vector fixed at zero. 82 688 weights at 256 (45 × 256 + 256 + 20 × 256 + 256 × 256 + 256).
+"No missile weapon" is a vector fixed at zero. 83 712 weights at 256 (49 × 256 + 256 + 20 × 256 + 256 × 256 + 256). A point whose first layer read 45 numbers
+(before the group "state") loads with zero weights for the 4 new ones (`ArmyReader._load_from_state_dict`): its cards
+and plan stay the same until the general learns more (only the rule "a shooter only with ammunition" changes: an empty
+shooter is no shooter any more).
 Empty slots never enter the network (they are taken out before it); their card is 0. A new label variant —
 `add_variant`: a new vector of zeros, the old cards stay the same to the bit. The layer's and the card's widths are
 parameters (`hidden`, `card`).
@@ -988,6 +1006,11 @@ Tests at build time (group 1 of the design's "Checks" pages):
 - `test_general_army_input.py`, `test_general_army_reader_torch.py` — the armies' input and analysis: the slots' order
   means nothing, empty slots do not interfere, one network for all, side 2's mirror, a new variant with zero weights,
   an unknown caste / size / trajectory is an error, the numbers' span.
+- `test_general_state_input_torch.py` — the group "state": morale, wavering, fatigue, ammunition of own units and the
+  enemies seen from the state's fields, a hidden enemy and a field not read — a fresh unit's; a shooter without
+  ammunition is no shooter (the threat numbers, the `shoot` mask); a point of 45 numbers loads with zeros for the new
+  ones, its cards and plan do not depend on the state. In `test_companion_general_torch.py` — the same 4 numbers in the
+  companion in the game and in the simulator at every plan.
 - `test_general_net_torch.py` — the general's network: the side mask of the group collection and the shares summing
   to 1; the routing, the dead and the empty in no group; a fresh general (the sharpness) gives a unit one clear main place (share > 0.8) and different group cards (cosine < 0.9), without the sharpness ~0.1; the inertia of a re-plan keeps the units in their groups; empty slots change nothing; a permutation of the slots
   permutes the units and changes nothing else (groups, choices, probabilities, value); alike units at different places

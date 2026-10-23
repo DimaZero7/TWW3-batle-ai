@@ -315,7 +315,7 @@ def test_the_lab_gives_the_network_its_units_shape():
     assert float(o["shape"][0, 0, 1]) > 20 and 0 < float(o["shape"][0, 0, 5]) <= 1   # width; within reach
     plain = scenario.build([a], P)
     assert "shape" not in plain.observation()
-    assert ob.NAMES[-len(ob.SHAPE):] == ob.SHAPE
+    assert ob.NAMES[ob.INDEX["shape_known"]:][:len(ob.SHAPE)] == ob.SHAPE
 
 
 def _rats_in_reach(free_on, steps=24):

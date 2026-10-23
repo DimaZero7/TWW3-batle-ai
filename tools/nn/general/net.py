@@ -28,7 +28,7 @@ Every choice is sampled (or given: the update's log-probabilities under the choi
 log-probability (the sum of its steps') and entropy; groups that are not groups take no part.
 
 Input dict (rows P; N the battle's slots, S tiles, G places a side):
-    num [P, N, 45], lab [P, N, 3]   the army slots (units.py)
+    num [P, N, 49], lab [P, N, 3]   the army slots (units.py; the state group: morale, fatigue, ammunition now)
     pos [P, N, 7]                   where each unit stands (POS_FEATURES; zeros for an enemy never seen)
     on [P, N]                       the unit sits at the council (present, alive, not known dead)
     own [P, N]                      the general's side
@@ -55,8 +55,8 @@ from tools.nn.model.encoder import Block
 NEG = -1e9
 # a group's threat numbers (General.threat; GeneralConfig.threat): the nearest enemy group's distance (/ THREAT_D m,
 # at most 3), log of the strength ratio own : that group's (cost x health come, within +-3), the shooters' share in the
-# group and in that group, the share of the group's units with an enemy unit closer than CONTACT_M (in contact), an
-# enemy group there is
+# group and in that group (shooters with ammunition left: army_input.armed), the share of the group's units with an
+# enemy unit closer than CONTACT_M (in contact), an enemy group there is
 THREAT = ("enemy_dist", "strength_ratio", "own_shooters", "enemy_shooters", "contact", "has_enemy")
 THREAT_D = 500.0
 CONTACT_M = 40.0
@@ -491,7 +491,7 @@ class General(nn.Module):
 
     def shoot_ok(self, inp, c):
         """[P, G, K] the kinds a group may take by its units (GeneralConfig.task_mask): "shoot" only for a group whose
-        shooters - units taking part (inp "on") whose card has a missile range (army_input "range" > 0) - are at least
+        shooters - units taking part (inp "on") with a range and ammunition left (army_input.armed) - are at least
         GeneralConfig.shoot_share of its units taking part (and one at least); every other kind always. All True
         without task_mask (or without the kind)."""
         G, K = self.cfg.places, self.cfg.kinds
@@ -502,7 +502,7 @@ class General(nn.Module):
             return out
         from tools.nn.general import army_input as ai
         on = inp["on"]
-        sh = (inp["num"][..., ai.INDEX["range"]] > 0) & on                                # [P, N]
+        sh = ai.armed(inp["num"]) & on                                                    # [P, N]
         mem = (c["main"][..., None] == torch.arange(G, device=sh.device)) & on[..., None]   # [P, N, G]
         n_sh = (mem & sh[..., None]).sum(1).float()
         n = mem.sum(1).float()
@@ -563,7 +563,7 @@ class General(nn.Module):
         num = inp["num"].float()
         cost = torch.expm1(num[..., ai.INDEX["cost"]] * math.log1p(5000.0)) * num[..., ai.INDEX["hp_come"]]
         strength = torch.einsum("png,pn->pg", mf, cost)
-        shooter = (num[..., ai.INDEX["range"]] > 0).float()
+        shooter = ai.armed(num).float()                     # (a shooter with ammunition left: army_input.armed)
         sh = torch.einsum("png,pn->pg", mf, shooter) / n.clamp(min=1)
         own_g, foe_g = n[:, :G] > 0, n[:, G:] > 0
         dg = (cent[:, :G, None] - cent[:, None, G:]).norm(dim=-1).masked_fill(~foe_g[:, None, :], float("inf"))

@@ -201,7 +201,7 @@ def test_an_older_network_loads_with_zero_weights_for_the_spell_inputs():
         if k == "encoder.ctx.0.weight":
             v = v[:, :ob.CONTEXT - len(ob.WINDS)]
         elif k == "encoder.unit.0.weight":
-            v = v[:, :ob.TOKEN - len(ob.MAGIC) - len(ob.SHAPE)]
+            v = v[:, :ob.TOKEN - len(ob.MAGIC) - len(ob.SHAPE) - len(ob.FX_STATS) - len(ob.FIGHT)]
         elif k.endswith(("abilities.net.0.weight", "ability_extra.net.0.weight", "ability_k.0.weight")):
             v = v[:, :mab.SIZE - n_sp]
         elif k in ("pair_bias.lin.weight", "heads.target_pair.weight"):

@@ -108,3 +108,54 @@ def features(m, state, own_bits, visible, doc=None, on=None):
     on = on.astype(np.float32) if m is np else on.float()
     own = own_bits.astype(np.float32) if m is np else own_bits.float()
     return m.stack([own, on], -1).reshape(*own.shape[:-1], 2 * own.shape[-1])
+
+
+# What the effects on now do, as numbers (the token's FX_STATS, observation.py; 23.10.2026): per (stat, how) of the
+# catalogue's effects' stats - the same stats and scales as an ability's passport (abilities.STATS): a multiplier as
+# value - 1 (the effects on multiply), an addition / its scale (they add). The stats an effect lays on the unit itself:
+# `on` self (an innate effect of the unit: Frenzy, Strength in Numbers, the owner's Hold the Line) or hit (a contact
+# effect on the unit: poison, contagion, suppression); an aura's friends get theirs through RECEIVED (abilities.received:
+# the simulator's fx_rx). Fixed and append-only (a new stat of the catalogue: test_nn_fx_stats_input fails until it
+# is appended here).
+FX_STATS = (("scalar_speed", "mult"), ("stat_melee_attack", "add"), ("stat_melee_defence", "add"),
+            ("stat_melee_damage_base", "mult"), ("stat_melee_damage_ap", "mult"), ("stat_charge_bonus", "mult"),
+            ("stat_morale", "add"), ("stat_resistance_physical", "add"), ("scalar_missile_damage_base", "mult"),
+            ("scalar_missile_damage_ap", "mult"))
+FX_STAT_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS)
+FX_MULT = np.array([h == "mult" for _, h in FX_STATS])
+_TORCH = {}
+
+
+@lru_cache(maxsize=1)
+def stat_table():
+    """[E, len(FX_STATS)] float32: per effect of the catalogue (keys() order) the log of each multiplier and each
+    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note)."""
+    from tools.nn.model import abilities
+    doc = load()
+    scale = {(s, h): float(k) for s, h, k in abilities.STATS}
+    col = {sh: j for j, sh in enumerate(FX_STATS)}
+    out = np.zeros((len(keys(doc)), len(FX_STATS)), np.float32)
+    for i, k in enumerate(keys(doc)):
+        for e in (doc["effects"].get(k) or {}).get("stats") or ():
+            on = set(e.get("on") or ())
+            j = col.get((e["stat"], e["how"]))
+            if j is None or not on & {"self", "hit"}:
+                continue
+            v = float(e["value"])
+            out[i, j] += np.log(max(v, 1e-6)) if e["how"] == "mult" else v / scale[(e["stat"], e["how"])]
+    return out
+
+
+def stats_on(m, on):
+    """[B, N, len(FX_STATS)] float: the stats of the effects on now (on [B, N, E] bool, active() and the visibility
+    already applied): multipliers multiply (value - 1), additions add (/ scale). numpy or torch."""
+    if m is np:
+        tab, mult = stat_table(), FX_MULT
+        val = on.astype(np.float32) @ tab
+    else:
+        key = str(on.device)
+        if key not in _TORCH:
+            _TORCH[key] = (m.as_tensor(stat_table(), device=on.device), m.as_tensor(FX_MULT, device=on.device))
+        tab, mult = _TORCH[key]
+        val = on.float() @ tab
+    return m.where(mult, m.exp(val) - 1, val)

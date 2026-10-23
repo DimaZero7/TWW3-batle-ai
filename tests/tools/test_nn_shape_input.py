@@ -8,6 +8,8 @@ from tools.nn.model import observation as ob
 from tests.tools.test_nn_spells import caster_battle
 
 F = len(ob.SHAPE_FEATURES) + ob.SHAPE_GRID
+S0 = ob.INDEX["shape_known"]                      # the shape's first column (FX_STATS, FIGHT after it)
+S1 = S0 + len(ob.SHAPE)
 
 
 def shape_state(**kw):
@@ -20,7 +22,7 @@ def shape_state(**kw):
 
 
 def test_the_shape_columns_are_the_tokens_last():
-    assert ob.NAMES[-len(ob.SHAPE):] == ob.SHAPE and len(ob.SHAPE) == 1 + F
+    assert ob.NAMES[S0:S1] == ob.SHAPE and ob.NAMES[S1:] == ob.FX_STATS + ob.FIGHT and len(ob.SHAPE) == 1 + F
     assert ob.SHAPE_FEATURES == tuple(__import__("tools.nn.fighters.shape", fromlist=["x"]).FEATURES)
     assert len(ob.SHAPE_SCALE) == F
 
@@ -35,14 +37,14 @@ def test_own_and_seen_enemies_show_their_shape_scaled():
     assert tok[0, ob.INDEX["shape_cell0"]] == pytest.approx(0.25)
     hidden, _ = ob.observe(dict(state, vis=np.array([[True, True, False, True]])), setup, 1)
     assert hidden.tokens[0, 2, ob.INDEX["shape_known"]] == 0             # the Warlord not seen: nothing
-    assert not hidden.tokens[0, 2, -len(ob.SHAPE):].any()
+    assert not hidden.tokens[0, 2, S0:S1].any()
     assert hidden.tokens[0, 0, ob.INDEX["shape_known"]] == 1             # own units always
 
 
 def test_no_shape_in_the_state_gives_zeros():
     setup, state = caster_battle()
     obs, _ = ob.observe(state, setup, 1)
-    assert not obs.tokens[0, :, -len(ob.SHAPE):].any()
+    assert not obs.tokens[0, :, S0:S1].any()
     cobs, _ = ob.observe(shape_state()[1], setup, 1, full=True)          # the critic sees every unit's
     assert cobs.tokens[0, :3, ob.INDEX["shape_known"]].tolist() == [1, 1, 1]
 
@@ -54,15 +56,15 @@ def test_an_older_checkpoint_loads_with_zero_weights_and_computes_what_it_did():
     cfg = preset("v2", d=32, heads=2, pointer=16, critic_d=32, critic_heads=2, sector_d=16, eyes=False)
     torch.manual_seed(0)
     sd = policy.Actor(cfg).state_dict()
-    old = {k: (v[:, :ob.TOKEN - len(ob.SHAPE)].clone() if k == "encoder.unit.0.weight" else v.clone())
+    old = {k: (v[:, :S0].clone() if k == "encoder.unit.0.weight" else v.clone())
            for k, v in sd.items()}
     loaded = policy.Actor(cfg)
     loaded.load_state_dict(old)
     w = loaded.state_dict()["encoder.unit.0.weight"]
     assert torch.all(w[:, ob.INDEX["shape_known"]:] == 0)
-    assert torch.equal(w[:, :ob.TOKEN - len(ob.SHAPE)], old["encoder.unit.0.weight"])
+    assert torch.equal(w[:, :S0], old["encoder.unit.0.weight"])
     tokens = torch.randn(2, 5, ob.TOKEN)
     ctx = torch.randn(2, ob.CONTEXT)
     with_shape = loaded.encoder(tokens, ctx)
-    tokens[..., -len(ob.SHAPE):] = 0
+    tokens[..., S0:] = 0
     assert torch.equal(loaded.encoder(tokens, ctx), with_shape)          # whatever the shape: the same output

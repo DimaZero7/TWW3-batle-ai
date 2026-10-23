@@ -41,7 +41,7 @@ def cards(m, armies, side=1):
 
 def test_shape_and_size():
     m = ar.ArmyReader()
-    assert ar.weights(m) == 45 * 256 + 256 + (4 + 12 + 4) * 256 + 256 * 256 + 256 == 82688
+    assert ar.weights(m) == 49 * 256 + 256 + (4 + 12 + 4) * 256 + 256 * 256 + 256 == 83712
     assert m.variants() == {"trajectory": 4, "caste": 12, "size": 4}
     c = cards(model(), {1: OURS, 2: THEIRS})
     assert c.shape == (80, 256)

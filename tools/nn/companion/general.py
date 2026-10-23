@@ -21,6 +21,7 @@ import numpy as np
 import torch
 
 from tools.nn.general import runtime as gruntime
+from tools.nn.model import passport as pp
 from tools.nn.model import policy as model_policy
 from tools.nn.model.decide import frame_to
 
@@ -60,12 +61,12 @@ def parse_sets(items):
 class GameBattles:
     """What Runtime reads of a rollout.Battles, for one game battle (B = 1, its N units in the state document's order):
     st.u - the unit fields [1, N] it reads (x, z, b, side, men, hp, hp0, ms, gone, vis, cost, width, sp_h, sp_v, m,
-    fire, target), st.t [1] (the battle's time, s), st.done, st.lord_dead_s [1, 2] (s since the side's lord fell, -1
+    fire, target, and the slots' state group: mp, fat, a - units.dynamic), st.t [1] (the battle's time, s), st.done, st.lord_dead_s [1, 2] (s since the side's lord fell, -1
     standing), st.keys; setup.bounds [1, 4]; mem[s].frame (the side's observation frame); ctrl [1, 2] (the side the
     network commands is the learner, the other a script); past (none); B, N, device, rows_learn.
 
     The game's state over it (update): positions, men, health share, morale state, visibility, the melee and firing
-    flags and the engine's target as read; a reading that is missing keeps the last one; a unit with men and no
+    flags and the engine's target, the morale (MoralePercent), the fatigue state and the projectiles left as read; a reading that is missing keeps the last one; a unit with men and no
     position has left the map (gone, as the enemy's script reads it); the static numbers (start health, cost,
     formation) are the simulator's of the unit's key (params.static, the formation of exchange.formation_shape); a lord
     falls - dead, shattered or gone - as the simulator's lord_dead_s."""
@@ -89,6 +90,7 @@ class GameBattles:
                 row = params.static(k, factions[int(sides[i]) - 1] if sides[i] in (1, 2) else None)
                 hp0[i], cost[i] = row["hp0"], row["cost"]
         sh = battle.shape or {}
+        known = pp.load()
         f = (lambda a: torch.as_tensor(np.nan_to_num(np.asarray(a, np.float32)), device=self.device)[None])
         z = torch.zeros(1, N, device=self.device)
         self.u = {"side": torch.as_tensor(sides, dtype=torch.long, device=self.device)[None],
@@ -100,7 +102,9 @@ class GameBattles:
                   "vis": torch.ones(1, N, dtype=torch.bool, device=self.device),
                   "m": torch.zeros(1, N, dtype=torch.bool, device=self.device),
                   "fire": torch.zeros(1, N, dtype=torch.bool, device=self.device),
-                  "target": torch.full((1, N), -1, dtype=torch.long, device=self.device)}
+                  "target": torch.full((1, N), -1, dtype=torch.long, device=self.device),
+                  # the slots' state group (army_input STATE) until read: a fresh unit's - morale 1, fresh, full ammunition
+                  "mp": z + 1.0, "fat": z.clone(), "a": f(pp.ammo([k if k in known else "" for k in keys]))}
         self.lord = torch.as_tensor(np.asarray(battle.setup.lord[0], bool), device=self.device)[None]
         self.st = SimpleNamespace(u=self.u, t=torch.zeros(1, device=self.device),
                                   done=torch.zeros(1, dtype=torch.bool, device=self.device),
@@ -115,7 +119,9 @@ class GameBattles:
         seen = torch.isfinite(x) & torch.isfinite(z)
         u["x"] = torch.where(seen, x, u["x"])
         u["z"] = torch.where(seen, z, u["z"])
-        for k in ("b", "hp"):
+        for k in ("b", "hp", "mp", "fat", "a"):
+            if k not in state:
+                continue
             v = t(k)
             u[k] = torch.where(torch.isfinite(v), v, u[k])
         u["men"] = torch.nan_to_num(t("men"), nan=0.0)

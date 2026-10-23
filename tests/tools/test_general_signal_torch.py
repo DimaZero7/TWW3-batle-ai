@@ -387,7 +387,8 @@ def test_the_missions_are_measured_and_logged_by_kind():
     assert seen and all(0.0 <= st[f"exec_{n}"] <= 1.0 for n in seen)
     assert st["exec_units"] > 0 and st["exec_bonus_abs"] > 0 and st["exec_weight"] == 1.0
     assert abs(st["exec_bonus"]) <= st["exec_bonus_abs"]
-    assert sum(st[f"kind_share_{n}"] for n in names) == pytest.approx(1.0, abs=2e-3)
+    # (each share rounded to 3 decimals: the sum within half a thousandth a kind)
+    assert sum(st[f"kind_share_{n}"] for n in names) == pytest.approx(1.0, abs=5e-4 * len(names) + 1e-9)
     assert 0.0 < st["masked_pairs"] < 1.0
     assert all(math.isfinite(x) for x in st["exec_base"] if x == x)
     # the paid units are our units with a group in a plan of the learner's

@@ -62,6 +62,17 @@ The rule: the AI sees only what a human player sees.
   or cast, an enemy's - summed as the passports' allies group (an enemy's: its enemies group), abilities.received;
   from the state's `ab_rx` (the abilities on it, a bitmask: the simulator's; the companion's from the unit card;
   missing: none). The unit's own abilities and innate effects are in its slots and its innate effects.
+* What the effects on the unit do (FX_STATS, the token's last columns but FIGHT, 23.10.2026; own units and seen enemies:
+  the game lists a seen unit's active effects with their numbers): the stats of its innate and contact effects on now
+  (the Innate effects' `on` below: Frenzy, Strength in Numbers, poison, contagion, suppression...) summed as RECEIVED -
+  multipliers multiply (value - 1), additions add (/ scale) - effects.stats_on; so poison is "-15 % speed, damage" and
+  not only effect number 19. An aura's friends get it through RECEIVED, its owner here.
+* The fight (FIGHT, the token's last columns, 23.10.2026; own units and seen enemies): under fire - a living unit of
+  the other side, not in melee, fires (the state's `fire`) with this unit its target (`target`: the simulator's shot
+  target, the game's engine target; the general's FIGHT under_fire, tools/nn/general/runtime.py fight_of) - and the
+  seconds the unit's current melee has gone on / MELEE_S, at most 1 (from the observations: Memory.melee_t0, the
+  first observation that saw it in melee; a unit not seen or out of melee starts again; the companion the same).
+  Missing `target`: not under fire.
 * Volley readiness (VOLLEY, own units and seen enemies, the column before ARC): seconds since the
   unit's projectiles left (`a`) last fell between two observations (its last volley) / its passport
   reload_s, clipped to 0..1; 1 before its first shot; 0 for units without missiles. Seen at the
@@ -120,6 +131,7 @@ ROUT_SHARE = 0.5     # ... and its rout_share (reward.Weights)
 RATE_CAP = 4.0       # the rate input: rate / RATE_MIN, at most this
 ORDER_AGE = 60.0     # s: the order in force's age / ORDER_AGE, capped at 1 (ORDER)
 ORDER_MOVE_M = 10.0  # m: a move point moved more than this is a new order (= reward.Weights.order_move_m)
+MELEE_S = 30.0       # s: the current melee's seconds / MELEE_S, capped at 1 (FIGHT; the charge bonus fades in ~13 s)
 
 # The token's dynamic features: (name, who sees it). "both": own units and visible enemies (the game's UI shows
 # them for an enemy unit, module doc); "own": own units only - the orders (zero for enemies; the critic's full view
@@ -172,15 +184,20 @@ SHAPE = ("shape_known",) + tuple(f"shape_{n}" for n in SHAPE_FEATURES) + tuple(f
 # the raw numbers' scales: men per m² x 2 (~0.5), metres / 30 (width, depth) and / 10 (the offsets), shares as they
 # are, a cell's share x 4 (an even spread 1 / 16 -> 0.25)
 SHAPE_SCALE = (2.0, 1 / 30, 1 / 30, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0) + (4.0,) * SHAPE_GRID
+# Then FX_STATS (23.10.2026, own units and seen enemies; older checkpoints: zero weights): what the effects on the unit
+# do, as numbers (module doc; effects.stats_on). Then FIGHT (23.10.2026, the same): under fire, the current melee's
+# seconds (module doc).
+FX_STATS = effects.FX_STAT_NAMES
+FIGHT = ("under_fire", "melee_s")
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE)
+         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE + FX_STATS + FIGHT)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM, RECEIVED, MAGIC, SHAPE)
+TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT)
 
 
 def old_columns(width):
@@ -340,6 +357,7 @@ class Memory:
     ord_x: object = None
     ord_z: object = None
     ord_t: object = None          # [B, N] time it was first seen in force (-1 never)
+    melee_t0: object = None       # [B, N] time the current melee was first seen (FIGHT; -1 not in melee or not seen)
 
 
 @dataclass
@@ -390,7 +408,8 @@ def start(state, setup, side):
     zero, false = xs * 0, xs != xs
     return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false, zero - 1, zero - 1,
                   zero[:, :2] - 1, zero - 1, zero[:, :2] - 1, zero - 1, zero[:, 0], zero[:, 0] - 1, zero - 1,
-                  zero - 1, ord_kind=zero - 1, ord_tgt=zero - 1, ord_x=zero, ord_z=zero, ord_t=zero - 1)
+                  zero - 1, ord_kind=zero - 1, ord_tgt=zero - 1, ord_x=zero, ord_z=zero, ord_t=zero - 1,
+                  melee_t0=zero - 1)
 
 
 def observe(state, setup, side, memory=None, full=False):
@@ -498,8 +517,10 @@ def observe(state, setup, side, memory=None, full=False):
     shown = S.present if full else (own | sees)
     magic = m.stack([m.where(shown, _f(m, _field(state, k, xs) > 0), xs * 0) for k in ("cast_now", "bm_hit")], -1)
     form = _shape(m, state, shown, xs)
-    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx, magic, form], -1)
-              * _f(m, S.present)[..., None])
+    fxs = _f(m, effects.stats_on(m, fx_on & shown[..., None]))
+    fight, melee_t0 = _fight(m, state, S, memory, tn, alive, sees, shown, xs)
+    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx, magic, form, fxs,
+                       fight], -1) * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)
@@ -520,13 +541,38 @@ def observe(state, setup, side, memory=None, full=False):
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
                  tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t, prev_ammo, volley_t,
-                 *ord_mem)
+                 *ord_mem, melee_t0=melee_t0)
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
     abil, abil_ok, abil_idx = _abilities(m, state, S, own, sees, ctrl, full, xs, fx_on, target_ok)
     return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), fr, side,
                abil, abil_ok, abil_idx), new
+
+
+def _fight(m, state, S, memory, tn, alive, sees, shown, like):
+    """([B, N, len(FIGHT)] the FIGHT columns, the Memory's melee_t0): module doc. Under fire: a living unit of the other
+    side, not in melee, firing with this unit its target; the current melee's seconds from the first observation that
+    saw the unit (seen now) in melee. Only where shown (own units, seen enemies; the critic's: all)."""
+    zero = like * 0
+    tgt, fire = state.get("target"), state.get("fire")
+    if tgt is None or fire is None:
+        under = zero > 0
+    else:
+        tgt = m.nan_to_num(tgt * 1.0, nan=-1.0)
+        side = S.side
+        shoots = alive & _b(m, fire) & ~_b(m, state["m"]) & (tgt >= 0)                         # [B, N] shooter i
+        N = like.shape[1]
+        cols = np.arange(N) if m is np else m.arange(N, device=like.device)
+        hit = shoots[..., None] & (tgt[..., None] == cols)                                   # [B, i, j]: i shoots j
+        foe = side[..., :, None] != side[..., None, :]
+        under = (hit & foe).any(-2) & S.present
+    melee = sees & _b(m, state["m"])
+    old = zero - 1 if memory.melee_t0 is None else memory.melee_t0
+    t0 = m.where(melee, m.where(old >= 0, old, tn), zero - 1)
+    secs = m.where(melee, m.clip((tn - t0) / MELEE_S, 0, 1), zero)
+    out = m.stack([_f(m, under), _f(m, secs)], -1)
+    return m.where(shown[..., None], out, out * 0), t0
 
 
 def _shape(m, state, shown, like):

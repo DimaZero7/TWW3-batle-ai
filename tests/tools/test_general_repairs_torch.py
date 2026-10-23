@@ -39,6 +39,7 @@ def army(P=1):
         lab[:, i, CASTE] = pp.CASTES.index(c)
         num[:, i, ai.INDEX["run"]] = 0.9 if "cavalry" in c else 0.45
         num[:, i, ai.INDEX["range"]] = 0.3 if c.startswith("missile") else 0.0
+        num[:, i, ai.INDEX["ammo_come"]] = 1.0 if c.startswith("missile") else 0.0     # (full ammunition)
         num[:, i, ai.INDEX["cost"]] = 0.7
         num[:, i, ai.INDEX["hp_come"]] = 1.0
         pos[:, i, 0], pos[:, i, 1], pos[:, i, -1] = x / 500.0, y / 500.0, 1.0
