@@ -84,9 +84,10 @@ then decides nothing - and the catch stays arc_lines'): friend_rays, friend_line
 - A path is blocked by a friend's man (a cylinder: radius and height x the mod's 1.0) it passes below the head of. A
   friend's men stand in files and ranks: a man's path lies in a file's band (2 r of the file spacing) or between two
   files - then it passes every rank of that friend - and it is blocked when the band holds a man of the friend where
-  the arc is below the heads (the share of the rank spacing that window covers); their centres begin no nearer than
-  the two bodies' radii. The unit's line ignores a friend whose formation overlaps its own (two units in one place):
-  no lob for it, only the men's paths.
+  the arc is below the heads (the share of the rank spacing that window covers); a body that holds the muzzle or
+  stands within its radius of it horizontally (beside, behind) blocks at any arc. The unit's line ignores a friend
+  whose formation is inside its own (the circumscribed circles intersect and the turned rectangles touch): no lob for
+  it, only the men's paths. (The game's path is 16 m chords along the arc; ours the exact parabola.)
 - Hits on friends take the full damage (can_damage_allies 1 for all our shooters).
 """
 import math
@@ -837,9 +838,11 @@ _RAYS = (-0.5, 0.0, 0.5)
 
 def _path_block(lo, hi, xa, xb, rk):
     """The length of the friends' centre interval [lo, hi] along a path whose bodies (radius rk) reach its blocked
-    part - the path below their heads before xa and after xb (the arc's two crossings of their height)."""
+    part - the path below their heads before xa and after xb (the arc's two crossings of their height) - and the
+    bodies that hold the muzzle itself or stand within rk of it horizontally, whatever the arc: their centres up to
+    pi / 4 rk ahead along the path (the mean half chord of that circle across the path's band)."""
     span = (hi - lo).clamp(min=0)
-    near = (torch.minimum(hi, xa + rk) - lo).clamp(min=0)
+    near = (torch.minimum(hi, torch.maximum(xa + rk, math.pi / 4 * rk)) - lo).clamp(min=0)
     far = (hi - torch.maximum(lo, xb - rk)).clamp(min=0)
     return torch.minimum(near + far, span)
 
@@ -857,10 +860,10 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
     centres lie before xa + r or after xb - r along it block it; a friend's men stand in its files and ranks: a path in
     a file's band (min(2 r / file spacing, 1) of the paths) meets a man there with the share of the rank spacing the
     window covers (at most 1), a path between the files passes all the ranks - the same men blocked every volley;
-    his men's centres begin no nearer than the two bodies' radii (bodies do not overlap). The aim point: aim_frac
-    (0.75) of the target's height. The men of i's own unit never block, but for a unit in melee with its target
-    (contact [B, N, N]); the unit's rays ignore a friend whose formation rectangle overlaps i's (geometry.rect_gap < 0:
-    two units in one place)."""
+    a body within its radius of the muzzle (beside, behind) blocks at any arc - the window starts pi / 4 rk behind it
+    (_path_block). The aim point: aim_frac (0.75) of the target's height. The men of i's own unit never block, but
+    for a unit in melee with its target (contact [B, N, N]); the unit's rays ignore a friend whose formation is inside
+    i's: their circumscribed circles intersect and the turned rectangles touch (geometry.rect_gap <= 0)."""
     ms = params.sim["missile"]
     arc = ms.get("arc_los")
     fcfg = ms["friend_los"]
@@ -920,7 +923,10 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
         """The path of i's man y m ahead of i's centre along the line: (L, the friends' centre interval along it lo..hi,
         how far across the path has come towards the target's centre at each friend)."""
         L = (dist - y).clamp(min=1.0)
-        lo = torch.maximum(along - span - y, ri + rk)
+        # (a body within rk of the muzzle blocks the shot at any arc - behind or beside it too: from pi / 4 rk behind,
+        # the mean half chord; the unit's own men in melee from the next man on, ri + rk: the shooter is not his own
+        # obstacle)
+        lo = torch.maximum(along - span - y, torch.where(eye, ri + rk, -math.pi / 4 * rk))
         hi = torch.minimum(along + span - y, edge - y)
         return L, lo, hi, (1 - (along - y) / L).clamp(min=0)
 
@@ -976,10 +982,14 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
         share = torch.where(on, share, torch.zeros_like(share))
     if rays:
         L, lo, hi, shrink = place(span_i)
-        # (a friend whose formation overlaps i's does not count for the unit's line: two units in one place)
-        apart = geometry.rect_gap(u["x"], u["z"], u["b"], pw["front"], pw["depth"]) >= 0
+        # "a formation inside another own one": their circumscribed circles intersect and the turned rectangles touch
+        # somewhere (rect_gap <= 0); a lone man: his circle
+        ri_c = torch.where(lone, rad, torch.sqrt((pw["front"] / 2) ** 2 + (pw["depth"] / 2) ** 2))
+        circles = pw["dist"] < ri_c[:, :, None] + ri_c[:, None, :]
+        touch = geometry.rect_gap(u["x"], u["z"], u["b"], pw["front"], pw["depth"]) <= 0
         lone_pair = lone[:, :, None] | lone[:, None, :]
-        apart = torch.where(lone_pair, pw["gap"] >= 0, apart)
+        touch = torch.where(lone_pair, pw["gap"] <= 0, touch)
+        apart = ~(circles & touch)
         front_block = torch.where(friend & apart, block(L, lo, hi), zero3)
         shut = torch.zeros_like(u["men"])
         for r in _RAYS:

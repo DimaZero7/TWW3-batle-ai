@@ -144,9 +144,10 @@ def test_rule3_and_5_units_in_each_other_bullets_lose_the_men_behind_the_others_
     share, _ = first_volley(pair, d=90.0)
     old, _ = first_volley(pair, d=90.0, params=OFF)
     assert share[0] < 0.75 and share[1] < 0.75 and old[0] > 0.95
-    # arrows rise over the other unit's heads within ~1 m: few of them are lost
+    # arrows rise over the other unit's heads within ~1 m and the archers stand looser (2.0 x 2.1 m against 1.4 x 1.7):
+    # fewer of them are lost
     arch, _ = first_volley([(ARCHER, -100, 0, 90), (ARCHER, -100, 0, 90)], d=100.0)
-    assert arch[0] > 0.75 and arch[0] > share[0] + 0.15
+    assert arch[0] > share[0] + 0.1
 
 
 def test_rule4_a_friend_hit_takes_the_full_damage():
@@ -240,8 +241,8 @@ def test_rule4_a_friend_overlapping_the_formation_does_not_close_the_line_no_lob
 
 def test_rule2_the_aim_point_is_three_quarters_of_the_target_mans_height():
     """The path ends at aim_frac (0.75) of the target man's height: a lower aim point (a flatter path) is blocked more."""
-    pair = [(ARCHER, -100, 0, 90), (ARCHER, -100, 0, 90)]          # (arrows: the window below the heads is short)
-    st, pw, target = setup(pair, d=100.0)
+    behind = [(HG, -100, 0, 90), (SPEAR, -60, 0, 90)]               # a screen 40 m ahead: the arc's height over it
+    st, pw, target = setup(behind, d=80.0)
     at = missile.friend_lines(st.u, pw, target, P)
     low_aim = P.with_cal("missile", friend_los=dict(P.sim["missile"]["friend_los"], aim_frac=0.1))
     assert float(missile.friend_lines(st.u, pw, target, low_aim)[0, 0]) > float(at[0, 0])
@@ -284,4 +285,34 @@ def test_rule2_the_path_is_checked_again_after_every_reload():
             st.u["z"][0, 1] = 200.0
     v = _volleys(st, 0, 60, away)
     assert len(v) >= 2 and v[0] < 0.75 * 90 and v[1] > 0.95 * float(st.u["men"][0, 0])
+
+
+def test_rule1_a_body_at_the_muzzle_blocks_the_shot_at_any_arc():
+    """A friend's man whose body holds the muzzle or stands within his radius of it (beside, behind) blocks the shot
+    whatever the arc: two archer units in one place lose men even on the 45 deg arc; a screen 40 m ahead loses none on
+    it. The window: centres from pi / 4 r behind the muzzle on, even when the arc clears every head."""
+    pair = [(ARCHER, -100, 0, 90), (ARCHER, -100, 0, 90)]
+    st, pw, target = setup(pair)
+    lob = torch.ones_like(target, dtype=torch.bool)
+    assert float(missile.friend_lines(st.u, pw, target, P, lob=lob)[0, 0]) > 0.1
+    st, pw, target = setup([(ARCHER, -100, 0, 90), (SPEAR, -60, 0, 90)])
+    assert float(missile.friend_lines(st.u, pw, target, P, lob=lob)[0, 0]) < 0.01
+    t = lambda *v: torch.tensor([float(x) for x in v])
+    clear = t(-1e9)                                                  # the arc above every head from the muzzle on
+    assert float(missile._path_block(t(-0.4), t(-0.1), clear, t(1e9), t(0.6))[0]) == pytest.approx(0.3)
+    assert float(missile._path_block(t(0.6), t(2.0), clear, t(1e9), t(0.6))[0]) == 0.0
+
+
+def test_rule3_a_formation_inside_another_needs_the_rectangles_to_touch():
+    """'A formation inside another own one' (the unit's line ignores its bodies): the circumscribed circles intersect
+    and the turned rectangles touch somewhere - a crossbow unit 0.5 m beyond the other's front (circles intersecting,
+    rectangles apart) closes the line at a near target; the same unit overlapping the front by 0.5 m does not."""
+    st, pw, target = setup([(XBOW, -100, 0, 90)], d=30.0)
+    depth = float(pw["depth"][0, 0])
+    st, pw, target = setup([(XBOW, -100, 0, 90), (XBOW, -100 + depth + 0.5, 0, 90)], d=30.0)
+    assert float(geometry.rect_gap(st.u["x"], st.u["z"], st.u["b"], pw["front"], pw["depth"])[0, 0, 1]) > 0
+    assert bool(missile.friend_rays(st.u, pw, target, P)[0, 0])
+    st, pw, target = setup([(XBOW, -100, 0, 90), (XBOW, -100 + depth - 0.5, 0, 90)], d=30.0)
+    assert float(geometry.rect_gap(st.u["x"], st.u["z"], st.u["b"], pw["front"], pw["depth"])[0, 0, 1]) < 0
+    assert not bool(missile.friend_rays(st.u, pw, target, P)[0, 0])
 
