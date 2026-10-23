@@ -152,7 +152,8 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
     [probe](../units/missile-probe.md)) or the 45 deg arc when lobbing. A path is blocked by a neighbour's man whose head
     the projectile passes below; the neighbour's men stand in ranks and files, so a path over n of its ranks passes with
     (1 - min(2r / file spacing, 1))^n; its men's centres are no nearer than the two bodies' radii (bodies do not
-    overlap). Bullets passing below the friends' heads by the spread hit them (`friend_catch`). The readiness is still
+    overlap). Bullets passing below the friends' heads by the spread hit them (`friend_catch`). A simplification: the
+    45 deg arc changes only who blocks whom; a lobbed shot's accuracy and flight time are the low arc's. The readiness is still
     ours: whole-unit volleys (`missile.volley_load` 1, see "Reload"). · the game's rules · high.
   - What it gives (the simulator, the first volley, as a share of the same unit alone): two handgunner units in one
     place - 0.56 each (1.0 without the rule); archers 0.84, crossbowmen 0.64: an arrow rises above a neighbour's head

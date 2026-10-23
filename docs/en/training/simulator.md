@@ -2417,6 +2417,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
   cavalry, monsters, magic (but two bombardments, [above](#magic)), flying, artillery, experience ranks, the scaled "strong enemy near"
   (by default only −3 with an enemy worth 3 times as much; the rule by the database's scale exists but is off: [above](#expendable-units-resistance-a-stronger-enemy)), the database's `broken_finish_base_timeout` 180 and `charge_timeout` 60 (meaning not found).
 - `vis` is always true: line of sight is not modelled.
+- The 45 deg arc of a closed line (`missile.friend_los`) changes only who blocks whom: a lobbed shot's accuracy, spread
+  and flight time are the low arc's (a known simplification).
 
 ## Tried and rejected
 
