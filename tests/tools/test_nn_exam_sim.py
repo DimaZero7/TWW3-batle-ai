@@ -164,6 +164,13 @@ class TestPlay:
         assert pb["side"] == [2, 1, 2, 1] and pb["seed"] == [1000800014] * 2 + [1000800163] * 2
         assert set(res["by_seed"]) == {"1000800014", "1000800163"}
         assert all("pair" in v for v in res["by_seed"].values()) and sum(res["pairs"]) == 2
+        # the behaviour sums (the friends in the way) in the proxy's battles; same outcome without them
+        for k in ("friend_skip_share_direct", "friend_skip_share_arc", "forced_lob_share_arc", "missile_melee_share"):
+            assert k in res["behaviour"]
+        assert "order_changes_per_min" not in res["behaviour"]                       # no liveliness
+        bare = exam_sim.play(actor, enemy=actor, r=1, seeds=(1000800014, 1000800163), fighters=False, limit_s=4.0,
+                             measure=())
+        assert bare["behaviour"] == {} and bare["per_battle"] == res["per_battle"]
         import torch
         torch.manual_seed(5)
         before = torch.rand(1)

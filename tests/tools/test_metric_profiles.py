@@ -230,7 +230,8 @@ class TestWiring:
 
     def test_the_card_of_a_step_without_script_metrics(self, tmp_path):
         exam = {"battles": 96, "pairs": [2, 3, 1], "wins12": 6.5, "trade": {"value": 0.05, "se": 0.02},
-                "enemy": "build/v2/itS27_4.pt", "lord_dead_own": 0.25}
+                "enemy": "build/v2/itS27_4.pt", "lord_dead_own": 0.25,
+                "behaviour": {"friend_skip_share_direct": 0.12, "friend_skip_share_arc": 0.034, "forced_lob_share_arc": None}}
         win = {"pinned/attack": {"games": 300, "wins": 120, "win_rate": 0.4},
                "pinned/defend": {"games": 100, "wins": 60, "win_rate": 0.6},
                "pinned/all": {"games": 400, "wins": 180, "win_rate": 0.45}, "lord_dead_own": 0.2, "games": 900}
@@ -248,6 +249,8 @@ class TestWiring:
         assert rows["lord_exam"]["values"] == [None, 0.25] and rows["exam_trade"]["values"] == [None, 0.05]
         assert "att 0.40 def 0.60, n 400" in text and "no script metrics" in text and data["no_script_metrics"]
         assert rows["lord"]["values"] == [None, None]         # the script cells' row: "-", not a failure
+        assert rows["friend_skip"]["values"] == [None, 0.12] and "0.120 / 0.034 / -" in text
+        assert "friend fire skip: bullets / arrows, forced lob" in text
 
     def test_the_card_says_what_was_computed(self):
         pts = [("0", {"profile": "mandatory+drills"}), ("5", {"profile": "mandatory+drills"})]

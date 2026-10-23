@@ -15,7 +15,8 @@ order kinds hold / move / attack, missile time in melee, timeouts, the evaluatio
 distance from the start; where the exam's proxy was played (profile exam, tools/nn/train/exam_sim.py) its trade
 (± 95 %), wins per 12, pairs 2-0/1-1/0-2 and own lord deaths in its battles; the training window since the last point
 (test5 "window", run.py log): the win rate against the pinned version (--past-pin) and own lord deaths in the
-training's battles. A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
+training's battles; the friends in the way in the proxy's battles (behaviour.py: the share of the bullets' / the
+arrows' fire taken by own units, the share of arrows forced to a 45 deg lob). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
 says so under the table. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
@@ -37,6 +38,7 @@ OPPONENTS = ("ai_like", "nearest", "hold_shoot")
 MOVE_X, LORD_X, TIMEOUTS, PLAIN = 1.5, 1.5, 0.05, 0.05    # anomaly thresholds; the plain change threshold
 NO_MARK = ("seconds", "kl", "kinds", "exam_wins")         # rows whose change is shown but never marked
 Z = 2.0
+FRIENDS = ("friend_skip_share_direct", "friend_skip_share_arc", "forced_lob_share_arc")   # behaviour.Tracker.friends
 
 
 # --- points -----------------------------------------------------------------------------------------
@@ -140,6 +142,11 @@ def rows(point):
     if w.get("lord_dead_own") is not None:
         out.append(("lord_train", "own lord dead, training window (all its battles)", w["lord_dead_own"],
                     _binom(w["lord_dead_own"], w.get("games")), "{:.3f}"))
+    fb = (e or {}).get("behaviour") or {}
+    if any(fb.get(k) is not None for k in FRIENDS):          # the friends in the way in the proxy's battles (behaviour.py)
+        d, a, lob = (fb.get(k) for k in FRIENDS)
+        out.append(("friend_skip", "friend fire skip: bullets / arrows, forced lob (exam's proxy)", d, None,
+                    "{:.3f}" + "".join(" / " + ("-" if v is None else f"{v:.3f}") for v in (a, lob))))
     if e and e.get("lord_dead_own") is not None:
         out.append(("lord_exam", "own lord dead, exam's proxy", e["lord_dead_own"], _binom(e["lord_dead_own"], e.get("battles")),
                     "{:.3f}"))

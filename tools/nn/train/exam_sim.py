@@ -37,6 +37,9 @@ MAX_UNITS = 19
 LIMIT_S = 3600.0
 Z95 = 1.959964
 PAIRS = ("2-0", "1-1", "0-2")
+# The behaviour sums the proxy keeps (behaviour.Tracker without the liveliness: the friends in the way, missile time in
+# melee, flanks, piles, ability uses); "behaviour" in its summary.
+MEASURE = ("behaviour",)
 
 
 def battle_seeds(seeds=SEEDS, r=R):
@@ -140,9 +143,11 @@ def resolve(path):
     return p if p.is_absolute() else project.ROOT / p
 
 
-def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fighters=True, seed=1, limit_s=LIMIT_S):
-    """The proxy of one network (an actor) -> summary() + {enemy, R, seeds, armies, fighters, seconds, lord_dead_own, per_battle:
-    {won, side, seed, trade, margin, destroyed, lost, budget}}. enemy: a checkpoint path or an actor. The draws (the
+def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fighters=True, seed=1, limit_s=LIMIT_S,
+         measure=MEASURE):
+    """The proxy of one network (an actor) -> summary() + {enemy, R, seeds, armies, fighters, seconds, lord_dead_own,
+    behaviour (behaviour.Tracker's sums over our units, `measure`: e.g. friend_skip_share_direct / _arc,
+    forced_lob_share_arc; {} with measure ()), per_battle: {won, side, seed, trade, margin, destroyed, lost, budget}}. enemy: a checkpoint path or an actor. The draws (the
     orders, the latency) come from their own random state: the caller's (a training's) is left as it was."""
     import torch
 
@@ -161,13 +166,14 @@ def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fight
         torch.manual_seed(seed)
         res = evaluate.play(actor, opponents=("past",), past=past, device=device, limit_s=limit_s, seed=seed,
                             generated=len(bank), max_units=MAX_UNITS, paired=False, baseline=False,
-                            cadence=cadence or cad.GAME, measure=(), cuda_graph=not fighters, fighters=men,
+                            cadence=cadence or cad.GAME, measure=set(measure), cuda_graph=not fighters, fighters=men,
                             seeds=bank, armies=ARMIES, defend=True)
     b = res["battles"]["past"]
     out = summary(b["won"], b["side"], b["seed"], b["trade"], res["by_opponent"]["past"].get("timeouts"))
     lord = res["by_opponent"]["past"].get("lord_dead_own")         # own lord deaths in its battles (test5's mandatory set)
     if lord is not None:
         out["lord_dead_own"] = round(float(lord), 4)
+    out["behaviour"] = res["by_opponent"]["past"].get("behaviour") or {}
     out.update(enemy=name, R=int(r), seeds=[int(s) for s in seeds], armies=ARMIES, fighters=bool(fighters),
                seconds=round(time.time() - t0),
                per_battle={k: b[k] for k in ("won", "side", "seed", "trade", "margin", "destroyed", "lost", "budget")})

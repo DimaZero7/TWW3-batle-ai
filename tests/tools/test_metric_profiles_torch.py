@@ -92,13 +92,16 @@ class TestEvaluationProfiles:
         monkeypatch.setattr(evaluate, "play_drills", lambda *a, **k: seen.setdefault("drills", {}))
         monkeypatch.setattr(test5.exam_sim, "play", lambda *a, **k: seen.setdefault(
             "exam", {"battles": 4, "pairs": [1, 0, 0], "expected": [1.0, 0.0], "wins12": 9.0, "trade": {"value": 0.1, "se": 0.05},
-                     "lord_dead_own": 0.25, "by_seed": {}}))
+                     "lord_dead_own": 0.25, "by_seed": {}, "behaviour": {"friend_skip_share_direct": 0.1},
+                     "per_battle": {}}))
         monkeypatch.setattr(test5.refs, "start", lambda **k: seen.__setitem__("refs", k))
         args = SimpleNamespace(eval=8, drill_eval=16, profiles=("exam",), no_script_metrics=True)
         assert test5.references(args) is None and "refs" not in seen and evaluate.REFS_READY is None
         res = test5.evaluation(None, args, "cpu", SimpleNamespace(meta=lambda: {}), last=True)
         assert "play" not in seen and "drills" not in seen and res["exam"]["lord_dead_own"] == 0.25
         assert res["no_script_metrics"] and res["key"]["no_script_metrics"] and res["key"]["opponents"] == []
+        ex = test5.metrics(res)["skill"]["exam"]                 # report.json: the proxy's behaviour, not its battles
+        assert ex["behaviour"]["friend_skip_share_direct"] == 0.1 and "per_battle" not in ex
         assert test5.evaluation(None, args, "cpu", SimpleNamespace(meta=lambda: {}))["by_opponent"] == {}
         # the drills chosen: only the drills' check scripts are looked for, not the script baselines
         args.profiles = ("drills",)
