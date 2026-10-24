@@ -4,6 +4,12 @@ R battles each, our network always defending (as nn-arena), in the fighters lab 
 
     python -m tools.nn.train.exam_sim build/nn-train/test5/g23_general/m40.pt            # in the container
     python -m tools.nn.train.exam_sim <ckpt> --R 8 --enemy build/v2/itS27_4.pt --out build/exam_sim
+    python -m tools.nn.train.exam_sim <ckpt> --general-set melee_stay=0 --general-set replan_near_m=0   # other rules
+
+--general-set FIELD=VALUE (repeatable): the checked network's general plays with that GeneralConfig rule instead of its
+checkpoint's (set_rules: the rules, not the shape) - the rules compared on one point without training; the overrides
+are printed and kept in the result ("general_set"). Per battle also its own lord: dead, the second of its death, its
+seconds in melee (evaluate.play's per-battle lists); "lord": their means.
 
 A seed's two exam battles: base = our network on side 1 (the generator's army 1), side 2 attacks; swap = our network on
 side 2 (army 2), side 1 attacks. The bank holds every seed 2R times in a row (scenes.Generated: side 1 attacks at even
@@ -143,6 +149,38 @@ def resolve(path):
     return p if p.is_absolute() else project.ROOT / p
 
 
+def general_set(actor, items):
+    """Apply --general-set FIELD=VALUE items to the actor's general (set_rules, a bool as 1/0/true/false) -> {field:
+    value} applied ({} without items). ValueError for an actor without a general or an unknown field."""
+    import dataclasses
+    from tools.nn.companion import general as cgeneral
+    sets = cgeneral.parse_sets(items)
+    if not sets:
+        return {}
+    gcfg = getattr(actor, "gcfg", None)
+    if gcfg is None:
+        raise ValueError("--general-set: the network has no general")
+    names = {f.name for f in dataclasses.fields(gcfg)}
+    over = {}
+    for k, v in sets.items():
+        if k not in names:
+            raise ValueError(f"--general-set {k!r}: not a GeneralConfig field ({sorted(names)})")
+        cur = getattr(gcfg, k)
+        over[k] = (str(v).lower() in ("1", "true", "yes")) if isinstance(cur, bool) else type(cur)(v)
+    actor.set_rules(dataclasses.replace(gcfg, **over))
+    return over
+
+
+def lord_means(b):
+    """{dead (share), dead_at_s (mean over the deaths), melee_s (mean)} of evaluate.play's per-battle lists b."""
+    dead = [bool(x) for x in b.get("lord_dead") or []]
+    at = [x for x in b.get("lord_dead_at") or [] if x is not None]
+    melee = b.get("lord_melee_s") or []
+    return {"dead": round(float(np.mean(dead)), 4) if dead else None,
+            "dead_at_s": round(float(np.mean(at)), 1) if at else None,
+            "melee_s": round(float(np.mean(melee)), 1) if melee else None}
+
+
 def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fighters=True, seed=1, limit_s=LIMIT_S,
          measure=MEASURE):
     """The proxy of one network (an actor) -> summary() + {enemy, R, seeds, armies, fighters, seconds, lord_dead_own,
@@ -174,9 +212,11 @@ def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fight
     if lord is not None:
         out["lord_dead_own"] = round(float(lord), 4)
     out["behaviour"] = res["by_opponent"]["past"].get("behaviour") or {}
+    out["lord"] = lord_means(b)
     out.update(enemy=name, R=int(r), seeds=[int(s) for s in seeds], armies=ARMIES, fighters=bool(fighters),
                seconds=round(time.time() - t0),
-               per_battle={k: b[k] for k in ("won", "side", "seed", "trade", "margin", "destroyed", "lost", "budget")})
+               per_battle={k: b[k] for k in ("won", "side", "seed", "trade", "margin", "destroyed", "lost", "budget",
+                                             "lord_dead", "lord_dead_at", "lord_melee_s") if k in b})
     return out
 
 
@@ -195,17 +235,31 @@ def main(argv=None):
                                                          "says it does not follow the game)")
     ap.add_argument("--out", help="a folder for the result: exam_<checkpoint>_R<R>.json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--general-set", action="append", default=[], metavar="FIELD=VALUE",
+                    help="a GeneralConfig rule of the checked network's general instead of its checkpoint's "
+                         "(repeatable: --general-set melee_stay=0 --general-set replan_near_m=0)")
     cad.add_args(ap)
     args = ap.parse_args(argv)
     actor = checkpoint.load_policy(resolve(args.checkpoint), args.device)
+    try:
+        over = general_set(actor, args.general_set)
+    except ValueError as e:
+        raise SystemExit(str(e))
+    if over:
+        print("general overrides (--general-set): " + ", ".join(f"{k}={v}" for k, v in over.items()), flush=True)
     res = play(actor, args.enemy, args.R, device=args.device, cadence=cad.of_args(args), fighters=not args.plain)
     res["checkpoint"] = args.checkpoint
+    res["general_set"] = over
     name = Path(args.checkpoint).parent.name + "/" + Path(args.checkpoint).stem
     print(line(res, name), flush=True)
+    lo = res.get("lord") or {}
+    print(f"own lord: dead {lo.get('dead')}, mean second of death {lo.get('dead_at_s')}, mean seconds in melee "
+          f"{lo.get('melee_s')}", flush=True)
     if args.out:
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
-        path = out / f"exam_{name.replace('/', '_')}_R{args.R}{'_plain' if args.plain else ''}.json"
+        tag = "".join(f"_{k}{v}" for k, v in over.items())
+        path = out / f"exam_{name.replace('/', '_')}_R{args.R}{'_plain' if args.plain else ''}{tag}.json"
         path.write_text(json.dumps(res, indent=1), encoding="utf-8", newline="\n")
         print(f"written: {path}", flush=True)
 

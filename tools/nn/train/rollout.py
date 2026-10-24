@@ -519,6 +519,7 @@ class Battles:
         F = len(PIN_FACTIONS)
         self.slot_rstats = torch.zeros(self.past_slots, 2, 3, device=self.device)
         self.slot_mstats = torch.zeros(self.past_slots, 2 * F * F, 3, device=self.device)
+        self.slot_lstats = torch.zeros(self.past_slots, 2, 2, device=self.device)   # games, own lord dead by role
         self.active = 0
         self.slot_used = {0}                                  # slots that may hold battles (a superset, host side)
         self.is_past = (self.ctrl == league.CODE["past"]).any(1)                     # [B]
@@ -542,6 +543,8 @@ class Battles:
         self.teach_gen = torch.Generator(device=self.device).manual_seed(seed + 7919)
         self.teach_draw = torch.zeros(self.B, device=self.device)
         self.stats = torch.zeros(2 * (len(STAT_NAMES) + 1), 3, device=self.device)    # games, wins, seconds
+        # the learner's own lord dead at the end, by opponent and role (take_lord_stats): games, deaths
+        self.lord_ostats = torch.zeros(2 * (len(STAT_NAMES) + 1), 2, device=self.device)
         # the pinned version's battles (pin_slot) by the learner's role and matchup: games, wins, gold trade summed
         F = len(PIN_FACTIONS)
         self.pin_stats = torch.zeros(2 * F * F, 3, device=self.device)
@@ -1148,11 +1151,14 @@ class Battles:
         self.slot_stats.index_add_(0, slot, torch.stack([dp, dp * won], 1))
         defends = (self.st.attacker[rb] != rs + 1).long()
         self.stats.index_add_(0, 2 * code + defends, torch.stack([d, d * won, d * self.st.t[rb]], 1))
+        own_dead = (self.st.lord_dead_s[rb, rs] >= 0).float()                       # [R] the learner's lord
+        self.lord_ostats.index_add_(0, 2 * code + defends, torch.stack([d, d * own_dead], 1))
         if self.row_slot is not None:
             # run.py --opponents: each slot's battles by role and by matchup (take_named)
             dp_ = d * past.float()
             self.slot_rstats.view(-1, 3).index_add_(0, slot * 2 + defends,
                                                     torch.stack([dp_, dp_ * won, dp_ * self.st.t[rb]], 1))
+            self.slot_lstats.view(-1, 2).index_add_(0, slot * 2 + defends, torch.stack([dp_, dp_ * own_dead], 1))
             gold = reward.gold_sides(self.st.u, self.weights.rout_share)[rb]
             own_lost = gold.gather(1, rs[:, None]).squeeze(1)
             enemy_lost = gold.gather(1, (1 - rs)[:, None]).squeeze(1)
@@ -1381,6 +1387,29 @@ class Battles:
         self.place_past = placement(self.rows_past, self.B)
         # self.scripts stays: the compiled assembly is keyed by it (an unused script costs little)
         return keep
+
+    def take_lord_stats(self, names=None):
+        """{"<opponent>/<role>": (games, own lord deaths)} of the learner's battles ended since the last call (its
+        lord dead or shattered at the end; role the learner's); with names [slot] (run.py --opponents) the past
+        battles by their slot's name instead of "past"."""
+        s = self.lord_ostats.cpu().clone().numpy()
+        sl = self.slot_lstats.cpu().clone().numpy()
+        self.lord_ostats.zero_()
+        self.slot_lstats.zero_()
+        out = {}
+        for i, name in enumerate(STAT_NAMES):
+            if names is not None and name in ("past", "untrained"):
+                continue
+            for j, role in enumerate(ROLES):
+                g, dead = s[2 * (i + 1) + j]
+                if g > 0:
+                    out[f"{name}/{role}"] = (int(round(g)), int(round(dead)))
+        for k, name in enumerate(names or ()):
+            for j, role in enumerate(ROLES):
+                g, dead = sl[k, j]
+                if g > 0:
+                    out[f"{name}/{role}"] = (int(round(g)), int(round(dead)))
+        return out
 
     def take_stats(self):
         """{"opponent/role": (games, wins, mean seconds)} since the last call (role of the learner)."""

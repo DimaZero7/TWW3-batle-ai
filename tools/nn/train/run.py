@@ -241,6 +241,12 @@ def rates(stats):
     return {k: round(w / g, 3) for k, (g, w, _) in stats.items() if g}
 
 
+def lord_dead(counts):
+    """{"<opponent>/<role>": {games, dead, share}} of the own lord's deaths (rollout.Battles.take_lord_stats counts
+    (games, deaths)): the log's and report.json's "lord_dead" (lord_dead/<opponent>/<role>)."""
+    return {k: {"games": int(g), "dead": int(d), "share": round(d / g, 4)} for k, (g, d) in sorted(counts.items()) if g}
+
+
 def by_opponent(stats, keys):
     """{name: {"attack" | "defend" | "all": {games, wins, win_rate}}} of the run's (games, wins, seconds) counts
     "<name>/<role>" for the log names `keys` (run.py --opponents: every opponent by name)."""
@@ -1057,6 +1063,7 @@ def _train(args, every=None, teacher=None, normal=None):
     ahead = builder.submit(draw()) if builder is not None else None
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
     pin_total = {}                                  # --past-pin: (games, wins, gold trade summed) by matchup
+    lord_total = {}                                 # own lord deaths (games, deaths) by opponent and role
     floor_w = None                                # the entropy floor's current weight (--entropy-target)
     paused = 0.0
     rolls, rolled_at = 0, 0.0                     # --anchor-roll: renewals of the reference, training s of the last
@@ -1247,6 +1254,10 @@ def _train(args, every=None, teacher=None, normal=None):
                 for k, (g, w, t) in c.items():
                     G, W, T = named_total.setdefault(n, {}).get(k, (0, 0, 0.0))
                     named_total[n][k] = (G + g, W + w, T + t * g)
+        lord_m = env.take_lord_stats(named_keys if named is not None else None)   # own lord deaths by opponent
+        for k, (g, d) in lord_m.items():
+            G, D = lord_total.get(k, (0, 0))
+            lord_total[k] = (G + g, D + d)
         pin_m = env.take_pin_stats()          # --past-pin: the pinned version's battles by matchup ({} without)
         for k, (g, w, t) in pin_m.items():
             G, W, T = pin_total.get(k, (0, 0, 0.0))
@@ -1285,6 +1296,8 @@ def _train(args, every=None, teacher=None, normal=None):
                         if pool is not None else None)}
         if pin_m:
             row["pinned_matchups"] = pinned_matchups(pin_m)
+        if lord_m:
+            row["lord_dead"] = lord_dead(lord_m)
         if named is not None:
             row["opponents"] = by_opponent(stats, list(mix))
             row["opponent_shares"] = mix
@@ -1408,6 +1421,8 @@ def _train(args, every=None, teacher=None, normal=None):
                "mean_battle_s": {k: round(s / g) for k, (g, _, s) in sorted(total.items()) if g}, "best_score": best}
     if pin_total:
         summary["pinned_matchups"] = pinned_matchups({k: (g, w, t / g) for k, (g, w, t) in pin_total.items() if g})
+    if lord_total:
+        summary["lord_dead"] = lord_dead(lord_total)
     if named is not None:
         summary["opponent_shares"] = mix
         summary["opponents"] = by_opponent(total, list(mix))
