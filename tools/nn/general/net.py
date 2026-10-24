@@ -340,6 +340,7 @@ class General(nn.Module):
             self.assign = Assign(d, G, cfg.council_heads, cfg.ff, start=self.groups.start[:G],
                                  stick=getattr(cfg, "assign_stick", 1.0))
             self.k_head = mlp(2 * d + 2, d, G)
+        self.assign_gen = None       # the membership's own generator (the tourney's lanes; None: torch's)
 
     # --- the cards ---------------------------------------------------------------------------------------------
     def coarse_tiles(self, tiles, tile_ok):
@@ -669,29 +670,35 @@ class General(nn.Module):
         logits = self.assign(units, before, role, inp["pos"], K, who, inp.get("prev"), inp.get("has_prev"),
                              inp.get("prev_main"))
         k_eff, m, cap = gassign.capacity(who.sum(1), K, self.cfg.assign_lo, self.cfg.assign_hi)
-        a, lp, ent = gassign.sample(logits, who, k_eff, m, cap, greedy)
+        a, lp, ent = gassign.sample(logits, who, k_eff, m, cap, greedy, getattr(self, "assign_gen", None))
         raw = torch.where(own, a, raw_rule)
         return raw, {"raw": raw, "raw_rule": raw_rule, "K": K, "lp_assign": lp, "ent_assign": ent, "lp_k": lp_k}
 
-    def assign_terms(self, inp, raw, K, grad_cards=False):
+    def assign_terms(self, inp, raw, K, grad_cards=False, council=None):
         """The learned collection's terms of plans made (the update; inp the plans' inputs, raw [P, N] their units'
-        places, K [P] their K) -> {"lp", "ent" [P] (the membership's log-probability and entropy, with gradients
-        through assign), "logits" [P, N, G] (unmasked), "who" [P, N], "k_logits", "k_ok" [P, G] (the K head's, with
-        gradients), "units" [P, N, D]}. The council runs without gradients unless grad_cards."""
+        places or None, K [P] their K) -> {"lp", "ent" [P] (the membership's log-probability and entropy, with
+        gradients through assign; without raw: none), "logits" [P, N, G] (unmasked), "who" [P, N], "k_logits", "k_ok"
+        [P, G] (the K head's, with gradients), "units", "before" [P, N, D]}. The council runs without gradients unless
+        grad_cards; council: its (units, before) computed already (a frozen council's, kept between epochs)."""
         from tools.nn.general import assign as gassign
         from tools.nn.general import groups as ggroups
-        with torch.set_grad_enabled(grad_cards and torch.is_grad_enabled()):
-            units, _, before = self.council_out(inp)
+        if council is None:
+            with torch.set_grad_enabled(grad_cards and torch.is_grad_enabled()):
+                units, _, before = self.council_out(inp)
+        else:
+            units, before = council
         own, free = inp["own"], inp["free"]
         who = own & free
         role = ggroups.roles(inp["num"], inp["lab"])
         logits = self.assign(units, before, role, inp["pos"], K, who, inp.get("prev"), inp.get("has_prev"),
                              inp.get("prev_main"))
-        k_eff, m, cap = gassign.capacity(who.sum(1), K, self.cfg.assign_lo, self.cfg.assign_hi)
-        a = torch.where(who, raw, torch.full_like(raw, -1))
-        lp, ent, _ = gassign.log_prob(logits, who, k_eff, m, cap, a)
-        kl, kok = self.k_logits(units, inp)
-        return {"lp": lp, "ent": ent, "logits": logits, "who": who, "k_logits": kl, "k_ok": kok, "units": units}
+        out = {"logits": logits, "who": who, "units": units, "before": before}
+        if raw is not None:
+            k_eff, m, cap = gassign.capacity(who.sum(1), K, self.cfg.assign_lo, self.cfg.assign_hi)
+            a = torch.where(who, raw, torch.full_like(raw, -1))
+            out["lp"], out["ent"], _ = gassign.log_prob(logits, who, k_eff, m, cap, a)
+        out["k_logits"], out["k_ok"] = self.k_logits(units, inp)
+        return out
 
     def council_out(self, inp):
         """(units [P, N, D] and tiles [P, S, D] after the council and its norm, before [P, N, D]: the units' cards

@@ -147,10 +147,12 @@ class GeneralConfig:
     #                            group cards as "rule")
     group_r: float = 100.0     # ... "rule": units of a role join while their clusters' centres are closer than this, m
     lord_join_m: float = 60.0  # ... "rule": a lone lord (or hero) joins the nearest melee group whose centre is closer
-    assign_lo: float = 0.5     # ... "learned": a group has at least max(1, floor(this x n / K)) units (n our free units)
-    assign_hi: float = 1.5     # ... and at most ceil(this x n / K): exactly K groups, none of a lone unit beside a
-    #                            giant one (the slot attention's failure); the rule's own groups are less even (a lone
-    #                            lord), so its ARI's ceiling under these bounds is below 1
+    assign_lo: float = 0.2     # ... "learned": a group has at least max(1, floor(this x n / K)) units (n our free units)
+    assign_hi: float = 2.5     # ... and at most ceil(this x n / K): exactly K groups are never empty (the slot
+    #                            attention's failure: one giant group and fragments); the bounds only cut the extremes.
+    #                            The rule's groups are uneven (g38's plans: 40 % single units - a lone lord, a lone
+    #                            horse -, the largest 3.7 x n / K): at 0.5 / 1.5 only 49 % of its plans fit and the ARI
+    #                            to it could not pass 0.71; at 0.2 / 2.5 86 % fit, the ceiling 0.95
     assign_stick: float = 1.0  # ... a re-plan: the start of the learned bonus on a unit's last group number
     group_centre: bool = True  # ... "rule": a group card reads its units' values less their side's mean (how the group
     #                            differs from its army: the council's unit cards share a large common part)

@@ -1839,10 +1839,10 @@ def parser():
                          "attention; the atlas of g17r: degenerate) or 'learned' (tools/nn/general/assign.py: our units "
                          "into K groups, K by its head; trained by tools.nn.general.tourney_train, PPO does not move "
                          "it). Saved with the checkpoint (an older one: net)")
-    ap.add_argument("--general-assign-lo", type=float, default=0.5,
+    ap.add_argument("--general-assign-lo", type=float, default=0.2,
                     help="general: with --general-groups learned, a group has at least max(1, floor(this x n / K)) "
                          "units (n our free units)")
-    ap.add_argument("--general-assign-hi", type=float, default=1.5,
+    ap.add_argument("--general-assign-hi", type=float, default=2.5,
                     help="general: with --general-groups learned, a group has at most ceil(this x n / K) units")
     ap.add_argument("--general-assign-stick", type=float, default=1.0,
                     help="general: with --general-groups learned, the start of the learned re-plan bonus on a unit's "

@@ -155,5 +155,5 @@ def test_config_bounds():
         gconfig.GeneralConfig(groups="learned", assign_lo=1.2)
     with pytest.raises(ValueError):
         gconfig.GeneralConfig(groups="learned", assign_hi=0.9)
-    assert gconfig.GeneralConfig(groups="learned").assign_hi == 1.5
+    assert gconfig.GeneralConfig(groups="learned").assign_hi == 2.5
     _ = army

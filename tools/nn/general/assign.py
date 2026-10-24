@@ -2,11 +2,17 @@
 general is given only the number of groups K, the network puts every free unit of its side into one of K groups.
 
     a unit's key: its card after the council + its card before it (an MLP) + its role's embedding (groups.roles: the
-      lord and heroes, fast, shooters, melee) + where it stands (pos), layer-normed
+      lord and heroes, fast, shooters, melee) + where it stands (pos); then one attention block among the side's free
+      units (NEAR_LAYERS of them) with a learned bias a head by the pair's distance bin and whether they share a role
+      (starts at - metres / 100: a unit hears its neighbours most - the rule's clusters are by place within a role,
+      which a unit alone cannot see), layer-normed
     a group's query: its own learned card (places 0..G-1; a copy of the slot attention's starting cards at the start)
       + the embedding of K + (a re-plan) the last plan's card of that number (a layer from zero); one layer of listening
-      to the side's free units (net.Listen) - the queries see the army they divide
-    logits [P, N, G] = query . key / sqrt(D); a re-plan: + a learned bonus (stick) on a unit's last group number
+      to the side's free units (net.Listen: the queries see the army they divide), then `rounds` (3) rounds of slot
+      attention among the K groups (the units split over them, softmax over the groups; each group takes the mean of
+      its units' values): a clustering, the groups compete for the units
+    logits [P, N, G] = query . key / sqrt(D) after the rounds; a re-plan: + a learned bonus (stick) on a unit's last
+      group number
 
 The membership is a sequential categorical choice with a capacity mask: the free units of the side in their slots'
 order, each picks one of the K_eff = min(K, n) groups (n the side's free units) that is not full (at most
@@ -24,9 +30,12 @@ import math
 import torch
 from torch import nn
 
-from tools.nn.general.net import NEG, POS_FEATURES, Listen, mlp
+from tools.nn.general.net import NEG, POS_FEATURES, POS_M, Listen, mlp
+from tools.nn.model.encoder import Block
 
 EPS = 1e-6
+NEAR_BINS = (25.0, 50.0, 75.0, 100.0, 125.0, 150.0, 200.0, 300.0, 500.0)    # m: the near blocks' distance bins
+NEAR_LAYERS = 2
 
 
 def capacity(n, K, lo, hi):
@@ -56,15 +65,19 @@ def allowed(counts, left, k_eff, m, cap):
     return torch.where(force[..., None], ok & (short > 0), ok)
 
 
-def sample(logits, who, k_eff, m, cap, greedy=False):
+def sample(logits, who, k_eff, m, cap, greedy=False, gen=None):
     """The sequential choice (module doc): logits [P, N, G], who [P, N] the units that take part (in slot order),
     k_eff, m, cap [P] (capacity()). -> (a [P, N] each unit's group, -1 for the others; lp [P] the sum of the steps'
     log-probabilities; ent [P] the sum of their entropies). Sampled by Gumbel-max under the mask (one draw of noise
-    [P, N, G] from torch's generator), or the most likely group each step (greedy)."""
+    [P, N, G] from torch's generator, or gen), or the most likely group each step (greedy)."""
     P, N, G = logits.shape
     dev = logits.device
     lg = logits.float()
-    noise = torch.zeros_like(lg) if greedy else -torch.log(-torch.log(torch.rand_like(lg).clamp(1e-12, 1 - 1e-7)))
+    if greedy:
+        noise = torch.zeros_like(lg)
+    else:
+        u = torch.rand(lg.shape, generator=gen, device=dev, dtype=lg.dtype)
+        noise = -torch.log(-torch.log(u.clamp(1e-12, 1 - 1e-7)))
     counts = torch.zeros(P, G, dtype=torch.long, device=dev)
     left = who.long().sum(1)
     a = torch.full((P, N), -1, dtype=torch.long, device=dev)
@@ -112,12 +125,16 @@ class Assign(nn.Module):
     (the councils'); start [G, D]: the groups' starting query cards (the slot attention's first G); stick: the re-plan
     bonus's start (a learned value)."""
 
-    def __init__(self, d, places, heads, ff, start=None, stick=1.0, roles=4):
+    def __init__(self, d, places, heads, ff, start=None, stick=1.0, roles=4, rounds=3):
         super().__init__()
         self.G = places
         self.unit = mlp(2 * d, 2 * d, d)
         self.role = nn.Embedding(roles, d)
         self.k_pos = nn.Linear(len(POS_FEATURES), d, bias=False)
+        self.near = nn.ModuleList(Block(d, heads, ff) for _ in range(NEAR_LAYERS))
+        # the near blocks' bias: a learned value a head, distance bin and "same role" (starts at - metres / 100)
+        mid = torch.tensor([(a + b) / 2 for a, b in zip((0.0,) + NEAR_BINS, NEAR_BINS + (NEAR_BINS[-1] * 1.5,))])
+        self.near_b = nn.Parameter((-(mid / 100.0))[None, None, :].repeat(heads, 2, 1).clone())
         self.norm_k = nn.LayerNorm(d)
         q0 = start.detach().clone() if start is not None else torch.randn(places, d) * 0.5
         self.query = nn.Parameter(q0)
@@ -126,7 +143,10 @@ class Assign(nn.Module):
         nn.init.zeros_(self.prev_in.weight)
         nn.init.zeros_(self.prev_in.bias)
         self.listen = Listen(d, heads, ff)
-        self.q, self.k = nn.Linear(d, d), nn.Linear(d, d)
+        self.rounds = rounds
+        self.q, self.k, self.v = nn.Linear(d, d), nn.Linear(d, d), nn.Linear(d, d)
+        self.norm_s = nn.LayerNorm(d)
+        self.upd = mlp(2 * d, 2 * d, d)
         self.stick = nn.Parameter(torch.tensor(float(stick)))
 
     def forward(self, units, before, role, pos, K, who, prev=None, has_prev=None, prev_main=None):
@@ -136,14 +156,41 @@ class Assign(nn.Module):
         P, N, d = units.shape
         G = self.G
         key = self.unit(torch.cat([units, before], -1)) + self.role(role.clamp(0, self.role.num_embeddings - 1))
-        key = self.norm_k(key + self.k_pos(pos.to(key.dtype)))
+        key = key + self.k_pos(pos.to(key.dtype))
+        bias = self.near_bias(pos, who, role).to(key.dtype)
+        for block in self.near:
+            key = block(key, bias)
+        key = self.norm_k(key)
         q = self.query[None].expand(P, -1, -1) + self.k_emb(K.clamp(0, G))[:, None, :]
         if prev is not None and has_prev is not None:
             q = q + self.prev_in(prev[:, :G].to(q.dtype)) * has_prev.reshape(-1, 1, 1).to(q.dtype)
         ok = who | ~who.any(1, keepdim=True)                      # (a side without free units: any key, unused)
         q = self.listen(q.to(key.dtype), key, ok)
-        logits = torch.einsum("pgd,pnd->png", self.q(q), self.k(key)) / math.sqrt(d)
+        # the slot attention's rounds (Locatello et al., 2020) among the K groups: every unit splits itself over the
+        # groups (softmax over them: they compete), each group takes the weighted mean of its units' values
+        live = torch.arange(G, device=units.device)[None] < K.clamp(1, G)[:, None]                 # [P, G]
+        k_, v_ = self.k(key), self.v(key)
+        w_on = who.to(key.dtype)[..., None]
+        for _ in range(self.rounds):
+            lg = torch.einsum("pgd,pnd->png", self.q(self.norm_s(q)), k_) / math.sqrt(d)
+            attn = torch.softmax(lg.masked_fill(~live[:, None, :], NEG), -1) * w_on
+            w = attn / (attn.sum(1, keepdim=True) + 1e-6)
+            q = q + self.upd(torch.cat([q, torch.einsum("png,pnd->pgd", w, v_)], -1))
+        logits = torch.einsum("pgd,pnd->png", self.q(self.norm_s(q)), k_) / math.sqrt(d)
         if prev_main is not None and has_prev is not None:
             last = (prev_main[..., None] == torch.arange(G, device=units.device)) & has_prev.reshape(-1, 1, 1)
             logits = logits + self.stick * last.to(logits.dtype)
         return logits
+
+    def near_bias(self, pos, who, role):
+        """[P, H, N, N] the units' attention bias among the side's free units: the learned near_b of the head, the pair's
+        distance bin (NEAR_BINS, m: pos's forward and lateral x POS_M) and whether they share a role; -inf to the others
+        (a unit always hears itself)."""
+        xy = pos[..., :2].float() * POS_M
+        d = (xy[:, :, None, :] - xy[:, None, :, :]).norm(dim=-1)                              # [P, N, N]
+        bins = torch.bucketize(d, torch.tensor(NEAR_BINS, device=d.device))                    # 0..len(NEAR_BINS)
+        same = (role[:, :, None] == role[:, None, :]).long()
+        b = self.near_b[:, same, bins].permute(1, 0, 2, 3)                                    # [P, H, N, N]
+        N = who.shape[1]
+        ok = (who[:, None, :] & who[:, :, None]) | torch.eye(N, dtype=torch.bool, device=who.device)[None]
+        return b.masked_fill(~ok[:, None], float("-inf"))
