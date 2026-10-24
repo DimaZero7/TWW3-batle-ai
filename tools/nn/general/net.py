@@ -332,6 +332,14 @@ class General(nn.Module):
         for lin in (self.fight_in, self.gtile_in):
             nn.init.zeros_(lin.weight)
             nn.init.zeros_(lin.bias)
+        # the learned group collection (GeneralConfig.groups "learned", assign.py) and the head of its number of groups
+        # K (1..G): made on a fork of torch's generator, so the draws after a General's making stay as they were
+        # without them (a fresh network's other parts, the critic, the battles); an older checkpoint loads them fresh
+        from tools.nn.general.assign import Assign
+        with torch.random.fork_rng(devices=[]):
+            self.assign = Assign(d, G, cfg.council_heads, cfg.ff, start=self.groups.start[:G],
+                                 stick=getattr(cfg, "assign_stick", 1.0))
+            self.k_head = mlp(2 * d + 2, d, G)
 
     # --- the cards ---------------------------------------------------------------------------------------------
     def coarse_tiles(self, tiles, tile_ok):
@@ -343,43 +351,43 @@ class General(nn.Module):
         n = tiles.new_zeros(P, self.C).index_add_(1, idx, w)
         return tot / n.clamp(min=1.0)[..., None], n > 0
 
-    def cards(self, inp):
+    def cards(self, inp, greedy=False):
         """Everything before the choices: {"units", "tiles" (after the council), "coarse", "coarse_ok" (the targets'
         tiles), "shares" [P, N, 2G], "places" [P, 2G, D] (the places' cards: the next plan's inertia), "groups"
         [P, 2G, D] (after the group council and its norm), "main" [P, N] (a free unit's group, -1 none), "perm"
         [P, 2G] (the groups' numbering: match_groups), "active" [P, 2G] (some unit's group)}; every [.., 2G] is in the
-        groups' numbers."""
+        groups' numbers. With GeneralConfig.groups "learned" a plan made here (no inp "main") has also "raw" [P, N]
+        (the units' places before the numbering), "raw_rule" [P, N] (the rule's), "K" [P] (the groups wanted: inp "K"
+        where > 0, else the K head's), "lp_assign" / "ent_assign" [P] (the membership's), "lp_k" [P] (the K head's
+        choice; 0 where K was given); greedy: the most likely membership and K."""
         P, N = inp["on"].shape
         G = self.cfg.places
-        on, own = inp["on"], inp["own"]
-        u = self.reader(inp["num"], inp["lab"], ~on)
-        pos = inp["pos"].to(u.dtype) * on[..., None].to(u.dtype)
-        u = u + (self.label((~own).long()) + self.pos_in(pos)) * on[..., None].to(u.dtype)
-        t = (self.tile_in(self.tile_numbers(inp["tiles"].to(u.dtype), inp["tile_ok"])) + self.tile_place
-             + self.label.weight[2] + self.pos_in(self.tile_pos.to(u.dtype)))
-        x = self.norm_in(torch.cat([u, t], 1))
-        ok = torch.cat([on, inp["tile_ok"]], 1)
-        bias = key_bias(ok, self.cfg.council_heads).to(x.dtype)
-        for block in self.council:
-            x = block(x, bias)
-        x = self.norm_out(x)
-        units, tiles = x[:, :N], x[:, N:]
+        own = inp["own"]
+        pos = inp["pos"] * inp["on"][..., None].to(inp["pos"].dtype)
+        units, tiles, before = self.council_out(inp)
         free = inp["free"]
-        if getattr(self.cfg, "groups", "net") == "rule":
-            # the groups by the rule (groups.py), numbered by their units (match_groups); the cards of that membership
+        how = getattr(self.cfg, "groups", "net")
+        if how in ("rule", "learned"):
+            # the groups by the rule (groups.py) - or ours by the learned collection (assign.py; the enemy's stay the
+            # rule's) -, numbered by their units (match_groups); the cards of that membership
+            extra = {}
             if inp.get("main") is not None:
                 main, perm = inp["main"], inp["perm"]
             else:
                 from tools.nn.general import groups as ggroups
                 raw = ggroups.collect(inp["num"], inp["lab"], inp["pos"], own, free, G, self.cfg.group_r,
                                       self.cfg.lord_join_m)
+                if how == "learned":
+                    raw, extra = self.learned_raw(inp, units, before, raw, greedy)
                 prev_main = inp.get("prev_main")
                 perm = match_groups(raw, torch.full_like(raw, -1) if prev_main is None else prev_main, G)
                 main = renumber(perm, raw)
             shares, places = self.groups.fixed(units, main, inp.get("prev"), inp.get("has_prev"),
                                                own if getattr(self.cfg, "group_centre", False) else None)
-            return self._after_groups(inp, tiles, shares, places, main, perm, units)
-        shares, places = self.groups(units, own, inp["free"], inp.get("prev"), inp.get("has_prev"), pos,
+            out = self._after_groups(inp, tiles, shares, places, main, perm, units)
+            out.update(extra)
+            return out
+        shares, places = self.groups(units, own, inp["free"], inp.get("prev"), inp.get("has_prev"), pos.to(units.dtype),
                                      inp.get("prev_main"))
         if inp.get("main") is not None:
             # the plan's own membership and numbering, locked (a re-computation of a plan made: the update, the
@@ -626,8 +634,82 @@ class General(nn.Module):
         return (pk.clamp(0, K - 1)[..., None] == torch.arange(K, device=dev)) & kept[..., None]
 
     def forward(self, inp, act=None, greedy=False):
-        c = self.cards(inp)
+        c = self.cards(inp, greedy)
         return c, self.decide(inp, c, act, greedy)
+
+    # --- the learned group collection (GeneralConfig.groups "learned", assign.py) ----------------------------------
+    def k_logits(self, units, inp):
+        """(logits [P, G] of K = 1..G, ok [P, G]: K at most the side's free units, K = 1 always) of the K head: the
+        means of our free units' and the enemy's units' cards after the council, and their counts / 20."""
+        own, free, on = inp["own"], inp["free"], inp["on"]
+        who = own & free
+        foe = on & ~own
+        x = torch.cat([masked_mean(units, who), masked_mean(units, foe), who.sum(1, keepdim=True).to(units.dtype) / 20.0,
+                       foe.sum(1, keepdim=True).to(units.dtype) / 20.0], -1)
+        G = self.cfg.places
+        ks = torch.arange(1, G + 1, device=units.device)
+        ok = ks[None] <= who.sum(1, keepdim=True).clamp(min=1)
+        return self.k_head(x).float(), ok
+
+    def learned_raw(self, inp, units, before, raw_rule, greedy=False):
+        """(raw [P, N]: our free units by the learned collection, the enemy's by the rule raw_rule; the extras of
+        cards()) of a plan made now."""
+        from tools.nn.general import assign as gassign
+        from tools.nn.general import groups as ggroups
+        own, free = inp["own"], inp["free"]
+        who = own & free
+        P = who.shape[0]
+        kl, kok = self.k_logits(units, inp)
+        k_pick, lp_k, _ = categorical(kl, kok, None, greedy)
+        given = inp.get("K")
+        given = torch.zeros(P, dtype=torch.long, device=who.device) if given is None else given.long()
+        K = torch.where(given > 0, given, k_pick + 1)
+        lp_k = torch.where(given > 0, torch.zeros_like(lp_k), lp_k)
+        role = ggroups.roles(inp["num"], inp["lab"])
+        logits = self.assign(units, before, role, inp["pos"], K, who, inp.get("prev"), inp.get("has_prev"),
+                             inp.get("prev_main"))
+        k_eff, m, cap = gassign.capacity(who.sum(1), K, self.cfg.assign_lo, self.cfg.assign_hi)
+        a, lp, ent = gassign.sample(logits, who, k_eff, m, cap, greedy)
+        raw = torch.where(own, a, raw_rule)
+        return raw, {"raw": raw, "raw_rule": raw_rule, "K": K, "lp_assign": lp, "ent_assign": ent, "lp_k": lp_k}
+
+    def assign_terms(self, inp, raw, K, grad_cards=False):
+        """The learned collection's terms of plans made (the update; inp the plans' inputs, raw [P, N] their units'
+        places, K [P] their K) -> {"lp", "ent" [P] (the membership's log-probability and entropy, with gradients
+        through assign), "logits" [P, N, G] (unmasked), "who" [P, N], "k_logits", "k_ok" [P, G] (the K head's, with
+        gradients), "units" [P, N, D]}. The council runs without gradients unless grad_cards."""
+        from tools.nn.general import assign as gassign
+        from tools.nn.general import groups as ggroups
+        with torch.set_grad_enabled(grad_cards and torch.is_grad_enabled()):
+            units, _, before = self.council_out(inp)
+        own, free = inp["own"], inp["free"]
+        who = own & free
+        role = ggroups.roles(inp["num"], inp["lab"])
+        logits = self.assign(units, before, role, inp["pos"], K, who, inp.get("prev"), inp.get("has_prev"),
+                             inp.get("prev_main"))
+        k_eff, m, cap = gassign.capacity(who.sum(1), K, self.cfg.assign_lo, self.cfg.assign_hi)
+        a = torch.where(who, raw, torch.full_like(raw, -1))
+        lp, ent, _ = gassign.log_prob(logits, who, k_eff, m, cap, a)
+        kl, kok = self.k_logits(units, inp)
+        return {"lp": lp, "ent": ent, "logits": logits, "who": who, "k_logits": kl, "k_ok": kok, "units": units}
+
+    def council_out(self, inp):
+        """(units [P, N, D] and tiles [P, S, D] after the council and its norm, before [P, N, D]: the units' cards
+        before it) - "Совещание", cards()'s first part."""
+        P, N = inp["on"].shape
+        on, own = inp["on"], inp["own"]
+        u = self.reader(inp["num"], inp["lab"], ~on)
+        pos = inp["pos"].to(u.dtype) * on[..., None].to(u.dtype)
+        u = u + (self.label((~own).long()) + self.pos_in(pos)) * on[..., None].to(u.dtype)
+        t = (self.tile_in(self.tile_numbers(inp["tiles"].to(u.dtype), inp["tile_ok"])) + self.tile_place
+             + self.label.weight[2] + self.pos_in(self.tile_pos.to(u.dtype)))
+        x = self.norm_in(torch.cat([u, t], 1))
+        ok = torch.cat([on, inp["tile_ok"]], 1)
+        bias = key_bias(ok, self.cfg.council_heads).to(x.dtype)
+        for block in self.council:
+            x = block(x, bias)
+        x = self.norm_out(x)
+        return x[:, :N], x[:, N:], u
 
     # --- the executor's cards ----------------------------------------------------------------------------------
     def exec_table(self):

@@ -121,3 +121,24 @@ def collect(num, lab, pos, own, free, G, r=100.0, lord_m=60.0):
     place = torch.where(own, rank_own, G + rank_foe)                               # [P, N] by cluster id
     raw = place.gather(1, label.clamp(min=0))
     return torch.where(free, raw, torch.full_like(raw, -1))
+
+
+def ari(a, b, mask, L):
+    """[P] the adjusted Rand index (Hubert and Arabie, 1985) of two memberships a, b [P, N] (labels 0..L-1) over the
+    units mask [P, N] (the learned collection against the rule: 1 the same partition whatever the labels, ~0 as by
+    chance). From the contingency table [P, L, L]; a plan where both partitions are trivial (one unit, or the index
+    undefined) gives 1."""
+    def pairs(x):
+        return x * (x - 1) / 2.0
+    w = mask.double()[..., None]
+    A = torch.nn.functional.one_hot(a.clamp(0, L - 1), L).double() * w
+    B = torch.nn.functional.one_hot(b.clamp(0, L - 1), L).double() * w
+    table = torch.einsum("pni,pnj->pij", A, B)
+    s_ij = pairs(table).sum((1, 2))
+    s_a = pairs(table.sum(2)).sum(1)
+    s_b = pairs(table.sum(1)).sum(1)
+    n = mask.double().sum(1)
+    expect = s_a * s_b / pairs(n).clamp(min=1.0)
+    den = 0.5 * (s_a + s_b) - expect
+    ok = den.abs() > 1e-9
+    return torch.where(ok, (s_ij - expect) / torch.where(ok, den, torch.ones_like(den)), torch.ones_like(den)).float()
