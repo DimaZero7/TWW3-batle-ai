@@ -70,3 +70,36 @@ def test_round_ks_and_seeds():
     ks = tourney.round_ks(c, 3)
     assert len(set(ks)) == 4 and all(1 <= k <= 10 for k in ks) and ks == tourney.round_ks(c, 3)
     assert tourney.round_seeds(c, 1) != tourney.round_seeds(c, 2)
+
+
+def test_the_copies_of_a_start_begin_alike_in_one_batch():
+    """batch: the battles of one start (every K, every copy) begin with the same state - armies, the randomised
+    numbers, places, the battle id (the simulator's draws) - and the start's men and memories; only K differs. Two
+    starts differ."""
+    from tools.nn.train import rollout, scenes
+    actor, enemy = nets()
+    c = cfg(ks=(2, 5), copies=2)
+    params = rollout.params_with_limit(c.limit_s)
+    source = scenes.Generated([31, 32], c.max_units, params, "cpu", sequential=True, armies=c.armies)
+    s_of = np.repeat(np.arange(2), 4)
+    k_of = np.tile(np.repeat(np.array([2, 5]), 2), 2)
+    side_of = np.ones(8, dtype=int)
+    env, rt = tourney._battles(actor, enemy, c, source, params, "cpu", s_of, k_of, side_of)
+    assert rt.b["K"].tolist() == k_of.tolist()
+    u = env.st.u
+    for b in range(1, 8):
+        same = s_of[b] == s_of[0]
+        eq = all(torch.equal(v[b], v[0]) for v in u.values())
+        assert eq == same, b
+    for b in (1, 2, 3, 5, 6, 7):
+        r = 0 if b < 4 else 4
+        assert all(torch.equal(v[b], v[r]) for v in u.values())
+        assert env.st.keys[b] == env.st.keys[r] and float(env.st.t[b]) == float(env.st.t[r])
+        assert int(env.st.attacker[b]) == int(env.st.attacker[r])
+        for s in (1, 2):
+            mem = env.mem[s]
+            for k, v in (vars(mem) if hasattr(mem, "__dict__") else mem._asdict()).items():
+                v = torch.as_tensor(v) if not torch.is_tensor(v) and hasattr(v, "shape") else v
+                if torch.is_tensor(v) and v.dim() and v.shape[0] == 8:
+                    assert torch.equal(v[b], v[r]), (s, k)
+    assert bool((u["row"][0] == u["row"][3]).all()) and not bool((u["row"][0] == u["row"][4]).all())

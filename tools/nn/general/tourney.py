@@ -15,7 +15,8 @@ Two ways to place the variants:
   "lanes": V batches of S battles stepped in lockstep (ability_branch.play_pair's way): variant v of start s sits at
           the same place of its batch, so it shares every draw with the other variants (the networks', the latency's)
           but the membership's: each copy has its own generator for the membership (General.assign_gen, seeded by the
-          copy's number) - two lanes of one K and one copy are the same battle to the bit (the test). V times slower.
+          round and the copy's number) - two lanes of one K and one copy are the same battle to the bit (the test).
+          V times slower.
 
 -> per battle: its start s, K, copy, the learner's side, its trade at the end (ability_branch.trade: (the enemy's gold
 lost - our own) / budget), won, length; and the learner's plans' records (Runtime.record + the membership's
@@ -173,7 +174,7 @@ def play(actor, enemy, cfg, rnd=0, device="cpu", cadence=None, ks=None, seeds=No
                 env, rt = _battles(actor, enemy, cfg, source, params, device, s_of[sel], k_of[sel], side_of[sel],
                                    cadence, men)
                 rt.on_plan = _collector(env, recs, v)
-                g = torch.Generator(device=dev).manual_seed(cfg.seed * 1009 + int(c_of[sel[0]]))
+                g = torch.Generator(device=dev).manual_seed((cfg.seed * 1009 + rnd) * 1009 + int(c_of[sel[0]]))
                 lanes.append((env, g, sel))
         else:
             raise ValueError(f"tourney mode {cfg.mode!r}: 'batch' or 'lanes'")
