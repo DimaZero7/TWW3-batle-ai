@@ -132,14 +132,16 @@ def general_params(actor):
     return [p for n, p in actor.named_parameters() if n.startswith("general.")]
 
 
-def freeze_but_general(actor, critic):
+def freeze_but_general(actor, critic, prefixes=("general.",)):
     """run.py --general-only 1: every parameter but the general's (general_params) - the executor's (the unit network
     and its task input) and the critic's - requires no gradient and has none, so no loss reaches it and Adam (which
     skips a parameter without a gradient) never moves it; the optimizer keeps all the parameters in their order, their
-    moments untouched (a later step without the flag resumes them). -> (frozen, trainable) weights."""
-    gen = {id(p) for p in general_params(actor)}
+    moments untouched (a later step without the flag resumes them). prefixes: the actor's parameters that stay
+    trainable (the learned group collection's branch: "general.assign.", "general.k_head."; critic None: no critic).
+    -> (frozen, trainable) weights."""
+    gen = {id(p) for n, p in actor.named_parameters() if n.startswith(tuple(prefixes))}
     frozen = trainable = 0
-    for p in list(actor.parameters()) + list(critic.parameters()):
+    for p in list(actor.parameters()) + (list(critic.parameters()) if critic is not None else []):
         if id(p) in gen:
             trainable += p.numel()
         else:

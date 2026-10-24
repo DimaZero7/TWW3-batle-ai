@@ -140,10 +140,20 @@ class GeneralConfig:
     # --- the architecture's repairs after the module atlas of g17r (build/diag_atlas2; docs "Tried and rejected") ---
     groups: str = "rule"       # the group collection: "rule" (groups.py: roles - shooters, melee, lord and heroes, fast -
     #                            then clusters by place within a role, at most `places` a side, both sides alike; the
-    #                            slot attention's keys and queries take no part and learn nothing) or "net" (the learned
+    #                            slot attention's keys and queries take no part and learn nothing), "net" (the learned
     #                            slot attention: the atlas found it degenerate - one group at the first plan, cards alike)
+    #                            or "learned" (assign.py: our side's free units into K groups by a sequential choice with
+    #                            a capacity mask, K given - the tourney's - or the K head's; the enemy's by the rule; the
+    #                            group cards as "rule")
     group_r: float = 100.0     # ... "rule": units of a role join while their clusters' centres are closer than this, m
     lord_join_m: float = 60.0  # ... "rule": a lone lord (or hero) joins the nearest melee group whose centre is closer
+    assign_lo: float = 0.2     # ... "learned": a group has at least max(1, floor(this x n / K)) units (n our free units)
+    assign_hi: float = 2.5     # ... and at most ceil(this x n / K): exactly K groups are never empty (the slot
+    #                            attention's failure: one giant group and fragments); the bounds only cut the extremes.
+    #                            The rule's groups are uneven (g38's 5116 plans: 46 % single units - a lone lord, a
+    #                            lone horse -, the largest 4.9 x n / K): at 0.5 / 1.5 only 62 % of its plans fit and
+    #                            the ARI to it could not pass 0.80; at 0.2 / 2.5 93 % fit, the ceiling 0.98
+    assign_stick: float = 1.0  # ... a re-plan: the start of the learned bonus on a unit's last group number
     group_centre: bool = True  # ... "rule": a group card reads its units' values less their side's mean (how the group
     #                            differs from its army: the council's unit cards share a large common part)
     split_kinds: bool = True   # the executor's own mission kind table (exec_kinds; the group card detached): the
@@ -187,8 +197,10 @@ class GeneralConfig:
             raise ValueError(f"general shoot_share {self.shoot_share}: a share in [0, 1]")
         if self.target_grid < 1:
             raise ValueError(f"general target_grid {self.target_grid}: >= 1")
-        if self.groups not in ("rule", "net"):
-            raise ValueError(f"general groups {self.groups!r}: 'rule' or 'net'")
+        if self.groups not in ("rule", "net", "learned"):
+            raise ValueError(f"general groups {self.groups!r}: 'rule', 'net' or 'learned'")
+        if not 0.0 < self.assign_lo <= 1.0 <= self.assign_hi:
+            raise ValueError(f"general assign_lo {self.assign_lo}, assign_hi {self.assign_hi}: 0 < lo <= 1 <= hi")
         if self.tile_feats not in ("v1", "v2"):
             raise ValueError(f"general tile_feats {self.tile_feats!r}: 'v1' or 'v2'")
         if self.group_r <= 0 or self.lord_join_m < 0:

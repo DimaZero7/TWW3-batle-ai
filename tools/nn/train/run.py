@@ -340,7 +340,8 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "replan_near_m": "general_replan_near_m", "teach_stall_s": "general_teach_stall_s",
                  "teach_wait_s": "general_teach_wait_s",
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
-                 "group_centre": "general_group_centre",
+                 "group_centre": "general_group_centre", "assign_lo": "general_assign_lo",
+                 "assign_hi": "general_assign_hi", "assign_stick": "general_assign_stick",
                  "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
                  "tile_norm": "general_tile_norm", "threat": "general_threat", "task_group": "general_task_group",
                  "group_tiles": "general_group_tiles"}
@@ -1843,10 +1844,20 @@ def parser():
     ap.add_argument("--general-waver-share", type=float, default=0.5,
                     help="general: a group has wavered (withdraw allowed in melee) when at least this share of its "
                          "units waver, rout or are shattered")
-    ap.add_argument("--general-groups", default="rule", choices=("rule", "net"),
+    ap.add_argument("--general-groups", default="rule", choices=("rule", "net", "learned"),
                     help="general: the group collection - 'rule' (tools/nn/general/groups.py: roles, then clusters by "
-                         "place, both sides alike; the attention's collection learns nothing) or 'net' (the learned slot "
-                         "attention; the atlas of g17r: degenerate). Saved with the checkpoint (an older one: net)")
+                         "place, both sides alike; the attention's collection learns nothing), 'net' (the learned slot "
+                         "attention; the atlas of g17r: degenerate) or 'learned' (tools/nn/general/assign.py: our units "
+                         "into K groups, K by its head; trained by tools.nn.general.tourney_train, PPO does not move "
+                         "it). Saved with the checkpoint (an older one: net)")
+    ap.add_argument("--general-assign-lo", type=float, default=0.2,
+                    help="general: with --general-groups learned, a group has at least max(1, floor(this x n / K)) "
+                         "units (n our free units)")
+    ap.add_argument("--general-assign-hi", type=float, default=2.5,
+                    help="general: with --general-groups learned, a group has at most ceil(this x n / K) units")
+    ap.add_argument("--general-assign-stick", type=float, default=1.0,
+                    help="general: with --general-groups learned, the start of the learned re-plan bonus on a unit's "
+                         "last group")
     ap.add_argument("--general-group-r", type=float, default=100.0,
                     help="general: with --general-groups rule, units of a role join while their clusters' centres are "
                          "closer than this (m)")
