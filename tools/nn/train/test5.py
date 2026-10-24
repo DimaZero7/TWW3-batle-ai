@@ -301,7 +301,9 @@ def window(run_dir, since, until):
     """The training's own battles over the updates (since, until] of a run (run.py's log.jsonl rows "games",
     "win_rate", "lord_dead_own"): {"pinned/attack" | "pinned/defend" | "pinned/all": {games, wins, win_rate}} against
     the pinned version (run.py --past-pin; absent without it), "lord_dead_own": own lord deaths in all the learner's
-    ended battles (the updates' shares weighted by their battles), "games", "updates". None without a log or rows."""
+    ended battles (the updates' shares weighted by their battles), "games", "updates"; with run.py --opponents also
+    "opponents": {name: {"attack" | "defend" | "all": {games, wins, win_rate}, "share"}} by every named opponent (the
+    rows' "opponents", "opponent_shares"). None without a log or rows."""
     path = Path(run_dir) / "log.jsonl"
     if not path.exists():
         return None
@@ -318,6 +320,21 @@ def window(run_dir, since, until):
                 acc[k] = (G + g[k], W + w.get(k, 0.0) * g[k])
     if acc:
         acc["pinned/all"] = (sum(G for G, _ in acc.values()), sum(W for _, W in acc.values()))
+    named, shares = {}, {}
+    for r in rows:                                # run.py --opponents: by name
+        shares.update(r.get("opponent_shares") or {})
+        for name, c in (r.get("opponents") or {}).items():
+            for role in ("attack", "defend"):
+                G, W = named.setdefault(name, {}).get(role, (0, 0))
+                x = c.get(role) or {}
+                named[name][role] = (G + int(x.get("games") or 0), W + int(x.get("wins") or 0))
+    if named:
+        cell = (lambda G, W: {"games": int(G), "wins": int(W), "win_rate": round(W / G, 4) if G else None})
+        out["opponents"] = {}
+        for name, c in named.items():
+            (ga, wa), (gd, wd) = c.get("attack", (0, 0)), c.get("defend", (0, 0))
+            out["opponents"][name] = {"attack": cell(ga, wa), "defend": cell(gd, wd), "all": cell(ga + gd, wa + wd),
+                                      "share": shares.get(name)}
     for k, (G, W) in acc.items():
         out[k] = {"games": int(G), "wins": int(round(W)), "win_rate": round(W / G, 4) if G else None}
     n = [sum((r.get("games") or {}).values()) for r in rows]

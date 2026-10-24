@@ -38,6 +38,7 @@ OPPONENTS = ("ai_like", "nearest", "hold_shoot")
 MOVE_X, LORD_X, TIMEOUTS, PLAIN = 1.5, 1.5, 0.05, 0.05    # anomaly thresholds; the plain change threshold
 NO_MARK = ("seconds", "kl", "kinds", "exam_wins")         # rows whose change is shown but never marked
 Z = 2.0
+WIN_SHARE = 0.05          # run.py --opponents: the window's "win vs <name>" rows for the opponents of this share or more
 FRIENDS = ("friend_skip_share_direct", "friend_skip_share_arc", "forced_lob_share_arc")   # behaviour.Tracker.friends
 
 
@@ -139,6 +140,13 @@ def rows(point):
                         if (w.get(f"pinned/{r}") or {}).get("games"))
         out.append(("pinned_win", "window: win vs pinned (training, since the last point)", pin.get("win_rate"),
                     _binom(pin.get("win_rate"), pin.get("games")), "{:.3f}" + f" ({roles.strip()}, n {pin['games']})"))
+    for name, c in (w.get("opponents") or {}).items():     # run.py --opponents: every opponent of share >= WIN_SHARE
+        a = c.get("all") or {}
+        if (c.get("share") or 0) < WIN_SHARE or not a.get("games"):
+            continue
+        roles = "".join(f" {r[:3]} {c[r]['win_rate']:.2f}" for r in ("attack", "defend") if (c.get(r) or {}).get("games"))
+        out.append((f"win_{name}", f"window: win vs {name} (training, since the last point)", a.get("win_rate"),
+                    _binom(a.get("win_rate"), a.get("games")), "{:.3f}" + f" ({roles.strip()}, n {a['games']})"))
     if w.get("lord_dead_own") is not None:
         out.append(("lord_train", "own lord dead, training window (all its battles)", w["lord_dead_own"],
                     _binom(w["lord_dead_own"], w.get("games")), "{:.3f}"))

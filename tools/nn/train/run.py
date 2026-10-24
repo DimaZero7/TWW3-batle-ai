@@ -1278,6 +1278,7 @@ def _train(args, every=None, teacher=None, normal=None):
             row["pinned_matchups"] = pinned_matchups(pin_m)
         if named is not None:
             row["opponents"] = by_opponent(stats, list(mix))
+            row["opponent_shares"] = mix
             if named_m:
                 row["opponent_matchups"] = named_matchups(named_m)
         if taught:

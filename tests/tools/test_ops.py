@@ -469,3 +469,16 @@ class TestOpponents:
         assert "itS27_4 by matchup (the learner's role/own-enemy): attack/EMP-SKV 0.60 (20)" in text
         assert data["opponents"]["self"]["all"]["games"] == 100
         assert card.opponents_table({}) == []
+
+    def test_the_card_has_a_window_row_for_every_named_opponent_of_five_percent(self):
+        cell = (lambda g, w: {"games": g, "wins": w, "win_rate": round(w / g, 4) if g else None})
+        p = point(0.5)
+        p["window"] = {"opponents": {
+            "self": {"attack": cell(40, 20), "defend": cell(40, 20), "all": cell(80, 40), "share": 0.35},
+            "itS27_4": {"attack": cell(20, 12), "defend": cell(20, 4), "all": cell(40, 16), "share": 0.25},
+            "ai_like": {"attack": cell(5, 5), "defend": cell(0, 0), "all": cell(5, 5), "share": 0.02}},
+            "lord_dead_own": 0.1, "games": 125}
+        rows = {r[0]: r for r in card.rows(p)}
+        assert rows["win_itS27_4"][2] == 0.4 and "win vs itS27_4" in rows["win_itS27_4"][1]
+        assert rows["win_itS27_4"][4] == "{:.3f} (att 0.60 def 0.20, n 40)" and "win_self" in rows
+        assert "win_ai_like" not in rows and "pinned_win" not in rows        # (share 0.02 < 0.05; no pin)
