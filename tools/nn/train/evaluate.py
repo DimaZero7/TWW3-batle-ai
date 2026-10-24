@@ -317,6 +317,21 @@ def _scatter(full, orig, cur):
         full[orig] = cur
 
 
+class LordMelee:
+    """Per battle the seconds the learner's own lord fights in melee (the state's melee flag, the lord standing with
+    men): s [B]. A watcher like behaviour.Tracker (update after every step; the compact batch shrinks it)."""
+
+    def __init__(self, st, params, mine):
+        self.dt = float(params.dt)
+        self.mine = mine
+        self.s = torch.zeros(st.B, device=st.device)
+
+    def update(self, st, live):
+        u = st.u
+        on = (u["lord"] & self.mine & u["m"].bool() & (u["men"] > 0)).any(1)
+        self.s = self.s + self.dt * (on & live).float()
+
+
 class _Full:
     """The whole evaluation batch while rollout.Battles.narrow shrinks the one that steps: what the
     results read (the state, the per-battle counters, the per-battle tensors of the watchers: the
@@ -374,7 +389,7 @@ class _Full:
 
 
 # What Graphed walks for the tensors a decision reads and writes (the bank and the setup are only read).
-_WALK = (S.State, rollout.Battles, behaviour.Tracker, behaviour.Fatigue, drill_transfer.Tracker, SimpleNamespace,
+_WALK = (S.State, rollout.Battles, behaviour.Tracker, behaviour.Fatigue, drill_transfer.Tracker, LordMelee, SimpleNamespace,
          rollout.ob.Memory,
          rollout.Frame)
 _SKIP = {"source", "bank", "setup", "params", "weights", "layout", "scripts", "past_actor", "gen"}
@@ -522,7 +537,8 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
              if want("behaviour") or want("liveliness") else None)
     xfer = drill_transfer.Tracker(env.st, env.params, mine, wrap=fast) if want("transfer") else None
     fat = behaviour.Fatigue(env.st, env.params, mine, wrap=fast) if want("fatigue") else None
-    watches = tuple(w for w in (watch, xfer, fat) if w is not None)
+    lordw = LordMelee(env.st, env.params, mine)          # the own lord's seconds in melee (per battle)
+    watches = tuple(w for w in (watch, xfer, fat, lordw) if w is not None)
     full = _Full(env, watches) if compact else None
     acc = SimpleNamespace(contact=contact, fired=fired, mine=mine)
 
@@ -576,8 +592,12 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     attacks_all = env.st.attacker.cpu().numpy() == side
     c_all = contact.cpu().numpy()
     fired_all = fired.cpu().numpy()
-    dead = env.st.lord_dead_s.cpu().numpy() >= 0                      # [B, side]
+    dead_s = env.st.lord_dead_s.cpu().numpy()                         # [B, side] seconds since its death (-1: alive)
+    dead = dead_s >= 0
     lords = (dead[np.arange(B), side - 1], dead[np.arange(B), 2 - side])
+    own_since = dead_s[np.arange(B), side - 1]
+    lord_at = np.where(own_since >= 0, t - own_since, np.nan)        # the own lord's death, s of battle
+    lord_melee = lordw.s.cpu().numpy()
     gold_b = reward.gold_sides(env.st.u, env.weights.rout_share).cpu().numpy()   # [B, side]
     gold = (gold_b[np.arange(B), side - 1], gold_b[np.arange(B), 2 - side], reward.budget(env.st.u).cpu().numpy())
     margin = skill.margin(winner, side, gold_b, start_cost(env.st.u))
@@ -621,7 +641,10 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                "attacks": attacks_all[this].tolist(), "side": side[this].tolist(), "pair": pair[this].tolist(),
                "seed": np.asarray(seeds_b)[this].tolist(), "margin": np.round(margin[this], 4).tolist(),
                "trade": np.round(trade[this], 4).tolist(), "destroyed": np.round(gold[1][this], 2).tolist(),
-               "lost": np.round(gold[0][this], 2).tolist(), "budget": np.round(gold[2][this], 2).tolist()}
+               "lost": np.round(gold[0][this], 2).tolist(), "budget": np.round(gold[2][this], 2).tolist(),
+               "lord_dead": lords[0][this].tolist(),
+               "lord_dead_at": [None if np.isnan(x) else round(float(x), 1) for x in lord_at[this]],
+               "lord_melee_s": np.round(lord_melee[this], 1).tolist()}
         for role, sel in (("attack", attacks), ("defend", this & ~attacks)):
             if sel.any():
                 result["roles"][role]["behaviour"] = observed(sel)

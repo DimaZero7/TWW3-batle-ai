@@ -482,3 +482,15 @@ class TestOpponents:
         assert rows["win_itS27_4"][2] == 0.4 and "win vs itS27_4" in rows["win_itS27_4"][1]
         assert rows["win_itS27_4"][4] == "{:.3f} (att 0.60 def 0.20, n 40)" and "win_self" in rows
         assert "win_ai_like" not in rows and "pinned_win" not in rows        # (share 0.02 < 0.05; no pin)
+
+    def test_the_card_has_the_own_lord_dead_by_opponent(self, tmp_path):
+        folder = report_folder(tmp_path, [(0, point(0.5)), (10, point(0.6))])
+        rep = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+        rep["training"] = {"lord_dead": {"itS27_4/attack": {"games": 20, "dead": 5, "share": 0.25},
+                                         "itS27_4/defend": {"games": 10, "dead": 1, "share": 0.1},
+                                         "nearest/attack": {"games": 4, "dead": 0, "share": 0.0}}}
+        (folder / "report.json").write_text(json.dumps(rep), encoding="utf-8")
+        text = "\n".join(card.card(folder)[0])
+        assert ("own lord dead by opponent (training, share (battles)): itS27_4 att 0.25 (20) def 0.10 (10); "
+                "nearest att 0.00 (4)") in text
+        assert card.lord_line({}) == []

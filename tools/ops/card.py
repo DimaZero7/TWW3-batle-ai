@@ -243,6 +243,21 @@ def anomalies(pts):
     return out
 
 
+def lord_line(tr):
+    """["own lord dead by opponent (training): <name> att x (n) def y (n); ..."] of report.json training "lord_dead"
+    (run.py: lord_dead/<opponent>/<role>); [] without it."""
+    ld = tr.get("lord_dead") or {}
+    if not ld:
+        return []
+    by = {}
+    for k, c in ld.items():
+        name, _, role = k.rpartition("/")
+        by.setdefault(name, {})[role] = c
+    return ["own lord dead by opponent (training, share (battles)): " + "; ".join(
+        f"{n} " + " ".join(f"{r[:3]} {c[r]['share']:.2f} ({c[r]['games']})" for r in ("attack", "defend") if r in c)
+        for n, c in by.items())]
+
+
 def opponents_table(rep):
     """Lines of the training's battles by opponent (run.py --opponents: report.json "training" "opponents", the
     learner's wins by role) and each big checkpoint's matchups ("opponent_matchups"); [] without them."""
@@ -259,6 +274,7 @@ def opponents_table(rep):
         out.append(f"| {name} | {sh:.2f} | {c['all']['games']} | {rate(c['attack'])} | {rate(c['defend'])} | "
                    f"{rate(c['all'])} |" if sh is not None else
                    f"| {name} | - | {c['all']['games']} | {rate(c['attack'])} | {rate(c['defend'])} | {rate(c['all'])} |")
+    out += lord_line(tr)
     for name, cells in (tr.get("opponent_matchups") or {}).items():
         out.append(f"{name} by matchup (the learner's role/own-enemy): " + ", ".join(
             f"{k} {v['win_rate']:.2f} ({v['games']})" for k, v in cells.items()))
@@ -321,6 +337,8 @@ def card(folder, prev=None):
     if rep and rep.get("train_s"):
         lines.append(f"training: {rep['train_s'] / 60:.0f} min, {rep.get('updates')} updates")
     lines += opponents_table(rep)
+    if not ((rep or {}).get("training") or {}).get("opponents"):          # (with --opponents: inside the table's lines)
+        lines += lord_line((rep or {}).get("training") or {})
     return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity,
                    "opponents": ((rep or {}).get("training") or {}).get("opponents"),
                    "computed": computed(pts, rep),

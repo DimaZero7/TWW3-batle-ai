@@ -102,6 +102,13 @@ def test_a_run_with_named_opponents_logs_them_by_name(tmp_path, monkeypatch):
     assert set(trained["opponents"]) == {"self", "x2_m40", "old", "nearest"}
     assert trained["opponents"]["x2_m40"]["all"]["games"] == sum(v for k, v in games.items() if k.startswith("x2_m40/"))
     assert set(trained["opponent_matchups"]) <= {"x2_m40", "old"} and trained["opponent_matchups"]
+    # the own lord's deaths by opponent and role (lord_dead/<name>/<role>): every update's and the run's
+    ld = trained["lord_dead"]
+    assert ld and all(k.split("/")[0] in {"self", "x2_m40", "old", "nearest"} and k.split("/")[1] in ("attack", "defend")
+                      for k in ld)
+    assert all(set(c) == {"games", "dead", "share"} and 0 <= c["share"] <= 1 for c in ld.values())
+    assert sum(c["games"] for k, c in ld.items() if k.startswith("x2_m40/")) == trained["opponents"]["x2_m40"]["all"]["games"]
+    assert any("lord_dead" in r for r in rows)
     assert not (out / "pool").exists()                                 # no pool at all
     with pytest.raises(SystemExit):                                    # not with --mix
         run.train(run.parser().parse_args(["--name", "n2", "--opponents", opp, "--mix", '{"self": 1.0}'] + base))
