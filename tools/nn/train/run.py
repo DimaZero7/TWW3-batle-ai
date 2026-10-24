@@ -241,6 +241,32 @@ def rates(stats):
     return {k: round(w / g, 3) for k, (g, w, _) in stats.items() if g}
 
 
+def by_opponent(stats, keys):
+    """{name: {"attack" | "defend" | "all": {games, wins, win_rate}}} of the run's (games, wins, seconds) counts
+    "<name>/<role>" for the log names `keys` (run.py --opponents: every opponent by name)."""
+    out = {}
+    for name in keys:
+        cell = {}
+        for role in ("attack", "defend"):
+            g, w, _ = stats.get(f"{name}/{role}", (0, 0, 0.0))
+            cell[role] = {"games": int(g), "wins": int(round(w)), "win_rate": round(w / g, 3) if g else None}
+        g = cell["attack"]["games"] + cell["defend"]["games"]
+        w = cell["attack"]["wins"] + cell["defend"]["wins"]
+        cell["all"] = {"games": g, "wins": w, "win_rate": round(w / g, 3) if g else None}
+        out[name] = cell
+    return out
+
+
+def named_matchups(cells):
+    """{name: {"<role>/<own>-<enemy>": {games, wins, win_rate, gold_trade}}} (the learner's view) of
+    rollout.Battles.take_named's counts."""
+    return {n: {k: {"games": g, "wins": w, "win_rate": round(w / g, 3), "gold_trade": round(t, 4)}
+                for k, (g, w, t) in sorted(c.items()) if g} for n, c in cells.items()}
+
+
+MATCHUP_SHARE = 0.1     # --opponents: the checkpoints of at least this share get their matchups in the log
+
+
 def score(window):
     """The worst win rate against the scripts over (opponent, role) with enough battles; None if too few."""
     rs = [w / g for k, (g, w, _) in window.items() if k.split("/")[0] in SCRIPTED and g >= 20]
@@ -654,6 +680,22 @@ def _train(args, every=None, teacher=None, normal=None):
     observe = observation(args, actor, start, cfg, int(carried.get("observe_updates", 0)), device)
     if args.entropy_decay and args.entropy_end is None:
         raise SystemExit("--entropy-decay needs --entropy-end (the weight it goes to)")
+    shares = None
+    if args.opponents:
+        # --opponents: every opponent by name at a hard share (league.named_layout): no mix, pool draws or pin
+        clash = [f for f, v in (("--mix", args.mix), ("--past-pin", args.past_pin), ("--past-pin-cells",
+                                args.past_pin_cells), ("--pool-extra", args.pool_extra)) if v]
+        if clash:
+            raise SystemExit(f"--opponents names every opponent: not with {', '.join(clash)}")
+        if args.drills:
+            raise SystemExit("--opponents: no drills (--drills 0)")
+        try:
+            shares = league.parse_opponents(args.opponents)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        missing = [n for n in shares if league.is_checkpoint(n) and not Path(n).is_file()]
+        if missing:
+            raise SystemExit(f"--opponents: no such checkpoint (nor a script: {', '.join(league.OPPONENTS)}): {missing}")
     if args.past_pin_cells:
         if not args.past_pin:
             raise SystemExit("--past-pin-cells needs --past-pin")
@@ -687,6 +729,8 @@ def _train(args, every=None, teacher=None, normal=None):
     print(pool.text(), flush=True)
     # The past slots (rollout.Battles): each holds a version; a battle keeps its slot's version from its start
     slots = max(1, args.past_slots)
+    if shares is not None:                       # --opponents: a slot for each checkpoint, loaded once
+        slots = max(1, sum(league.is_checkpoint(n) for n in shares))
     slot_path, slot_p = [None] * slots, [1.0] * slots
     pasts = {}                                   # (slot, ModelConfig) -> its actor
     deferred = 0                                 # draws that found no free slot (the active one goes on)
@@ -697,7 +741,13 @@ def _train(args, every=None, teacher=None, normal=None):
         mix = league.with_drills(mix, args.drills, shares)
     # the scripts met only as the defender in training (the learner attacks); the evaluation keeps league.ATTACK_ONLY
     defend_only = league.names_list(args.defend_only)
-    lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers(), attack_only=defend_only)
+    named = None
+    if shares is not None:
+        named = league.named_layout(args.battles, len(scenes.SCENES), shares, scenes.attackers(), defend_only)
+        lay, mix = named.layout, {named.keys[n]: v for n, v in shares.items()}
+    else:
+        lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers(),
+                            attack_only=defend_only)
     # the drills' teacher (drills/teach.py): manual {drill: the imitation term's starting weight}, annealed
     # to 0; or auto (teach_auto.py): every READY drill the run plays, a share of its battles from its deficit
     played = set(np.unique(lay.opponent).tolist())
@@ -894,7 +944,17 @@ def _train(args, every=None, teacher=None, normal=None):
         print(f"past pinned: {Path(args.past_pin).name} in slot {slots}, apart from the pool; {args.past_pin_share:g} of "
               f"the past battles (~{args.past_pin_share * past_share:.0%} of all), counted as pinned/attack|defend",
               flush=True)
-    pick_past()
+    if named is not None:
+        for k, path in enumerate(named.checkpoints):
+            load_slot(k, Path(path), False, 1.0)
+        env.fix_slots(named.row_slot)
+        print("opponents (--opponents, hard shares: battles of the batch): " + ", ".join(
+            f"{named.keys[n]} {named.rows[n]}" + (f" (slot {named.checkpoints.index(n)})" if n in named.checkpoints
+                                                  else "") for n in shares), flush=True)
+    else:
+        pick_past()
+    named_keys = [named.keys[p] for p in named.checkpoints] if named is not None else []
+    named_total = {}                              # --opponents: (games, wins, gold trade summed) by checkpoint, matchup
     dlearn = None                                 # --general-distinct: the classifier (distinct.Learner)
     d_updates0 = int(carried.get("general_distinct_updates", 0))
     e_updates0 = int(carried.get("general_exec_updates", 0))   # --general-exec-decay's counter over the chain
@@ -1168,6 +1228,18 @@ def _train(args, every=None, teacher=None, normal=None):
             next_keep += args.keep_every
         decisions += env.B * args.steps
         stats = env.take_stats()
+        named_m = {}
+        if named is not None:
+            # the past battles by their checkpoint's name (and the untrained: none), the scripts by theirs
+            n_stats, n_cells = env.take_named(named_keys)
+            stats = {k: v for k, v in stats.items() if k.split("/")[0] not in ("past", "untrained")}
+            stats.update(n_stats)
+            big = {named.keys[n] for n in named.checkpoints if shares[n] >= MATCHUP_SHARE}
+            named_m = {n: c for n, c in n_cells.items() if n in big}
+            for n, c in named_m.items():
+                for k, (g, w, t) in c.items():
+                    G, W, T = named_total.setdefault(n, {}).get(k, (0, 0, 0.0))
+                    named_total[n][k] = (G + g, W + w, T + t * g)
         pin_m = env.take_pin_stats()          # --past-pin: the pinned version's battles by matchup ({} without)
         for k, (g, w, t) in pin_m.items():
             G, W, T = pin_total.get(k, (0, 0, 0.0))
@@ -1175,7 +1247,7 @@ def _train(args, every=None, teacher=None, normal=None):
         # the learner's results against each slot's version -> the pool's quality scores (before a slot changes); the
         # pinned slot (--past-pin, the last one) stays out of the pool
         for k, (g, w) in enumerate(env.take_slot_stats()[:slots]):
-            if g and slot_path[k] is not None:
+            if g and slot_path[k] is not None and named is None:
                 pool.result(slot_path[k], g, w, slot_p[k])
         pool.tick()
         pool.write()
@@ -1198,11 +1270,16 @@ def _train(args, every=None, teacher=None, normal=None):
                "reward_parts": {r: {k: round(v, 4) for k, v in p.items()} for r, p in env.reward_parts().items()},
                "games": {k: g for k, (g, _, _) in stats.items()}, "win_rate": rates(stats),
                "seconds_per_battle": {k: round(s) for k, (_, _, s) in stats.items()},
-               "past": slot_path[env.active].name, "past_deferred": deferred,
+               "past": slot_path[env.active].name if slot_path[env.active] is not None else None,
+               "past_deferred": deferred,
                "pool": {"n": len(pool), "wide": int((pool.probs() > 0.05).sum()),
                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
         if pin_m:
             row["pinned_matchups"] = pinned_matchups(pin_m)
+        if named is not None:
+            row["opponents"] = by_opponent(stats, list(mix))
+            if named_m:
+                row["opponent_matchups"] = named_matchups(named_m)
         if taught:
             row["teach"] = taught
         if torch.cuda.is_available():
@@ -1286,7 +1363,7 @@ def _train(args, every=None, teacher=None, normal=None):
                     checkpoint.save(out / "best.pt", actor, critic, args.preset, dict(meta, score=sc))
                     print(f"   best: worst scripted win rate {sc:.2f}", flush=True)
                 window = {}
-        if update % args.past_every == 0:
+        if update % args.past_every == 0 and named is None:
             pick_past()
         if every and time.time() - t0 - paused >= next_mark * 60 and time.time() - t0 - paused < args.minutes * 60:
             t_e = time.time()
@@ -1318,6 +1395,11 @@ def _train(args, every=None, teacher=None, normal=None):
                "mean_battle_s": {k: round(s / g) for k, (g, _, s) in sorted(total.items()) if g}, "best_score": best}
     if pin_total:
         summary["pinned_matchups"] = pinned_matchups({k: (g, w, t / g) for k, (g, w, t) in pin_total.items() if g})
+    if named is not None:
+        summary["opponent_shares"] = mix
+        summary["opponents"] = by_opponent(total, list(mix))
+        summary["opponent_matchups"] = named_matchups(
+            {n: {k: (g, w, t / g) for k, (g, w, t) in c.items() if g} for n, c in named_total.items()})
     print("trained:", json.dumps(summary), flush=True)
     return actor, summary, out
 
@@ -1465,6 +1547,11 @@ def parser():
     ap.add_argument("--retarget", type=float, default=reward.Weights.retarget,
                     help="cost of switching an attack to another target while the old one stands")
     ap.add_argument("--mix", help='opponent shares as json, e.g. {"self": 0.2, "nearest": 0.4}')
+    ap.add_argument("--opponents",
+                    help='every opponent by name at a hard share of the battles (league.named_layout; sum 1): scripts, '
+                         '"self" and checkpoints (each in a past slot of its own, loaded once), as json - {"self": '
+                         '0.35, "build/v2/itS27_4.pt": 0.25, "ai_like": 0.02, ...} - or "name:share,..."; not with '
+                         '--mix, --past-pin, --pool-extra, --drills; the log by name (league.opponent_key)')
     ap.add_argument("--defend-only", default=",".join(league.ATTACK_ONLY),
                     help="training: these opponents (comma-separated) play only the defender, the learner attacks "
                          "(default: league.ATTACK_ONLY; the evaluation always uses that one)")

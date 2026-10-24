@@ -513,6 +513,12 @@ class Battles:
         # the pinned slot (pin_slot; run.py --past-pin): its index, the share of the past battles that take it, its draws
         self.pin, self.pin_share, self.pin_gen = None, 0.0, None
         self.pin_cells = None         # [2 F F] bool: the cells (the pinned version's view) it plays in; None: every one
+        # run.py --opponents (fix_slots): each past row's own slot for the whole run; per slot the learner's games,
+        # wins, seconds by role and games, wins, gold trade by matchup (take_named)
+        self.row_slot = None
+        F = len(PIN_FACTIONS)
+        self.slot_rstats = torch.zeros(self.past_slots, 2, 3, device=self.device)
+        self.slot_mstats = torch.zeros(self.past_slots, 2 * F * F, 3, device=self.device)
         self.active = 0
         self.slot_used = {0}                                  # slots that may hold battles (a superset, host side)
         self.is_past = (self.ctrl == league.CODE["past"]).any(1)                     # [B]
@@ -654,10 +660,43 @@ class Battles:
         self.slot_used.add(k)
         self.battle_slot = self._restart_slot(torch.ones(self.B, dtype=torch.bool, device=self.device))
 
+    def fix_slots(self, row_slot):
+        """run.py --opponents: every past battle row plays the version of its own slot row_slot [B] (league.Named; -1:
+        not a past row) for the whole run - no pool, no draw; the battles running now take it at once."""
+        self.row_slot = torch.as_tensor(row_slot, device=self.device).long()
+        self.battle_slot = torch.where(self.row_slot >= 0, self.row_slot, torch.zeros_like(self.row_slot))
+        self.slot_used = set(range(self.past_slots))
+
+    def take_named(self, names):
+        """({"<name>/<role>": (games, wins, mean seconds)}, {name: {"<role>/<own>-<enemy>": (games, wins, mean gold
+        trade)}}) of the past slots' battles since the last call, names [slot] the log's names (the learner's role and
+        factions, as take_pin_stats)."""
+        r = self.slot_rstats.cpu().clone().numpy()
+        m = self.slot_mstats.cpu().clone().numpy()
+        self.slot_rstats.zero_()
+        self.slot_mstats.zero_()
+        F = len(PIN_FACTIONS)
+        stats, cells = {}, {}
+        for k, name in enumerate(names):
+            for j, role in enumerate(ROLES):
+                g, w, t = r[k, j]
+                if g > 0:
+                    stats[f"{name}/{role}"] = (int(round(g)), int(round(w)), float(t / g))
+            for j, role in enumerate(ROLES):
+                for a, own in enumerate(PIN_FACTIONS):
+                    for e, enemy in enumerate(PIN_FACTIONS):
+                        g, w, trade = m[k, (j * F + a) * F + e]
+                        if g > 0:
+                            cells.setdefault(name, {})[f"{role}/{own}-{enemy}"] = (int(round(g)), int(round(w)),
+                                                                                   float(trade / g))
+        return stats, cells
+
     def _restart_slot(self, finished):
         """[B] the past slot of every battle once the battles `finished` (re)start: the active slot, or the pinned one
         with probability pin_share (a draw for every battle; only the past battles read their slot)."""
         new = torch.full_like(self.battle_slot, self.active)
+        if self.row_slot is not None:
+            return torch.where(finished, self.row_slot.clamp(min=0), self.battle_slot)
         if self.pin is not None:
             take = torch.rand(self.B, generator=self.pin_gen, device=self.device) < self.pin_share
             if self.pin_cells is not None:
@@ -1108,6 +1147,21 @@ class Battles:
         self.slot_stats.index_add_(0, slot, torch.stack([dp, dp * won], 1))
         defends = (self.st.attacker[rb] != rs + 1).long()
         self.stats.index_add_(0, 2 * code + defends, torch.stack([d, d * won, d * self.st.t[rb]], 1))
+        if self.row_slot is not None:
+            # run.py --opponents: each slot's battles by role and by matchup (take_named)
+            dp_ = d * past.float()
+            self.slot_rstats.view(-1, 3).index_add_(0, slot * 2 + defends,
+                                                    torch.stack([dp_, dp_ * won, dp_ * self.st.t[rb]], 1))
+            gold = reward.gold_sides(self.st.u, self.weights.rout_share)[rb]
+            own_lost = gold.gather(1, rs[:, None]).squeeze(1)
+            enemy_lost = gold.gather(1, (1 - rs)[:, None]).squeeze(1)
+            trade = (enemy_lost - own_lost) / reward.budget(self.st.u)[rb]
+            fac = self._fac_codes()[rb]
+            own_f, enemy_f = fac.gather(1, rs[:, None]).squeeze(1), fac.gather(1, (1 - rs)[:, None]).squeeze(1)
+            F = len(PIN_FACTIONS)
+            cell = (defends * F + own_f) * F + enemy_f
+            flat = self.slot_mstats.view(-1, 3)
+            flat.index_add_(0, slot * (2 * F * F) + cell, torch.stack([dp_, dp_ * won, dp_ * trade], 1))
         if self.pin is not None:
             # the pinned version's battles by matchup (take_pin_stats): the gold trade as the evaluation's matchups
             # (matchups._cell: (enemy gold destroyed - own gold lost) / budget, reward.gold_sides at the end)

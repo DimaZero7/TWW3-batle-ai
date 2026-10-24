@@ -235,6 +235,28 @@ def anomalies(pts):
     return out
 
 
+def opponents_table(rep):
+    """Lines of the training's battles by opponent (run.py --opponents: report.json "training" "opponents", the
+    learner's wins by role) and each big checkpoint's matchups ("opponent_matchups"); [] without them."""
+    tr = (rep or {}).get("training") or {}
+    opp = tr.get("opponents")
+    if not opp:
+        return []
+    shares = tr.get("opponent_shares") or {}
+    rate = (lambda c: f"{c['win_rate']:.2f} ({c['games']})" if c.get("games") else "-")
+    out = ["", "opponents in training (run.py --opponents; the learner's win rate, battles):", "",
+           "| opponent | share | battles | win attack | win defend | win all |", "|---|---|---|---|---|---|"]
+    for name, c in opp.items():
+        sh = shares.get(name)
+        out.append(f"| {name} | {sh:.2f} | {c['all']['games']} | {rate(c['attack'])} | {rate(c['defend'])} | "
+                   f"{rate(c['all'])} |" if sh is not None else
+                   f"| {name} | - | {c['all']['games']} | {rate(c['attack'])} | {rate(c['defend'])} | {rate(c['all'])} |")
+    for name, cells in (tr.get("opponent_matchups") or {}).items():
+        out.append(f"{name} by matchup (the learner's role/own-enemy): " + ", ".join(
+            f"{k} {v['win_rate']:.2f} ({v['games']})" for k, v in cells.items()))
+    return out
+
+
 def computed(pts, rep=None):
     """The line naming the metric profiles of the points: one name when all agree, else per point."""
     names = [p.get("profile") or (rep or {}).get("profile") or "full" for _, p in pts]
@@ -290,7 +312,9 @@ def card(folder, prev=None):
         lines.append(f"capacity: {capacity.get('verdict')} - {'; '.join(capacity.get('reasons') or [])}")
     if rep and rep.get("train_s"):
         lines.append(f"training: {rep['train_s'] / 60:.0f} min, {rep.get('updates')} updates")
+    lines += opponents_table(rep)
     return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity,
+                   "opponents": ((rep or {}).get("training") or {}).get("opponents"),
                    "computed": computed(pts, rep),
                    "no_script_metrics": bool((rep or {}).get("no_script_metrics")
                                              or any(p.get("no_script_metrics") for _, p in pts))}
