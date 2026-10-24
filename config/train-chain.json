@@ -55,6 +55,7 @@
         "drills": 0,
         "snapshot-every": 20,
         "pool": 12,
+        "pool-no-untrained": true,
         "pool-extra": "build/v2/itS26_15.pt,build/v2/itS25_1.pt,build/v2/itS26_5.pt",
         "past-pin": "build/v2/itS27_4.pt",
         "past-pin-share": 0.65,

@@ -391,7 +391,7 @@ def test_the_teacher_gives_no_withdraw_to_the_lords_group_in_melee():
 
 def test_the_teachers_shooters_pick_the_target_their_shots_hurt_most():
     """teacher.shot_hp + shoot_target: slingers (base 7, armour-piercing 1) between greatswords of armour 95 (nearer)
-    and militia of armour 25 shoot the militia; a target beyond range + APPROACH_M counts 0; equal values: the
+    and militia of armour 25 shoot the militia; a target beyond range + walk x REACH_S counts 0; equal values: the
     nearest; nothing in reach: the nearest; a shield blocks small arms (the simulator's per_hit, sim/melee.py)."""
     from tools.nn.sim import melee as smelee
     N = 4
@@ -410,7 +410,8 @@ def test_the_teachers_shooters_pick_the_target_their_shots_hurt_most():
     small = torch.tensor([[True, True, False, False]])
     armour, hp_man, shield, resist, men0 = f(0, 0, 95, 25), f(60, 60, 80, 60), f(0, 0, 0, 0), f(0, 0, 0, 0), f(80,
                                                                                                               80, 60, 90)
-    shot = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0)
+    walk = f(4, 4, 0, 0)
+    shot = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0, walk=walk)
     want = smelee.per_hit(torch.tensor(7.0), torch.tensor(1.0), torch.tensor(25.0), torch.tensor(60.0))
     assert abs(float(shot[0, 0, 3]) - float(want)) < 1e-5 and float(shot[0, 0, 2]) < float(shot[0, 0, 3])
     args = (main, active, x, z, own, standing, shooter, no, G, CFG.kinds)
@@ -418,21 +419,64 @@ def test_the_teachers_shooters_pick_the_target_their_shots_hurt_most():
     assert int(kind[0, 0]) == K["shoot"] and int(target[0, 0]) == G
     kind, target, _ = teacher.choose(*args, shot=shot)
     assert int(kind[0, 0]) == K["shoot"] and int(target[0, 0]) == G + 1         # the militia
-    # the militia out of reach (range 150 + 100 m): the greatswords
+    # the militia out of reach (range 150 + 4 m/s x 10 s): the greatswords
     x_far = x.clone()
     x_far[0, 3] = 400.0
-    shot_far = teacher.shot_hp(x_far, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0)
+    shot_far = teacher.shot_hp(x_far, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0, walk=walk)
     assert float(shot_far[0, 0, 3]) == 0 and float(shot_far[0, 0, 2]) > 0
     _, target, _ = teacher.choose(main, active, x_far, z, own, standing, shooter, no, G, CFG.kinds, shot=shot_far)
     assert int(target[0, 0]) == G
     # both alike: the nearest; nothing in reach: the nearest
-    same = teacher.shot_hp(x, z, rng, dmg, ap, small, f(0, 0, 25, 25), f(60, 60, 60, 60), shield, resist, men0)
+    same = teacher.shot_hp(x, z, rng, dmg, ap, small, f(0, 0, 25, 25), f(60, 60, 60, 60), shield, resist, men0,
+                           walk=walk)
     _, target, _ = teacher.choose(*args, shot=same)
     assert int(target[0, 0]) == G
     _, target, _ = teacher.choose(*args, shot=torch.zeros(1, N, N))
     assert int(target[0, 0]) == G
     # a shield of 0.9 on the militia blocks the slings: the greatswords again
-    shielded = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, f(0, 0, 0, 0.9), resist, men0)
+    shielded = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, f(0, 0, 0, 0.9), resist, men0, walk=walk)
     _, target, _ = teacher.choose(*args, shot=shielded)
     assert int(target[0, 0]) == G
-    assert teacher.APPROACH_M == 100.0
+    assert teacher.REACH_S == 10.0
+    # without the walk: the range alone (the militia at 160 m out of 150)
+    assert float(teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0)[0, 0, 3]) == 0
+
+
+def test_the_teachers_shooters_pick_a_target_in_range_or_within_ten_seconds_of_a_walk():
+    """teacher reach (the human's battle against g34: range + 100 m kept his shooters the target while they stood out
+    of range): the enemy's soft shooters at 200 m (range 150, a walk of 3 m/s: 150 + 30 = 180 m) are not chosen before
+    the enemy's armoured infantry at 140 m in range; at 175 m they are; nothing in reach - the group the shooters
+    bring into range soonest (approach_s), not the nearest by the centres."""
+    N = 4
+    f = (lambda *v: torch.tensor([list(v)], dtype=torch.float32))
+    main = torch.tensor([[0, 0, G, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, G, G + 1]] = True
+    own = torch.tensor([[True, True, False, False]])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    shooter = torch.tensor([[True, True, False, False]])
+    no = torch.zeros(1, N, dtype=torch.bool)
+    rng, dmg, ap, walk = f(150, 150, 0, 0), f(7, 7, 0, 0), f(1, 1, 0, 0), f(3, 3, 0, 0)
+    small = torch.tensor([[True, True, False, False]])
+    # theirs: 2 infantry of armour 95 (e0), 3 shooters of armour 0 (e1)
+    armour, hp_man, shield, resist, men0 = f(0, 0, 95, 0), f(60, 60, 80, 60), f(0, 0, 0, 0), f(0, 0, 0, 0), f(80, 80, 60,
+                                                                                                         90)
+
+    def pick(xs, zs):
+        x, z = f(*xs), f(*zs)
+        shot = teacher.shot_hp(x, z, rng, dmg, ap, small, armour, hp_man, shield, resist, men0, walk=walk)
+        app = teacher.approach_s(x, z, rng, walk)
+        kind, target, _ = teacher.choose(main, active, x, z, own, standing, shooter, no, G, CFG.kinds, shot=shot,
+                                         approach=app)
+        assert int(kind[0, 0]) == K["shoot"]
+        return int(target[0, 0])
+
+    assert pick((0, 0, 140, 0), (0, 0, 0, 200)) == G                  # the shooters at 200 m: the infantry in range
+    assert pick((0, 0, 140, 0), (0, 0, 0, 175)) == G + 1              # at 175 m (within 180): the soft shooters
+    # nothing in reach: the infantry nearer by the centres (300 against 320 m), but our shooter 1 has the enemy's
+    # shooters in range after (220 - 150) / 3 s - sooner than any of ours the infantry
+    xs, zs = (0, 0, 300, 0), (0, 200, 100, 420)
+    t = teacher.approach_s(f(*xs), f(*zs), rng, walk)
+    assert float(t[0, 1, 3]) == pytest.approx(70 / 3, rel=1e-4) and float(t[0, 0, 2]) > 50
+    assert pick(xs, zs) == G + 1
+    assert torch.isinf(t[0, 2, 0])                                     # no range: never

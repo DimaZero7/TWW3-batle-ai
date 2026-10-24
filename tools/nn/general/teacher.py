@@ -9,13 +9,16 @@ The rule (on the groups' standing units, the state's truth), later rules over ea
   shooters        a group whose units are mostly shooters (range and ammunition): shoot the enemy group its shots hurt
                   most - the mean HP a shot of its shooters takes from that group's units (shot_hp: the simulator's
                   damage rule melee.per_hit - armour roll, overkill, resistances - less a shield's block of small arms
-                  from the front) x the share of those pairs in reach (range + APPROACH_M); the nearest group on a tie
-                  and where no group is in reach (without `shot`: the nearest). The human's battle against g31: by the
-                  nearest group 96 % of the slingers' fire (armour-piercing 1) went at greatswords of armour 95;
+                  from the front) x the share of those pairs in reach (in range now, or within REACH_S of the
+                  shooter's walk: range + walk x REACH_S); the nearest group on a tie; where no group is in reach -
+                  the group the shooters bring into range soonest at a walk (approach_s; without `shot`: the nearest).
+                  The human's battle against g31: by the nearest group 96 % of the slingers' fire (armour-piercing 1)
+                  went at greatswords of armour 95; against g34 (reach = range + 100 m) the human's shooters were the
+                  target 60 % of the time, out of range ~85 % of those seconds, and 82 % of the fire went at armour 95;
   one screen      the non-shooting group without the lord nearest to our largest shooting group screens it;
   the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group -
-                  unless the group fights in melee and holds (some unit in melee, none wavering: taskmask.fighting, the
-                  general's mask GeneralConfig.melee_stay): then it holds the tile it stands on (the lord rides with
+                  unless the group fights in melee and holds (some unit in melee, under GeneralConfig.waver_share of
+                  its alive units wavering or worse: taskmask.fighting, the general's mask GeneralConfig.melee_stay): then it holds the tile it stands on (the lord rides with
                   the infantry by the group rule; the human's battle against g31: "withdraw" to the whole infantry in
                   melee, 46 orders, those units killed 0.03 men/s against 0.19). No rule gives "withdraw" to a group
                   that fights and holds;
@@ -53,18 +56,20 @@ FRONT_M = 100.0          # the flank rule: the target's front point this far ahe
 #                          the nearest to it; my rule - a line of 3-4 units is ~150 m wide)
 NEAR_FLANK_M = 300.0     # ... a second attacker flanks an enemy group whose centre is within this of its own
 PIN_M = 150.0            # ... a holding / screening group pins its nearest enemy group within this (centre to centre)
-APPROACH_M = 100.0       # shoot: an enemy unit within the shooter's range + this is in reach (a short step in: ~20-25 s
-#                          at a walk, inside one re-plan of 30 s; my rule)
+REACH_S = 10.0           # shoot: an enemy unit in the shooter's range now or after this many seconds of its walk is in
+#                          reach (range + walk x REACH_S; my rule: the old range + 100 m, 25-35 s of a walk, kept the
+#                          human's shooters the target while they stayed out of range)
 TIE = 1e-3               # shoot: groups whose value is within this share of the best are equal (the nearest wins)
 INDEX = {k.name: k.index for k in gconfig.MISSION_KINDS}
 
 
-def shot_hp(x, z, rng, m_damage, m_ap, small_arms, armour, hp_man, shield, resist, men0, approach=APPROACH_M):
+def shot_hp(x, z, rng, m_damage, m_ap, small_arms, armour, hp_man, shield, resist, men0, walk=None, reach_s=REACH_S):
     """[M, N (shooter i), N (target j)] the HP a projectile of unit i takes from unit j when it hits, the simulator's
     rule (missile.volley: melee.per_hit of the projectile's damage and armour-piercing against j's armour, health of a
     man and resistance; a lone man loses the mean; a shield blocks small arms from the front - the teacher assumes the
-    front - less what the armour-piercing part pierces, missile.shield_pierce), 0 where j is beyond i's range + approach (centre to centre) or i has no range. The fields [M, N] are the
-    state's (sim/state.py); resist: the resistance against i's projectiles (missile + physical, at most 0.9)."""
+    front - less what the armour-piercing part pierces, missile.shield_pierce), 0 where j is beyond i's range + its
+    walk x reach_s (centre to centre; walk None: the range alone) or i has no range. The fields [M, N] are the state's
+    (sim/state.py); resist: the resistance against i's projectiles (missile + physical, at most 0.9)."""
     from tools.nn.sim import melee as smelee
     hit = smelee.per_hit(m_damage.float()[:, :, None], m_ap.float()[:, :, None], armour.float()[:, None, :],
                          hp_man.float()[:, None, :], resist.float()[:, None, :], single=(men0 <= 1)[:, None, :])
@@ -72,14 +77,25 @@ def shot_hp(x, z, rng, m_damage, m_ap, small_arms, armour, hp_man, shield, resis
     left = mpairs.shield_left(m_damage.float(), m_ap.float())[:, :, None]          # (the armour-piercing pierces it)
     hit = hit * (1 - shield.float()[:, None, :] * left * small_arms.float()[:, :, None])
     d = torch.hypot(x.float()[:, :, None] - x.float()[:, None, :], z.float()[:, :, None] - z.float()[:, None, :])
-    reach = (rng.float()[:, :, None] > 0) & (d <= rng.float()[:, :, None] + approach)
+    step = 0.0 if walk is None else (walk.float().clamp(min=0) * reach_s)[:, :, None]
+    reach = (rng.float()[:, :, None] > 0) & (d <= rng.float()[:, :, None] + step)
     return hit * reach.float()
 
 
-def shoot_target(mem, shooter, shot, d, G, near_e):
+def approach_s(x, z, rng, walk):
+    """[M, N (i), N (j)] the seconds unit i walks to have unit j in its range (0 in range now; inf without range or
+    walk). x, z, rng, walk [M, N] the state's (sim/state.py)."""
+    d = torch.hypot(x.float()[:, :, None] - x.float()[:, None, :], z.float()[:, :, None] - z.float()[:, None, :])
+    r, w = rng.float()[:, :, None], walk.float()[:, :, None]
+    t = (d - r).clamp(min=0) / w.clamp(min=1e-6)
+    return torch.where((r > 0) & (w > 0), t, torch.full_like(t, float("inf")))
+
+
+def shoot_target(mem, shooter, shot, d, G, near_e, approach=None):
     """[M, G] each of our groups' shoot target (module doc, "shooters"): the enemy group of the largest mean shot_hp
     of the group's shooters at its units (pairs out of reach count 0); within TIE of the best - the nearest (d [M, G,
-    G] our groups' centres to theirs, inf where no group); nothing in reach - near_e."""
+    G] our groups' centres to theirs, inf where no group); nothing in reach - the group a shooter of ours brings into
+    range soonest (approach [M, N, N]: approach_s; None or no such pair: near_e)."""
     sh = (mem[:, :, :G] & shooter[..., None]).float()                              # [M, N, G] our shooters
     foe = mem[:, :, G:].float()                                                     # [M, N, G] their units
     tot = torch.einsum("mig,mij,mje->mge", sh, shot.float(), foe)
@@ -88,7 +104,15 @@ def shoot_target(mem, shooter, shot, d, G, near_e):
     best = val.max(-1, keepdim=True).values
     top = (val >= best * (1 - TIE)) & (best > 0) & torch.isfinite(d)
     pick = d.masked_fill(~top, float("inf")).argmin(-1)
-    return torch.where(best[..., 0] > 0, G + pick, near_e)
+    fall = near_e
+    if approach is not None:
+        inf = torch.full_like(approach, float("inf"))
+        t_ie = torch.where(mem[:, None, :, G:], approach[..., None], inf[..., None]).amin(2)       # [M, N, G (enemy)]
+        t_ge = torch.where(sh[..., None] > 0, t_ie[:, :, None, :], torch.full_like(t_ie[:, :, None, :], float("inf")))
+        t_ge = t_ge.amin(1).masked_fill(~torch.isfinite(d), float("inf"))                        # [M, G, G (enemy)]
+        soon = t_ge.min(-1)
+        fall = torch.where(torch.isfinite(soon.values), G + soon.indices, near_e)
+    return torch.where(best[..., 0] > 0, G + pick, fall)
 
 
 def own_tile(cent, tiles, tiles_ok):
@@ -98,7 +122,8 @@ def own_tile(cent, tiles, tiles_ok):
 
 
 def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=None, tiles_ok=None, engage=None,
-           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None, shot=None, info=None):
+           hold_m=HOLD_M, facing=None, flank=True, fast=None, melee=None, waver=None, shot=None, info=None,
+           waver_share=0.5, alive=None, approach=None):
     """-> (kind [M, G], target [M, G], use [M, G]: our groups the rule gives a mission) of plans [M]: main [M, N] the
     plan's group numbers, active [M, 2G], the units' x, z, own, standing, shooter, lord [M, N]; kinds: the network's
     number of kinds (a rule whose kind is beyond it is not used); tiles [M, C, 2] the coarse tiles' world centres,
@@ -107,7 +132,10 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     flank: the flank rule on, fast [M, N] the units of the role "fast" (groups.roles; None: no fast groups); melee,
     waver [M, N] the units in melee and those wavering or worse (None: nobody - the lord's group withdraws always);
     shot [M, N, N] the HP a shot of unit i takes from unit j in reach (shot_hp; None: shooters shoot the nearest);
-    info: a dict that gets "wait" [M, G] (the groups the wait holds) when the wait rule runs."""
+    info: a dict that gets "wait" [M, G] (the groups the wait holds) when the wait rule runs; waver_share
+    (GeneralConfig.waver_share) and alive [M, N] (the units alive, the routing ones too; None: standing) - a group
+    holds in melee while under waver_share of its alive units waver or worse (taskmask.fighting); approach [M, N, N]
+    the seconds of i's walk to bring j into range (approach_s; None: no group in reach - the nearest)."""
     M, N = main.shape
     dev = main.device
     ar = torch.arange(2 * G, device=dev)
@@ -130,8 +158,8 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     sh = torch.einsum("mng,mn->mg", mem[:, :, :G].float(), shooter.float()) / n[:, :G].clamp(min=1)
     shooters = own_g & (sh > 0.5) & on("shoot")
     kind = torch.where(shooters & has_e, torch.full_like(kind, k_of("shoot")), kind)
-    target = torch.where(shooters & has_e, near_e if shot is None else shoot_target(mem, shooter, shot, d, G, near_e),
-                         target)
+    target = torch.where(shooters & has_e, near_e if shot is None
+                         else shoot_target(mem, shooter, shot, d, G, near_e, approach), target)
     # one screen of the largest shooting group
     lord_g = (mem[:, :, :G] & lord[..., None]).any(1)
     size = n[:, :G]
@@ -158,7 +186,9 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     has_o = other.max(-1).values > 0
     fights = torch.zeros_like(own_g)
     if melee is not None:
-        fights = gtaskmask.fighting(mem[:, :, :G], melee, torch.zeros_like(melee) if waver is None else waver)
+        alive_m = None if alive is None else (main[..., None] == ar[:G]) & alive[..., None]
+        fights = gtaskmask.fighting(mem[:, :, :G], melee, torch.zeros_like(melee) if waver is None else waver,
+                                    waver_share, alive_m)
     wd = own_g & lord_g & threat[:, None] & has_o & on("withdraw") & ~fights
     kind = torch.where(wd, torch.full_like(kind, k_of("withdraw")), kind)
     target = torch.where(wd, o_idx, target)

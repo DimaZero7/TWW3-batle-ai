@@ -329,3 +329,139 @@ class TestEntropyDecay:
         assert run.schedule(0.01, 0.003, run.decay_share(60.0, 7200.0, 0.0)) == pytest.approx(0.003)
         args = run.parser().parse_args([])
         assert args.entropy_decay == 0.0 and args.past_slots == 3 and args.past_every == 6 and args.resume
+
+
+class TestChainPool:
+    """A chain step's pool (league.open_pool, run.py): it carries on from the previous step's pool/q.json beside
+    --init or --critic-init (--pool-fresh: not); --pool-no-untrained keeps the untrained network out."""
+
+    def prev_run(self, tmp_path):
+        run = tmp_path / "runs" / "test5_prev"
+        (run / "pool").mkdir(parents=True)
+        (run / "latest.pt").write_bytes(b"")
+        a, b, rnd = files(tmp_path, 3)
+        state = {"clock": 33, "eta": 0.01, "entries": [
+            {"path": str(rnd), "q": -0.9, "added": 0, "games": 40, "wins": 38, "untrained": True},
+            {"path": str(a), "q": -0.3, "added": 10, "games": 20, "wins": 12, "untrained": False},
+            {"path": str(b), "q": 0.0, "added": 30, "games": 2, "wins": 0, "untrained": False}]}
+        (run / "pool" / "q.json").write_text(json.dumps(state), encoding="utf-8")
+        return run, state, (a, b, rnd)
+
+    def test_a_new_step_carries_on_from_the_previous_steps_q(self, tmp_path):
+        run, state, (a, b, rnd) = self.prev_run(tmp_path)
+        made = []
+        init = tmp_path / "test5" / "prev" / "m40.pt"                     # (a network folder without a pool)
+        for i, src in enumerate(({"init": run / "latest.pt"}, {"init": init, "critic": run / "latest.pt"})):
+            root = tmp_path / f"new{i}" / "pool"
+            pool, notes = league.open_pool(root, size=12, untrained=lambda: made.append(1) or tmp_path / "rnd.pt", **src)
+            assert [e["q"] for e in pool.entries] == [-0.9, -0.3, 0.0] and pool.clock == 33
+            assert pool.probs()[2] > pool.probs()[0] and notes and not made     # not all equal; no new untrained
+            assert json.loads((root / "q.json").read_text(encoding="utf-8"))["clock"] == 33
+        assert json.loads((run / "pool" / "q.json").read_text(encoding="utf-8")) == state    # the old one untouched
+
+    def test_no_untrained_drops_it_and_a_fresh_or_own_pool_is_left_as_it_was(self, tmp_path):
+        run, _, (a, b, rnd) = self.prev_run(tmp_path)
+        pool, _ = league.open_pool(tmp_path / "n1" / "pool", init=run / "latest.pt", untrained=lambda: rnd,
+                                   no_untrained=True)
+        assert [e["q"] for e in pool.entries] == [-0.3, 0.0] and not any(e["untrained"] for e in pool.entries)
+        # --pool-fresh: a new pool - the untrained network (or, with no_untrained, the init alone) and the init
+        init = tmp_path / "init.pt"
+        init.write_bytes(b"")
+        pool, _ = league.open_pool(tmp_path / "n2" / "pool", init=run / "latest.pt", untrained=lambda: rnd,
+                                   inherit=False)
+        assert [bool(e["untrained"]) for e in pool.entries] == [True, False]
+        pool, _ = league.open_pool(tmp_path / "n3" / "pool", init=init, untrained=lambda: rnd, no_untrained=True)
+        assert len(pool) == 1 and pool.entries[0]["path"] == league.Pool.key(init)
+        pool, _ = league.open_pool(tmp_path / "n4" / "pool", untrained=lambda: rnd, no_untrained=True)
+        assert len(pool) == 1 and pool.entries[0]["untrained"]                 # nothing else to play: kept
+        # a folder with its own q.json (--pool-dir, a resumed run) keeps it
+        own = tmp_path / "n3" / "pool"
+        pool, notes = league.open_pool(own, init=run / "latest.pt", untrained=lambda: rnd, extra=[a])
+        assert not notes and [e["path"] for e in pool.entries] == [league.Pool.key(init), league.Pool.key(a)]
+
+    def test_the_flags_and_the_general_steps_of_the_chain(self):
+        from pathlib import Path
+        from tools.nn.train import run
+        ns = run.parser().parse_args(["--pool-no-untrained", "--pool-fresh"])
+        assert ns.pool_no_untrained and ns.pool_fresh
+        ns = run.parser().parse_args([])
+        assert not ns.pool_no_untrained and not ns.pool_fresh
+        chain = json.loads((Path(__file__).resolve().parents[2] / "config" / "train-chain.json").read_text(
+            encoding="utf-8"))
+        assert chain["steps"]["general"]["options"]["pool-no-untrained"] is True
+
+
+class TestPinCells:
+    """run.py --past-pin-cells (rollout.pin_cells, Battles.pin_slot cells): the pinned version only in past battles of
+    its cells - the cell in ITS view (its role, its own faction first) - with --past-pin-share there; elsewhere the
+    pool's version."""
+
+    def env(self, B=400):
+        env = rollout.Battles(league.layout(B, 1, {"past": 1.0}), MIRROR, past_slots=2, compile=False)
+        env.set_past(nets(1)[0], slot=0)
+        return env
+
+    def set_cells(self, env, gen):
+        """Random factions and attackers for every battle (a new setup.factions list: the codes made again)."""
+        F = ["wh_main_emp_empire", "wh2_main_skv_skaven"]
+        fac = [[F[int(torch.randint(2, (1,), generator=gen))], F[int(torch.randint(2, (1,), generator=gen))]]
+               for _ in range(env.B)]
+        env.setup.factions = fac
+        env._fac_key = None
+        env.st.attacker = torch.randint(1, 3, (env.B,), generator=gen)
+        ps = (env.ctrl[:, 0] != league.CODE["past"]).long()
+        names = []
+        for b in range(env.B):
+            p = int(ps[b])
+            role = "attack" if int(env.st.attacker[b]) == p + 1 else "defend"
+            own, enemy = rollout.matchups.SHORT[fac[b][p]], rollout.matchups.SHORT[fac[b][1 - p]]
+            names.append(f"{role}/{own}-{enemy}")
+        return names
+
+    def test_names_and_the_auto_cells_of_a_report(self, tmp_path):
+        assert rollout.pin_cells("defend/EMP-EMP, attack/SKV-EMP") == ["defend/EMP-EMP", "attack/SKV-EMP"]
+        assert rollout.pin_cell_code("pinned/defend/EMP-EMP") == rollout.pin_cell_code("defend/EMP-EMP")
+        for bad in ("hold/EMP-EMP", "defend/EMP", "defend/EMP-XYZ", ""):
+            with pytest.raises(ValueError):
+                rollout.pin_cells(bad)
+        rep = {"training": {"pinned_matchups": {
+            "pinned/defend/EMP-EMP": {"games": 311, "wins": 200, "win_rate": 0.643, "gold_trade": 0.07},
+            "pinned/defend/SKV-EMP": {"games": 676, "wins": 369, "win_rate": 0.546, "gold_trade": 0.08},
+            "pinned/attack/SKV-SKV": {"games": 511, "wins": 281, "win_rate": 0.55, "gold_trade": 0.03},
+            "pinned/attack/EMP-SKV": {"games": 60, "wins": 50, "win_rate": 0.83, "gold_trade": 0.2}}}}
+        path = tmp_path / "x2" / "report.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps(rep), encoding="utf-8")
+        assert rollout.pin_cells(f"auto:{path}:0.55") == ["attack/SKV-SKV", "defend/EMP-EMP"]   # (60 games: too few)
+        assert rollout.pin_cells(f"auto:{path}:0.5:50") == ["attack/EMP-SKV", "attack/SKV-SKV", "defend/EMP-EMP",
+                                                            "defend/SKV-EMP"]
+        assert rollout.pin_cells(f"auto:{path}") == rollout.pin_cells(f"auto:{path}:0.55")
+        with pytest.raises(ValueError):
+            rollout.pin_cells(f"auto:{path}:0.9")
+
+    def test_the_pinned_version_plays_only_its_cells_at_its_share_there(self):
+        gen = torch.Generator().manual_seed(5)
+        env = self.env()
+        names = self.set_cells(env, gen)
+        cells = ["defend/EMP-EMP", "attack/SKV-EMP"]
+        env.pin_slot(1, nets(2)[0], 0.65, seed=1, cells=cells)
+        for _ in range(3):                                          # new battles: new cells, new draws
+            slot = env._restart_slot(torch.ones(env.B, dtype=torch.bool))
+            mine = torch.tensor([n in cells for n in names])
+            assert int(mine.sum()) > 40
+            assert not bool((slot[~mine] == 1).any())                # never outside its cells
+            share = float((slot[mine] == 1).float().mean())
+            assert 0.5 < share < 0.8                                  # its share among its cells' battles
+            names = self.set_cells(env, gen)
+        # without cells: any cell
+        env2 = self.env()
+        self.set_cells(env2, gen)
+        env2.pin_slot(1, nets(2)[0], 1.0, seed=1)
+        assert bool((env2.battle_slot == 1).all())
+
+    def test_the_run_refuses_cells_without_a_pin(self):
+        from tools.nn.train import run
+        with pytest.raises(SystemExit):
+            run.train(run.parser().parse_args(["--past-pin-cells", "defend/EMP-EMP", "--device", "cpu"]))
+        ns = run.parser().parse_args(["--past-pin", "x.pt", "--past-pin-cells", "auto:r.json:0.55"])
+        assert ns.past_pin_cells == "auto:r.json:0.55"

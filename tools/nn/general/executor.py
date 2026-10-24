@@ -37,6 +37,7 @@ class GeneralActor(model_policy.ActorV2):
         self.heads.__class__ = MaskedChainHeads
         from tools.nn.general.taskmask import parts_of
         self.heads.parts = parts_of(self.gcfg)                  # the masks' parts in force (GeneralConfig.task_mask_parts)
+        self.heads.waver_share = self.gcfg.waver_share          # melee_stay's group rule (GeneralConfig.waver_share)
         # (registered after every part of the unit network: their parameters come last, run.resume keeps the order)
         self.task_in = nn.Linear(self.gcfg.task_dim, cfg.d)
         nn.init.zeros_(self.task_in.weight)
@@ -86,6 +87,7 @@ class GeneralActor(model_policy.ActorV2):
         self.gcfg = gcfg
         self.general.cfg = gcfg
         self.heads.parts = parts_of(gcfg)
+        self.heads.waver_share = gcfg.waver_share
         self.general.groups.rounds = gcfg.rounds
 
     def load_state_dict(self, state_dict, strict=True, assign=False):

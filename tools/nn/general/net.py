@@ -513,7 +513,8 @@ class General(nn.Module):
     def melee_ok(self, inp, c):
         """[P, G, K] the kinds a group may take by its fight (GeneralConfig.melee_stay): no "withdraw" for a group that
         fights in melee and has not wavered (taskmask.fighting: some unit taking part in melee - inp "fight", the
-        state's melee flag - none wavering or worse - inp "num"'s wavering column); every other kind always. All True
+        state's melee flag - under GeneralConfig.waver_share of its units wavering or worse - inp "num"'s wavering
+        column); every other kind always. All True
         without melee_stay, without the kind or without inp "fight"."""
         G, K = self.cfg.places, self.cfg.kinds
         out = torch.ones(c["main"].shape[0], G, K, dtype=torch.bool, device=c["main"].device)
@@ -526,7 +527,7 @@ class General(nn.Module):
         on = inp["on"] & inp["own"]
         mem = (c["main"][..., None] == torch.arange(G, device=on.device)) & on[..., None]     # [P, N, G]
         waver = inp["num"][..., gunits.WAVERING] > 0.5
-        out[..., wd] = ~taskmask.fighting(mem, f[..., 1] > 0.5, waver)
+        out[..., wd] = ~taskmask.fighting(mem, f[..., 1] > 0.5, waver, float(getattr(self.cfg, "waver_share", 0.5)))
         return out
 
     def centres(self, inp, c):

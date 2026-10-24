@@ -38,6 +38,7 @@ OPPONENTS = ("ai_like", "nearest", "hold_shoot")
 MOVE_X, LORD_X, TIMEOUTS, PLAIN = 1.5, 1.5, 0.05, 0.05    # anomaly thresholds; the plain change threshold
 NO_MARK = ("seconds", "kl", "kinds", "exam_wins")         # rows whose change is shown but never marked
 Z = 2.0
+WIN_SHARE = 0.05          # run.py --opponents: the window's "win vs <name>" rows for the opponents of this share or more
 FRIENDS = ("friend_skip_share_direct", "friend_skip_share_arc", "forced_lob_share_arc")   # behaviour.Tracker.friends
 
 
@@ -139,6 +140,13 @@ def rows(point):
                         if (w.get(f"pinned/{r}") or {}).get("games"))
         out.append(("pinned_win", "window: win vs pinned (training, since the last point)", pin.get("win_rate"),
                     _binom(pin.get("win_rate"), pin.get("games")), "{:.3f}" + f" ({roles.strip()}, n {pin['games']})"))
+    for name, c in (w.get("opponents") or {}).items():     # run.py --opponents: every opponent of share >= WIN_SHARE
+        a = c.get("all") or {}
+        if (c.get("share") or 0) < WIN_SHARE or not a.get("games"):
+            continue
+        roles = "".join(f" {r[:3]} {c[r]['win_rate']:.2f}" for r in ("attack", "defend") if (c.get(r) or {}).get("games"))
+        out.append((f"win_{name}", f"window: win vs {name} (training, since the last point)", a.get("win_rate"),
+                    _binom(a.get("win_rate"), a.get("games")), "{:.3f}" + f" ({roles.strip()}, n {a['games']})"))
     if w.get("lord_dead_own") is not None:
         out.append(("lord_train", "own lord dead, training window (all its battles)", w["lord_dead_own"],
                     _binom(w["lord_dead_own"], w.get("games")), "{:.3f}"))
@@ -235,6 +243,28 @@ def anomalies(pts):
     return out
 
 
+def opponents_table(rep):
+    """Lines of the training's battles by opponent (run.py --opponents: report.json "training" "opponents", the
+    learner's wins by role) and each big checkpoint's matchups ("opponent_matchups"); [] without them."""
+    tr = (rep or {}).get("training") or {}
+    opp = tr.get("opponents")
+    if not opp:
+        return []
+    shares = tr.get("opponent_shares") or {}
+    rate = (lambda c: f"{c['win_rate']:.2f} ({c['games']})" if c.get("games") else "-")
+    out = ["", "opponents in training (run.py --opponents; the learner's win rate, battles):", "",
+           "| opponent | share | battles | win attack | win defend | win all |", "|---|---|---|---|---|---|"]
+    for name, c in opp.items():
+        sh = shares.get(name)
+        out.append(f"| {name} | {sh:.2f} | {c['all']['games']} | {rate(c['attack'])} | {rate(c['defend'])} | "
+                   f"{rate(c['all'])} |" if sh is not None else
+                   f"| {name} | - | {c['all']['games']} | {rate(c['attack'])} | {rate(c['defend'])} | {rate(c['all'])} |")
+    for name, cells in (tr.get("opponent_matchups") or {}).items():
+        out.append(f"{name} by matchup (the learner's role/own-enemy): " + ", ".join(
+            f"{k} {v['win_rate']:.2f} ({v['games']})" for k, v in cells.items()))
+    return out
+
+
 def computed(pts, rep=None):
     """The line naming the metric profiles of the points: one name when all agree, else per point."""
     names = [p.get("profile") or (rep or {}).get("profile") or "full" for _, p in pts]
@@ -290,7 +320,9 @@ def card(folder, prev=None):
         lines.append(f"capacity: {capacity.get('verdict')} - {'; '.join(capacity.get('reasons') or [])}")
     if rep and rep.get("train_s"):
         lines.append(f"training: {rep['train_s'] / 60:.0f} min, {rep.get('updates')} updates")
+    lines += opponents_table(rep)
     return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity,
+                   "opponents": ((rep or {}).get("training") or {}).get("opponents"),
                    "computed": computed(pts, rep),
                    "no_script_metrics": bool((rep or {}).get("no_script_metrics")
                                              or any(p.get("no_script_metrics") for _, p in pts))}

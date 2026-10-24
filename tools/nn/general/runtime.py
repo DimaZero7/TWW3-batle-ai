@@ -485,7 +485,8 @@ class Runtime:
                                tiles=tiles, tiles_ok=tiles_ok, engage=engage, hold_m=self.teach_hold_m,
                                facing=f("b"), flank=self.teach_flank,
                                fast=ggroups.roles(self.b["num"][b], self.b["lab"][b]) == ggroups.ROLES.index("fast"),
-                               **self._teach_fight(f), shot=self._teach_shot(f), info=info)
+                               **self._teach_fight(f), shot=self._teach_shot(f), info=info,
+                               approach=gteacher.approach_s(f("x"), f("z"), f("range"), f("walk")))
         if "wait" in info:
             # the wait's clock: begins at the first plan that waits (the farthest group's best distance afresh), stops
             # when no group waits
@@ -521,11 +522,12 @@ class Runtime:
 
     @staticmethod
     def _teach_shot(f):
-        """[M, N, N] the HP a shot of unit i takes from unit j in reach (teacher.shot_hp) of the state's fields f(name):
+        """[M, N, N] the HP a shot of unit i takes from unit j in reach (teacher.shot_hp: in range now or after
+        teacher.REACH_S of i's walk) of the state's fields f(name):
         the resistance missile + physical, at most 0.9 (the simulator's missile.physical_resist, config/nn/sim.json)."""
         resist = (f("resist_missile").float() + f("resist_physical").float()).clamp(max=0.9)
         return gteacher.shot_hp(f("x"), f("z"), f("range"), f("m_damage"), f("m_ap"), f("small_arms"), f("armour"),
-                                f("hp_man"), f("shield"), resist, f("men0"))
+                                f("hp_man"), f("shield"), resist, f("men0"), walk=f("walk"))
 
     def _teach_fight(self, f):
         """The teacher's melee rule's inputs (teacher.choose melee, waver) of the state's fields f(name) -> [M, N]:
@@ -533,7 +535,9 @@ class Runtime:
         group withdraws as before)."""
         if not getattr(self.gcfg, "melee_stay", False):
             return {}
-        return {"melee": f("m").bool(), "waver": f("ms").float() >= gunits.WAVERING_MS}
+        alive = (f("side") > 0) & (f("men") > 0) & ~f("gone")
+        return {"melee": f("m").bool(), "waver": f("ms").float() >= gunits.WAVERING_MS,
+                "waver_share": self.gcfg.waver_share, "alive": alive}
 
     def teach_clock(self):
         """The teacher's clock runs (after()): taught battles, or mission branches against the teacher."""
@@ -1042,12 +1046,13 @@ class Runtime:
         return out
 
     # --- the executor's input ---------------------------------------------------------------------------------------
-    def task(self, rows, obs_r, fr, t=None):
+    def task(self, rows, obs_r, fr, t=None, otgt=None):
         """{"task" [R, N, task_dim], "task_on" [R, N], "task_geo" [R, N, 4], "task_plan" [R]} of rows [R] on their
         observation obs_r (the rows' dict) and frame fr (module doc); with the task masks also their numbers
         (taskmask.fields) - the volley lock's from the battle time t [R] (s; None: the time replan() noted, none
         before: no lock): its clock per unit (vl_t0) is kept here, and a second call at the same time gives the first
-        one's lock (the past slots' rows)."""
+        one's lock (the past slots' rows); otgt [R, N] the units' orders' attack targets in force (the state's
+        order_target, taskmask.fields; None: not known)."""
         if t is None and getattr(self, "t_now", None) is not None and self.t_now.shape[0] == self.B:
             t = self.t_now[rows % self.B]
         r, G, cfg = self.r, self.G, self.gcfg
@@ -1102,9 +1107,31 @@ class Runtime:
             reach = torch.where(uok, reach, torch.zeros_like(reach))
             kind_u = r["kind"][rows].gather(1, mi)
             lock = None if t is None else self._volley(rows, obs_r, on & (kind_u == gtaskmask.KIND["shoot"]), t)
-            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock))
+            line = self.shoot_line(rows, obs_r, main, cent, on, kind_u)
+            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock, line, otgt))
             self._count_masks(rows, dict(obs_r, **out))
         return out
+
+    def shoot_line(self, rows, obs, main, cent, on, kind_u):
+        """[R, N] the forward limit (m, the side's frame) of our units under "shoot" while our infantry groups hold
+        (taskmask part shoot_line, GeneralConfig.shoot_line_m): the most forward centre cent [R, 2G, 2] of our groups
+        under "hold" with under half of their units shooters (the token's ammunition and range), + shoot_line_m;
+        taskmask.LINE_NONE where none (no such group, not "shoot", the rule off)."""
+        G = self.G
+        none = torch.full(main.shape, gtaskmask.LINE_NONE, device=self.dev)
+        lead = float(getattr(self.gcfg, "shoot_line_m", 0.0))
+        if lead <= 0 or not self.gcfg.kinds > gtaskmask.KIND["shoot"]:
+            return none
+        tok = obs["tokens"]
+        shooter = (tok[..., ob.INDEX["ammo"]].float() > 0) & (tok[..., gtaskmask.RANGE_COL].float() > 0)
+        own = obs["own"] & obs["attend"]
+        mem = (main[..., None] == torch.arange(G, device=self.dev)) & own[..., None]          # [R, N, G]
+        n = mem.sum(1).float()
+        n_sh = (mem & shooter[..., None]).sum(1).float()
+        hold = (self.r["kind"][rows] == gtaskmask.KIND["hold"]) & (n > 0) & (n_sh < 0.5 * n)   # [R, G]
+        front = cent[:, :G, 0].masked_fill(~hold, -float("inf")).max(-1).values               # [R]
+        lim = (front + lead)[:, None].expand_as(none)
+        return torch.where(on & (kind_u == gtaskmask.KIND["shoot"]) & hold.any(-1, keepdim=True), lim, none)
 
     def _volley(self, rows, obs, shoot, t):
         """The volley lock [R, N] of rows at the battle time t [R] (taskmask.volley_lock; its clock kept in vl_t0; a
@@ -1130,7 +1157,7 @@ class Runtime:
         S = self.S
         sec_ok = (msectors.inside(self.mcfg, g).any(-1) if g is not None
                   else torch.ones(rows.shape[0], S, dtype=torch.bool, device=self.dev))
-        m = gtaskmask.masks(self.mcfg, obs, sec_ok, gtaskmask.parts_of(self.gcfg))
+        m = gtaskmask.masks(self.mcfg, obs, sec_ok, gtaskmask.parts_of(self.gcfg), self.gcfg.waver_share)
         _, _, _, fb = gtaskmask.apply(m, ctrl, obs.get("free", ctrl), obs["target_ok"], sec_ok)
         self.stats.add("mask_free", free.sum())
         self.stats.add("mask_units", (m["on"] & free).sum())

@@ -25,6 +25,10 @@ test5's own switches (TEST5_FLAGS) go through --set too, but to test5, not run.p
 chain file's test5 / step entry "no-script-metrics": true) -> test5 --no-script-metrics: no battles against the scripts,
 no script baselines (the step does not wait for them on a new simulator version), the mandatory set is own lord deaths
 (the exam's proxy, the training window against the pinned version); --set no-script-metrics=0 turns it off again.
+
+--set opponents='{"self": 0.35, "build/v2/itS27_4.pt": 0.25, ...}' (run.py --opponents: every opponent by name at a hard
+share) drops the chain's mix, past-pin, past-pin-share, past-pin-cells and pool-extra (OPPONENTS_REPLACE: run.py refuses
+them beside it) and says so.
 """
 import argparse
 import json
@@ -146,6 +150,10 @@ def wall_minutes(minutes, every, miss, exam=0, scripts=True):
             + STARTUP_S) / 60, evals
 
 
+# the options run.py --opponents replaces (an error beside it): dropped from a step that sets opponents
+OPPONENTS_REPLACE = ("mix", "past-pin", "past-pin-share", "past-pin-cells", "pool-extra")
+
+
 def named_step(chain, name):
     """The chain file's "steps" entry `name` ({} for None): options, drop, minutes, every, profile, canary."""
     if not name:
@@ -175,6 +183,8 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
     for k in named.get("drop") or ():
         standing.pop(k, None)
     options = apply_sets(standing, sets, drops)
+    # --opponents names every opponent at a hard share (run.py): the chain's mix, pin and pool extras give way to it
+    replaced = [k for k in OPPONENTS_REPLACE if options.get("opponents") is not None and options.pop(k, None) is not None]
     flags = {k: v for k, v in t5.items() if k in TEST5_FLAGS}
     flags.update({k: options.pop(k) for k in TEST5_FLAGS if k in options})       # --set wins over the chain file
     head = ["--critic-init", rel(critic)] if critic else []
@@ -191,7 +201,8 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
     info = {"label": label, "prev": prev_label, "init": rel(init), "critic": rel(critic) if critic else None,
             "minutes": minutes, "every": every, "canary": canary, "container": prefix + label, "options": options,
             "extra": list(extra), "out": f"build/nn-train/test5/{label}", "profile": profile or profiles.FULL,
-            "step": step_name, "no_script_metrics": "--no-script-metrics" in test5_args}
+            "step": step_name, "no_script_metrics": "--no-script-metrics" in test5_args,
+            "replaced_by_opponents": replaced}
     return lines, info
 
 
@@ -219,6 +230,8 @@ def main(argv=None):
     print("\n".join(lines))
     print()
     print(f"chain: {info['prev']} -> {info['label']}: init {info['init']}, critic {info['critic'] or 'NONE (warm start of the critic!)'}")
+    if info["replaced_by_opponents"]:
+        print(f"opponents: --opponents names every opponent; dropped {', '.join(info['replaced_by_opponents'])}")
     scripts = not info["no_script_metrics"]
     version, missing = baseline_cache() if scripts else (None, [])
     if not scripts:

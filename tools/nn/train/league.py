@@ -14,6 +14,7 @@ The pool: <pool folder>/*.pt in the checkpoint format (tools/nn/train/checkpoint
 import json
 import os
 import random
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -77,6 +78,97 @@ def counts(B, mix):
     return dict(zip(names, n))
 
 
+ATTACK_ONLY_DEFAULT = ("hold",)
+
+
+def opponent_key(name):
+    """The log's name of an opponent of run.py --opponents: a script's (or "self") own name; a checkpoint's file name
+    without .pt, with its folder's name before a generic one (m40, latest, best, v00012: x2_exploit_general_m40)."""
+    if name in CODE:
+        return name
+    p = Path(name)
+    stem = p.stem
+    if re.fullmatch(r"(m\d+|latest|best|v\d+|random)", stem) and p.parent.name:
+        stem = f"{p.parent.name}_{stem}"
+    return stem
+
+
+def parse_opponents(text):
+    """{name: share} of run.py --opponents (a JSON object, or "name:share,name:share"): every opponent by name - a
+    script or "self" (league.OPPONENTS, not "past"), or a checkpoint (a path, a past version of its own); the shares
+    above 0 and summing to 1 (within 1e-3); the log's names (opponent_key) distinct. ValueError otherwise."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("--opponents: empty")
+    if text.startswith("{"):
+        shares = json.loads(text)
+    else:
+        shares = {}
+        for part in text.split(","):
+            name, colon, v = part.strip().rpartition(":")
+            if not colon or not name:
+                raise ValueError(f"--opponents {part!r}: name:share")
+            shares[name.strip()] = float(v)
+    shares = {str(k): float(v) for k, v in shares.items()}
+    if "past" in shares:
+        raise ValueError("--opponents: name the past versions by their checkpoints, not 'past'")
+    bad = [k for k, v in shares.items() if not v > 0]
+    if bad:
+        raise ValueError(f"--opponents: shares must be above 0: {bad}")
+    total = sum(shares.values())
+    if abs(total - 1.0) > 1e-3:
+        raise ValueError(f"--opponents: the shares sum to {total:.4f}, not 1")
+    keys = [opponent_key(k) for k in shares]
+    if len(set(keys)) != len(keys):
+        raise ValueError(f"--opponents: two opponents with one name in the log: {keys}")
+    return shares
+
+
+def is_checkpoint(name):
+    """An --opponents name that is a checkpoint (not a script or "self")."""
+    return name not in CODE
+
+
+@dataclass
+class Named:
+    """The layout of run.py --opponents: the battles' Layout (the checkpoints' rows have the code "past"), each row's
+    past slot (row_slot [B], -1: not a checkpoint's), the checkpoints in slot order (paths) and every opponent's log
+    name and rows."""
+    layout: "Layout"
+    row_slot: np.ndarray
+    checkpoints: list
+    keys: dict          # name -> log name (opponent_key)
+    rows: dict          # name -> battles (rows) of the batch
+
+
+def named_layout(B, n_scenes, shares, scene_attacker=None, attack_only=ATTACK_ONLY_DEFAULT):
+    """Named of B battles by the hard shares {name: share} (parse_opponents): each opponent gets its rows by the
+    largest remainder (sum B: every share within one battle of share x B), within them the scenes and the learner's
+    side cycle as in layout(); a checkpoint's rows are past battles in its own slot for the whole run."""
+    names = list(shares)
+    w = np.array([shares[n] for n in names], float)
+    raw = w / w.sum() * B
+    n = np.floor(raw).astype(int)
+    for i in np.argsort(-(raw - n), kind="stable")[:B - n.sum()]:
+        n[i] += 1
+    ckpts = [nm for nm in names if is_checkpoint(nm)]
+    scene, side, opp, slot = [], [], [], []
+    for name, k in zip(names, n):
+        j = np.arange(k)
+        sc = j % n_scenes
+        sd = 1 + (j // n_scenes) % 2
+        if scene_attacker is not None and name in attack_only:
+            sd = np.asarray(scene_attacker)[sc]
+        scene.append(sc)
+        side.append(sd)
+        ck = is_checkpoint(name)
+        opp.append(np.full(k, CODE["past"] if ck else CODE[name]))
+        slot.append(np.full(k, ckpts.index(name) if ck else -1))
+    lay = Layout(np.concatenate(scene), np.concatenate(side), np.concatenate(opp))
+    return Named(lay, np.concatenate(slot), ckpts, {nm: opponent_key(nm) for nm in names},
+                 {nm: int(k) for nm, k in zip(names, n)})
+
+
 ATTACK_ONLY = ("hold",)   # `hold` never attacks: as the attacker it only waits out the hour
 # (the evaluation's set; training takes its own from run.py --defend-only, default this one)
 
@@ -107,6 +199,51 @@ def layout(B, n_scenes, mix=None, opponent=None, scene_attacker=None, attack_onl
         side.append(sd)
         opp.append(np.full(n, CODE[name]))
     return Layout(np.concatenate(scene), np.concatenate(side), np.concatenate(opp))
+
+
+def inherit_pool(root, sources):
+    """A chain step's new pool carries on from the previous step's (run.py; --pool-fresh: not): the first of sources
+    (checkpoints: --init, --critic-init) whose folder has pool/q.json - a run's latest.pt beside its pool - is copied
+    into root (its versions' files stay where they are: q.json keeps their paths). Only into a folder without its own
+    q.json. -> the q.json copied, or None."""
+    import shutil
+    root = Path(root)
+    if (root / Pool.STATE).exists():
+        return None
+    for src in sources:
+        if not src:
+            continue
+        q = Path(src).parent / "pool" / Pool.STATE
+        if q.is_file() and q.parent.resolve() != root.resolve():
+            root.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(q, root / Pool.STATE)
+            return q
+    return None
+
+
+def open_pool(root, size=8, seed=0, eta=0.01, init=None, critic=None, untrained=None, inherit=True,
+              no_untrained=False, extra=()):
+    """(Pool, notes) of a run (run.py): root's q.json if there (--pool-dir: the parts of a night), else the previous
+    step's (inherit_pool from init / critic, inherit=True), else a new pool with the untrained network
+    (untrained(): its file; not with no_untrained while there is an init) and init; no_untrained also takes an
+    inherited untrained one out; the extra checkpoints go in (one already in keeps its q)."""
+    notes = []
+    if inherit:
+        q = inherit_pool(root, (init, critic))
+        if q is not None:
+            notes.append(f"pool: carries on from {Pool.key(q)}")
+    pool = Pool(root, size=size, seed=seed, eta=eta)
+    if no_untrained and pool.drop_untrained():
+        notes.append("pool: the untrained network taken out (--pool-no-untrained)")
+    if not len(pool):
+        if not (no_untrained and init) and untrained is not None:
+            pool.add(untrained(), untrained=True)
+        if init:
+            pool.add(init)
+    for e in extra:
+        pool.add(e)
+    pool.write()
+    return pool, notes
 
 
 class Pool:
@@ -216,6 +353,12 @@ class Pool:
         tmp.write_text(json.dumps({"clock": self.clock, "eta": self.eta, "entries": self.entries}, indent=1),
                        encoding="utf-8", newline="\n")
         os.replace(tmp, self.root / self.STATE)
+
+    def drop_untrained(self):
+        """Take the untrained network out (run.py --pool-no-untrained); -> how many left."""
+        n = len(self.entries)
+        self.entries = [e for e in self.entries if not e.get("untrained")]
+        return n - len(self.entries)
 
     def top(self, k=5):
         """[(name, q, p, age in updates)] of the k most probable versions."""

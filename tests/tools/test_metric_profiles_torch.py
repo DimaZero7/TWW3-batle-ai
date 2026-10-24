@@ -115,6 +115,23 @@ class TestEvaluationProfiles:
         assert seen["refs"]["scripts"] == test5.OPPONENTS and seen["refs"]["drills"] == ()
         evaluate.REFS_READY = None
 
+    def test_the_window_by_every_named_opponent(self, tmp_path):
+        """run.py --opponents: the window's games and wins by name and role since the last point, with the shares."""
+        cell = (lambda g, w: {"games": g, "wins": w, "win_rate": round(w / g, 3) if g else None})
+        rows = [{"update": u, "games": {"itS27_4/attack": 10, "self/attack": 20},
+                 "opponent_shares": {"self": 0.5, "itS27_4": 0.25, "ai_like": 0.02},
+                 "opponents": {"self": {"attack": cell(20, 10), "defend": cell(20, 10), "all": cell(40, 20)},
+                               "itS27_4": {"attack": cell(10, 6), "defend": cell(10, 2), "all": cell(20, 8)},
+                               "ai_like": {"attack": cell(1, 1), "defend": cell(0, 0), "all": cell(1, 1)}}}
+                for u in (1, 2, 3)]
+        (tmp_path / "log.jsonl").write_text("".join(json.dumps(r) + chr(10) for r in rows), encoding="utf-8")
+        w = test5.window(tmp_path, 1, 3)
+        o = w["opponents"]
+        assert o["itS27_4"]["attack"] == {"games": 20, "wins": 12, "win_rate": 0.6}
+        assert o["itS27_4"]["all"] == {"games": 40, "wins": 16, "win_rate": 0.4} and o["itS27_4"]["share"] == 0.25
+        assert o["self"]["all"]["games"] == 80 and o["ai_like"]["share"] == 0.02
+        assert "pinned/all" not in w
+
     def test_the_profiles_of_the_script_battles_are_left_out(self):
         kept, dropped = test5.without_scripts(("behaviour", "fatigue", "drills", "capacity", "exam"))
         assert kept == ("drills", "exam") and dropped == ("behaviour", "fatigue", "capacity")

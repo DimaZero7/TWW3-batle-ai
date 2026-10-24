@@ -429,3 +429,56 @@ class TestBaselines:
         monkeypatch.setattr(version, "sim_version", lambda: "s2")
         f.write_text("x = 1\n", encoding="utf-8")
         assert version.drill_version() != one
+
+
+class TestOpponents:
+    """run.py --opponents through the chain (step: the mix, pin and pool extras give way) and the card's table."""
+
+    def test_a_step_with_opponents_drops_the_mix_the_pin_and_the_pool_extras(self, tmp_path):
+        ck = tmp_path / "net.pt"
+        ck.write_bytes(b"x")
+        chain = {"test5": {"minutes": 25, "every": 5}, "options": {"anchor": 0.03},
+                 "steps": {"general": {"options": {"mix": {"self": 0.5, "past": 0.5}, "past-pin": "a.pt",
+                                                   "past-pin-share": 0.65, "pool-extra": "b.pt", "pool": 12}}}}
+        opp = '{"self": 0.5, "build/v2/itS27_4.pt": 0.4, "ai_like": 0.1}'
+        lines, info = step.build("g1", str(ck), chain, step_name="general", sets=[f"opponents={opp}"])
+        assert info["replaced_by_opponents"] == ["mix", "past-pin", "past-pin-share", "pool-extra"]
+        cmd = lines[1]
+        assert "--mix" not in cmd and "--past-pin" not in cmd and "--pool-extra" not in cmd and "--pool 12" in cmd
+        assert "--opponents '{\"self\":0.5,\"build/v2/itS27_4.pt\":0.4,\"ai_like\":0.1}'" in cmd
+        _, info = step.build("g1", str(ck), chain, step_name="general")
+        assert info["replaced_by_opponents"] == [] and "mix" in info["options"]
+
+    def test_the_card_prints_the_training_by_opponent(self, tmp_path):
+        folder = report_folder(tmp_path, [(0, point(0.5)), (10, point(0.6))])
+        rep = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+        cell = (lambda g, w: {"games": g, "wins": w, "win_rate": round(w / g, 3) if g else None})
+        rep["training"] = {"opponent_shares": {"self": 0.6, "itS27_4": 0.3, "ai_like": 0.1},
+                           "opponents": {"self": {"attack": cell(50, 25), "defend": cell(50, 25), "all": cell(100, 50)},
+                                         "itS27_4": {"attack": cell(20, 12), "defend": cell(30, 9),
+                                                     "all": cell(50, 21)},
+                                         "ai_like": {"attack": cell(10, 9), "defend": cell(0, 0), "all": cell(10, 9)}},
+                           "opponent_matchups": {"itS27_4": {"attack/EMP-SKV": {"games": 20, "wins": 12,
+                                                                                "win_rate": 0.6, "gold_trade": 0.1}}}}
+        (folder / "report.json").write_text(json.dumps(rep), encoding="utf-8")
+        lines, data = card.card(folder)
+        text = "\n".join(lines)
+        assert "| opponent | share | battles | win attack | win defend | win all |" in text
+        assert "| itS27_4 | 0.30 | 50 | 0.60 (20) | 0.30 (30) | 0.42 (50) |" in text
+        assert "| ai_like | 0.10 | 10 | 0.90 (10) | - | 0.90 (10) |" in text
+        assert "itS27_4 by matchup (the learner's role/own-enemy): attack/EMP-SKV 0.60 (20)" in text
+        assert data["opponents"]["self"]["all"]["games"] == 100
+        assert card.opponents_table({}) == []
+
+    def test_the_card_has_a_window_row_for_every_named_opponent_of_five_percent(self):
+        cell = (lambda g, w: {"games": g, "wins": w, "win_rate": round(w / g, 4) if g else None})
+        p = point(0.5)
+        p["window"] = {"opponents": {
+            "self": {"attack": cell(40, 20), "defend": cell(40, 20), "all": cell(80, 40), "share": 0.35},
+            "itS27_4": {"attack": cell(20, 12), "defend": cell(20, 4), "all": cell(40, 16), "share": 0.25},
+            "ai_like": {"attack": cell(5, 5), "defend": cell(0, 0), "all": cell(5, 5), "share": 0.02}},
+            "lord_dead_own": 0.1, "games": 125}
+        rows = {r[0]: r for r in card.rows(p)}
+        assert rows["win_itS27_4"][2] == 0.4 and "win vs itS27_4" in rows["win_itS27_4"][1]
+        assert rows["win_itS27_4"][4] == "{:.3f} (att 0.60 def 0.20, n 40)" and "win_self" in rows
+        assert "win_ai_like" not in rows and "pinned_win" not in rows        # (share 0.02 < 0.05; no pin)

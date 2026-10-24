@@ -216,7 +216,9 @@ def test_the_general_gives_shoot_only_to_a_group_with_a_shooter():
 def test_the_parts_switch_each_mask_alone():
     assert taskmask.parse_parts("all") == frozenset(taskmask.PARTS)
     default = taskmask.parts_of(gconfig.GeneralConfig())                # the harmless ones (docs: the ablation)
-    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) and "attack_target" not in default
+    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) | {"melee_stay"}         # (shoot_line: off by default)
+    assert gconfig.GeneralConfig().shoot_line_m == 0.0
+    assert "attack_target" not in default
     assert not default & {"withdraw_attack", "shoot_melee", "shoot_target"} and "withdraw_move" in default
     assert taskmask.parse_parts("") == frozenset() == taskmask.parse_parts("none")
     with pytest.raises(ValueError):
@@ -240,7 +242,8 @@ def test_the_executor_heads_follow_the_rules_parts():
     import dataclasses
     actor = executor.wrap(policy.Actor(TINY).eval(), gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2,
                                                                            task_mask_parts="hold_move,screen_move"))
-    assert actor.heads.parts == frozenset({"hold_move", "screen_move"})
+    # (melee_stay: its own field; shoot_line off by default)
+    assert actor.heads.parts == frozenset({"hold_move", "screen_move", "melee_stay"})
     actor.set_rules(dataclasses.replace(actor.gcfg, task_mask=False))
     assert actor.heads.parts == frozenset()
 
@@ -383,3 +386,249 @@ def test_the_general_gives_no_withdraw_to_a_group_that_fights_in_melee_and_holds
     o = obs_of(POS, {0: ("withdraw", (-700.0, 0.0), 100.0, 2)}, attacking=[0])
     m = taskmask.masks(TINY, o, torch.ones(1, CENTRES.shape[0], dtype=torch.bool), taskmask.parts_of(gconfig.GeneralConfig()))
     assert bool(m["kind"][0, 0, ATTACK]) and bool(m["kind"][0, 0, KEEP])
+
+
+def test_a_group_has_wavered_only_when_half_of_its_units_waver():
+    """taskmask.fighting with GeneralConfig.waver_share (0.5): one wavering unit of four leaves the group holding in
+    melee (the human's battle against g34: one of 8-14 freed the whole group); two of four - it has wavered; the share
+    counts the alive (routing) members given apart from those standing."""
+    mem = torch.ones(1, 4, 1, dtype=torch.bool)
+    melee = torch.tensor([[True, False, False, False]])
+    one = torch.tensor([[False, True, False, False]])
+    two = torch.tensor([[False, True, True, False]])
+    assert bool(taskmask.fighting(mem, melee, one, 0.5)[0, 0])
+    assert not bool(taskmask.fighting(mem, melee, two, 0.5)[0, 0])
+    assert not bool(taskmask.fighting(mem, torch.zeros_like(melee), one, 0.5)[0, 0])     # nobody in melee
+    standing = mem.clone()
+    standing[0, 2:, 0] = False                                        # 2, 3 rout (not standing, alive)
+    rout = torch.tensor([[False, False, True, True]])
+    assert not bool(taskmask.fighting(standing, melee, rout, 0.5, alive=mem)[0, 0])
+    assert gconfig.GeneralConfig().waver_share == 0.5
+    with pytest.raises(ValueError):
+        gconfig.GeneralConfig(waver_share=0.0)
+
+
+def melee_obs(kind, waver=(), order_move=(), target=G):
+    """Our unit 0 in melee with the enemy 3 (20 m off), units 0, 1 of group 0 under `kind`; waver: our wavering
+    units; order_move: our units whose order in force is a move."""
+    pos = list(POS)
+    pos[3] = (-280.0, 0.0)
+    point = (-500.0, 0.0) if kind in ("hold", "withdraw") else None
+    tg = 2 * G + 1 if kind in ("hold", "withdraw") else target
+    o = obs_of(pos, {0: (kind, point, 100.0, tg), 1: (kind, point, 100.0, tg)})
+    tok = o["tokens"]
+    tok[0, [0, 3], ob.INDEX["melee"]] = 1.0
+    for i in waver:
+        tok[0, i, ob.INDEX["state_wavering"]] = 1.0
+    for i in order_move:
+        tok[0, i, ob.INDEX["order_move"]] = 1.0
+    o["attend"] = torch.ones(1, N, dtype=torch.bool)
+    return o
+
+
+def test_a_steady_unit_in_melee_does_not_move_off_under_any_mission_but_a_wavered_withdraw():
+    """melee_stay (the executor's part): a steady unit in melee gets no move / withdraw (nor keep of a move in force),
+    its attack only at the enemy it fights - under hold (the human's battle: a hold led it back to its point), attack,
+    and withdraw of a group that has not wavered; a withdraw of a group half wavering frees it; a wavering unit is
+    free; the part off: as before."""
+    sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
+    parts = taskmask.parts_of(gconfig.GeneralConfig())
+    assert "melee_stay" in parts
+    assert "melee_stay" not in taskmask.parts_of(gconfig.GeneralConfig(melee_stay=False))
+    for kind in ("hold", "attack", "withdraw"):
+        o = melee_obs(kind, order_move=[0])
+        m = taskmask.masks(TINY, o, sec_ok, parts)
+        k = m["kind"][0, 0]
+        assert not k[MOVE] and not k[WITHDRAW] and not k[KEEP] and bool(k[ATTACK]) and bool(k[HOLD]), kind
+        assert m["target"][0, 0].tolist() == [False, False, False, True, False, False], kind
+        assert bool(m["on"][0, 0])
+        kind_a, tgt, _, fb = taskmask.apply(m, o["ctrl"], o["free"], o["target_ok"], sec_ok)
+        assert not bool(fb[0, 0]) and bool(tgt[0, 0, 3]) and not bool(kind_a[0, 0, MOVE])
+        # unit 1 (not in melee): its mission's masks as before
+        assert bool(m["kind"][0, 1, MOVE])
+    # keep of an attack / hold in force stays open
+    m = taskmask.masks(TINY, melee_obs("hold"), sec_ok, parts)
+    assert bool(m["kind"][0, 0, KEEP])
+    # withdraw of a group with one of two wavering (half): the group has wavered - unit 0 may go
+    m = taskmask.masks(TINY, melee_obs("withdraw", waver=[1]), sec_ok, parts)
+    assert bool(m["kind"][0, 0, MOVE]) and bool(m["kind"][0, 0, WITHDRAW])
+    # ... under hold, the same group: unit 0 still stays (only a withdraw frees it)
+    m = taskmask.masks(TINY, melee_obs("hold", waver=[1]), sec_ok, parts)
+    assert not bool(m["kind"][0, 0, MOVE])
+    # a wavering unit itself: free of the rule
+    m = taskmask.masks(TINY, melee_obs("hold", waver=[0]), sec_ok, parts)
+    assert bool(m["kind"][0, 0, MOVE])
+    # the part off: hold moves it as before
+    m = taskmask.masks(TINY, melee_obs("hold"), sec_ok, parts - {"melee_stay"})
+    assert bool(m["kind"][0, 0, MOVE])
+
+
+def test_the_general_closes_withdraw_to_a_large_group_with_one_wavering_unit():
+    """net.melee_ok with waver_share: a group of 8 with one unit in melee and one wavering holds (no withdraw); with
+    4 of 8 wavering - withdraw open."""
+    from tools.nn.general import units as gunits
+    from tools.nn.general.net import General
+    gen = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2), TINY.sectors, TINY.grid_half)
+    Nn = 9
+    num = torch.zeros(1, Nn, ai.SIZE)
+    fight = torch.zeros(1, Nn, 2)
+    fight[0, 0, 1] = 1.0
+    num[0, 1, gunits.WAVERING] = 1.0
+    own = torch.tensor([[True] * 8 + [False]])
+    inp = {"num": num, "on": torch.ones(1, Nn, dtype=torch.bool), "own": own, "fight": fight}
+    c = {"main": torch.tensor([[0] * 8 + [G]])}
+    w = K["withdraw"]
+    assert not bool(gen.melee_ok(inp, c)[0, 0, w])
+    num[0, 1:4, gunits.WAVERING] = 1.0
+    num[0, 4, gunits.WAVERING] = 1.0
+    assert bool(gen.melee_ok(inp, c)[0, 0, w])
+
+
+def line_obs(firing=False, attacking=False, line=-430.0, moving=True):
+    """Our unit 2 (a shooter, range 150 m) at (-450, 0) under "shoot" at e0 with the line at `line` (our holding
+    infantry's front -450 + 20 m); the enemy 3 at 130 m (in range), 4 and 5 far."""
+    pos = list(POS)
+    pos[2], pos[3] = (-450.0, 0.0), (-320.0, 0.0)
+    o = obs_of(pos, {2: ("shoot", None, 0.0, G)}, shooter=[2], attacking=[2] if attacking else [])
+    tok = o["tokens"]
+    tok[0, 2, taskmask.RANGE_COL] = 150.0 / taskmask.RANGE_SCALE
+    tok[0, 2, ob.INDEX["firing"]] = float(firing)
+    tok[0, 2, ob.INDEX["moving"]] = float(moving)
+    o["task_line"] = torch.full((1, N), taskmask.LINE_NONE)
+    o["task_line"][0, 2] = line
+    return o
+
+
+def test_a_shooter_under_shoot_stays_behind_the_line_of_our_holding_infantry():
+    """shoot_line: the sectors that reach behind the line, the fine cells behind it, the attack only at enemies in
+    range now, no keep of an attack in force while walking and not firing (it would walk to its target's range); a
+    firing or standing shooter keeps; no line (LINE_NONE) or the part off - free as before."""
+    sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
+    parts = taskmask.parts_of(gconfig.GeneralConfig(shoot_line_m=20.0))
+    assert "shoot_line" in parts and "shoot_line" not in taskmask.parts_of(gconfig.GeneralConfig())   # (off by default)
+    assert taskmask.RANGE_COL != taskmask.RELOAD_COL
+    o = line_obs(attacking=True)
+    m = taskmask.masks(TINY, o, sec_ok, parts)
+    allowed = CENTRES[m["sector"][0, 2]]
+    assert bool(m["on"][0, 2]) and allowed.shape[0] > 0
+    assert float((allowed[:, 0] - sc.step(TINY) / 2).max()) <= -430.0                 # nothing ahead of the line
+    assert float(CENTRES[~m["sector"][0, 2], 0].min()) - sc.step(TINY) / 2 > -430.0
+    assert m["target"][0, 2].tolist() == [False, False, False, True, False, False]     # in range now ...
+    o2 = line_obs(attacking=True)
+    o2["pos"][0, 4] = torch.tensor([-300.0, 200.0]) / ob.POS          # ... or from the line: -300 <= -430 + 150
+    assert bool(taskmask.masks(TINY, o2, sec_ok, parts)["target"][0, 2, 4])
+    o2["pos"][0, 4] = torch.tensor([-250.0, 200.0]) / ob.POS          # beyond it: no
+    assert not bool(taskmask.masks(TINY, o2, sec_ok, parts)["target"][0, 2, 4])
+    assert not bool(m["kind"][0, 2, KEEP]) and bool(m["kind"][0, 2, MOVE]) and bool(m["kind"][0, 2, ATTACK])
+    assert float(m["line"][0, 2]) == -430.0 and float(m["line"][0, 0]) == taskmask.LINE_NONE
+    # the fine cells of a sector across the line: those beyond it cut
+    s_across = int(((CENTRES[:, 0] - sc.step(TINY) / 2 < -430.0) & (CENTRES[:, 0] + sc.step(TINY) / 2 > -430.0)
+                    & (CENTRES[:, 1].abs() < sc.step(TINY))).nonzero()[0])
+    k2 = TINY.fine ** 2
+    sector = torch.full((1, N), s_across, dtype=torch.long)
+    cut = taskmask.fine_line(TINY, m, sector, torch.ones(1, N, k2, dtype=torch.bool))
+    cells = sc.cells(TINY)[s_across, :, 0]
+    assert torch.equal(cut[0, 2], cells <= -430.0) and bool(cut[0, 2].any()) and not bool(cut[0, 2].all())
+    assert bool(cut[0, 0].all())                                                        # no line: every cell
+    # firing, or standing (aiming: a new order would reset its aim): its attack in force kept
+    m = taskmask.masks(TINY, line_obs(firing=True, attacking=True), sec_ok, parts)
+    assert bool(m["kind"][0, 2, KEEP])
+    m = taskmask.masks(TINY, line_obs(attacking=True, moving=False), sec_ok, parts)
+    assert bool(m["kind"][0, 2, KEEP])
+    # no line or the part off: as before
+    for o_, p_ in ((line_obs(line=taskmask.LINE_NONE), parts), (line_obs(), parts - {"shoot_line"})):
+        m = taskmask.masks(TINY, o_, sec_ok, p_)
+        assert bool(m["sector"][0, 2].all()) and bool(m["target"][0, 2, 4])
+    # an observation without the field (older stored rows): no line
+    o = line_obs()
+    del o["task_line"]
+    assert bool(taskmask.masks(TINY, o, sec_ok, parts)["sector"][0, 2].all())
+
+
+def test_the_runtimes_line_is_the_front_of_our_holding_infantry_plus_the_lead():
+    """Runtime.shoot_line: the most forward centre of our groups under hold with under half shooters + shoot_line_m,
+    for the units under shoot; none without such a group or with the rule off."""
+    from types import SimpleNamespace
+    from tools.nn.general import runtime as gruntime
+    o = line_obs()
+    tok = o["tokens"]
+    tok[0, 0, ob.INDEX["ammo"]] = 0.0
+    o["attend"] = torch.ones(1, N, dtype=torch.bool)
+    main = torch.tensor([[0, 0, 1, G, G, G + 1]])
+    cent = torch.zeros(1, 2 * G, 2)
+    cent[0, 0, 0], cent[0, 1, 0] = -300.0, -450.0
+    on = torch.tensor([OWN])
+    kinds = torch.full((2, G), K["attack"])
+    kinds[1, 0], kinds[1, 1] = K["hold"], K["shoot"]
+    kind_u = torch.tensor([[K["hold"], K["hold"], K["shoot"], 0, 0, 0]])
+    rt = SimpleNamespace(G=G, dev=torch.device("cpu"), r={"kind": kinds},
+                         gcfg=gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, shoot_line_m=20.0))
+    line = gruntime.Runtime.shoot_line(rt, torch.tensor([1]), o, main, cent, on, kind_u)
+    assert float(line[0, 2]) == -280.0 and float(line[0, 0]) == taskmask.LINE_NONE
+    kinds[1, 0] = K["attack"]                                                # the infantry attacks: no line
+    assert float(gruntime.Runtime.shoot_line(rt, torch.tensor([1]), o, main, cent, on, kind_u).min()) == taskmask.LINE_NONE
+    kinds[1, 0] = K["hold"]
+    rt.gcfg = gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, shoot_line_m=0.0)
+    assert float(gruntime.Runtime.shoot_line(rt, torch.tensor([1]), o, main, cent, on, kind_u).min()) == taskmask.LINE_NONE
+
+
+def test_the_rollouts_shooters_under_a_line_never_choose_a_point_ahead_of_it():
+    """In the simulator's battles (every group holds, those with a shooter shoot): the moves of our units under shoot
+    with a line go to cells behind it; the update's log-probabilities are the rollout's (the line is stored)."""
+    import dataclasses
+    from tools.nn.train import ppo, rollout
+    env, actor, crit = real()
+    actor.set_rules(dataclasses.replace(actor.gcfg, shoot_line_m=20.0))        # (off by default)
+    env.step(actor, crit)
+    rt = env.general_rt
+    G_ = rt.G
+    u = env.st.u
+    rows = torch.arange(2 * env.B)
+    b = rows % env.B
+    main = rt.r["main"]
+    shooter = (u["range"][b] > 0) & (u["a"][b] > 0)
+    mem = main[..., None] == torch.arange(G_)
+    share = (mem & shooter[..., None]).sum(1).float() / mem.sum(1).clamp(min=1).float()
+    rt.r["kind"][:, :] = torch.where(share >= 0.5, torch.full_like(rt.r["kind"], K["shoot"]),
+                                     torch.full_like(rt.r["kind"], K["hold"]))
+    batch = rollout.collect(env, actor, crit, 3)
+    o, a = batch["obs"], batch["action"]
+    lined = (o["task_line"] < taskmask.LINE_NONE / 2) & o["free"] & o["ctrl"]
+    assert bool(lined.any())
+    moving = lined & ((a.kind == MOVE) | (a.kind == WITHDRAW))
+    sector, fine = sc.split(TINY, a.point)
+    fwd = sc.cells(TINY)[sector, fine][..., 0]
+    assert bool((fwd[moving] <= o["task_line"][moving] + 1e-3).all())
+    with torch.no_grad():
+        obs = rollout.full_obs(batch["obs"], batch["abil_static"])
+        obs = ppo.with_task(actor, batch, obs)
+        logits, _ = actor.sequence(obs, batch["h0"], batch["reset"], batch["action"])
+        lp, _ = hd.log_prob(logits, batch["action"], obs["ctrl"])
+    torch.testing.assert_close(lp, batch["lp"], atol=1e-4, rtol=0)
+
+
+def test_a_steady_unit_in_melee_does_not_keep_an_attack_on_an_enemy_it_does_not_fight():
+    """melee_stay and the keep: an attack in force on a far enemy (the simulator: a unit in melee told to attack an
+    enemy it does not touch walks off, battle.py contact.attack_leave) is not kept; on the enemy it fights it is; the
+    target not known (no task_otgt): not kept either - it attacks the one it fights anew."""
+    sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
+    parts = taskmask.parts_of(gconfig.GeneralConfig())
+    for kind in ("hold", "attack"):
+        o = melee_obs(kind)
+        o["tokens"][0, 0, ob.INDEX["order_attack"]] = 1.0
+        for target, keep in ((4, False), (3, True), (-1, False)):
+            o["task_otgt"] = torch.full((1, N), -1, dtype=torch.int16)
+            o["task_otgt"][0, 0] = target
+            m = taskmask.masks(TINY, o, sec_ok, parts)
+            assert bool(m["kind"][0, 0, KEEP]) == keep, (kind, target)
+            assert bool(m["kind"][0, 0, ATTACK]) and bool(m["target"][0, 0, 3]) and not bool(m["target"][0, 0, 4])
+        del o["task_otgt"]
+        assert not bool(taskmask.masks(TINY, o, sec_ok, parts)["kind"][0, 0, KEEP])
+    # fields: the target slots of the units with a task, -1 elsewhere; without them no field
+    f = taskmask.fields(torch.zeros(1, 3, dtype=torch.long), torch.zeros(1, 3, 2), torch.zeros(1, 3),
+                        torch.zeros(1, 3, dtype=torch.long), torch.zeros(1, 3, dtype=torch.long),
+                        torch.tensor([[True, False, True]]), otgt=torch.tensor([[2, 1, -1]]))
+    assert f["task_otgt"].tolist() == [[2, -1, -1]]
+    assert "task_otgt" not in taskmask.fields(torch.zeros(1, 3, dtype=torch.long), torch.zeros(1, 3, 2),
+                                              torch.zeros(1, 3), torch.zeros(1, 3, dtype=torch.long),
+                                              torch.zeros(1, 3, dtype=torch.long), torch.ones(1, 3, dtype=torch.bool))
