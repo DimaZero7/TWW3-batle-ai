@@ -483,7 +483,7 @@ def test_the_general_closes_withdraw_to_a_large_group_with_one_wavering_unit():
     assert bool(gen.melee_ok(inp, c)[0, 0, w])
 
 
-def line_obs(firing=False, attacking=False, line=-430.0):
+def line_obs(firing=False, attacking=False, line=-430.0, moving=True):
     """Our unit 2 (a shooter, range 150 m) at (-450, 0) under "shoot" at e0 with the line at `line` (our holding
     infantry's front -450 + 20 m); the enemy 3 at 130 m (in range), 4 and 5 far."""
     pos = list(POS)
@@ -492,6 +492,7 @@ def line_obs(firing=False, attacking=False, line=-430.0):
     tok = o["tokens"]
     tok[0, 2, taskmask.RANGE_COL] = 150.0 / taskmask.RANGE_SCALE
     tok[0, 2, ob.INDEX["firing"]] = float(firing)
+    tok[0, 2, ob.INDEX["moving"]] = float(moving)
     o["task_line"] = torch.full((1, N), taskmask.LINE_NONE)
     o["task_line"][0, 2] = line
     return o
@@ -499,8 +500,8 @@ def line_obs(firing=False, attacking=False, line=-430.0):
 
 def test_a_shooter_under_shoot_stays_behind_the_line_of_our_holding_infantry():
     """shoot_line: the sectors that reach behind the line, the fine cells behind it, the attack only at enemies in
-    range now, no keep of an attack in force while not firing (it would walk to its target's range); a firing shooter
-    keeps; no line (LINE_NONE) or the part off - free as before."""
+    range now, no keep of an attack in force while walking and not firing (it would walk to its target's range); a
+    firing or standing shooter keeps; no line (LINE_NONE) or the part off - free as before."""
     sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
     parts = taskmask.parts_of(gconfig.GeneralConfig())
     assert "shoot_line" in parts and "shoot_line" not in taskmask.parts_of(gconfig.GeneralConfig(shoot_line_m=0.0))
@@ -511,7 +512,12 @@ def test_a_shooter_under_shoot_stays_behind_the_line_of_our_holding_infantry():
     assert bool(m["on"][0, 2]) and allowed.shape[0] > 0
     assert float((allowed[:, 0] - sc.step(TINY) / 2).max()) <= -430.0                 # nothing ahead of the line
     assert float(CENTRES[~m["sector"][0, 2], 0].min()) - sc.step(TINY) / 2 > -430.0
-    assert m["target"][0, 2].tolist() == [False, False, False, True, False, False]     # in range now only
+    assert m["target"][0, 2].tolist() == [False, False, False, True, False, False]     # in range now ...
+    o2 = line_obs(attacking=True)
+    o2["pos"][0, 4] = torch.tensor([-300.0, 200.0]) / ob.POS          # ... or from the line: -300 <= -430 + 150
+    assert bool(taskmask.masks(TINY, o2, sec_ok, parts)["target"][0, 2, 4])
+    o2["pos"][0, 4] = torch.tensor([-250.0, 200.0]) / ob.POS          # beyond it: no
+    assert not bool(taskmask.masks(TINY, o2, sec_ok, parts)["target"][0, 2, 4])
     assert not bool(m["kind"][0, 2, KEEP]) and bool(m["kind"][0, 2, MOVE]) and bool(m["kind"][0, 2, ATTACK])
     assert float(m["line"][0, 2]) == -430.0 and float(m["line"][0, 0]) == taskmask.LINE_NONE
     # the fine cells of a sector across the line: those beyond it cut
@@ -523,8 +529,10 @@ def test_a_shooter_under_shoot_stays_behind_the_line_of_our_holding_infantry():
     cells = sc.cells(TINY)[s_across, :, 0]
     assert torch.equal(cut[0, 2], cells <= -430.0) and bool(cut[0, 2].any()) and not bool(cut[0, 2].all())
     assert bool(cut[0, 0].all())                                                        # no line: every cell
-    # firing: its attack in force kept (the volley lock's own rule)
+    # firing, or standing (aiming: a new order would reset its aim): its attack in force kept
     m = taskmask.masks(TINY, line_obs(firing=True, attacking=True), sec_ok, parts)
+    assert bool(m["kind"][0, 2, KEEP])
+    m = taskmask.masks(TINY, line_obs(attacking=True, moving=False), sec_ok, parts)
     assert bool(m["kind"][0, 2, KEEP])
     # no line or the part off: as before
     for o_, p_ in ((line_obs(line=taskmask.LINE_NONE), parts), (line_obs(), parts - {"shoot_line"})):

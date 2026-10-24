@@ -38,8 +38,11 @@ on the chained heads' parts (tools/nn/model/chain.py: kind -> target -> sector -
               under "shoot" goes no farther forward (the side's frame) than the most forward centre of those groups
               + shoot_line_m (Runtime.task: "task_line", LINE_NONE where none): the sectors that reach behind that
               line, the fine cells behind it (MaskedChainHeads), the attack of a shooter only at enemies in its range
-              now (of a unit without missiles: at enemies behind the line), no keep of an attack or a move beyond the
-              line in force (a firing shooter keeps: the volley lock). The human's battle against g34: the infantry
+              now or from the line (their forward within the line + its range: it stops behind the line; in range
+              now alone cut the general's fire by ~70 % in the check) - of a unit without missiles: at enemies behind
+              the line, no keep of an attack in force while the unit
+              walks and does not fire, nor of a move beyond the line (a standing shooter keeps its attack: a new
+              order resets its aim; closing that keep cut the general's fire by ~70 % in the check). The human's battle against g34: the infantry
               waited 66 s, the shooting groups went 107-140 m ahead of it alone and took the blow first
 Each piece is a part (PARTS; GeneralConfig.task_mask_parts, run.py --general-task-mask-parts); by default only those
 that cost nothing at minute 0 (config.MASK_PARTS: the movement ones, the general's shoot_group and the volley lock -
@@ -298,10 +301,12 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     off_now = ((tok[..., ob.INDEX["order_move"]].float() > 0.5) | (tok[..., ob.INDEX["order_withdraw"]].float() > 0.5))
     k_st = ~((ar == MOVE) | (ar == WITHDRAW) | ((ar == KEEP) & (off_now & free)[..., None]))
     kind = torch.where(st[..., None], k_st, kind)
-    # shoot_line: no keep of an attack (a shooter not firing walks to its range) or of a move beyond the line in force
+    # shoot_line: no keep of an attack while walking to it, not firing (a shooter walks to its target's range; a
+    # standing one aiming keeps - a new order resets its aim) or of a move beyond the line in force
     firing = tok[..., ob.INDEX["firing"]].float() > 0.5
     o_fwd = px + tok[..., ob.INDEX["order_fwd"]].float() * ob.POS
-    beyond = ((att_now & ~firing) | (off_now & (o_fwd > limit))) & line & ~st
+    moving = tok[..., ob.INDEX["moving"]].float() > 0.5
+    beyond = ((att_now & ~firing & moving) | (off_now & (o_fwd > limit))) & line & ~st
     kind = kind & ~((ar == KEEP) & (beyond & free)[..., None])
     # sectors (their centres in the side's frame, with half a diagonal of slack)
     c = sc.centres(cfg, mk.device)
@@ -317,9 +322,10 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     sec = torch.ones_like(dcP, dtype=torch.bool)
     melee_j = tok[..., ob.INDEX["melee"]].float() > 0.5
     tgt = torch.where(st[..., None], foe[:, None, :] & melee_j[:, None, :] & (D <= STAY_M), tgt)
-    # shoot_line: a shooter's attack only at enemies in its range now, of a unit without missiles at enemies behind it
+    # shoot_line: a shooter's attack only at enemies in its range now or in range from the line (their forward within
+    # the line + its range: walking to its range it stops behind the line), of a unit without missiles at enemies behind
     rng = tok[..., RANGE_COL].float() * RANGE_SCALE
-    in_rng = D <= rng[..., None]
+    in_rng = (D <= rng[..., None]) | (px[:, None, :] <= (limit + rng)[..., None])
     behind = px[:, None, :] <= limit[..., None]
     t_line = foe[:, None, :] & torch.where((shooter & (rng > 0))[..., None], in_rng, behind)
     tgt = torch.where((line & ~st)[..., None], tgt & t_line, tgt)
