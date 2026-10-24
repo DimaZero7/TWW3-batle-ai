@@ -145,7 +145,7 @@ a{color:inherit}
 .proj line{stroke:var(--open);stroke-width:1.1;opacity:.85}
 :root{--tc-test:#1a9a8a}
 .areah{font-size:18px;margin:0 0 4px}
-.node.t-env span,.node.t-task span{display:block}
+.node.t-env span,.node.t-task span,.node.t-learn span{display:block}
 .blocks{display:grid;grid-template-columns:auto auto auto;justify-content:start;align-items:center;gap:12px;margin-top:6px}
 .blocks .nodestack{align-self:end;margin-bottom:-12px}
 .t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-learn{--tc:#b8329a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a} .t-teach{--tc:#b5452b} .t-task{--tc:#3f86a8}
@@ -285,6 +285,21 @@ a{color:inherit}
 .tasks ol,.tasks ul{margin:0;padding-left:24px}
 .tasks li{margin:0 0 7px;line-height:1.4}
 .tasks li::marker{color:var(--ink);font-weight:600}
+.sigbar{display:flex;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.sigseg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer;transition:filter .15s}
+.sigseg:hover,.sigseg.sel{filter:brightness(1.12)}
+.sigseg span{padding:0 6px;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 1px rgba(0,0,0,.35)}
+.siglegend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+.sigkey i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.sigkey.off{opacity:.6}
+.sigcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.sigcard{font:inherit;text-align:left;background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--sc);border-radius:10px;padding:12px 14px;cursor:pointer;color:var(--ink);display:flex;flex-direction:column;gap:4px}
+.sigcard:hover,.sigcard.sel{background:color-mix(in srgb,var(--sc) 10%,var(--panel));border-color:var(--sc)}
+.sigcard.off{opacity:.65}
+.sigcard b{font-size:15px}
+.sigcard span{font-size:13px;color:var(--muted)}
+.sigcard em{font-size:12px;font-style:normal;color:var(--sc)}
+.sigopen h2{margin:0 0 4px}
 .tsk>summary{cursor:pointer;font-weight:600;list-style-position:inside}
 .tsk>summary:hover{text-decoration:underline}
 .tsk .ttext{padding:4px 0 2px 18px;color:var(--muted)}
@@ -1007,6 +1022,11 @@ a{color:inherit}
     <h2 class="areah">Задачи</h2>
     <div class="types"><span class="tl">Что в работе сейчас, что дальше по порядку ценности, что закрыто недавно.</span></div>
     <div class="blocks"><div class="brow"><button class="node t-task" data-n="tasks" type="button">Список задач<span>список задач</span></button></div></div>
+  </section>
+  <section class="net simsec" aria-label="Сигналы обучения">
+    <h2 class="areah">Сигналы обучения</h2>
+    <div class="types"><span class="tl">От чего учится сеть в одном шаге обучения: доли сигналов на линии и карточка каждого — как он работает.</span></div>
+    <div class="blocks"><div class="brow"><button class="node t-learn" data-n="signals" type="button">Сигналы обучения<span data-sig-sub>сигналы</span></button></div></div>
   </section>
   <div class="crumbs" id="crumbs"></div>
 
@@ -2449,6 +2469,81 @@ a{color:inherit}
   </div>
 </template>
 
+<template id="tpl-signals">
+  <div class="panel" data-signals>
+  <p class="tupd">Один шаг обучения генерала (40 мин, ~2 000 боёв). Линия — чем он заполнен; доли примерные, по объёму боёв и их копий. Сигналы без доли сейчас выключены. Нажми карточку — откроется, как сигнал работает.</p>
+  <div class="box"><div class="sigbar" data-bar></div><div class="siglegend" data-legend></div></div>
+  <div class="sigcards" data-cards></div>
+  <div class="box sigopen" data-open hidden></div>
+  </div>
+</template>
+
+<script>
+(function(){
+  // the learning signals: share = the part of the line (per cent of one training step, roughly, by battles and their copies);
+  // on: in the chain now; sep: needs its own time slice between steps (cannot mix into a step)
+  var S=[
+   {id:"gold",n:"Размен золотом",c:"#d4a017",share:56,on:true,who:"головы генерала: вид задания, цель, точка",
+    how:["Сеть играет бой против противника из списка: сама против себя 32 %, S27 28 %, эксплуататор 22 %, старые сети и скрипты 18 %.",
+         "Награда — разница золота по ходу боя: сколько убил минус сколько потерял (по цене отрядов).",
+         "Решения, после которых разница росла, усиливаются, остальные ослабляются. Это и есть обучение с подкреплением (PPO).",
+         "Главный и единственный «честный» сигнал: он про результат боя, а не про похожесть на кого-то."],
+    now:"включён, основа шага: 70 % боёв сеть решает сама"},
+   {id:"teacher",n:"Подражание учителю",c:"#b5452b",share:24,on:true,who:"голова вида задания генерала",
+    how:["В 30 % боёв задания группам выбирает не сеть, а скриптовый учитель по правилам: враг дальше 250 м — держать; больше половины стрелков — стрелять; сблизились — атаковать; дерущихся не выдёргивать.",
+         "Сеть смотрит на его выбор и тянется к нему якорем подражания. Бой при этом всё равно даёт размен золотом.",
+         "Зачем: без учителя сеть на старте выбирала задания наугад и не выбиралась из этого."],
+    now:"включён, 30 % боёв"},
+   {id:"ability",n:"Ветки способностей",c:"#8a5ad8",share:20,on:true,who:"голова способностей исполнителя",
+    how:["Для 20 % решений о способности бой копируется. В копии способность применяется иначе или не применяется, обе копии играются 60 с.",
+         "Разница цены между копиями говорит, была ли способность полезна. Это чистый сигнал: остальной бой в обеих копиях одинаковый.",
+         "Не больше 128 копий на одно обновление, чтобы не съесть видеокарту."],
+    now:"включён, 20 % решений"},
+   {id:"groups",n:"Турнир групп",c:"#5f9a2e",share:0,on:false,sep:true,who:"сбор групп: сколько групп и кто в какой",
+    how:["Одна расстановка играется 10 раз с разным делением на группы на одних и тех же случайных числах; исполнитель заморожен.",
+         "Деление, давшее размен лучше среднего по десятке, усиливается.",
+         "Не может идти внутри обычного шага: всё, кроме модуля групп, заморожено, а бой играется десять раз подряд. Поэтому это отдельный кусок времени между шагами, например «40 мин шаг + 15 мин турнир».",
+         "В обычном бою состав групп по размену не выучить: не видно, виноват состав или задание."],
+    now:"выключен; модуль построен, решение пользователя (24.10) — влить в линию"},
+   {id:"drills",n:"Учения навыков",c:"#3a7bd5",share:0,on:false,who:"исполнитель (сеть отряда)",
+    how:["Часть боёв (была 20 %) — короткие учебные сценарии: клещи, стрельба с отходом, прикрытие. Учитель-скрипт показывает приём, сеть подражает.",
+         "Выключены с 07.10: приёмы в игре не подтвердились, а исполнитель учился по размену лучше, чем по подсказкам."],
+    now:"выключены"},
+   {id:"observe",n:"Наблюдение за боями человека",c:"#1a9a8a",share:0,on:false,who:"генерал",
+    how:["Записи боёв пользователя против сети превращаются в «что делал человек в такой обстановке», сеть подражает его заданиям.",
+         "Сейчас вес гаснет (×0,95 за обновление, к 4 000-му обновлению ноль) и в цепочке выключен из-за памяти.",
+         "В плане задача «учиться на записях постоянно»: сделать это твёрдой долей боёв."],
+    now:"выключено"},
+   {id:"branches",n:"Ветки заданий",c:"#c4568a",share:0,on:false,who:"головы генерала",
+    how:["Как ветки способностей, но копия боя с другим заданием группы: атаковать вместо держать, обойти вместо стрелять. 60 с, разница цены.",
+         "Выключено: копия всего боя на каждое задание дорого, а сигнал тонул в шуме."],
+    now:"выключено"}
+  ];
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  var sub=document.querySelector("[data-sig-sub]");
+  if(sub)sub.textContent=S.length+" сигналов · "+S.filter(function(s){return s.on;}).length+" включены";
+  window.SignalsUI={mount:function(c){
+    var root=c.querySelector("[data-signals]");if(!root)return;
+    var tot=S.reduce(function(a,s){return a+s.share;},0)||1;
+    root.querySelector("[data-bar]").innerHTML=S.filter(function(s){return s.share>0;}).map(function(s){
+      return '<div class="sigseg" data-id="'+s.id+'" style="width:'+(100*s.share/tot)+'%;background:'+s.c+'" title="'+esc(s.n)+' · '+s.share+' %"><span>'+esc(s.n)+' · '+s.share+' %</span></div>';}).join("");
+    root.querySelector("[data-legend]").innerHTML=S.map(function(s){
+      return '<span class="sigkey'+(s.on?"":" off")+'"><i style="background:'+s.c+'"></i>'+esc(s.n)+(s.on?" · "+s.share+" %":(s.sep?" · отдельное время":" · выкл"))+'</span>';}).join("");
+    root.querySelector("[data-cards]").innerHTML=S.map(function(s){
+      return '<button type="button" class="sigcard'+(s.on?"":" off")+'" data-id="'+s.id+'" style="--sc:'+s.c+'"><b>'+esc(s.n)+'</b><span>'+esc(s.who)+'</span><em>'+esc(s.now)+'</em></button>';}).join("");
+    var open=root.querySelector("[data-open]");
+    function show(id){var s=S.filter(function(x){return x.id===id;})[0];if(!s)return;
+      [].forEach.call(root.querySelectorAll(".sigcard,.sigseg"),function(e){e.classList.toggle("sel",e.dataset.id===id);});
+      open.hidden=false;open.style.borderLeft="4px solid "+s.c;
+      open.innerHTML='<h2>'+esc(s.n)+' <span class="chip '+(s.on?"done":"later")+'">'+(s.on?"включён":"выключен")+'</span></h2>'+
+        '<p class="small"><b>Кого учит:</b> '+esc(s.who)+'.</p><ul class="small">'+s.how.map(function(x){return '<li>'+esc(x)+'</li>';}).join("")+'</ul>'+
+        '<p class="small"><b>Сейчас:</b> '+esc(s.now)+'.</p>';
+      open.scrollIntoView({block:"nearest",behavior:"smooth"});}
+    root.addEventListener("click",function(e){var b=e.target.closest("[data-id]");if(b)show(b.dataset.id);});
+  }};
+})();
+</script>
+
 <template id="tpl-roster">
   <div class="panel">
   <section class="cards">
@@ -2748,7 +2843,7 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={tasks:{t:"Задачи · Список задач",tpl:"tpl-tasks"},roster:{t:"Армии · Отряды и фракции",tpl:"tpl-roster"},landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Алгоритм · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},missionpick:{t:"Обработка · Выбор заданий",tpl:"tpl-missionpick"},missions:{t:"Выход · Задания групп",tpl:"tpl-missions"},deploypick:{t:"Обработка · Выбор мест расстановки",tpl:"tpl-deploypick"},deployplaces:{t:"Выход · Места групп",tpl:"tpl-deployplaces"},deploylayout:{t:"Алгоритм · Раскладка отрядов",tpl:"tpl-deploylayout"},deployment:{t:"Выход · Расстановка",tpl:"tpl-deployment"},unittask:{t:"Алгоритм · Задание отряда",tpl:"tpl-unittask"},unittasks:{t:"Выход · Задания отрядов",tpl:"tpl-unittasks"},executor:{t:"Обработка · Исполнитель (сеть отряда)",tpl:"tpl-executor"},orders:{t:"Выход · Приказы отрядам",tpl:"tpl-orders"},game:{t:"Среда · Игра / симулятор",tpl:"tpl-game"},situation:{t:"Вход · Обстановка",tpl:"tpl-situation"},replan:{t:"Алгоритм · Пересмотр замысла",tpl:"tpl-replan"},reward:{t:"Алгоритм · Награда",tpl:"tpl-reward"},planvalue:{t:"Обработка · Оценка замысла",tpl:"tpl-planvalue"},branches:{t:"Учитель · Ветки заданий",tpl:"tpl-branches"},unitvalue:{t:"Обработка · Оценка отряда",tpl:"tpl-unitvalue"},training:{t:"Учитель · PPO исполнителя",tpl:"tpl-training"},opponents:{t:"Среда · Соперники",tpl:"tpl-opponents"},league:{t:"Среда · Лига: эксплуататор",tpl:"tpl-league"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"},threat:{t:"Алгоритм · Угроза и участки группы",tpl:"tpl-threat"},execkinds:{t:"Выученная таблица · Виды заданий исполнителя",tpl:"tpl-execkinds"},teacher:{t:"Алгоритм · Скриптовый учитель",tpl:"tpl-teacher"},measure:{t:"Алгоритм · Мера выполнения",tpl:"tpl-measure"},imitate:{t:"Учитель · Подражание учителю",tpl:"tpl-imitate"},ppoplan:{t:"Учитель · PPO замысла",tpl:"tpl-ppoplan"},gaingen:{t:"Учитель · Доплата генералу",tpl:"tpl-gaingen"},gainexec:{t:"Учитель · Доплата исполнителю",tpl:"tpl-gainexec"},abilteach:{t:"Учитель · Учитель способностей",tpl:"tpl-abilteach"},gentest:{t:"Проверка · Проверки генерала",tpl:"tpl-gentest"},kindhead:{t:"Выход · Голова вида",tpl:"tpl-kindhead"},abilhead:{t:"Выход · Голова способностей",tpl:"tpl-abilhead"},ownkind:{t:"Учитель · Свой сигнал головы вида",tpl:"tpl-ownkind"}};
+  var nodes={tasks:{t:"Задачи · Список задач",tpl:"tpl-tasks"},signals:{t:"Обучение · Сигналы обучения",tpl:"tpl-signals"},roster:{t:"Армии · Отряды и фракции",tpl:"tpl-roster"},landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Алгоритм · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},missionpick:{t:"Обработка · Выбор заданий",tpl:"tpl-missionpick"},missions:{t:"Выход · Задания групп",tpl:"tpl-missions"},deploypick:{t:"Обработка · Выбор мест расстановки",tpl:"tpl-deploypick"},deployplaces:{t:"Выход · Места групп",tpl:"tpl-deployplaces"},deploylayout:{t:"Алгоритм · Раскладка отрядов",tpl:"tpl-deploylayout"},deployment:{t:"Выход · Расстановка",tpl:"tpl-deployment"},unittask:{t:"Алгоритм · Задание отряда",tpl:"tpl-unittask"},unittasks:{t:"Выход · Задания отрядов",tpl:"tpl-unittasks"},executor:{t:"Обработка · Исполнитель (сеть отряда)",tpl:"tpl-executor"},orders:{t:"Выход · Приказы отрядам",tpl:"tpl-orders"},game:{t:"Среда · Игра / симулятор",tpl:"tpl-game"},situation:{t:"Вход · Обстановка",tpl:"tpl-situation"},replan:{t:"Алгоритм · Пересмотр замысла",tpl:"tpl-replan"},reward:{t:"Алгоритм · Награда",tpl:"tpl-reward"},planvalue:{t:"Обработка · Оценка замысла",tpl:"tpl-planvalue"},branches:{t:"Учитель · Ветки заданий",tpl:"tpl-branches"},unitvalue:{t:"Обработка · Оценка отряда",tpl:"tpl-unitvalue"},training:{t:"Учитель · PPO исполнителя",tpl:"tpl-training"},opponents:{t:"Среда · Соперники",tpl:"tpl-opponents"},league:{t:"Среда · Лига: эксплуататор",tpl:"tpl-league"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"},threat:{t:"Алгоритм · Угроза и участки группы",tpl:"tpl-threat"},execkinds:{t:"Выученная таблица · Виды заданий исполнителя",tpl:"tpl-execkinds"},teacher:{t:"Алгоритм · Скриптовый учитель",tpl:"tpl-teacher"},measure:{t:"Алгоритм · Мера выполнения",tpl:"tpl-measure"},imitate:{t:"Учитель · Подражание учителю",tpl:"tpl-imitate"},ppoplan:{t:"Учитель · PPO замысла",tpl:"tpl-ppoplan"},gaingen:{t:"Учитель · Доплата генералу",tpl:"tpl-gaingen"},gainexec:{t:"Учитель · Доплата исполнителю",tpl:"tpl-gainexec"},abilteach:{t:"Учитель · Учитель способностей",tpl:"tpl-abilteach"},gentest:{t:"Проверка · Проверки генерала",tpl:"tpl-gentest"},kindhead:{t:"Выход · Голова вида",tpl:"tpl-kindhead"},abilhead:{t:"Выход · Голова способностей",tpl:"tpl-abilhead"},ownkind:{t:"Учитель · Свой сигнал головы вида",tpl:"tpl-ownkind"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
@@ -2768,7 +2863,7 @@ a{color:inherit}
     [].forEach.call(document.querySelectorAll(".node"),function(b){b.classList.toggle("on",b.dataset.n===cur);});
     var N=nodes[cur];document.getElementById("crumbs").innerHTML="<b>"+N.t+"</b>";
     var c=document.getElementById("content");c.innerHTML="";
-    if(N.tpl){c.appendChild(document.getElementById(N.tpl).content.cloneNode(true));draw(c);if(window.TasksUI)window.TasksUI.mount(c);}
+    if(N.tpl){c.appendChild(document.getElementById(N.tpl).content.cloneNode(true));draw(c);if(window.TasksUI)window.TasksUI.mount(c);if(window.SignalsUI)window.SignalsUI.mount(c);}
     else c.innerHTML='<div class="empty">Ещё не обсуждали. Дойдём по порядку.</div>';
   }
   function fillGrid(el,fn,w,h){var s="";for(var y=0;y<h;y++)for(var x=0;x<w;x++)s+='<i style="background:'+fn(x,y)+'"></i>';el.innerHTML=s;}
