@@ -748,6 +748,10 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
             # the critic's
             grad_norm = torch.nn.utils.clip_grad_norm_(actor_params, cfg.max_grad)
             grad_norm_critic = torch.nn.utils.clip_grad_norm_(critic_params, cfg.max_grad)
+            # (no gradient at all - the critic's warm-up, train_policy False - gives a 0 on the CPU: to the batch's
+            # device, or the stats' one read of the GPU fails; a start without the trainer's counters runs the warm-up)
+            grad_norm = grad_norm.to(adv.device)
+            grad_norm_critic = grad_norm_critic.to(adv.device)
             # the minibatch's one read of the GPU: is the gradient finite, and the KL (target_kl's early stop)
             finite = (torch.isfinite(grad_norm) & torch.isfinite(grad_norm_critic)).double()
             read = (torch.stack([finite, torch.as_tensor(step["kl"], dtype=torch.float64, device=finite.device)])

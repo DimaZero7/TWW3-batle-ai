@@ -120,6 +120,29 @@ def log_prob(logits, who, k_eff, m, cap, a):
     return lp, (ent * on.float()).sum(1), ok
 
 
+def groups_of(a, who, G):
+    """[P, G] bool: the groups 0..G-1 that hold some unit of `who` [P, N] in the membership a [P, N] (-1 none)."""
+    on = who & (a >= 0) & (a < G)
+    return (torch.nn.functional.one_hot(a.clamp(0, G - 1), G).bool() & on[..., None]).any(1)
+
+
+def keep_last(a, logits, who, prev_main, has_prev, keep, G):
+    """GeneralConfig.groups_sticky: (a' [P, N], kept [P]) - the rows `keep` [P] (a re-plan by the timer) with a last
+    plan (has_prev) and some unit of `who` [P, N] in one of its groups keep that plan's membership: each unit of who by
+    its last group number (prev_main [P, N], 0..G-1; the units not in who - out of the fight - drop off, a group left
+    empty goes); a unit of who without a last group (back in the fight) joins the kept group its logits [P, N, G] like
+    most. The other rows keep a (the membership sampled). The numbers are the last plan's, so net.match_groups keeps
+    them (and the kinds' inertia its groups)."""
+    if prev_main is None or has_prev is None:
+        return a, torch.zeros_like(keep)
+    old = torch.where(who & (prev_main >= 0) & (prev_main < G), prev_main, torch.full_like(prev_main, -1))
+    live = groups_of(old, who, G)                                                          # [P, G]
+    kept = keep.bool() & has_prev.bool() & live.any(1)
+    fill = logits.float().masked_fill(~live[:, None, :], NEG).argmax(-1)
+    last = torch.where(old >= 0, old, torch.where(who, fill, torch.full_like(old, -1)))
+    return torch.where(kept[:, None], last, a), kept
+
+
 class Assign(nn.Module):
     """The learned membership's logits (module doc). d: the card's width; places: G; heads, ff: the listening layer's
     (the councils'); start [G, D]: the groups' starting query cards (the slot attention's first G); stick: the re-plan

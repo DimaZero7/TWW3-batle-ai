@@ -154,6 +154,14 @@ class GeneralConfig:
     #                            lone horse -, the largest 4.9 x n / K): at 0.5 / 1.5 only 62 % of its plans fit and
     #                            the ARI to it could not pass 0.80; at 0.2 / 2.5 93 % fit, the ceiling 0.98
     assign_stick: float = 1.0  # ... a re-plan: the start of the learned bonus on a unit's last group number
+    groups_sticky: bool = False  # ... "learned": a re-plan by the timer only (replan_s, no event) keeps our side's last
+    #                            groups and K (net.learned_raw: the units by their last group number; the units out
+    #                            drop off, a group left empty goes; a unit back in the fight joins the kept group its
+    #                            logits like most) - the membership is chosen again only at the deployment and at a
+    #                            re-plan on an event (a group broken, a lord fallen, the enemy near); missions and
+    #                            targets are chosen as before. A kept plan's membership was not chosen: no lp_assign
+    #                            (runtime "kept"; the tourney leaves it out). g40 under "learned": the groups shuffled
+    #                            at every 30 s plan
     group_centre: bool = True  # ... "rule": a group card reads its units' values less their side's mean (how the group
     #                            differs from its army: the council's unit cards share a large common part)
     split_kinds: bool = True   # the executor's own mission kind table (exec_kinds; the group card detached): the

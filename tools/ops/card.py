@@ -16,7 +16,11 @@ distance from the start; where the exam's proxy was played (profile exam, tools/
 (± 95 %), wins per 12, pairs 2-0/1-1/0-2 and own lord deaths in its battles; the training window since the last point
 (test5 "window", run.py log): the win rate against the pinned version (--past-pin) and own lord deaths in the
 training's battles; the friends in the way in the proxy's battles (behaviour.py: the share of the bullets' / the
-arrows' fire taken by own units, the share of arrows forced to a 45 deg lob). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
+arrows' fire taken by own units, the share of arrows forced to a 45 deg lob). The general's groups (a line under the
+table, from the run's log build/nn-train/runs/test5_<label>/log.jsonl "general", the mean of its updates): our groups a
+plan, the composition changes a battle (re-plans whose membership of our side differed from the last plan's) and their
+share of the re-plans, the share of our groups with shooters and melee together, and with groups "learned" the ARI
+to the rule, K and the share of plans that kept the last groups (GeneralConfig.groups_sticky). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
 says so under the table. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
@@ -289,6 +293,41 @@ def computed(pts, rep=None):
     return "computed: " + "; ".join(f"min {m} {n}" for (m, _), n in zip(pts, names))
 
 
+GROUP_KEYS = (("groups_own", "groups a plan", "{:.2f}"), ("group_changes_per_battle", "composition changes a battle", "{:.2f}"),
+              ("group_change_share", "of re-plans", "{:.3f}"), ("mixed_share", "shoot+melee groups", "{:.3f}"),
+              ("assign_ari", "ARI to rule", "{:.3f}"), ("assign_k", "K", "{:.2f}"), ("assign_kept", "plans kept", "{:.3f}"))
+
+
+def general_groups(folder):
+    """({key: mean over the run's updates} of GROUP_KEYS, updates) from the run's log (module doc); ({}, 0) without."""
+    folder = Path(folder)
+    log = folder.parent.parent / "runs" / f"test5_{folder.name}" / "log.jsonl"
+    if not log.is_file():
+        return {}, 0
+    vals, n = {}, 0
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            g = json.loads(line).get("general")
+        except ValueError:
+            continue
+        if not isinstance(g, dict):
+            continue
+        n += 1
+        for k, _, _ in GROUP_KEYS:
+            if isinstance(g.get(k), (int, float)):
+                vals.setdefault(k, []).append(float(g[k]))
+    return {k: sum(v) / len(v) for k, v in vals.items()}, n
+
+
+def groups_line(folder):
+    """["general groups (training log, mean of N updates): ..."] or [] (module doc)."""
+    g, n = general_groups(folder)
+    if not g:
+        return []
+    return [f"general groups (training log, mean of {n} updates): "
+            + ", ".join(f"{title} {f.format(g[k])}" for k, title, f in GROUP_KEYS if k in g)]
+
+
 def card(folder, prev=None):
     """The card's lines (markdown) and its data ({"points", "rows", "anomalies", "capacity"})."""
     pts, rep = points_of(folder)
@@ -331,6 +370,7 @@ def card(folder, prev=None):
         lines.append("no script metrics (test5 --no-script-metrics): the rating, the pair gold and the script battles' "
                      "rows are not computed (\"-\"); judge by the exam's proxy, the pinned window and own lord deaths")
     lines += ["anomalies: " + ("; ".join(anomaly) if anomaly else "none")]
+    lines += groups_line(folder)
     capacity = (rep or {}).get("capacity")
     if capacity:
         lines.append(f"capacity: {capacity.get('verdict')} - {'; '.join(capacity.get('reasons') or [])}")
@@ -341,7 +381,7 @@ def card(folder, prev=None):
         lines += lord_line((rep or {}).get("training") or {})
     return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity,
                    "opponents": ((rep or {}).get("training") or {}).get("opponents"),
-                   "computed": computed(pts, rep),
+                   "computed": computed(pts, rep), "general_groups": general_groups(folder)[0],
                    "no_script_metrics": bool((rep or {}).get("no_script_metrics")
                                              or any(p.get("no_script_metrics") for _, p in pts))}
 

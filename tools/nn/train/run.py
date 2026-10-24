@@ -348,6 +348,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
                  "group_centre": "general_group_centre", "assign_lo": "general_assign_lo",
                  "assign_hi": "general_assign_hi", "assign_stick": "general_assign_stick",
+                 "groups_sticky": "general_groups_sticky",
                  "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
                  "tile_norm": "general_tile_norm", "threat": "general_threat", "task_group": "general_task_group",
                  "group_tiles": "general_group_tiles"}
@@ -1873,6 +1874,10 @@ def parser():
     ap.add_argument("--general-assign-stick", type=float, default=1.0,
                     help="general: with --general-groups learned, the start of the learned re-plan bonus on a unit's "
                          "last group")
+    ap.add_argument("--general-groups-sticky", type=lambda v: bool(int(v)), default=False,
+                    help="general: with --general-groups learned, 1: a re-plan by the timer alone keeps our last groups "
+                         "and K (chosen again only at the deployment and on an event: a group broken, a lord fallen, "
+                         "the enemy near); 0: every re-plan chooses them")
     ap.add_argument("--general-group-r", type=float, default=100.0,
                     help="general: with --general-groups rule, units of a role join while their clusters' centres are "
                          "closer than this (m)")

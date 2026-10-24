@@ -20,7 +20,7 @@ Two ways to place the variants:
 
 -> per battle: its start s, K, copy, the learner's side, its trade at the end (ability_branch.trade: (the enemy's gold
 lost - our own) / budget), won, length; and the learner's plans' records (Runtime.record + the membership's
-log-probability "lp_assign", "k_used", the battle's number, the plan's time, whether it is the deployment's).
+log-probability "lp_assign", "k_used", "kept" (GeneralConfig.groups_sticky: the last plan's groups kept, not chosen), the battle's number, the plan's time, whether it is the deployment's).
 
 The advantages (advantages()): a battle's membership advantage is its trade less the mean of the battles of the same
 start and K (with 2 copies: half their difference); the K head's of a start is each K's mean trade less the mean over
@@ -134,6 +134,7 @@ def _collector(env, recs, lane):
         rec = rt.record(rr)
         rec["lp_assign"] = rt.r["lp_assign"][rr].clone()
         rec["k_used"] = rt.r["k_used"][rr].clone()
+        rec["kept"] = rt.r["kept"][rr].clone()        # (GeneralConfig.groups_sticky: the membership not chosen)
         rec["battle"] = rr % rt.B
         rec["lane"] = torch.full_like(rr, lane)
         rec["t_plan"] = env.st.t[rr % rt.B].float().clone()

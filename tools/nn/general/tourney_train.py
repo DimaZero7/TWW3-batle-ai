@@ -14,7 +14,12 @@ A round (synchronous: the update after the round's battles end): tourney.play (S
   K head:     on each start's deployment plan, -sum over the K played of pi(K) x A(K) (A: the K's mean trade less the
               mean over the K played, / the same scale), minus k_entropy x the head's entropy;
   anchor:     the cross-entropy to the rule's groups and K (assign_learn.anchor) on the round's plans, its weight w0
-              down to a floor over anchor_decay rounds (signal.imitate_weight; run.py imitate_floor's way).
+              down to a floor over anchor_decay rounds (signal.imitate_weight; run.py imitate_floor's way); --anchor 0:
+              none (the collection free of the rule);
+  mixed:      --mixed-penalty C (0 off): a plan's advantage less C x (its share of mixed groups - the round's mean;
+              groups.mixed: shooters and melee in one group), in trade units before the scale (plan_advantage);
+  kept plans (GeneralConfig.groups_sticky: a timer re-plan kept the last groups, tourney "kept") are left out of the
+              membership's term - their membership was not chosen.
 The council's cards are computed once a round without gradients (frozen). The log (one JSON line a round, log.jsonl;
 a short line on the console): trade by K, the advantages' scale, the losses, the ARI to the rule, our groups a plan
 (exactly K_eff), the role mix, MI(group; role), the cosine of the group cards, MI(group; kind), the K head's choice.
@@ -56,6 +61,8 @@ class Learn:
     anchor_min: float = 0.05
     grad_clip: float = 1.0
     kl_max: float = 0.02                 # the epochs stop when the KL a unit (from the plans' policy) passes it
+    mixed_penalty: float = 0.0           # x the plan's share of mixed groups (groups.mixed: shooters and melee in one
+    #                                      group), taken off its advantage in trade units (less the round's mean); 0 off
 
 
 def _rows(d, idx):
@@ -97,6 +104,17 @@ def k_term(gen, rec, res, ak, scale, k_entropy, council=None):
     return -(gain.mean() + k_entropy * ent.mean()), p.detach().cpu().numpy()
 
 
+def plan_advantage(a_battle, share, coef, chosen, scale):
+    """[M] the plans' advantages: a_battle [M] (their battle's, trade units) less coef x (share [M], the plan's share of
+    mixed groups, - its mean over the chosen plans `chosen` [M]), / scale, within +-ADV_CLIP."""
+    adv = a_battle.float()
+    if coef:
+        w = chosen.float()
+        mean = (share * w).sum() / w.sum().clamp(min=1.0)
+        adv = adv - coef * (share.float() - mean)
+    return (adv / scale).clamp(-ADV_CLIP, ADV_CLIP)
+
+
 def update(actor, opt, res, learn, rnd, scale):
     """One round's update (module doc) -> the log's numbers."""
     gen = actor.general
@@ -105,9 +123,13 @@ def update(actor, opt, res, learn, rnd, scale):
     M = len(rec["battle"])
     dev = rec["battle"].device
     a_b, ak, mean = tourney.advantages(res["trade"], res["state"], res["K"], res["ks"])
-    adv = torch.as_tensor(a_b, dtype=torch.float32, device=dev)[rec["battle"]]
-    adv = (adv / scale).clamp(-ADV_CLIP, ADV_CLIP)
     raw = raw_of(rec)
+    G = gen.cfg.places
+    who_all = rec["own"] & rec["free"]
+    chosen = ~rec["kept"].bool() if "kept" in rec else torch.ones(M, dtype=torch.bool, device=dev)
+    share = ggroups.mixed_share(raw, who_all, ggroups.roles(rec["num"], rec["lab"]), G)
+    adv = plan_advantage(torch.as_tensor(a_b, dtype=torch.float32, device=dev)[rec["battle"]], share,
+                         learn.mixed_penalty, chosen, scale)
     K = rec["K"].long()
     old = rec["lp_assign"].float()
     w_anchor = gsignal.imitate_weight(learn.anchor, learn.anchor_decay, rnd, learn.anchor_min)
@@ -138,7 +160,8 @@ def update(actor, opt, res, learn, rnd, scale):
             with torch.no_grad():
                 # the KL a unit from the plans' own policy (k3); the epochs stop beyond kl_max (learn.py's way)
                 lr0 = (t["lp"] - old[idx]).clamp(-20, 20)
-                kl_unit = float(((torch.expm1(lr0) - lr0) / n_u).mean())
+                c0 = chosen[idx].float()                # (a kept plan's membership was not chosen: no KL)
+                kl_unit = float(((torch.expm1(lr0) - lr0) / n_u * c0).sum() / c0.sum().clamp(min=1.0))
                 if kl_first is None:
                     kl_first = kl_unit             # (before any step: ~0 when play and update agree)
             if steps and learn.kl_max and kl_unit > learn.kl_max:
@@ -146,9 +169,11 @@ def update(actor, opt, res, learn, rnd, scale):
                 break
             ratio = torch.exp((t["lp"] - old[idx]).clamp(-20, 20))
             a = adv[idx]
-            surr = torch.minimum(ratio * a, ratio.clamp(1 - learn.clip, 1 + learn.clip) * a)
-            ent = (t["ent"] / n_u).mean()
-            loss = -surr.mean() - learn.entropy * ent
+            ch = chosen[idx].float()
+            n_ch = ch.sum().clamp(min=1.0)
+            surr = torch.minimum(ratio * a, ratio.clamp(1 - learn.clip, 1 + learn.clip) * a) * ch
+            ent = (t["ent"] / n_u * ch).sum() / n_ch
+            loss = -surr.sum() / n_ch - learn.entropy * ent
             if w_anchor > 0:
                 an = al.anchor(gen, sub, rule[idx], (units[idx], before[idx]))
                 loss = loss + w_anchor * (an["ce"] + learn.k_weight * an["ce_k"])
@@ -165,9 +190,9 @@ def update(actor, opt, res, learn, rnd, scale):
             steps += 1
             with torch.no_grad():
                 lr_ = (t["lp"] - old[idx]).clamp(-20, 20)
-                sums["kl"] += float((torch.expm1(lr_) - lr_).mean()) * len(idx)
-                sums["clip"] += float(((ratio - 1).abs() > learn.clip).float().mean()) * len(idx)
-                sums["pg"] += float(-surr.mean().detach()) * len(idx)
+                sums["kl"] += float(((torch.expm1(lr_) - lr_) * ch).sum() / n_ch) * len(idx)
+                sums["clip"] += float((((ratio - 1).abs() > learn.clip).float() * ch).sum() / n_ch) * len(idx)
+                sums["pg"] += float(-surr.sum().detach() / n_ch) * len(idx)
                 sums["ent"] += float(ent.detach()) * len(idx)
                 sums["n"] += len(idx)
     n = max(1, sums["n"])
@@ -175,7 +200,8 @@ def update(actor, opt, res, learn, rnd, scale):
            "anchor_ce": round(sums["anchor"] / n, 4) if w_anchor > 0 else None, "kl": round(sums["kl"] / n, 5),
            "clip": round(sums["clip"] / n, 4), "k_loss": None if k_loss is None else round(float(k_loss.detach()), 5),
            "kl_first_unit": None if kl_first is None else round(kl_first, 6), "kl_unit_last": round(kl_unit, 5),
-           "steps": steps, "kl_stop": stopped}
+           "steps": steps, "kl_stop": stopped, "kept_share": round(float(1.0 - chosen.float().mean()), 4),
+           "mixed_share": round(float(share[chosen].mean()) if bool(chosen.any()) else 0.0, 4)}
     if pi is not None:
         out["k_pi"] = [round(float(x), 3) for x in pi.mean(0)]
     return out, a_b, ak, mean

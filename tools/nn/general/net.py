@@ -360,7 +360,9 @@ class General(nn.Module):
         groups' numbers. With GeneralConfig.groups "learned" a plan made here (no inp "main") has also "raw" [P, N]
         (the units' places before the numbering), "raw_rule" [P, N] (the rule's), "K" [P] (the groups wanted: inp "K"
         where > 0, else the K head's), "lp_assign" / "ent_assign" [P] (the membership's), "lp_k" [P] (the K head's
-        choice; 0 where K was given); greedy: the most likely membership and K."""
+        choice; 0 where K was given), "kept" [P] (GeneralConfig.groups_sticky: the last plan's groups kept - inp "keep",
+        a re-plan by the timer -, lp_assign / ent_assign / lp_k 0, K the groups kept); greedy: the most likely
+        membership and K."""
         P, N = inp["on"].shape
         G = self.cfg.places
         own = inp["own"]
@@ -671,8 +673,18 @@ class General(nn.Module):
                              inp.get("prev_main"))
         k_eff, m, cap = gassign.capacity(who.sum(1), K, self.cfg.assign_lo, self.cfg.assign_hi)
         a, lp, ent = gassign.sample(logits, who, k_eff, m, cap, greedy, getattr(self, "assign_gen", None))
+        kept = torch.zeros(P, dtype=torch.bool, device=who.device)
+        if getattr(self.cfg, "groups_sticky", False) and inp.get("keep") is not None:
+            a, kept = gassign.keep_last(a, logits, who, inp.get("prev_main"), inp.get("has_prev"), inp["keep"],
+                                        self.cfg.places)
+            if bool(kept.any()):
+                z = torch.zeros_like(lp)
+                lp, ent, lp_k = torch.where(kept, z, lp), torch.where(kept, z, ent), torch.where(kept, z, lp_k)
+                n_kept = gassign.groups_of(a, who, self.cfg.places).sum(1)
+                K = torch.where(kept, n_kept.clamp(min=1), K)
         raw = torch.where(own, a, raw_rule)
-        return raw, {"raw": raw, "raw_rule": raw_rule, "K": K, "lp_assign": lp, "ent_assign": ent, "lp_k": lp_k}
+        return raw, {"raw": raw, "raw_rule": raw_rule, "K": K, "lp_assign": lp, "ent_assign": ent, "lp_k": lp_k,
+                     "kept": kept}
 
     def assign_terms(self, inp, raw, K, grad_cards=False, council=None):
         """The learned collection's terms of plans made (the update; inp the plans' inputs, raw [P, N] their units'

@@ -70,3 +70,17 @@ def test_graft_puts_the_collection_into_an_older_general(tmp_path):
     for k in sd:
         ref = ss if k.startswith(("general.assign.", "general.k_head.")) else sdst
         assert torch.equal(sd[k], ref[k]), k
+
+
+def test_graft_drops_the_training_state_unless_kept():
+    """graft.graft: the target's "train" (Adam, the counters) is dropped by default, kept with keep_train (the line
+    g41: the step's latest.pt goes on); the target's rules (groups_sticky) stay."""
+    from tools.nn.general import graft
+    src = {"actor": {"general.assign.w": torch.ones(2), "x": torch.zeros(1)}, "general": {"card": 16, "places": 10}}
+    dst = {"actor": {"general.assign.w": torch.zeros(2), "x": torch.ones(1)},
+           "general": {"card": 16, "places": 10, "groups_sticky": True}, "train": {"optim": {}, "state": {"updates": 7}}}
+    out, n = graft.graft(src, dst)
+    assert n == 1 and "train" not in out and out["general"]["groups"] == "learned" and out["general"]["groups_sticky"]
+    assert torch.equal(out["actor"]["general.assign.w"], torch.ones(2)) and torch.equal(out["actor"]["x"], torch.ones(1))
+    out, _ = graft.graft(src, dst, keep_train=True)
+    assert out["train"]["state"]["updates"] == 7

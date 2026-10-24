@@ -9,8 +9,11 @@ parts, the critic) stays as it was.
         --into build/nn-train/test5/g38_general/m40.pt --out build/learned_groups/g38_learned.pt
     python -m tools.nn.train.exam_sim build/learned_groups/g38_learned.pt --R 2 --plain --device cpu
 
-The target's training state ("train": the optimizer of its own parameters) is dropped: run.py --init from the grafted
-file starts Adam afresh (its parameters are not the saved optimizer's).
+The target's training state ("train": Adam, the trainer's counters, the ability critic, the kind Q's buffer) is
+dropped: run.py --init from the grafted file starts them afresh. --keep-train keeps it (the line g41: the step's
+latest.pt goes on as a chain's step does; a target without the collection has an Adam of fewer parameters - run.py
+then starts Adam afresh and keeps the rest; one with it keeps Adam too: the collection's weights have no moments, PPO
+does not train them).
 """
 import argparse
 import sys
@@ -22,8 +25,9 @@ from tools.nn.general.assign_learn import PREFIXES
 KEYS = ("assign_lo", "assign_hi", "assign_stick")
 
 
-def graft(src, dst):
-    """(the grafted checkpoint dict, tensors copied) of the source and target checkpoint dicts (checkpoint.read)."""
+def graft(src, dst, keep_train=False):
+    """(the grafted checkpoint dict, tensors copied) of the source and target checkpoint dicts (checkpoint.read);
+    keep_train: the target's "train" stays (module doc)."""
     if not src.get("general") or not dst.get("general"):
         raise ValueError("graft: both checkpoints need a general")
     for f in ("card", "places"):
@@ -44,7 +48,8 @@ def graft(src, dst):
         if k in src["general"]:
             gen[k] = src["general"][k]
     out["general"] = gen
-    out.pop("train", None)
+    if not keep_train:
+        out.pop("train", None)
     out["meta"] = dict(dst.get("meta") or {}, graft={"collection": src.get("meta", {}).get("tourney"),
                                                      "tensors": n})
     return out, n
@@ -59,16 +64,18 @@ def main(argv=None):
     ap.add_argument("--from", dest="src", required=True, help="the branch's checkpoint (its collection)")
     ap.add_argument("--into", required=True, help="the general's checkpoint to take it")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--keep-train", action="store_true", help="keep the target's training state (module doc)")
     args = ap.parse_args(argv)
-    data, n = graft(checkpoint.read(resolve(args.src)), checkpoint.read(resolve(args.into)))
+    data, n = graft(checkpoint.read(resolve(args.src)), checkpoint.read(resolve(args.into)), args.keep_train)
     out = resolve(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".tmp")
     torch.save(data, tmp)
     tmp.replace(out)
     actor = checkpoint.load_policy(out)                  # (it loads: the shapes fit)
-    print(f"written: {out} ({n} tensors of the collection; groups {actor.gcfg.groups}, bounds "
-          f"{actor.gcfg.assign_lo}/{actor.gcfg.assign_hi})", flush=True)
+    print(f"written: {out} ({n} tensors of the collection; groups {actor.gcfg.groups}, sticky "
+          f"{getattr(actor.gcfg, 'groups_sticky', False)}, bounds {actor.gcfg.assign_lo}/{actor.gcfg.assign_hi}; "
+          f"training state {'kept' if 'train' in data else 'dropped'})", flush=True)
 
 
 if __name__ == "__main__":

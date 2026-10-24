@@ -90,7 +90,9 @@ COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy",
           "target_enemy", "target_tile", "exec_bonus", "exec_bonus_abs", "exec_units", "pairs_ok", "pairs_all",
           "teach_plans", "battle_min", "shoot_groups", "shoot_noshooter", "shoot_units", "shoot_units_nomissile",
           "mask_free", "mask_units", "mask_fallback", "volley_lock", "fire_shooters", "fire_on",
-          "assign_plans", "assign_ari", "assign_k", "assign_groups")
+          "assign_plans", "assign_ari", "assign_k", "assign_groups", "assign_kept", "churn_plans", "churn_changed",
+          "changes_ended",
+          "mixed_groups", "mixed_of")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -213,7 +215,8 @@ class Runtime:
              "place": z(R, G, dt=L) - 1, "tgt": z(R, G, 2), "mix": z(R, N, D), "kc": z(R, N, D),
              "tile_w": z(R, self.gcfg.target_grid ** 2, 2),
              "places": z(R, 2 * G, D), "members": z(R, G), "lords": z(R, 2, dt=Bo), "r_sum": z(R),
-             "n_replan": z(R, dt=L), "lp": z(R, G), "value": z(R), "active": z(R, 2 * G, dt=Bo),
+             "n_replan": z(R, dt=L), "n_change": z(R, dt=L), "lp": z(R, G), "value": z(R),
+             "active": z(R, 2 * G, dt=Bo),
              "r_disc": z(R), "v_start": z(R) + float("nan"),
              "b_kind": z(R, G, len(O.KINDS)), "b_run": z(R, G), "b_n": z(R, G), "b_c0": z(R, G, 2),
              "b_ok0": z(R, G, dt=Bo), "b_last": z(R, G, 2), "b_okl": z(R, G, dt=Bo), "b_path": z(R, G),
@@ -223,7 +226,7 @@ class Runtime:
              "fire_t0": z(R) - 1.0, "vl_t0": z(R, N) - 1.0, "vl_at": z(R) - 1.0, "vl_lock": z(R, N, dt=Bo),
              "q_t0": z(R), "q_tr0": z(R), "q_trh": z(R) + float("nan"), "near0": z(R, G, dt=Bo),
              "w_t0": z(R) - 1.0, "w_best": z(R) + float("inf"), "w_bt": z(R), "w_go": z(R, dt=Bo),
-             "lp_assign": z(R), "k_used": z(R, dt=L)}
+             "lp_assign": z(R), "k_used": z(R, dt=L), "kept": z(R, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
@@ -360,14 +363,18 @@ class Runtime:
 
     # --- planning ---------------------------------------------------------------------------------------------------
     @torch.no_grad()
-    def plan(self, env, rows, deploy, obs=None, reason="deploy"):
-        """Plan rows [M] (long, those with a planner) now. -> the deployment's {row: points} for the layout."""
+    def plan(self, env, rows, deploy, obs=None, reason="deploy", sticky=None):
+        """Plan rows [M] (long, those with a planner) now. sticky [M] bool: the rows re-planned by the timer alone
+        (replan(); a general with GeneralConfig.groups_sticky keeps their groups). -> the deployment's {row: points}
+        for the layout."""
         if rows.numel() == 0:
             return
         owner = self.owners(env, rows)
         keep = owner >= 0
+        if sticky is None or deploy:
+            sticky = torch.zeros_like(keep)
         if not bool(keep.all()):
-            rows, owner = rows[keep], owner[keep]
+            rows, owner, sticky = rows[keep], owner[keep], sticky[keep]
             if rows.numel() == 0:
                 return
         inp, frame, u = self.inputs(env, rows, deploy, obs)
@@ -375,7 +382,7 @@ class Runtime:
         for o in torch.unique(owner).tolist():
             sel = (owner == o).nonzero().squeeze(1)
             gen = self.actor_of(env, o).general
-            c, d = gen(_take(inp, sel), greedy=self.greedy)
+            c, d = gen(dict(_take(inp, sel), keep=sticky[sel]), greedy=self.greedy)
             if o == 0 and self.teacher > 0:
                 d = self._teach(env, rows[sel], c, d, Frame(frame.cx[sel], frame.cz[sel], frame.ux[sel], frame.uz[sel]))
                 self.r["teach_use"][rows[sel]] = d["teach_use"]
@@ -392,7 +399,7 @@ class Runtime:
             if "lp_assign" in c:
                 # the learned collection's plans (GeneralConfig.groups "learned"): its membership's log-probability,
                 # its K and the rule's membership (the log's ARI)
-                vals.update(lp_assign=c["lp_assign"], k_used=c["K"], raw_rule=c["raw_rule"])
+                vals.update(lp_assign=c["lp_assign"], k_used=c["K"], raw_rule=c["raw_rule"], kept=c["kept"])
                 learned[sel] = True
             for k, v in vals.items():
                 if k not in res:
@@ -419,7 +426,7 @@ class Runtime:
         for k in ("main", "perm", "kind", "target", "place", "lp", "value", "mix", "kc", "places", "active",
                   "kind_logp"):
             r[k][rows] = res[k].to(r[k].dtype)
-        for k in ("lp_assign", "k_used"):
+        for k in ("lp_assign", "k_used", "kept"):
             r[k][rows] = res[k].to(r[k].dtype) if res.get(k) is not None else torch.zeros_like(r[k][rows])
         for k, v in inp.items():
             r["in/" + k][rows] = v.to(r["in/" + k].dtype)
@@ -457,6 +464,7 @@ class Runtime:
             r["fresh"][rows] = (owner == 0) & ~r["teach"][rows]
         if deploy:
             r["n_replan"][rows] = 0
+            r["n_change"][rows] = 0
         else:
             r["n_replan"][rows] += 1
         self._count(rows, owner, res, inp, deploy, reason)
@@ -589,6 +597,10 @@ class Runtime:
         shoot = lg & (res["kind"] == gtaskmask.KIND["shoot"])
         c.add("shoot_groups", shoot.sum())
         c.add("shoot_noshooter", (shoot & ~has_sh).sum())
+        # our groups holding shooters and melee together (groups.mixed: the log's mixed_share), of the general's plans
+        role = ggroups.roles(inp["num"], inp["lab"])
+        c.add("mixed_groups", (ggroups.mixed(res["main"], inp["own"] & inp["free"], role, G) & own_g).sum())
+        c.add("mixed_of", own_g.sum())
         if deploy:
             dep = inp["deploy"] & mine
             c.add("deploys", mine.sum())
@@ -612,6 +624,8 @@ class Runtime:
         c.add("assign_ari", (a * m).sum())
         c.add("assign_k", (res["k_used"].float() * m).sum())
         c.add("assign_groups", (n_g * m).sum())
+        if res.get("kept") is not None:
+            c.add("assign_kept", (res["kept"].bool() & mine).sum())
 
     def _churn(self, rows, owner, res):
         """The log's counters of a re-plan's numbering (the learner's plans; before the new plan is written): our units
@@ -623,6 +637,12 @@ class Runtime:
         both = (old >= 0) & (old < G) & (new >= 0) & (new < G) & mine[:, None]
         c.add("churn_units", both.sum())
         c.add("churn_moved", (both & (old != new)).sum())
+        # the re-plans whose membership of our side differs from the last plan's (a unit in a group in both plans moved;
+        # units out of the fight or back in it do not count): the log's group_changes_per_battle
+        changed = (both & (old != new)).any(1)
+        c.add("churn_plans", mine.sum())
+        c.add("churn_changed", changed.sum())
+        r["n_change"][rows] += changed.long()
         kept = r["active"][rows][:, :G] & res["active"][:, :G] & mine[:, None]
         c.add("kind_kept_groups", kept.sum())
         c.add("kind_switched", (kept & (r["kind"][rows] != res["kind"])).sum())
@@ -752,7 +772,8 @@ class Runtime:
             near = (self.near_groups(env, rows) & ~r["near0"]).any(-1)
         # the teacher's wait ran out (wait_clock: w_go since the plan, which still waits; the taught plans)
         wait = r["w_go"] & (r["w_t0"] >= 0) & r["teach"]
-        event = live & (age >= self.gcfg.replan_min_s) & (broken | lord | near | wait) & ~timer
+        cause = broken | lord | near | wait
+        event = live & (age >= self.gcfg.replan_min_s) & cause & ~timer
         due = timer | event
         if not bool(due.any()):
             return
@@ -762,7 +783,9 @@ class Runtime:
         self.stats.add("replan_lord", (event & lord & ~broken & mine).sum())
         self.stats.add("replan_near", (event & near & ~lord & ~broken & mine).sum())
         self.stats.add("replan_wait", (event & wait & ~near & ~lord & ~broken & mine).sum())
-        self.plan(env, due.nonzero().squeeze(1), deploy=False, obs=obs, reason="replan")
+        idx = due.nonzero().squeeze(1)
+        # the timer alone (no event now, even under replan_min_s): a sticky collection keeps its groups (plan's sticky)
+        self.plan(env, idx, deploy=False, obs=obs, reason="replan", sticky=(timer & ~cause)[idx])
 
     def near_groups(self, env, rows):
         """[M, G] our groups of the plans in force of rows [M] (r["main"]) with a standing enemy unit (not routing:
@@ -830,6 +853,7 @@ class Runtime:
             mine = r["has"][rows] & (r["owner"][rows] == 0)
             self.stats.add("battles", mine.sum())
             self.stats.add("replans_ended", (r["n_replan"][rows] * mine).sum())
+            self.stats.add("changes_ended", (r["n_change"][rows] * mine).sum())
             self.stats.add("battle_min", (env.st.t[rows % self.B].double() * mine).sum() / 60.0)   # their length
             r["has"][rows] = False
             r["owner"][rows] = -1
@@ -1344,7 +1368,11 @@ class Runtime:
                 "kind_switch": round(s["kind_switched"] / max(1.0, s["kind_kept_groups"]), 4),
                 **({"assign_ari": round(s["assign_ari"] / s["assign_plans"], 4),
                     "assign_k": round(s["assign_k"] / s["assign_plans"], 3),
-                    "assign_groups": round(s["assign_groups"] / s["assign_plans"], 3)} if s["assign_plans"] else {}),
+                    "assign_groups": round(s["assign_groups"] / s["assign_plans"], 3),
+                    "assign_kept": round(s["assign_kept"] / s["assign_plans"], 4)} if s["assign_plans"] else {}),
+                "group_changes_per_battle": round(s["changes_ended"] / max(1.0, s["battles"]), 2),
+                "group_change_share": round(s["churn_changed"] / max(1.0, s["churn_plans"]), 4),
+                "mixed_share": round(s["mixed_groups"] / max(1.0, s["mixed_of"]), 4),
                 **({"distinct_bonus": round(s["distinct_bonus"] / max(1.0, s["distinct_groups"]), 5),
                     "distinct_weight": round(self.distinct.weight, 6)} if self.distinct is not None else {}),
                 **{f"kind_share_{k.name}": round(float(p[k.index]), 3) for k in names},

@@ -142,3 +142,22 @@ def ari(a, b, mask, L):
     den = 0.5 * (s_a + s_b) - expect
     ok = den.abs() > 1e-9
     return torch.where(ok, (s_ij - expect) / torch.where(ok, den, torch.ones_like(den)), torch.ones_like(den)).float()
+
+
+def mixed(main, who, role, G):
+    """[P, G] bool: our groups (numbers 0..G-1 of main [P, N], -1 none) whose units of `who` [P, N] hold both a shooter
+    and a melee unit (role [P, N]: roles(); the lord, heroes and fast units do not count) - the log's mixed_share, the
+    tourney's mixed penalty (tourney_train --mixed-penalty)."""
+    on = who & (main >= 0) & (main < G)
+    oh = torch.nn.functional.one_hot(main.clamp(0, G - 1), G).bool() & on[..., None]
+    shoot = (oh & (role == ROLES.index("shoot"))[..., None]).any(1)
+    melee = (oh & (role == ROLES.index("melee"))[..., None]).any(1)
+    return shoot & melee
+
+
+def mixed_share(main, who, role, G):
+    """[P] the share of our groups (holding some unit of who) that are mixed (mixed()); 0 without groups."""
+    on = who & (main >= 0) & (main < G)
+    act = (torch.nn.functional.one_hot(main.clamp(0, G - 1), G).bool() & on[..., None]).any(1)
+    n = act.sum(1)
+    return mixed(main, who, role, G).sum(1).float() / n.clamp(min=1).float()
