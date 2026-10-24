@@ -301,20 +301,24 @@ a{color:inherit}
 .sigcard em{font-size:12px;font-style:normal;color:var(--sc)}
 .sigopen h2{margin:0 0 4px}
 .sigpanel{margin-top:10px}
-.tsk>summary{cursor:pointer;font-weight:600;list-style-position:inside}
-.tsk>summary:hover{text-decoration:underline}
-.tsk .ttext{padding:4px 0 2px 18px;color:var(--muted)}
-.tsk .ttext p{margin:0 0 6px}
+.tsk-h b{font-size:15px}
+.tmore>summary{cursor:pointer;font-size:12px;color:var(--later);list-style:none;display:inline-block;padding:1px 0}
+.tmore>summary::-webkit-details-marker{display:none}
+.tmore>summary::before{content:"▸ "} .tmore[open]>summary::before{content:"▾ "}
+.tmore>summary:hover{text-decoration:underline}
+.tmore .ttext{padding:4px 0 2px 12px;color:var(--muted);border-left:2px solid var(--line);margin:2px 0 6px}
+.tmore .ttext p{margin:0 0 6px}
 .tclosed>summary{cursor:pointer;list-style-position:inside}
-.tsub{margin:4px 0 2px;padding-left:0;list-style:none;border-left:2px solid var(--line)}
-.tsub li{margin:0 0 4px;padding-left:10px}
-.tsub .tsk.sub>summary,.tsub .tsk.sub.flat{font-weight:500;color:var(--ink)}
+.tclosed>summary:hover{text-decoration:underline}
+.tsub{margin:6px 0 2px;padding-left:0;list-style:none}
+.tsub li{margin:0 0 5px;padding-left:12px;border-left:2px solid var(--line)}
+.tsl{font-weight:500;color:var(--ink)}
 .tsn{font-family:var(--f-mono);font-size:12px;color:var(--muted);margin-right:2px}
 .tsm{font-size:12px;color:var(--muted);font-weight:400;margin-left:4px}
-.tsub li.st-done>.tsk>summary,.tsub li.st-done>.tsk.flat{color:var(--done)}
-.tsub li.st-work>.tsk>summary,.tsub li.st-work>.tsk.flat{color:var(--open)}
-.tsub li.st-stop>.tsk>summary,.tsub li.st-stop>.tsk.flat{color:var(--muted);text-decoration:line-through}
-.tsk .ttext .tsub .ttext{color:var(--muted)}
+.tsub li.st-done>.tsl .tst{color:var(--done)}
+.tsub li.st-work>.tsl .tst{color:var(--open)}
+.tsub li.st-stop>.tsl .tst{color:var(--muted);text-decoration:line-through}
+.tsub li.st-done{border-left-color:var(--done)} .tsub li.st-work{border-left-color:var(--open)}
 .tclosed>summary:hover{text-decoration:underline}
 .trow{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
 .tdrag li{cursor:grab;border-radius:6px;padding:2px 4px;margin-left:-4px}
@@ -2800,11 +2804,11 @@ a{color:inherit}
   function hhmm(){var d=new Date();return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);}
   function paras(s){return String(s||"").split(/\n+/).filter(function(x){return x.trim();}).map(function(x){return '<p>'+rich(x)+'</p>';}).join("");}
   var ST={plan:"план",work:"в работе",done:"готово",stop:"снято"};
+  function more(text,cls){var ps=paras(text);return ps?'<details class="tmore'+(cls?" "+cls:"")+'"><summary>подробнее</summary><div class="ttext">'+ps+'</div></details>':'';}
   function subs(t,num){if(!Array.isArray(t.subtasks)||!t.subtasks.length)return "";
     return '<ol class="tsub">'+t.subtasks.map(function(s,i){var n=(num?num+".":"")+(i+1),meta=[s.kind,ST[s.status]||s.status].filter(Boolean).join(" · ");
-      var head='<span class="tsn">'+n+'</span> '+esc(s.title)+(meta?' <span class="tsm">'+esc(meta)+'</span>':'');
-      return '<li class="st-'+esc(s.status||"plan")+'">'+(s.text?'<details class="tsk sub"><summary>'+head+'</summary><div class="ttext">'+paras(s.text)+'</div></details>':'<div class="tsk sub flat">'+head+'</div>')+'</li>';}).join("")+'</ol>';}
-  function body(t,num){return '<details class="tsk"><summary>'+esc(t.title)+(Array.isArray(t.subtasks)&&t.subtasks.length?' <span class="tsm">'+t.subtasks.length+' подзадач'+(t.subtasks.length===1?"а":t.subtasks.length<5?"и":"")+'</span>':'')+'</summary><div class="ttext">'+paras(t.text)+subs(t,num)+'</div></details>';}
+      return '<li class="st-'+esc(s.status||"plan")+'"><div class="tsl"><span class="tsn">'+n+'</span> <span class="tst">'+esc(s.title)+'</span>'+(meta?' <span class="tsm">'+esc(meta)+'</span>':'')+'</div>'+more(s.text,"sub")+'</li>';}).join("")+'</ol>';}
+  function body(t,num){return '<div class="tsk"><div class="tsk-h"><b>'+esc(t.title)+'</b></div>'+more(t.text)+subs(t,num)+'</div>';}
   function subtitle(){var s=document.querySelector('.node[data-n="tasks"] span');
     if(s&&D)s.textContent="обновлено "+D.updated+" · "+D.in_progress.length+" в работе · "+D.planned.length+" в плане";}
   if(!valid(D))D=null;
