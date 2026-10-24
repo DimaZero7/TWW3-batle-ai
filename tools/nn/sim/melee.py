@@ -51,7 +51,7 @@ from their ranks since the rout (contact.pursue_envelop_run).
 """
 import torch
 
-from tools.nn.sim import fatigue, geometry, knobs, lone_rout
+from tools.nn.sim import fatigue, geometry, knobs, lone_rout, stack
 from tools.nn.sim import orders as O
 
 
@@ -227,6 +227,30 @@ def contact_spacing(u, h, v, on):
     return (h - cut).clamp(min=0.3), (v - cut).clamp(min=0.3)
 
 
+def target_face_cap(F, used, side_j, pw, single_i, single_j, w=None):
+    """F [B, N, N] (i strikes j) with melee.target_face_cap: the formations coming at j through the same side of j
+    (side_j: 0 front, 1 / 2 flanks, 3 back - seen from j) share its length - each takes used [B, N, N] metres of it
+    (its men striking x its own spacing / fighting_files), together no more than the side is long or than the longest
+    single attacker takes (a lone attacker keeps what it brings: through a flank by its own front, melee.flank_face).
+    A lone striker or target is not capped. w [B, N, N] (melee.face_cap_wave): F is the waved men, each striker's
+    metres are used x its wave, and the side holds its length x the smallest wave among its strikers (the side's oldest
+    pair; 1 for every striker: the cap without the wave)."""
+    front_j, depth_j = pw["front"][:, None, :], pw["depth"][:, None, :]
+    for g in range(4):
+        in_g = (side_j == g) & ~single_i
+        u_g = torch.where(in_g, used, torch.zeros_like(used))
+        side_len = torch.maximum(front_j if g in (0, 3) else depth_j, u_g.amax(dim=1, keepdim=True))
+        if w is None:
+            tot = u_g.sum(dim=1, keepdim=True)
+            cap = side_len
+        else:
+            tot = torch.where(in_g, used * w, torch.zeros_like(used)).sum(dim=1, keepdim=True)
+            w_side = torch.where(in_g & (used > 0), w, torch.full_like(w, 1e6)).amin(dim=1, keepdim=True)
+            cap = side_len * w_side
+        F = torch.where(in_g & ~single_j & (tot > cap), F * cap / tot.clamp(min=1e-6), F)
+    return F
+
+
 def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
@@ -277,6 +301,18 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     face_j = pw["face_j"] if sat_j is None else torch.where(sat_j, pw["front"][:, None, :], pw["depth"][:, None, :])
     length = torch.minimum(face_i, face_j)
     length_meet = length          # the two sides' common length (the impact's front: contact.first_strike_rank)
+    # Own formations standing in each other (tools/nn/sim/stack.py; melee.stack_block / stack_side / stack_no_wrap,
+    # config/nn/sim.json melee.stack_why): a formation standing on the back of one of ours that fights the same target
+    # belongs to that one's side of the target, and brings only the part of its front the other leaves free.
+    behind = cover = side_k = None
+    if cal.get("stack_block") or cal.get("stack_side") or cal.get("stack_no_wrap"):
+        cover, _, behind, side_k = stack.stacked(u, pw, contact, stack.side_of_target(pw), float(params.dt))
+        behind = behind & ~single_i & ~single_j
+        if cal.get("stack_side"):
+            # (its side of the target is the one ahead's: the length it meets is that side's)
+            g_len = torch.where((side_k == 0) | (side_k == 3), pw["front"][:, None, :], pw["depth"][:, None, :])
+            length = torch.where(behind, torch.minimum(face_i, g_len), length)
+            length_meet = length
     flank_j = torch.zeros_like(through_front)
     wrap = flank_j
     if cal.get("flank_face", "min") == "striker":
@@ -285,6 +321,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         # 1.53x what a frontal one does; melee.flank_face, config/nn/sim.json).
         s_j, c_j = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
         flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :] if sat_j is None else ~sat_j
+        if behind is not None and cal.get("stack_side"):
+            flank_j = torch.where(behind, (side_k == 1) | (side_k == 2), flank_j)
         wrap = flank_j
         if cal.get("flank_face_busy"):
             # A target held through its front or back by another unit (melee.flank_face_busy; config/nn/sim.json
@@ -298,6 +336,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             if "contact_s" in u:
                 held = held & (u["contact_s"][:, :, None] + float(params.dt) < u["contact_s"][:, None, :])
             wrap = flank_j & ~held
+        if behind is not None and cal.get("stack_no_wrap"):
+            # (melee.stack_no_wrap) a formation on the back of one of ours does not wrap round the target's flank: its
+            # way there is our own men
+            wrap = wrap & ~behind
         length = torch.where(wrap, face_i, length)
     if edge is not None:
         # The contact's frontage (melee.frontage_edge_m; absent: off): a formation's men strike the enemies within their
@@ -333,6 +375,11 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     F = F * torch.where(single_i, torch.ones_like(F), share_i.pow(cal.get("men_exp_striker", 0.0)))
     F = F * torch.where(single_j, torch.ones_like(F), share_j.pow(cal.get("men_exp_target", 0.0)))
     F = torch.where(contact, F, torch.zeros_like(F))
+    if cover is not None and cal.get("stack_block"):
+        # (melee.stack_block) own bodies ahead: the men of i's side behind them do not reach the enemy - the share of the
+        # side of i that meets j (front, a flank, back) the ones ahead cover; formations only
+        side_ij = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
+        F = torch.where(~single_i & ~single_j, F * (1 - cover.gather(2, side_ij)), F)
     # Across several contacts a unit brings to each side of its formation (front, left, right, back)
     # no more men than that side holds, and no more than it has in all; a single man is split
     # between his opponents. (Men on a flank turn to fight: measured, a unit already fighting hits a
@@ -343,6 +390,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         hold = cal["fighting_files"] * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
         tot = torch.where(in_g, F, torch.zeros_like(F)).sum(dim=2, keepdim=True)
         F = torch.where(in_g & ~single_i & (tot > hold), F * hold / tot.clamp(min=1e-6), F)
+    face_cap = None
     if cal.get("target_face_cap"):
         # The target's side is only so long (melee.target_face_cap): the units coming at j through the same side of j
         # (front, left, right, back - seen from j) share its length - each brings fighting_files of the files it
@@ -351,19 +399,13 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         # Measured (build/routgap/overlap_melee.py, all fair recordings): an enemy formation struck by two of ours
         # standing in each other (centres within 8 m) loses 26.5 HP/s, by one 26.9, by two apart 32.5; three 29.0 /
         # 39.4.
-        s_j, c_j = torch.sin(pw["rel_j"]), torch.cos(pw["rel_j"])
-        front_j, depth_j = pw["front"][:, None, :], pw["depth"][:, None, :]
-        thru_j = s_j.abs() * depth_j <= c_j.abs() * front_j
-        side_j = torch.where(thru_j, torch.where(c_j >= 0, 0, 3), torch.where(s_j >= 0, 1, 2))
+        # (melee.stack_side: a formation on the back of one of ours counts on that one's side of the target)
+        side_j = stack.side_of_target(pw)
+        if behind is not None and cal.get("stack_side"):
+            side_j = torch.where(behind, side_k, side_j)
         used = F * along / cal["fighting_files"]                 # metres of j's side each striker's men take
-        for g in range(4):
-            in_g = side_j == g
-            u_g = torch.where(in_g & ~single_i, used, torch.zeros_like(used))
-            # (a lone attacker keeps what it brings - through a flank by its own front, melee.flank_face: the cap is
-            # the side's length or the longest single attacker's, whichever is more)
-            side_len = torch.maximum(front_j if g in (0, 3) else depth_j, u_g.amax(dim=1, keepdim=True))
-            tot = u_g.sum(dim=1, keepdim=True)
-            F = torch.where(in_g & ~single_j & ~single_i & (tot > side_len), F * side_len / tot.clamp(min=1e-6), F)
+        face_cap = (side_j, used, F)                             # (the cap again after the wave: melee.face_cap_wave)
+        F = target_face_cap(F, used, side_j, pw, single_i, single_j)
     # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
     F0 = F if (first and cc.get("first_strike_steady")) else None
     F_rank = None
@@ -405,7 +447,18 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             w = torch.where(shot_at, w.clamp(min=float(floor)), w)
             if F0 is not None:          # (the floor is the steady level)
                 F0 = torch.where(single_i | single_j | ~shot_at, F0, F0 * float(floor))
-        F = torch.where(single_i | single_j, F, F * w)
+        if face_cap is not None and cal.get("face_cap_wave"):
+            # The wave within the target's side (melee.face_cap_wave; config/nn/sim.json melee.stack_why): the wave is
+            # more men of the two fronts within reach while they are fresh, not more room on the target's side - the
+            # side's cap is laid on the waved men, the side holding its length x the wave of the side's oldest pair
+            # (a fresh unit coming onto a side our other unit has fought for long brings no wave beyond the side; a
+            # lone attacker and units meeting the target together keep theirs: with one wave on the side it is the
+            # cap as before, x that wave)
+            side_j, used, F_free = face_cap
+            w_f = torch.where(single_i | single_j, torch.ones_like(w), w)
+            F = target_face_cap(F_free * w_f, used, side_j, pw, single_i, single_j, w=w_f)
+        else:
+            F = torch.where(single_i | single_j, F, F * w)
     if cc.get("pursue_envelop"):
         # A caught router is engulfed (contact.pursue_envelop; config/nn/sim.json contact.pursue_envelop_why): a chaser
         # with its attack order on a routing formation it touches, whose run is at least the router's free flight

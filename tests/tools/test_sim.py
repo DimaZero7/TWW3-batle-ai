@@ -10,7 +10,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tools.nn.sim import abilities, battle, effects, fatigue, geometry, melee, missile, morale  # noqa: E402
-from tools.nn.sim import movement, replay, scenario  # noqa: E402
+from tools.nn.sim import movement, replay, scenario, stack  # noqa: E402
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim import state as S  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
@@ -2612,9 +2612,120 @@ class TestTargetFace:
             return float(r[0, 0, H] + r[0, 1, H])
         one = rate(P, "none")
         assert P.sim["melee"]["target_face_cap"] is True
-        assert one < rate(P, "pile") < 1.3 * one          # (the slaves' front is a little longer than the spearmen's)
-        assert rate(P.with_cal("melee", target_face_cap=False), "pile") == pytest.approx(2 * one, rel=0.02)
+        flat = _no_stack(P)                               # (the second unit's bodies ahead: TestStack)
+        assert one < rate(flat, "pile") < 1.3 * one       # (the slaves' front is a little longer than the spearmen's)
+        assert rate(flat.with_cal("melee", target_face_cap=False), "pile") == pytest.approx(2 * one, rel=0.02)
         assert rate(P, "flank") > 1.3 * one
+
+
+def _no_stack(params):
+    """params without the stacked formations' rules (melee.stack_block / stack_side / stack_no_wrap, face_cap_wave)."""
+    return params.with_cal("melee", stack_block=0, stack_side=0, stack_no_wrap=0, face_cap_wave=0)
+
+
+def _stack_state(params, lateral=0.0, back=0.0, bearing=90.0, clock=(0.0, 0.0), n_own=2, z0=0.0):
+    """Spearmen (slots 0, 1 [, 2]) at the front of skavenslaves (slot H): unit 0 square on it in contact (z0 m along
+    its front), the others moved `lateral` m more along the slaves' front (z) and `back` m away (x), facing `bearing`;
+    contact_s = clock."""
+    own = [(SPEAR, -50, 0, 90)] * n_own + [(SPEAR, -300, 600, 90)]
+    st = scenario.build([army(own, [(SLAVE, 50, 0, 270)])], params)
+    H = st.N // 2
+    front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+    st.u["x"][0, :n_own] = -(depth[0, 0] / 2 + TOUCH / 2)
+    st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+    st.u["z"][0, 0] = z0
+    for k in range(1, n_own):
+        st.u["z"][0, k] = z0 + lateral * k
+        st.u["x"][0, k] = st.u["x"][0, k] - back
+        st.u["b"][0, k] = bearing
+    for k, c in enumerate(clock):
+        st.u["contact_s"][0, k] = c
+        st.u["melee_s"][0, k] = c
+    st.u["contact_s"][0, H] = st.u["melee_s"][0, H] = max(clock)
+    return st, H, front, depth
+
+
+def _stack_rate(params, st, H, who=(0, 1), men=False):
+    """HP/s the units `who` strike the slaves (slot H) with (men: the men striking)."""
+    pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"], rect=True)
+    contact = pw["enemy"] & (pw["gap"] <= 1.0)
+    keep = torch.zeros_like(contact)
+    keep[:, list(who)] = True
+    keep[:, H] = True
+    contact = contact & keep & keep.transpose(1, 2)
+    r = melee.strikes(st.u, pw, contact, params, torch.zeros_like(st.u["men"]))[3 if men else 0]
+    return float(sum(r[0, k, H] for k in who))
+
+
+class TestStack:
+    """melee.stack_block / stack_side / stack_no_wrap (tools/nn/sim/stack.py) and melee.face_cap_wave: own bodies are not
+    passed - a formation standing in one of ours that fights the same target brings only its uncovered edges, on that
+    one's side of the target, without wrapping round its flank; the wave stays within the target's side."""
+
+    def test_cover_is_the_share_of_the_front_the_unit_ahead_stands_on(self):
+        st, H, front, depth = _stack_state(P, lateral=6.0, clock=(10.0, 0.0))
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"], rect=True)
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        cover, ahead, behind, side_k = stack.stacked(st.u, pw, contact, stack.side_of_target(pw), P.dt)
+        f = float(front[0, 0])
+        assert float(cover[0, 1, 0]) == pytest.approx((f - 6.0) / f, abs=0.01)
+        assert float(cover[0, 1, 3]) == pytest.approx((f - 6.0) / f, abs=0.01)  # (its back: the same line)
+        # its flank towards unit 0 (facing +x, its front line runs to -z: unit 0 6 m that way, side 1) is all covered,
+        # the other is free
+        assert float(cover[0, 1, 1]) == pytest.approx(1.0, abs=0.01) and float(cover[0, 1, 2]) == 0.0
+        assert int(ahead[0, 1]) == 0 and bool(behind[0, 1, H]) and int(side_k[0, 1, H]) == 0
+        # the one in melee longer is ahead: nothing covers it
+        assert float(cover[0, 0].max()) == 0.0 and int(ahead[0, 0]) == -1 and not bool(behind[0, 0, H])
+
+    def test_a_unit_beside_the_targets_flank_is_not_behind_the_front_unit(self):
+        st, H, front, depth = _stack_state(P, clock=(10.0, 0.0))
+        # unit 1 beside the slaves' left flank facing it, its corner in unit 0's box
+        st.u["x"][0, 1] = st.u["x"][0, H] - depth[0, H] / 2 + 1.0
+        st.u["z"][0, 1] = front[0, H] / 2 + depth[0, 1] / 2 + TOUCH / 2
+        st.u["b"][0, 1] = 180.0
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"], rect=True)
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        assert bool(contact[0, 1, H])
+        _, _, behind, _ = stack.stacked(st.u, pw, contact, stack.side_of_target(pw), P.dt)
+        assert not bool(behind[0, 1, H])
+
+    @pytest.mark.parametrize("lateral", [0.0, 6.0, 12.0])
+    def test_a_stacked_second_unit_adds_only_its_free_edges(self, lateral):
+        st, H, front, _ = _stack_state(P, lateral=lateral, clock=(10.0, 0.0))
+        one = _stack_rate(P, st, H, who=(0,), men=True)
+        two = _stack_rate(P, st, H, men=True)
+        # the slaves' front is a little longer than the spearmen's: the edges add at most that (men striking; the HP
+        # also by the direction - the edges' unit stands off the slaves' front by its centre)
+        assert one <= two <= one * float(front[0, H] / front[0, 0]) + 1e-3
+        if lateral == 0.0:
+            assert two == pytest.approx(one, rel=1e-4)
+        flat = _no_stack(P)
+        assert _stack_rate(flat, st, H) > 1.3 * _stack_rate(flat, st, H, who=(0,))
+
+    def test_a_unit_spilling_onto_the_flank_from_the_back_of_ours_does_not_wrap_round(self):
+        # unit 0 6 m off the slaves' centre, the second 14 m beyond it, 2 m nearer, turned 30 deg in: its centre line
+        # meets the slaves' flank, more than half its front in unit 0's box
+        st, H, front, _ = _stack_state(P, lateral=14.0, back=-2.0, bearing=120.0, clock=(10.0, 0.0), z0=6.0)
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"], rect=True)
+        assert int(stack.side_of_target(pw)[0, 1, H]) in (1, 2)          # by its centre: the flank
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        assert bool(contact[0, 1, H]) and float(pw["gap"][0, 0, 1]) < 0
+        one = _stack_rate(P, st, H, who=(0,), men=True)
+        assert _stack_rate(P, st, H, men=True) <= one * float(front[0, H] / front[0, 0]) + 1e-3
+        assert _stack_rate(_no_stack(P), st, H, men=True) > 1.3 * one
+
+    def test_a_fresh_unit_on_a_side_fought_long_brings_no_wave_beyond_the_side(self):
+        # both exactly on the slaves' front (no stack rules: the wave rule alone), unit 0 there 60 s, unit 1 fresh
+        st, H, _, _ = _stack_state(P, clock=(60.0, 0.0))
+        p_on = P.with_cal("melee", stack_block=0, stack_side=0, stack_no_wrap=0)
+        p_off = p_on.with_cal("melee", face_cap_wave=0)
+        one = _stack_rate(p_on, st, H, who=(0,))
+        assert _stack_rate(p_on, st, H) <= one * 1.25                   # the side's length (slaves a bit wider)
+        assert _stack_rate(p_off, st, H) > 1.4 * one                    # the fresh unit's wave on its half of the side
+        # a lone fresh attacker keeps its wave; two meeting the target together share it as before
+        st2, H2, _, _ = _stack_state(P, clock=(0.0, 0.0))
+        assert _stack_rate(p_on, st2, H2, who=(1,)) == pytest.approx(_stack_rate(p_off, st2, H2, who=(1,)), rel=1e-5)
+        assert _stack_rate(p_on, st2, H2) == pytest.approx(_stack_rate(p_off, st2, H2), rel=1e-5)
 
 
 class TestFriendPush:

@@ -505,6 +505,13 @@ def test_a_man_with_a_friend_in_the_way_is_blocked():
     live = torch.ones((1, M), dtype=torch.bool)
     got = FM.blocked_line(F, u, near, tgt, live)[0].tolist()
     assert got == [True, False, False, False, False, False, True]   # 0 behind 1; 3's friend 0.9 m aside; 6 behind 0, 1
+    # clear_line "other_units": only a man of another unit of his side blocks - man 6 of a third unit (side 1) behind
+    # men 0 and 1 of unit 0 is blocked, man 0 behind his own unit's man 1 is not
+    uid3 = torch.tensor([[0, 0, 1, 0, 0, 1, 2]])
+    near3 = SimpleNamespace(px=px, pz=pz, cand=cand, c_uid=uid3[:, cand[0]])
+    u3 = {"side": torch.tensor([[1, 2, 1]]), "radius": torch.tensor([[0.65, 0.65, 0.65]])}
+    got = FM.blocked_line(SimpleNamespace(uid=uid3, B=1), u3, near3, tgt, live, other_units=True)[0].tolist()
+    assert got == [False, False, False, False, False, False, True]
 
 
 def test_a_man_holding_his_enemy_is_not_carried_by_his_unit():

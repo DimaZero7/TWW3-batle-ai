@@ -111,9 +111,11 @@ def standoff(lab, t):
     return float(s["steady_m"]) - (float(s["steady_m"]) - float(s["start_m"])) * torch.exp(-t / float(s["tau_s"]))
 
 
-def blocked_line(F, u, near, tgt, live):
+def blocked_line(F, u, near, tgt, live, other_units=False):
     """[B, M] a man whose line to the man he fights (tgt, -1 none) passes through a living man of his own side: that
-    man's body (his radius) crosses the segment between them, strictly between the two (lab.json melee.clear_line)."""
+    man's body (his radius) crosses the segment between them, strictly between the two (lab.json melee.clear_line).
+    other_units: only a man of another unit of his side blocks (clear_line "other_units": a formation standing in one
+    of ours does not strike past its men; his own unit's ranks keep the lab's measured reach)."""
     from tools.nn.fighters import cells
     px, pz = near.px, near.pz
     t_c = tgt.clamp(min=0)
@@ -131,6 +133,8 @@ def blocked_line(F, u, near, tgt, live):
     same = side_m.gather(1, cc.reshape(F.B, -1)).reshape(cand.shape) == side_m[:, :, None]
     ok = (cand >= 0) & same & live.gather(1, cc.reshape(F.B, -1)).reshape(cand.shape)
     r_c = rad_m.gather(1, cc.reshape(F.B, -1)).reshape(cand.shape)
+    if other_units:
+        ok = ok & (near.c_uid != F.uid[:, :, None])
     inway = ok & (along > 0) & (along < L[:, :, None]) & (perp < r_c)
     return inway.any(2) & (tgt >= 0)
 
@@ -262,7 +266,7 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
         # (lab.json melee.clear_line) a man strikes only when no man of his own side stands in the way to the man he
         # fights (a body within its radius of the line between them): a second rank in reach does not strike past its
         # front rank; he keeps his target and waits (his clock stands, as out of reach)
-        has = has & ~blocked_line(F, u, near, tgt, live)
+        has = has & ~blocked_line(F, u, near, tgt, live, other_units=lab["melee"]["clear_line"] == "other_units")
     K_pair = lab["melee"].get("pairs")
     if K_pair:
         # (lab.json melee.pairs) an enemy man is fought by at most K men at a time; the rest re-pair or wait
