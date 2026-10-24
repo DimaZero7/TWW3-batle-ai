@@ -680,7 +680,7 @@ def _train(args, every=None, teacher=None, normal=None):
     observe = observation(args, actor, start, cfg, int(carried.get("observe_updates", 0)), device)
     if args.entropy_decay and args.entropy_end is None:
         raise SystemExit("--entropy-decay needs --entropy-end (the weight it goes to)")
-    shares = None
+    opp_shares = None
     if args.opponents:
         # --opponents: every opponent by name at a hard share (league.named_layout): no mix, pool draws or pin
         clash = [f for f, v in (("--mix", args.mix), ("--past-pin", args.past_pin), ("--past-pin-cells",
@@ -690,10 +690,10 @@ def _train(args, every=None, teacher=None, normal=None):
         if args.drills:
             raise SystemExit("--opponents: no drills (--drills 0)")
         try:
-            shares = league.parse_opponents(args.opponents)
+            opp_shares = league.parse_opponents(args.opponents)
         except ValueError as e:
             raise SystemExit(str(e))
-        missing = [n for n in shares if league.is_checkpoint(n) and not Path(n).is_file()]
+        missing = [n for n in opp_shares if league.is_checkpoint(n) and not Path(n).is_file()]
         if missing:
             raise SystemExit(f"--opponents: no such checkpoint (nor a script: {', '.join(league.OPPONENTS)}): {missing}")
     if args.past_pin_cells:
@@ -729,8 +729,8 @@ def _train(args, every=None, teacher=None, normal=None):
     print(pool.text(), flush=True)
     # The past slots (rollout.Battles): each holds a version; a battle keeps its slot's version from its start
     slots = max(1, args.past_slots)
-    if shares is not None:                       # --opponents: a slot for each checkpoint, loaded once
-        slots = max(1, sum(league.is_checkpoint(n) for n in shares))
+    if opp_shares is not None:                   # --opponents: a slot for each checkpoint, loaded once
+        slots = max(1, sum(league.is_checkpoint(n) for n in opp_shares))
     slot_path, slot_p = [None] * slots, [1.0] * slots
     pasts = {}                                   # (slot, ModelConfig) -> its actor
     deferred = 0                                 # draws that found no free slot (the active one goes on)
@@ -742,9 +742,9 @@ def _train(args, every=None, teacher=None, normal=None):
     # the scripts met only as the defender in training (the learner attacks); the evaluation keeps league.ATTACK_ONLY
     defend_only = league.names_list(args.defend_only)
     named = None
-    if shares is not None:
-        named = league.named_layout(args.battles, len(scenes.SCENES), shares, scenes.attackers(), defend_only)
-        lay, mix = named.layout, {named.keys[n]: v for n, v in shares.items()}
+    if opp_shares is not None:
+        named = league.named_layout(args.battles, len(scenes.SCENES), opp_shares, scenes.attackers(), defend_only)
+        lay, mix = named.layout, {named.keys[n]: v for n, v in opp_shares.items()}
     else:
         lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers(),
                             attack_only=defend_only)
@@ -950,7 +950,7 @@ def _train(args, every=None, teacher=None, normal=None):
         env.fix_slots(named.row_slot)
         print("opponents (--opponents, hard shares: battles of the batch): " + ", ".join(
             f"{named.keys[n]} {named.rows[n]}" + (f" (slot {named.checkpoints.index(n)})" if n in named.checkpoints
-                                                  else "") for n in shares), flush=True)
+                                                  else "") for n in opp_shares), flush=True)
     else:
         pick_past()
     named_keys = [named.keys[p] for p in named.checkpoints] if named is not None else []
@@ -1234,7 +1234,7 @@ def _train(args, every=None, teacher=None, normal=None):
             n_stats, n_cells = env.take_named(named_keys)
             stats = {k: v for k, v in stats.items() if k.split("/")[0] not in ("past", "untrained")}
             stats.update(n_stats)
-            big = {named.keys[n] for n in named.checkpoints if shares[n] >= MATCHUP_SHARE}
+            big = {named.keys[n] for n in named.checkpoints if opp_shares[n] >= MATCHUP_SHARE}
             named_m = {n: c for n, c in n_cells.items() if n in big}
             for n, c in named_m.items():
                 for k, (g, w, t) in c.items():
