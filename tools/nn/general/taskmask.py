@@ -29,8 +29,11 @@ on the chained heads' parts (tools/nn/model/chain.py: kind -> target -> sector -
     any       melee_stay (GeneralConfig.melee_stay; the general's rule net.melee_ok and the teacher's): a unit in melee
               (the token's flag) and not wavering or worse, of a group that holds (fighting(): under waver_share of
               its units wavering or worse) - or of any group, its mission not "withdraw" - gets no move, no withdraw
-              and no keep of a move / withdraw in force; its attack only at the seen enemies in melee within STAY_M
-              of it (those it fights; none: no attack - hold or keep). The human's battle against g34: a hold led a
+              and no keep of a move / withdraw in force, nor of an attack in force on an enemy it does not fight
+              ("task_otgt": the order's target slot, Runtime.task; not among the enemies below, or not known: closed
+              - in the simulator, battle.py contact.attack_leave, a unit in melee attacking an enemy it does not
+              touch walks off and strikes nobody up to the 24 s breakoff); its attack only at the seen enemies in
+              melee within STAY_M of it (those it fights; none: no attack - hold or keep). The human's battle against g34: a hold led a
               fighting unit back to its point (22 orders), a withdraw of a group with one wavering unit of 8-14 led
               its steady ones out of melee (63 of 72 withdraw orders)
     shoot     shoot_line (GeneralConfig.shoot_line_m > 0): while our infantry groups hold (a group under "hold", under
@@ -76,7 +79,7 @@ KIND = {k.name: k.index for k in gconfig.MISSION_KINDS}
 ATTACK_M = 150.0         # attack / flank: the sectors may come up to this far from the target group's centre at least
 HOLD_FIGHT = 3.0         # hold: the attack only at enemies within this x the reach of the point (the measure's 0)
 AWAY_M = gmission.AWAY_M  # withdraw: towards the point only this far from the nearest enemy
-KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main", "task_lock", "task_line")
+KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main", "task_lock", "task_line", "task_otgt")
 LINE_NONE = 1e4          # "task_line" where no line holds the unit (m: beyond any map)
 # the volley lock (shoot_volley, volley_lock()): a volley seen at this decision (volley_ready x reload under this, s)
 # frees the decision; the simulator's men load fully only after ~1.1-1.3x the passport's reload (observation.py VOLLEY):
@@ -142,11 +145,13 @@ def parts_of(gcfg):
     return p
 
 
-def fields(kind_u, point, reach, target_u, main, on, lock=None, line=None):
+def fields(kind_u, point, reach, target_u, main, on, lock=None, line=None, otgt=None):
     """The task's numbers of the observation (module doc): kind_u [R, N] the unit's group's mission kind, point [R, N, 2]
     its point in the side's frame (m), reach [R, N] (0: no point), target_u [R, N] the target index, main [R, N] the
     plan's group numbers of every slot, on [R, N] the units with a task; lock [R, N] the volley lock (volley_lock();
-    None: nobody); line [R, N] the forward limit of shoot_line (m in the side's frame; None or LINE_NONE: none)."""
+    None: nobody); line [R, N] the forward limit of shoot_line (m in the side's frame; None or LINE_NONE: none); otgt
+    [R, N] the slot of the attack target of each unit's order in force (the state's order_target; -1 none; None: not
+    known - melee_stay then closes the keep of an attack in force)."""
     small = torch.int8
     lock = torch.zeros_like(on) if lock is None else lock & on
     line = torch.full_like(reach, LINE_NONE) if line is None else torch.where(on, line, torch.full_like(line, LINE_NONE))
@@ -154,7 +159,9 @@ def fields(kind_u, point, reach, target_u, main, on, lock=None, line=None):
             "task_pt": torch.where(on[..., None], torch.nan_to_num(point), torch.zeros_like(point)).float(),
             "task_reach": torch.where(on, reach, torch.zeros_like(reach)).float(),
             "task_tg": torch.where(on, target_u, torch.full_like(target_u, -1)).to(small),
-            "task_main": main.to(small), "task_lock": lock.bool(), "task_line": line.float()}
+            "task_main": main.to(small), "task_lock": lock.bool(), "task_line": line.float(),
+            **({} if otgt is None else {"task_otgt": torch.where(on, otgt.long(), torch.full_like(otgt.long(), -1))
+                                        .to(torch.int16)})}
 
 
 def _missile_column(name, scale):
@@ -321,7 +328,16 @@ def masks(cfg, obs, sec_ok, parts=None, waver_share=0.5):
     dcE = _d(cx, cz, ex[..., None], ez[..., None])
     sec = torch.ones_like(dcP, dtype=torch.bool)
     melee_j = tok[..., ob.INDEX["melee"]].float() > 0.5
-    tgt = torch.where(st[..., None], foe[:, None, :] & melee_j[:, None, :] & (D <= STAY_M), tgt)
+    fights = foe[:, None, :] & melee_j[:, None, :] & (D <= STAY_M)                # [B, N, N] the enemies i fights
+    tgt = torch.where(st[..., None], fights, tgt)
+    # ... and no keep of an attack in force on an enemy it does not fight (its target slot task_otgt; not known: closed)
+    ot = obs.get("task_otgt")
+    if ot is not None:
+        ot = ot.long()
+        keep_att = fights.gather(2, ot.clamp(min=0)[..., None])[..., 0] & (ot >= 0)
+    else:
+        keep_att = torch.zeros_like(st)
+    kind = kind & ~((ar == KEEP) & (st & att_now & ~keep_att & free)[..., None])
     # shoot_line: a shooter's attack only at enemies in its range now or in range from the line (their forward within
     # the line + its range: walking to its range it stops behind the line), of a unit without missiles at enemies behind
     rng = tok[..., RANGE_COL].float() * RANGE_SCALE

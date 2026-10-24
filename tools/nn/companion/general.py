@@ -228,7 +228,9 @@ class GameGeneral:
         self.rt.replan(self.env, two)
         recs += self._records(n0)
         fr = frame_to(obs.frame, self.device)
-        task = self.rt.task(self.env.rows_learn, obs_t, fr)
+        ot = state.get("order_target") if hasattr(state, "get") else None
+        ot = None if ot is None else torch.as_tensor(np.asarray(ot, np.int64), device=self.device).reshape(1, -1)
+        task = self.rt.task(self.env.rows_learn, obs_t, fr, otgt=ot)
         return task, recs
 
 

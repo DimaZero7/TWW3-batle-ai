@@ -1046,12 +1046,13 @@ class Runtime:
         return out
 
     # --- the executor's input ---------------------------------------------------------------------------------------
-    def task(self, rows, obs_r, fr, t=None):
+    def task(self, rows, obs_r, fr, t=None, otgt=None):
         """{"task" [R, N, task_dim], "task_on" [R, N], "task_geo" [R, N, 4], "task_plan" [R]} of rows [R] on their
         observation obs_r (the rows' dict) and frame fr (module doc); with the task masks also their numbers
         (taskmask.fields) - the volley lock's from the battle time t [R] (s; None: the time replan() noted, none
         before: no lock): its clock per unit (vl_t0) is kept here, and a second call at the same time gives the first
-        one's lock (the past slots' rows)."""
+        one's lock (the past slots' rows); otgt [R, N] the units' orders' attack targets in force (the state's
+        order_target, taskmask.fields; None: not known)."""
         if t is None and getattr(self, "t_now", None) is not None and self.t_now.shape[0] == self.B:
             t = self.t_now[rows % self.B]
         r, G, cfg = self.r, self.G, self.gcfg
@@ -1107,7 +1108,7 @@ class Runtime:
             kind_u = r["kind"][rows].gather(1, mi)
             lock = None if t is None else self._volley(rows, obs_r, on & (kind_u == gtaskmask.KIND["shoot"]), t)
             line = self.shoot_line(rows, obs_r, main, cent, on, kind_u)
-            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock, line))
+            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock, line, otgt))
             self._count_masks(rows, dict(obs_r, **out))
         return out
 

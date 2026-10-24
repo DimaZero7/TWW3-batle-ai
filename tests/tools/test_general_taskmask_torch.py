@@ -605,3 +605,30 @@ def test_the_rollouts_shooters_under_a_line_never_choose_a_point_ahead_of_it():
         logits, _ = actor.sequence(obs, batch["h0"], batch["reset"], batch["action"])
         lp, _ = hd.log_prob(logits, batch["action"], obs["ctrl"])
     torch.testing.assert_close(lp, batch["lp"], atol=1e-4, rtol=0)
+
+
+def test_a_steady_unit_in_melee_does_not_keep_an_attack_on_an_enemy_it_does_not_fight():
+    """melee_stay and the keep: an attack in force on a far enemy (the simulator: a unit in melee told to attack an
+    enemy it does not touch walks off, battle.py contact.attack_leave) is not kept; on the enemy it fights it is; the
+    target not known (no task_otgt): not kept either - it attacks the one it fights anew."""
+    sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
+    parts = taskmask.parts_of(gconfig.GeneralConfig())
+    for kind in ("hold", "attack"):
+        o = melee_obs(kind)
+        o["tokens"][0, 0, ob.INDEX["order_attack"]] = 1.0
+        for target, keep in ((4, False), (3, True), (-1, False)):
+            o["task_otgt"] = torch.full((1, N), -1, dtype=torch.int16)
+            o["task_otgt"][0, 0] = target
+            m = taskmask.masks(TINY, o, sec_ok, parts)
+            assert bool(m["kind"][0, 0, KEEP]) == keep, (kind, target)
+            assert bool(m["kind"][0, 0, ATTACK]) and bool(m["target"][0, 0, 3]) and not bool(m["target"][0, 0, 4])
+        del o["task_otgt"]
+        assert not bool(taskmask.masks(TINY, o, sec_ok, parts)["kind"][0, 0, KEEP])
+    # fields: the target slots of the units with a task, -1 elsewhere; without them no field
+    f = taskmask.fields(torch.zeros(1, 3, dtype=torch.long), torch.zeros(1, 3, 2), torch.zeros(1, 3),
+                        torch.zeros(1, 3, dtype=torch.long), torch.zeros(1, 3, dtype=torch.long),
+                        torch.tensor([[True, False, True]]), otgt=torch.tensor([[2, 1, -1]]))
+    assert f["task_otgt"].tolist() == [[2, -1, -1]]
+    assert "task_otgt" not in taskmask.fields(torch.zeros(1, 3, dtype=torch.long), torch.zeros(1, 3, 2),
+                                              torch.zeros(1, 3), torch.zeros(1, 3, dtype=torch.long),
+                                              torch.zeros(1, 3, dtype=torch.long), torch.ones(1, 3, dtype=torch.bool))

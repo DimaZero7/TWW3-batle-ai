@@ -830,7 +830,8 @@ class Battles:
         rt = self.general_rt
         if rt is None or getattr(actor, "gcfg", None) is None:
             return obs_r
-        return dict(obs_r, **rt.task(rows, obs_r, fr))
+        # (the orders' targets in force: melee_stay keeps an attack only on an enemy the unit fights, taskmask.masks)
+        return dict(obs_r, **rt.task(rows, obs_r, fr, otgt=self.st.u["order_target"][rows % self.B]))
 
     def _redeployed(self, rows):
         """Battles rows [B] (bool) deployed again after their start (the general's first plans, Runtime.deploy_pending):
