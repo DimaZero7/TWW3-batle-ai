@@ -107,11 +107,13 @@ class GeneralConfig:
     waver_share: float = 0.5   # ... a group has wavered when at least this share of its units (alive) waver, rout or
     #                            are shattered (taskmask.fighting); one wavering unit of 8-14 freed the whole group
     #                            (the human's battle against g34: 63 of 72 withdraw orders went to steady units)
-    shoot_line_m: float = 20.0  # the executor's shooters under "shoot" go no farther than this ahead of the front of our
+    shoot_line_m: float = 0.0  # (off by default) the executor's shooters under "shoot" go no farther than this ahead of the front of our
     #                            infantry groups under "hold" (the most forward centre; taskmask part shoot_line, on
     #                            with this field > 0: the sectors, cells, targets and the keep of a move or attack in
     #                            force); the human's battle against g34: the infantry waited 66 s while the shooting
-    #                            groups went 107-140 m ahead alone and took the blow first; 0: off
+    #                            groups went 107-140 m ahead alone and took the blow first; 0: off - the default:
+    #                            g34 (not trained under it) fired half as much (64 battles vs ai_like: 11 475 -> 5 464
+    #                            fire-seconds, the gold trade -0.02 against +0.02 without it); 20 after training under it
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet

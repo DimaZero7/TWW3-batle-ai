@@ -1824,9 +1824,10 @@ def parser():
                     help="general: 1 'withdraw' not for a group fighting in melee that has not wavered (some unit in "
                          "melee, under general-waver-share of it wavering or worse); the teacher and the executor's "
                          "mask (a steady unit in melee: no move / withdraw) keep the rule too; 0: withdraw anywhere")
-    ap.add_argument("--general-shoot-line-m", type=float, default=20.0,
+    ap.add_argument("--general-shoot-line-m", type=float, default=0.0,
                     help="general: shooters under 'shoot' go no farther than this ahead of our infantry groups under "
-                         "'hold' (the executor's mask part shoot_line); 0: off")
+                         "'hold' (the executor's mask part shoot_line, e.g. 20); 0 (default): off - a network not "
+                         "trained under it fired half as much")
     ap.add_argument("--general-waver-share", type=float, default=0.5,
                     help="general: a group has wavered (withdraw allowed in melee) when at least this share of its "
                          "units waver, rout or are shattered")

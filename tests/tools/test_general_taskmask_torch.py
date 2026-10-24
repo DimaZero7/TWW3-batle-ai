@@ -216,7 +216,8 @@ def test_the_general_gives_shoot_only_to_a_group_with_a_shooter():
 def test_the_parts_switch_each_mask_alone():
     assert taskmask.parse_parts("all") == frozenset(taskmask.PARTS)
     default = taskmask.parts_of(gconfig.GeneralConfig())                # the harmless ones (docs: the ablation)
-    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) | {"melee_stay", "shoot_line"}
+    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) | {"melee_stay"}         # (shoot_line: off by default)
+    assert gconfig.GeneralConfig().shoot_line_m == 0.0
     assert "attack_target" not in default
     assert not default & {"withdraw_attack", "shoot_melee", "shoot_target"} and "withdraw_move" in default
     assert taskmask.parse_parts("") == frozenset() == taskmask.parse_parts("none")
@@ -241,8 +242,8 @@ def test_the_executor_heads_follow_the_rules_parts():
     import dataclasses
     actor = executor.wrap(policy.Actor(TINY).eval(), gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2,
                                                                            task_mask_parts="hold_move,screen_move"))
-    # (melee_stay, shoot_line: their own fields)
-    assert actor.heads.parts == frozenset({"hold_move", "screen_move", "melee_stay", "shoot_line"})
+    # (melee_stay: its own field; shoot_line off by default)
+    assert actor.heads.parts == frozenset({"hold_move", "screen_move", "melee_stay"})
     actor.set_rules(dataclasses.replace(actor.gcfg, task_mask=False))
     assert actor.heads.parts == frozenset()
 
@@ -503,8 +504,8 @@ def test_a_shooter_under_shoot_stays_behind_the_line_of_our_holding_infantry():
     range now, no keep of an attack in force while walking and not firing (it would walk to its target's range); a
     firing or standing shooter keeps; no line (LINE_NONE) or the part off - free as before."""
     sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
-    parts = taskmask.parts_of(gconfig.GeneralConfig())
-    assert "shoot_line" in parts and "shoot_line" not in taskmask.parts_of(gconfig.GeneralConfig(shoot_line_m=0.0))
+    parts = taskmask.parts_of(gconfig.GeneralConfig(shoot_line_m=20.0))
+    assert "shoot_line" in parts and "shoot_line" not in taskmask.parts_of(gconfig.GeneralConfig())   # (off by default)
     assert taskmask.RANGE_COL != taskmask.RELOAD_COL
     o = line_obs(attacking=True)
     m = taskmask.masks(TINY, o, sec_ok, parts)
@@ -561,7 +562,7 @@ def test_the_runtimes_line_is_the_front_of_our_holding_infantry_plus_the_lead():
     kinds[1, 0], kinds[1, 1] = K["hold"], K["shoot"]
     kind_u = torch.tensor([[K["hold"], K["hold"], K["shoot"], 0, 0, 0]])
     rt = SimpleNamespace(G=G, dev=torch.device("cpu"), r={"kind": kinds},
-                         gcfg=gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2))
+                         gcfg=gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, shoot_line_m=20.0))
     line = gruntime.Runtime.shoot_line(rt, torch.tensor([1]), o, main, cent, on, kind_u)
     assert float(line[0, 2]) == -280.0 and float(line[0, 0]) == taskmask.LINE_NONE
     kinds[1, 0] = K["attack"]                                                # the infantry attacks: no line
@@ -574,8 +575,10 @@ def test_the_runtimes_line_is_the_front_of_our_holding_infantry_plus_the_lead():
 def test_the_rollouts_shooters_under_a_line_never_choose_a_point_ahead_of_it():
     """In the simulator's battles (every group holds, those with a shooter shoot): the moves of our units under shoot
     with a line go to cells behind it; the update's log-probabilities are the rollout's (the line is stored)."""
+    import dataclasses
     from tools.nn.train import ppo, rollout
     env, actor, crit = real()
+    actor.set_rules(dataclasses.replace(actor.gcfg, shoot_line_m=20.0))        # (off by default)
     env.step(actor, crit)
     rt = env.general_rt
     G_ = rt.G
