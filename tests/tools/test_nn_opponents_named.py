@@ -102,9 +102,34 @@ def test_a_run_with_named_opponents_logs_them_by_name(tmp_path, monkeypatch):
     assert set(trained["opponents"]) == {"self", "x2_m40", "old", "nearest"}
     assert trained["opponents"]["x2_m40"]["all"]["games"] == sum(v for k, v in games.items() if k.startswith("x2_m40/"))
     assert set(trained["opponent_matchups"]) <= {"x2_m40", "old"} and trained["opponent_matchups"]
-    q = json.loads((out / "pool" / "q.json").read_text(encoding="utf-8"))
-    assert sum(e["games"] for e in q["entries"]) == 0                  # the pool draws nothing
+    assert not (out / "pool").exists()                                 # no pool at all
     with pytest.raises(SystemExit):                                    # not with --mix
         run.train(run.parser().parse_args(["--name", "n2", "--opponents", opp, "--mix", '{"self": 1.0}'] + base))
     with pytest.raises(SystemExit):                                    # a checkpoint that is not there
         run.train(run.parser().parse_args(["--name", "n3", "--opponents", '{"self": 0.5, "no/such.pt": 0.5}'] + base))
+
+
+def test_named_opponents_start_from_a_run_with_a_pool_and_ignore_the_pools_options(tmp_path, monkeypatch):
+    """A chain step (test5 puts --pool-extra into every run's line; the previous run's latest.pt has pool/q.json
+    beside it): with --opponents no pool is made or carried on, --pool-extra / --pool / --pool-no-untrained are
+    ignored - no SystemExit."""
+    from tools.nn.train import run
+    prev = tmp_path / "runs" / "test5_prev"
+    (prev / "pool").mkdir(parents=True)
+    latest = checkpoint.save(prev / "latest.pt", *nets())
+    (prev / "pool" / "q.json").write_text(json.dumps({"clock": 9, "eta": 0.01, "entries": [
+        {"path": str(latest), "q": 0.0, "added": 0, "games": 0, "wins": 0, "untrained": False}]}), encoding="utf-8")
+    a = checkpoint.save(tmp_path / "exp.pt", *nets(7))
+    extra = checkpoint.save(tmp_path / "long19.pt", *nets(9))
+    monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+    monkeypatch.setattr(checkpoint, "RANDOM", checkpoint.save(tmp_path / "random.pt", *nets(3)))
+    opp = json.dumps({"self": 0.5, str(a): 0.5})
+    args = ["--name", "named2", "--init", str(latest), "--critic-init", str(latest), "--battles", "8", "--steps", "4",
+            "--updates", "2", "--minutes", "3", "--device", "cpu", "--no-eval", "--limit", "6", "--bank", "8",
+            "--max-units", "4", "--critic-warmup", "0", "--snapshot-every", "1", "--pool-extra", str(extra),
+            "--pool", "12", "--pool-no-untrained", "--opponents", opp]
+    _, trained, out = run.train(run.parser().parse_args(args))
+    assert not (out / "pool").exists()                                  # no pool made, none carried on
+    assert set(trained["opponents"]) == {"self", "exp"}
+    rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows and all(r["pool"] is None for r in rows)

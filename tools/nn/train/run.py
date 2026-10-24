@@ -682,9 +682,10 @@ def _train(args, every=None, teacher=None, normal=None):
         raise SystemExit("--entropy-decay needs --entropy-end (the weight it goes to)")
     opp_shares = None
     if args.opponents:
-        # --opponents: every opponent by name at a hard share (league.named_layout): no mix, pool draws or pin
+        # --opponents: every opponent by name at a hard share (league.named_layout): no mix, pin or pool - the pool's
+        # options are ignored (test5's PROTOCOL puts --pool-extra into every run's line; no pool is made or carried on)
         clash = [f for f, v in (("--mix", args.mix), ("--past-pin", args.past_pin), ("--past-pin-cells",
-                                args.past_pin_cells), ("--pool-extra", args.pool_extra)) if v]
+                                args.past_pin_cells)) if v]
         if clash:
             raise SystemExit(f"--opponents names every opponent: not with {', '.join(clash)}")
         if args.drills:
@@ -719,14 +720,19 @@ def _train(args, every=None, teacher=None, normal=None):
     # carries on from its q.json: the untrained network and --init only go into a new pool); a chain step's new pool
     # carries on from the previous step's (league.inherit_pool: the --init's or --critic-init's run folder has
     # pool/q.json; --pool-fresh: not); --pool-no-untrained: no untrained network in it
-    pool, notes = league.open_pool(
-        Path(args.pool_dir) if args.pool_dir else out / "pool", size=args.pool, seed=args.seed, eta=args.pool_eta,
-        init=args.init, critic=args.critic_init, untrained=lambda: checkpoint.random_for(actor.cfg),
-        inherit=not args.pool_fresh and not args.pool_dir, no_untrained=args.pool_no_untrained,
-        extra=list(filter(None, (args.pool_extra or "").split(","))))
-    for note in notes:
-        print(note, flush=True)
-    print(pool.text(), flush=True)
+    if opp_shares is None:
+        pool, notes = league.open_pool(
+            Path(args.pool_dir) if args.pool_dir else out / "pool", size=args.pool, seed=args.seed, eta=args.pool_eta,
+            init=args.init, critic=args.critic_init, untrained=lambda: checkpoint.random_for(actor.cfg),
+            inherit=not args.pool_fresh and not args.pool_dir, no_untrained=args.pool_no_untrained,
+            extra=list(filter(None, (args.pool_extra or "").split(","))))
+        for note in notes:
+            print(note, flush=True)
+        print(pool.text(), flush=True)
+    else:
+        pool = None                              # --opponents: no pool (its options ignored)
+        if args.pool_extra:
+            print(f"--opponents: no pool; --pool-extra {args.pool_extra} ignored", flush=True)
     # The past slots (rollout.Battles): each holds a version; a battle keeps its slot's version from its start
     slots = max(1, args.past_slots)
     if opp_shares is not None:                   # --opponents: a slot for each checkpoint, loaded once
@@ -1249,8 +1255,9 @@ def _train(args, every=None, teacher=None, normal=None):
         for k, (g, w) in enumerate(env.take_slot_stats()[:slots]):
             if g and slot_path[k] is not None and named is None:
                 pool.result(slot_path[k], g, w, slot_p[k])
-        pool.tick()
-        pool.write()
+        if pool is not None:
+            pool.tick()
+            pool.write()
         lords = env.lords()
         for k, (g, w, s) in stats.items():
             for acc in (total, window):
@@ -1272,8 +1279,9 @@ def _train(args, every=None, teacher=None, normal=None):
                "seconds_per_battle": {k: round(s) for k, (_, _, s) in stats.items()},
                "past": slot_path[env.active].name if slot_path[env.active] is not None else None,
                "past_deferred": deferred,
-               "pool": {"n": len(pool), "wide": int((pool.probs() > 0.05).sum()),
-                        "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
+               "pool": ({"n": len(pool), "wide": int((pool.probs() > 0.05).sum()),
+                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}
+                        if pool is not None else None)}
         if pin_m:
             row["pinned_matchups"] = pinned_matchups(pin_m)
         if named is not None:
@@ -1352,9 +1360,11 @@ def _train(args, every=None, teacher=None, normal=None):
         if update % args.snapshot_every == 0:
             meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name,
                     "cadence": cadence.meta()}
-            pool.save(actor, None, args.preset, meta, name=f"{args.name}_v{update:05d}.pt" if args.pool_dir else None)
+            if pool is not None:
+                pool.save(actor, None, args.preset, meta, name=f"{args.name}_v{update:05d}.pt" if args.pool_dir else None)
             checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta, blob())
-            print("   " + pool.text() + (f"; draws without a free slot {deferred}" if slots > 1 else ""), flush=True)
+            if pool is not None:
+                print("   " + pool.text() + (f"; draws without a free slot {deferred}" if slots > 1 else ""), flush=True)
             sc, _ = score(window)
             print(f"   window: " + ", ".join(f"{k} {w / g:.2f} ({g})" for k, (g, w, _) in sorted(window.items())),
                   flush=True)
@@ -1383,7 +1393,8 @@ def _train(args, every=None, teacher=None, normal=None):
             "cadence": cadence.meta(),
             "ppo": dataclasses.asdict(cfg), "reward": dataclasses.asdict(weights)}
     checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta, blob())
-    print(pool.text(), flush=True)
+    if pool is not None:
+        print(pool.text(), flush=True)
     if not (out / "best.pt").exists():
         checkpoint.save(out / "best.pt", actor, critic, args.preset, meta)
     log.close()
