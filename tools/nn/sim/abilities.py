@@ -278,9 +278,16 @@ def restore(u, old):
 
 
 def bits(flags):
-    """[..., A] bool -> [...] int64 bitmask (bit a: flags[..., a]); at most 62 abilities."""
+    """[..., A] bool -> [...] int64 bitmask (bit a: flags[..., a]); at most 62 abilities. Out of the compiled step
+    (torch.compiler.disable): fused into it, the bitmask's 13-wide reduction drew the whole tail of the step into one
+    persistent Triton kernel of ~190 arguments that Triton 3.7 cannot build ('operand does not dominate this use',
+    PassManager::run failed - 25.10.2026, the abilities of line g43)."""
     assert flags.shape[-1] <= 62, "the received bitmask holds 62 abilities"
     return (flags.long() << torch.arange(flags.shape[-1], device=flags.device)).sum(-1)
+
+
+if torch is not None:
+    bits = torch.compiler.disable(bits)
 
 
 def vigour(u, params, standing):
