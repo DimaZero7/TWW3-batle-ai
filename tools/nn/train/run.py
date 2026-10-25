@@ -420,8 +420,11 @@ def with_general(actor, args):
                              kl=args.general_kl, kind_own=bool(args.general_kind_own_signal),
                              kind_weight=args.general_kind_weight, kind_epochs=args.general_kind_epochs,
                              kind_q=args.general_kind_q)
-    print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
-          flush=True)
+    if args.general_plan_lambda > 0 and args.general_return != "critic":
+        raise SystemExit("--general-plan-lambda chains the critic's one-step advantages: it needs --general-return critic")
+    print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}"
+          + (f" chained over the battle (plan lambda {args.general_plan_lambda:g})" if args.general_plan_lambda > 0
+             else "") + f"; lr x {args.general_lr_mult:g}", flush=True)
     return actor, cfg
 
 
@@ -508,7 +511,11 @@ def general_text(g):
             f"{g.get('clip_old', 0):.2f}, old weight {g.get('stale_w', 1):.2f}) "
             f"value mse {g.get('value_mse', 0):.5f} ev {g.get('value_ev', 0):+.2f} return {g.get('return_mean', 0):+.4f}"
             + (f" critic ev {g['critic_ev']:+.2f}" if "critic_ev" in g else "")
-            + f"; adv {g.get('adv_mean', 0):+.4f} sd {g.get('adv_std', 0):.4f}; task_in |W| {g.get('task_in_w', 0):.3f} "
+            + f"; adv {g.get('adv_mean', 0):+.4f} sd {g.get('adv_std', 0):.4f}"
+            + (f" (chained, lambda {g['plan_lambda']:g}: {g.get('gae_plans_per_battle', 0):.1f} plans a battle, cut "
+               f"{g.get('gae_cut_share', 0):.2f}, sd one-step {g.get('gae_delta_sd', 0):.4f} chained "
+               f"{g.get('gae_adv_sd', 0):.4f}, waiting {g.get('gae_held', 0)})" if "plan_lambda" in g else "")
+            + f"; task_in |W| {g.get('task_in_w', 0):.3f} "
             f"(group {g.get('task_in_group', 0):.3f} kind {g.get('task_in_kind', 0):.3f} geo {g.get('task_in_geo', 0):.3f})"
             + (f"; branches {g['branch_branches']} of {g.get('branch_plans', 0)} plans, price "
                f"{g.get('branch_price_mean', 0):+.4f} sd {g.get('branch_price_std', 0):.4f} (real share "
@@ -980,6 +987,7 @@ def _train(args, every=None, teacher=None, normal=None):
     if env.general_rt is not None:
         # the general's plans: the return's rule and the discount per decision (the trainer's)
         env.general_rt.ret, env.general_rt.gamma = args.general_return, cfg.gamma
+        env.general_rt.plan_lam = args.general_plan_lambda    # (0: each plan's own advantage, as before)
         if glearn_cfg is not None and glearn_cfg.distinct > 0:
             # --general-distinct: the classifier of missions by behaviour (its weights, Adam and the decay's counter go
             # on from --init's "train"; fresh otherwise)
@@ -1958,6 +1966,12 @@ def parser():
                          "rest); critic: the plan's discounted reward + gamma^n x the unit critic's value where it ended "
                          "(0 at the battle's end), its advantage less the critic's value where it began (the plan "
                          "value learns the same target beside it)")
+    ap.add_argument("--general-plan-lambda", type=float, default=0.0,
+                    help="general: L, the plans' advantage chained over the battle (runtime.py, signal.plan_gae): "
+                         "each plan's one-step advantage by the critic + gamma^n x L x the next plan's chained one, "
+                         "back from the battle's end - the plans wait for it (on the CPU). 0 (the default): each plan's "
+                         "own (as before); 1: the real reward to the battle's end - the critic at the plan. Needs "
+                         "--general-return critic")
     ap.add_argument("--general-branches", type=float, default=0.0,
                     help="general: P, the share of the learner's plans replayed with one group's mission kind changed "
                          "(tools/nn/general/branch.py): the price 'this kind against another' is the kind choice's "

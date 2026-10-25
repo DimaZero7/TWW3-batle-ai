@@ -4,6 +4,11 @@ host's tests check them; docs/en/training/general.md "Training").
 * plan_target: a plan's target by the unit network's critic (run.py --general-return critic) - the reward over the
   plan's decisions, discounted, + gamma^n x the critic's value where the plan ended (0 when the battle ended there);
   the plan's advantage is that - the critic's value where it began (plan_advantage).
+* plan_gae: the plans' advantage chained over a battle (run.py --general-plan-lambda L; runtime.py "hold"): each plan's
+  one-step advantage delta (plan_advantage) + gamma^n x L x the next plan's chained advantage, back from the battle's
+  end. L = 0: the plan's own delta (the critic's value at its end stands for the rest of the battle); L = 1: the
+  discounted real reward from the plan to the battle's end - the critic's value at the plan (the critic only the
+  baseline, never in place of what followed).
 * distinct_bonus: the executor's bonus for missions that tell apart (run.py --general-distinct W) - a classifier
   guesses a group's mission kind from what its units did during the plan; the bonus is log q(kind | behaviour) - log(1/K)
   (0 when it guesses no better than chance, up to log K when it is sure and right), clipped to [-log K, log K], x W.
@@ -54,6 +59,19 @@ def plan_advantage(r_disc, n, v_start, v_end, done, gamma):
     """The plan's advantage by the critic: plan_target - v_start (the critic's value at the plan's decision; a battle's
     first plan, the deployment: at the battle's first decision)."""
     return plan_target(r_disc, n, v_end, done, gamma) - v_start
+
+
+def plan_gae(delta, disc, cont, lam):
+    """The chained advantage of plans [M] (module doc): delta - each plan's one-step advantage, disc - gamma^n of its
+    decisions, cont - 1 where the next entry is the same battle's (side's) next plan, 0 at a sequence's last (its battle
+    ended there, or it was cut: its delta already holds the critic's value at its end); entries in order within a
+    sequence. -> A [M]: A_k = delta_k + disc_k x lam x cont_k x A_(k+1). numpy arrays and torch tensors alike."""
+    out = delta * 0.0
+    run = 0.0
+    for k in reversed(range(len(delta))):
+        run = delta[k] + disc[k] * lam * cont[k] * run
+        out[k] = run
+    return out
 
 
 def distinct_bonus(logq, kinds, weight=1.0):

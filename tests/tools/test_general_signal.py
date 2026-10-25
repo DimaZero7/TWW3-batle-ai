@@ -39,6 +39,38 @@ def test_a_critic_that_is_right_gives_no_advantage():
     assert signal.plan_advantage(r, n, v_start, v_end, 0.0, g) == pytest.approx(0.0)
 
 
+def test_plan_gae_at_lambda_0_is_each_plans_own_advantage():
+    delta = np.array([0.1, -0.3, 0.2, 0.05])
+    disc = np.array([0.98, 0.97, 0.99, 0.0])
+    cont = np.array([1.0, 1.0, 1.0, 0.0])
+    assert signal.plan_gae(delta, disc, cont, 0.0) == pytest.approx(delta)
+
+
+def test_plan_gae_at_lambda_1_is_the_real_reward_to_the_battles_end_less_the_critic_at_the_plan():
+    g = 0.9994
+    n = [22, 30, 15]                                         # three plans' decisions; the battle ends in the last
+    rew = [0.02, -0.05, 0.4]                                 # each plan's discounted reward (r_disc)
+    v = [0.3, 0.1, -0.2]                                     # the critic at each plan's start
+    v_end = v[1:] + [0.0]                                    # ... at its end (the next plan's start; 0 at the end)
+    done = [0.0, 0.0, 1.0]
+    delta = np.array([signal.plan_advantage(rew[k], n[k], v[k], v_end[k], done[k], g) for k in range(3)])
+    disc = np.array([g ** k for k in n])
+    a = signal.plan_gae(delta, disc, np.array([1.0, 1.0, 0.0]), 1.0)
+    # the critic's values in between cancel: only the real reward and the critic at the plan stay
+    mc0 = rew[0] + g ** 22 * (rew[1] + g ** 30 * rew[2])
+    assert a[0] == pytest.approx(mc0 - v[0])
+    assert a[1] == pytest.approx(rew[1] + g ** 30 * rew[2] - v[1])
+    assert a[2] == pytest.approx(rew[2] - v[2])
+
+
+def test_plan_gae_does_not_chain_across_sequences():
+    delta = np.array([0.1, 0.2, 0.5, -0.4])
+    disc = np.ones(4)
+    cont = np.array([1.0, 0.0, 1.0, 0.0])                    # two sequences of two plans
+    a = signal.plan_gae(delta, disc, cont, 0.5)
+    assert a == pytest.approx([0.1 + 0.5 * 0.2, 0.2, 0.5 + 0.5 * -0.4, -0.4])
+
+
 def test_the_distinct_bonus_is_zero_at_chance_and_grows_with_the_guess():
     K = 10
     chance = np.log(np.full(4, 1.0 / K))

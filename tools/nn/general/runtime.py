@@ -55,6 +55,14 @@ training (docs/en/training/general.md "How it runs").
   end_chunk gives the chunk's ("q_out", each with its battle's number "bid": start_battles numbers every battle it
   starts, both sides one number - the outcome Q holds battles out whole). A battle's restart bumps its slot's epoch: an
   outcome of an older battle in that slot is dropped (never expected: a battle's plans are settled when it ends).
+* The plans' chained advantage (run.py --general-plan-lambda L > 0: plan_lam = L; signal.plan_gae; needs the critic's
+  return): a learner's plan that ends is not ready at once - its record waits on the CPU ("hold", by its battle's number
+  and side) with its one-step advantage (its target - the critic's value at its start) and gamma^n, until its battle
+  ends; then the battle's (side's) plans get A_k = delta_k + gamma^n_k x L x A_(k+1) from the end back, their "ret" =
+  A + the base, and go to the ready records together (learn.update unchanged: its advantage ret - base is A). A
+  battle restarted in its slot or dropped (narrow) releases its waiting plans cut there (the last one's delta holds
+  the critic's value at its end: a truncated sum). A plan that waits over an update is old (its "new" off: learn's
+  importance weight); its outcome (q_out, the outcome Q) waits with it. L = 0: no hold, bit for bit as before.
 * The game (tools/nn/companion/general.py GameBattles): the companion runs this Runtime on a view of the bridge's state
   shaped like a Battles of one battle - what it reads of `env`: st.u (x, z, b, side, men, hp, hp0, ms, gone, vis, cost,
   width, sp_h, sp_v), st.t, st.done, st.lord_dead_s, st.keys, setup.bounds, mem[s].frame, ctrl, past, battle_slot,
@@ -92,7 +100,8 @@ COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy",
           "mask_free", "mask_units", "mask_fallback", "volley_lock", "fire_shooters", "fire_on",
           "assign_plans", "assign_ari", "assign_k", "assign_groups", "assign_kept", "churn_plans", "churn_changed",
           "changes_ended",
-          "mixed_groups", "mixed_of")
+          "mixed_groups", "mixed_of",
+          "gae_seqs", "gae_plans", "gae_cut", "gae_d_sum", "gae_d_sq", "gae_a_sum", "gae_a_sq")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -197,6 +206,10 @@ class Runtime:
         # --general-kind-q outcome|both: the plans' outcomes over q_h seconds (module doc; 0: off, nothing kept)
         self.q_h = 0.0
         self.q_next = 0                           # the next ended plan's id
+        # --general-plan-lambda L (module doc): the plans' chained advantage; the ended plans waiting for their battle's
+        # end on the CPU: parts {id: records}, left {id: entries not released}, idx {battle x 2 + side: [(id, i)]}
+        self.plan_lam = 0.0
+        self.hold = {"parts": {}, "left": {}, "idx": {}, "next": 0}
         self.bid_next = 0                         # the next battle's number (start_battles)
         self.q_wait = None                        # the ended plans waiting for their outcome (_q_add)
         self.outcome_q = None                     # ... their Q (kind_q.OutcomeQ; run.py attaches it to the batch)
@@ -722,6 +735,8 @@ class Runtime:
         if self.teacher > 0:
             self._draw_teach(idx)                 # --general-teacher P: the battles whose learner plans it makes
         rows = torch.cat([idx, idx + self.B])
+        if self._waiting():
+            self._release(self._keys(rows).tolist(), cut=True)    # (the slot's last battle, if any of it still waits)
         self.r["fire_t0"][rows] = -1.0            # (the teacher's clock: our shooters' first volley)
         self.r["w_t0"][rows], self.r["w_go"][rows] = -1.0, False      # (the wait's fuse, wait_clock)
         self.r["vl_t0"][rows], self.r["vl_at"][rows], self.r["vl_lock"][rows] = -1.0, -1.0, False   # (the volley lock)
@@ -907,7 +922,90 @@ class Runtime:
                 self.bonus.index_add_(0, rr, bonus.sum(-1))
                 self.stats.add("distinct_bonus", bonus.sum())
                 self.stats.add("distinct_groups", ok.sum())
+        if getattr(self, "plan_lam", 0.0) > 0:
+            self._hold_add(rr, rec, done)         # (module doc: ready at its battle's end)
+            return
         self.ready.append(rec)
+
+    # --- the plans' chained advantage (module doc; --general-plan-lambda) ---------------------------------------------
+    def _keys(self, rows):
+        """[M] each row's battle (its number) x 2 + its side."""
+        return self.b["bid"][rows % self.B] * 2 + rows // self.B
+
+    def _hold_add(self, rows, rec, done):
+        """The ended plans' records rec of rows wait on the CPU with their one-step advantage and gamma^n (0 at the
+        battle's end); done: their battle ended - its plans are released."""
+        base = rec["base"].float()
+        delta = rec["ret"].float() - base
+        disc = torch.zeros_like(delta) if done else self.gamma ** self.r["n_dec"][rows].float()
+        keys = self._keys(rows)
+        part = {k: v.cpu() for k, v in rec.items()}
+        part.update({"h_delta": delta.cpu(), "h_disc": disc.cpu()})
+        h = self.hold
+        pid = h["next"]
+        h["next"] += 1
+        h["parts"][pid], h["left"][pid] = part, len(rows)
+        for i, k in enumerate(keys.tolist()):
+            h["idx"].setdefault(k, []).append((pid, i))
+        if done:
+            self._release(keys.tolist(), cut=False)
+
+    def _release(self, keys, cut):
+        """The waiting plans of the battles' sides keys (ints; those with none skipped) -> ready, each sequence's
+        chained advantage in its "ret" (signal.plan_gae); cut: the battles did not end (a restart, narrow)."""
+        h = self.hold
+        seqs = [h["idx"].pop(k) for k in dict.fromkeys(int(x) for x in keys) if k in h["idx"]]
+        if not seqs:
+            return
+        ent = [e for q in seqs for e in q]                         # in the time order within each sequence
+        cont = torch.ones(len(ent))
+        at = -1
+        for q in seqs:
+            at += len(q)
+            cont[at] = 0.0
+        by_part = {}
+        for j, (pid, i) in enumerate(ent):
+            by_part.setdefault(pid, []).append((i, j))
+        got, order = [], []
+        for pid, ij in by_part.items():
+            p = h["parts"][pid]
+            ix = torch.tensor([i for i, _ in ij], dtype=torch.long)
+            got.append({k: v[ix] for k, v in p.items()})
+            order += [j for _, j in ij]
+            h["left"][pid] -= len(ij)
+            if h["left"][pid] <= 0:
+                del h["parts"][pid], h["left"][pid]
+        rec = _cat(got)
+        inv = torch.empty(len(order), dtype=torch.long)
+        inv[torch.tensor(order, dtype=torch.long)] = torch.arange(len(order))
+        rec = {k: v[inv] for k, v in rec.items()}                 # back into the sequences' order
+        delta, disc = rec.pop("h_delta"), rec.pop("h_disc")
+        adv = gsignal.plan_gae(delta, disc, cont, self.plan_lam)
+        rec["ret"] = adv + rec["base"].float()
+        st = self.stats
+        st.add("gae_seqs", float(len(seqs)))
+        st.add("gae_plans", float(len(ent)))
+        if cut:
+            st.add("gae_cut", float(len(seqs)))
+        st.add("gae_d_sum", float(delta.sum()))
+        st.add("gae_d_sq", float((delta * delta).sum()))
+        st.add("gae_a_sum", float(adv.sum()))
+        st.add("gae_a_sq", float((adv * adv).sum()))
+        self.ready.append({k: v.to(self.dev) for k, v in rec.items()})
+
+    def held(self):
+        """The ended plans waiting for their battle's end (module doc)."""
+        return int(sum(self.hold["left"].values())) if getattr(self, "hold", None) else 0
+
+    def _waiting(self):
+        """Whether some battle's ended plans wait (a Runtime made without __init__, the tests' stubs: none)."""
+        h = getattr(self, "hold", None)
+        return bool(h and h["idx"])
+
+    def _parts(self):
+        """[the waiting plans' records, part by part] (module doc)."""
+        h = getattr(self, "hold", None)
+        return list(h["parts"].values()) if h else []
 
     def critic_target(self, rows, done):
         """(target, base) [M] of the plans of rows ending now by the critic (module doc; signal.plan_target): the
@@ -973,8 +1071,13 @@ class Runtime:
         if w is None:
             return None
         done = w["state"] == 1
-        out = {k: w[k][done] for k in ("qid", "y", "span", "ended", "bid")}
         keep = w["state"] == 0
+        held = [p["qid"] for p in self._parts() if "qid" in p]
+        if held and len(w["qid"]):
+            # a waiting plan's outcome waits with it (--general-plan-lambda: the outcome Q joins it to its record)
+            wait = torch.isin(w["qid"], torch.cat(held).to(w["qid"].device)) & done
+            done, keep = done & ~wait, keep | wait
+        out = {k: w[k][done] for k in ("qid", "y", "span", "ended", "bid")}
         self.q_wait = {k: v[keep] for k, v in w.items()}
         return out if len(out["qid"]) else None
 
@@ -1249,6 +1352,11 @@ class Runtime:
         rows = (r["has"] & (r["owner"] == 0)).nonzero().squeeze(1)
         self.table = []
         r["new"].zero_()                          # the plans in force were begun before this chunk
+        if getattr(self, "plan_lam", 0.0) > 0:
+            # the waiting ended plans and those released since the last chunk (a cut) were begun before this chunk too
+            # (learn.update's importance weight)
+            for p in self._parts() + self.ready:
+                p["new"] = torch.zeros_like(p["new"])
         self.tix.fill_(-1)
         if rows.numel() and self.learner is not None:
             rec = self.record(rows)
@@ -1280,6 +1388,12 @@ class Runtime:
     def narrow(self, keep):
         """Only the battles keep [b] stay (Battles.narrow)."""
         two = torch.cat([keep, keep + self.B])
+        if self._waiting():
+            # the dropped battles' waiting plans: released, cut here (module doc)
+            out = torch.ones(self.B, dtype=torch.bool, device=self.dev)
+            out[keep] = False
+            gone = out.nonzero().squeeze(1)
+            self._release(self._keys(torch.cat([gone, gone + self.B])).tolist(), cut=True)
         if self.q_wait is not None:
             # the waiting outcomes of the battles kept, their rows renumbered
             pos = torch.full((2 * self.B,), -1, dtype=torch.long, device=self.dev)
@@ -1313,7 +1427,8 @@ class Runtime:
         snapshot, no re-plans, no deployment, no records."""
         new = Runtime.__new__(Runtime)
         new.__dict__.update({k: v for k, v in self.__dict__.items() if k not in ("r", "b", "tix", "ready", "table",
-                                                                                  "teach_ready", "q_wait")})
+                                                                                  "teach_ready", "q_wait", "hold")})
+        new.hold, new.plan_lam = {"parts": {}, "left": {}, "idx": {}, "next": 0}, 0.0
         new.B = B
         new.r = self._rows(2 * B)
         for k in ("has", "main", "kind", "target", "tgt", "mix", "kc"):
@@ -1356,7 +1471,18 @@ class Runtime:
         top = np.argsort(-places)[:6]
         tg = np.array([s["target_own"], s["target_enemy"], s["target_tile"]])
         tg = tg / tg.sum() if tg.sum() else tg
-        return {"plans": int(s["plans"]), "deploy_plans": int(s["deploys"]),
+        gae = {}
+        if getattr(self, "plan_lam", 0.0) > 0:
+            # the chained plans released since the last call (module doc): plans a battle's side, the share cut, the
+            # spread (sd) of the one-step advantage and of the chained one - the chain long and its tail real
+            n_p = max(1.0, s["gae_plans"])
+            sd = (lambda a, q: math.sqrt(max(0.0, q / n_p - (a / n_p) ** 2)))
+            gae = {"plan_lambda": self.plan_lam,
+                   "gae_plans_per_battle": round(s["gae_plans"] / max(1.0, s["gae_seqs"]), 2),
+                   "gae_cut_share": round(s["gae_cut"] / max(1.0, s["gae_seqs"]), 4),
+                   "gae_delta_sd": round(sd(s["gae_d_sum"], s["gae_d_sq"]), 5),
+                   "gae_adv_sd": round(sd(s["gae_a_sum"], s["gae_a_sq"]), 5), "gae_held": self.held()}
+        return {**gae, "plans": int(s["plans"]), "deploy_plans": int(s["deploys"]),
                 "deploy_net_share": round(s["deploys_net"] / max(1.0, s["deploys"]), 3),
                 "groups_own": round(s["groups_own"] / n, 2), "groups_enemy": round(s["groups_enemy"] / n, 2),
                 "kinds": [round(float(x), 3) for x in p], "kind_entropy": round(ent, 3),
