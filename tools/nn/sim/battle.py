@@ -11,7 +11,7 @@ import math
 import torch
 
 from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
-from tools.nn.sim import skirmish
+from tools.nn.sim import skirmish, stealth
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -32,6 +32,8 @@ def threat_flags(u, pw, params, *, alive=None, standing=None):
         alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
     if standing is None:
         standing = alive & ~u["r"]
+    # a hidden enemy threatens nobody's flank (stealth.py: the enemy's morale does not count it)
+    standing = standing & stealth.seen(u)
     threat = pw["enemy"] & standing[:, None, :] & (pw["dist"] <= radius)
     if enabled:
         threat = threat & (pw["rel_j"].abs() <= trial["facing_deg"] * geometry.DEG)
@@ -60,6 +62,8 @@ def step(st, orders, params=None, dt=None):
     same_side = u["side"][:, :, None] == u["side"][:, None, :]
     N = st.N
     eye = torch.eye(N, dtype=torch.bool, device=st.device)[None]
+    # the units the other side sees (stealth.py: not hidden at the last step's end; all of them without stealth)
+    seen = stealth.seen(u)
 
     # (the skirmish run's far point shown in ox, oz last step - skirmish.show_far_point, below: the order's own point back)
     if "sk_shown" in u:
@@ -74,7 +78,9 @@ def step(st, orders, params=None, dt=None):
     # m/s median, build/audit_orders), as ai_like gives it. Before, the network's withdraw walked here (decide.to_orders
     # keeps the run flag of MOVE and ATTACK only) and ran in the game.
     run = torch.where(take, orders.run | (orders.kind == O.WITHDRAW), u["order_run"])
-    t_ok = (tgt >= 0) & alive.gather(1, tgt.clamp(min=0)) & ~same_side.gather(2, tgt.clamp(min=0)[:, :, None]).squeeze(2)
+    # (an attack order on a hidden enemy is no order, as on a dead one: stealth.py)
+    t_ok = ((tgt >= 0) & alive.gather(1, tgt.clamp(min=0)) & seen.gather(1, tgt.clamp(min=0))
+            & ~same_side.gather(2, tgt.clamp(min=0)[:, :, None]).squeeze(2))
     kind = torch.where((kind == O.ATTACK) & ~t_ok, torch.full_like(kind, O.HOLD), kind)
     tgt = torch.where(kind == O.ATTACK, tgt, torch.full_like(tgt, -1))
     # --- spells (magic.py; config/nn/sim.json magic): the winds flow, casts asked (magic.request) start, a caster out of
@@ -283,7 +289,8 @@ def step(st, orders, params=None, dt=None):
                                  torch.where(new_order & ~hold_on, torch.zeros_like(u["brk_s"]),
                                              (u["brk_s"] - dt).clamp(min=0)))
         striker = striker & ~((kind == O.HOLD) & (u["brk_s"] > 0) & form)
-    strike = touch & striker[:, :, None]
+    # (blows do not fall on a hidden enemy - in contact it is revealed at the step's end: stealth.py)
+    strike = touch & striker[:, :, None] & seen[:, None, :]
     # A lone man chasing a lone router (the enemy lord after our lord) strikes him only within his own reach - the
     # regular contact -, not across the pursuit's box gap (the routing mob strings out beyond its box, a lone man does
     # not); the router's melee flag keeps the chase (lone_rout.strike_cut, config/nn/sim.json contact.lone_rout own_reach)
@@ -619,8 +626,13 @@ def step(st, orders, params=None, dt=None):
         # A burst (missile.py burst_share): a volley of spv shots a man (the Ratling Gun's 18) leaves at the measured
         # rate over spv / bst_rate s from its start; the reload runs from the start (the cycle start to start)
         burst, start, share, volley_target = missile.burst_share(u, volley_target, m_target, share, dt)
+    pen_info = {}
+    if (cal["missile"].get("penetration") or {}).get("on") and missile.pen_limit(params) > 1 and cal["kills"].get(
+            "missile_front") and "fw" in u:
+        # (the front rank's share of the hits, once: the penetration's first man and the kills below)
+        pen_info["front"] = missile.front_share(u, pw, params)
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch_geo, clear=clear,
-                                             loaded=share, catch=catch)
+                                             loaded=share, catch=catch, info=pen_info)
     hp_bomb = kills_bomb = None
     if magic.on(params) and "bm0_s" in u:
         # the bombardments landing this step (magic.py): the HP and the men each caster's strike takes from each unit,
@@ -711,7 +723,11 @@ def step(st, orders, params=None, dt=None):
                 # kills.missile_front: a flat shot strikes the front man of its file first (missile.front_share), so
                 # the hits fall on the front rank (its files) and the rest evenly; a man takes at most his health -
                 # the hits beyond the dead men's are lost (melee.front_kills)
-                fs = missile.front_share(u, pw, params)
+                fs = pen_info["front"] if "front" in pen_info else missile.front_share(u, pw, params)
+                if "pen" in pen_info:
+                    # the men a penetrating projectile strikes past its first stand behind the front rank (missile.py
+                    # penetration: the pair's hits are its first men's x pen)
+                    fs = fs / pen_info["pen"].clamp(min=1.0)
                 h_f = (h_pair * fs).sum(1)
                 files = (pw["front"] / u["sp_h"].clamp(min=0.1)).clamp(min=1)
                 k_t, lost, fw_new = melee.front_kills(h_f, (H - h_f).clamp(min=0), u["men"], files, u["hp_man"],
@@ -846,7 +862,8 @@ def step(st, orders, params=None, dt=None):
     # --- morale ---
     d = pw["dist"]
     friends = same_side & ~eye & alive[:, None, :]
-    foes = pw["enemy"] & alive[:, None, :]
+    # (the morale does not count a hidden enemy: stealth.py)
+    foes = pw["enemy"] & alive[:, None, :] & seen[:, None, :]
     # The lord's aura: full within general_aura_radius, fading linearly to 0 at
     # x inspiration_radius_max_effect_range_modifier (database: 70 m, 105 m).
     r0 = M["general_aura_radius"]
@@ -1283,6 +1300,10 @@ def step(st, orders, params=None, dt=None):
         u["ox"] = torch.where(shown, sk_x, u["ox"])
         u["oz"] = torch.where(shown, sk_z, u["oz"])
         u["sk_shown"] = shown
+    # --- hiding and spotting (stealth.py; config/nn/sim.json stealth): who is hidden for the next step and the observation;
+    # firing (its shooting state), melee and an attack order in force reveal, an enemy within its spotting distance x the
+    # unit's hiding_scalar sees it (the step's start's gap) ---
+    stealth.update(u, pw, params, dt, firing, u["m"], (kind == O.ATTACK) & (tgt >= 0))
     threat_cal = cal["threat"].get("calibration", {})
     # A calibrated flag uses the position and bearing visible in this observation.
     # OFF preserves the legacy pre-move geometry for exact baseline comparison.

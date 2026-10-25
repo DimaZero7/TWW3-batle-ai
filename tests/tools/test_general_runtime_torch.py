@@ -419,3 +419,25 @@ def test_the_teachers_wait_runs_out_against_an_enemy_that_stands():
     assert went is not None and went <= 121.0, went
     assert not bool(((r["kind"][row] == hold) & r["teach_use"][row] & (r["target"][row] >= 2 * rt.G)).any())
     assert rt.stats["replan_wait"] + rt.stats["replan_timer"] >= 1
+
+
+def test_an_enemy_hidden_from_the_start_is_not_in_the_generals_deployment_inputs():
+    """(25.10.2026, line g43; tools/nn/sim/stealth.py) the deployment's places and tiles come from the state, every unit
+    seen - but an enemy hidden from the start is not: it is not on the general's map, as not in the observation."""
+    env = battles()
+    actor, crit = nets()
+    env.step(actor, crit)
+    rt = env.general_rt
+    rows = torch.arange(2 * env.B)
+    b, s = rows % env.B, rows // env.B + 1
+    inp, _, _ = rt.inputs(env, rows, True)
+    enemy = (env.st.u["side"][0] > 0) & (env.st.u["side"][0] == 2)
+    j = int(torch.nonzero(enemy)[0])
+    env.st.u["vis"][0, j] = False                                   # hidden from side 1
+    hid, _, _ = rt.inputs(env, rows, True)
+    r1 = 0                                                          # battle 0 seen by side 1
+    assert float(inp["pos"][r1, j].abs().sum()) > 0 and float(hid["pos"][r1, j].abs().sum()) == 0
+    assert not torch.equal(inp["tiles"][r1], hid["tiles"][r1])
+    r2 = env.B                                                      # battle 0 seen by side 2: its own unit, shown
+    torch.testing.assert_close(inp["pos"][r2], hid["pos"][r2])
+    torch.testing.assert_close(inp["tiles"][r2], hid["tiles"][r2])

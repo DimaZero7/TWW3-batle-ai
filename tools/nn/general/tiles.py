@@ -88,10 +88,11 @@ def with_extra(cfg, tiles, u, own, alive, vis, num, lab, frame):
     return out
 
 
-def from_state(cfg, u, cost, side, frame, cells_in):
+def from_state(cfg, u, cost, side, frame, cells_in, seen=None):
     """[R, S, 8] of the battles' state for rows of side `side` [R] (1 or 2): u the state's fields of the rows' battles
     [R, N] (x, z, side, men, hp, r, gone), cost [R, N] (multiplayer gold), frame: the rows' Frame, cells_in [R, S, k2].
-    Every unit seen and visible (the deployment); the dead and those gone left out (as attend)."""
+    Every unit seen and visible (the deployment) but where seen [R, N] says not (an enemy hidden from the start:
+    tools/nn/sim/stealth.py; None: all); the dead and those gone left out (as attend)."""
     present = u["side"] > 0
     alive = present & (u["men"] > 0) & ~u["gone"]
     own = present & (u["side"] == side[:, None])
@@ -102,7 +103,8 @@ def from_state(cfg, u, cost, side, frame, cells_in):
     # the token's routing columns are the morale state's (ms 6 routing, 7 shattered)
     ms = u["ms"].float()
     rout = (ms >= 5.5) & present
-    return core(cfg, pos, own, attend, present, present, cost.float(), u["hp"].float(), rout, cells_in)
+    seen = present if seen is None else (seen & present)
+    return core(cfg, pos, own, attend, seen, seen, cost.float(), u["hp"].float(), rout, cells_in)
 
 
 def frame_at(u, side, bounds):

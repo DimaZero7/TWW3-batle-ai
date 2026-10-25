@@ -67,7 +67,8 @@ class LiveSetup:
               "reload",                              # passport reload_s [B, N] (the volley input, VOLLEY)
               "arc",                                 # passport fire arc / 180 [B, N] (the token's ARC)
               "weapon",                              # shots a volley, magical attacks [B, N, 2] (the token's WEAPON)
-              "aim")                                 # aim and retarget silence [B, N, 2] (the token's AIM)
+              "aim",                                 # aim and retarget silence [B, N, 2] (the token's AIM)
+              "sight")                               # men a bullet strikes past the first, spotting [B, N, 2] (SIGHT)
 
     def __init__(self, arrays, char, factions):
         self.arrays, self.char, self.factions = arrays, char, factions

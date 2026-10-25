@@ -300,16 +300,19 @@ class Runtime:
         num = gunits.dynamic(self.b["num"][b], self.b["full"][b], u, own, u["vis"] & present)
         frame, bounds = self._frame(env, rows, deploy)
         cells_in = msectors.inside(self.mcfg, msectors.geo(frame, bounds))
+        # at the deployment every unit is seen but an enemy hidden from the start (the state's vis: tools/nn/sim/stealth.py
+        # - as the observation, which never shows it)
+        seen_now = present & (own | u["vis"])
         if deploy:
-            tiles = gtiles.from_state(self.mcfg, u, u["cost"], s, frame, cells_in)
-            pos = self.pos_of_state(u, frame, present)
+            tiles = gtiles.from_state(self.mcfg, u, u["cost"], s, frame, cells_in, seen=seen_now)
+            pos = self.pos_of_state(u, frame, seen_now)
         else:
             o = {k: obs[k][rows] for k in ("tokens", "own", "attend", "pos")}
             tiles = gtiles.from_obs(self.mcfg, o, cells_in)
             pos = self.pos_of_obs(o)
         if getattr(self.gcfg, "tile_feats", "v1") == "v2":
             # the three numbers always zero in the simulator replaced (GeneralConfig.tile_feats; tiles.extra)
-            vis = present if deploy else (u["vis"] & present)
+            vis = seen_now if deploy else (u["vis"] & present)
             tiles = gtiles.with_extra(self.mcfg, tiles, u, own, alive & present, vis, num, self.b["lab"][b], frame)
         tile_ok = cells_in.any(-1)
         if deploy and self.gcfg.deploy == "net":
@@ -353,8 +356,9 @@ class Runtime:
 
     @staticmethod
     def pos_of_state(u, frame, present):
-        """[M, N, 7] the units' places at the deployment (the state: every unit seen, standing) in the side's frame
-        (frame [M]), as the observation's token would show them."""
+        """[M, N, 7] the units' places at the deployment (the state: every unit seen but a hidden enemy, standing) in the
+        side's frame (frame [M]), as the observation's token would show them; present [M, N]: the units shown (zeros
+        for the others)."""
         f, l = frame.point(u["x"].float(), u["z"].float())
         fc, fs = frame.facing(u["b"].float())
         z = torch.zeros_like(f)
@@ -656,7 +660,7 @@ class Runtime:
         sel = dep.nonzero().squeeze(1)
         G = self.G
         tile_w = gtiles.centres_world(self.mcfg, Frame(*(getattr(frame, k)[sel] for k in ("cx", "cz", "ux", "uz"))))
-        host = {k: v[sel].cpu().numpy() for k, v in u.items() if k in ("x", "z", "side", "men", "width", "sp_h", "sp_v")}
+        host = {k: v[sel].cpu().numpy() for k, v in u.items() if k in ("x", "z", "side", "men", "width", "sp_h", "sp_v", "vis")}
         main = res["main"][sel].cpu().numpy()
         place = res["place"][sel].cpu().numpy()
         tw = tile_w.cpu().numpy()
@@ -670,7 +674,8 @@ class Runtime:
         for i in range(len(sel)):
             side = int(s_np[i])
             own = host["side"][i] == side
-            foe = (host["side"][i] > 0) & ~own
+            # (the enemies seen: one hidden from the start is not, tools/nn/sim/stealth.py)
+            foe = (host["side"][i] > 0) & ~own & (host["vis"][i] if "vis" in host else True)
             enemy_c = (float(host["x"][i][foe].mean()), float(host["z"][i][foe].mean())) if foe.any() else (0.0, 0.0)
             units = []
             for n in np.nonzero(own)[0]:

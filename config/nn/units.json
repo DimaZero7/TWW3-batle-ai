@@ -211,7 +211,23 @@
    "checked": null
   },
   "hiding_scalar": {
-   "source": "land_units.hiding_scalar",
+   "source": "land_units.hiding_scalar: the unit's own share of an enemy's spotting distance (stealth: a Gutter Runner is seen within 0.8 of it)",
+   "checked": null
+  },
+  "spotting.scrub": {
+   "source": "land_units.spot_dist_scrub, m: how far the unit sees a hidden enemy out of woods (80; the Jezzails 160) - the simulator's open ground (tools/nn/sim/stealth.py)",
+   "checked": null
+  },
+  "spotting.tree": {
+   "source": "land_units.spot_dist_tree, m: the same into woods (60; the Jezzails 160); no woods in the simulator",
+   "checked": null
+  },
+  "projectile_resistance": {
+   "source": "battle_entities.projectile_penetration_resistance: what a man adds to a penetrating projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number means this entity can stop projectiles more easily')",
+   "checked": null
+  },
+  "projectile_speed_keep": {
+   "source": "battle_entities.projectile_penetration_speed_change: the share of its speed a projectile keeps passing through the man (0.9 men, 0.95 Skaven)",
    "checked": null
   },
   "attributes": {
@@ -221,6 +237,10 @@
   "abilities": {
    "source": "land_units_to_unit_abilites_junctions.ability",
    "checked": "card owned abilities"
+  },
+  "spells": {
+   "source": "ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md 1); only on casters",
+   "checked": null
   },
   "multiplayer_cost": {
    "source": "main_units.multiplayer_cost",
@@ -322,6 +342,14 @@
    "source": "projectiles.projectile_penetration",
    "checked": null
   },
+  "missile.penetration_max": {
+   "source": "projectile_penetration_junctions.max_penetration of missile.penetration: the counter a projectile goes on through (each man struck adds his projectile_resistance; -1 no limit, absent 0: it stops in the first)",
+   "checked": null
+  },
+  "missile.penetration_cap": {
+   "source": "projectile_penetration_junctions.entity_size_cap of missile.penetration: it passes only a man of a smaller size (very_small < small < medium < large < very_large)",
+   "checked": null
+  },
   "missile.shot_type": {
    "source": "projectiles.shot_type",
    "checked": null
@@ -332,7 +360,7 @@
   }
  },
  "_missing": {
-  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units (not in the passport)",
+  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the pools)",
   "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
@@ -345,6 +373,17 @@
   "stats": "special_ability_phase_stat_effects rows of the phase: stat, how (add / mult), value"
  },
  "contact_phases": {
+  "wh2_dlc09_unit_contact_shieldbreaker": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "stat_missile_block_chance",
+     "how": "add",
+     "value": -24.0
+    }
+   ]
+  },
   "wh2_dlc12_unit_contact_suppressive_fire": {
    "duration_s": 10.0,
    "effect": "negative",
@@ -468,6 +507,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "encourages",
     "hide_forest"
@@ -554,6 +599,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "charge_defense_vs_large",
     "charge_reflection",
@@ -636,6 +687,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "hide_forest"
    ],
@@ -669,6 +726,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": null
    },
    "card_check": "equal"
@@ -741,6 +800,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "encourages",
     "hide_forest"
@@ -828,6 +893,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "charge_defense_vs_large",
     "charge_reflection",
@@ -913,6 +984,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "expendable",
     "hide_forest"
@@ -997,6 +1074,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "expendable",
     "hide_forest"
@@ -1034,6 +1117,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": null
    },
    "card_check": "equal"
@@ -1106,6 +1191,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "charge_defense_vs_large",
     "charge_reflection",
@@ -1188,6 +1279,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "charge_defense_vs_large",
     "charge_reflection",
@@ -1273,6 +1370,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "charge_defense_vs_large",
     "charge_reflection",
@@ -1355,6 +1458,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "hide_forest"
    ],
@@ -1435,6 +1544,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "hide_forest",
     "unbreakable"
@@ -1519,6 +1634,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "hide_forest"
    ],
@@ -1599,6 +1720,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest",
@@ -1634,6 +1761,8 @@
     "explosion": null,
     "penetration": "low",
     "shot_type": "small_arm_default",
+    "penetration_max": 2,
+    "penetration_cap": "small",
     "contact_phase": null
    },
    "card_check": "no card"
@@ -1706,6 +1835,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "expendable",
     "hide_forest"
@@ -1790,6 +1925,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -1873,6 +2014,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 0.9,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest"
@@ -1910,6 +2057,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": null
    },
    "card_check": "no card"
@@ -1982,6 +2131,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "hide_forest"
    ],
@@ -2015,6 +2170,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": null
    },
    "card_check": "equal"
@@ -2087,6 +2244,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "hide_forest"
    ],
@@ -2120,6 +2283,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": null
    },
    "card_check": "equal"
@@ -2192,6 +2357,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -2275,6 +2446,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "charge_defense_vs_large",
     "charge_reflection",
@@ -2360,6 +2537,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -2443,6 +2626,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 0.9,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest",
@@ -2481,6 +2670,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": null
    },
    "card_check": "equal"
@@ -2553,6 +2744,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -2589,6 +2786,8 @@
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
     "contact_phase": "wh2_dlc12_unit_contact_suppressive_fire"
    },
    "card_check": "no card"
@@ -2661,6 +2860,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -2745,6 +2950,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -2829,6 +3040,12 @@
    "can_skirmish": false,
    "can_brace": false,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest",
@@ -2914,6 +3131,12 @@
    "can_skirmish": false,
    "can_brace": false,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest",
@@ -2929,6 +3152,941 @@
     "missile": 0.0
    },
    "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_dlc13_emp_inf_huntsmen_0": {
+   "land_unit": "wh2_dlc13_emp_inf_huntsmen_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 90,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 4,
+   "entity": "wh_dlc04_infantry_free_company_blood_dismembers",
+   "spacing": {
+    "template": "wh2_dlc13_emp_inf_huntsmen",
+    "h": 2.5,
+    "v": 2.4,
+    "scatter": 1.3,
+    "chaotic": false
+   },
+   "hp_per_man": 69,
+   "hp_total": 6210,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.6,
+    "charge": 4.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 3.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 240.0
+   },
+   "melee": {
+    "attack": 16,
+    "defence": 17,
+    "charge_bonus": 4,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 25,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 55,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "guerrilla_deploy",
+    "ignore_trees",
+    "mounted_fire_move",
+    "stalk"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 650,
+   "combat_potential": {
+    "melee": 225.0,
+    "missile": 425.0
+   },
+   "missile": {
+    "weapon": "wh2_dlc13_emp_bow_huntsmen",
+    "projectile": "wh2_dlc13_emp_bow_arrow_huntsman",
+    "ammo": 22,
+    "accuracy": 10,
+    "category": "arrow",
+    "range_m": 160,
+    "min_range_m": 0,
+    "reload_s": 11.0,
+    "damage": 16,
+    "ap_damage": 4,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "dual_low_fixed",
+    "direct": false,
+    "muzzle_velocity": 45.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 120.0,
+    "calibration_area_m": 4.3,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 35.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
+    "contact_phase": null
+   },
+   "card_check": "no card"
+  },
+  "wh3_dlc25_emp_inf_nuln_ironsides": {
+   "land_unit": "wh3_dlc25_emp_inf_nuln_ironsides",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 60,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 3,
+   "entity": "wh3_dlc25_emp_inf_nuln_ironsides",
+   "spacing": {
+    "template": "infantry_ranged_ordered",
+    "h": 1.5,
+    "v": 1.5,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 104,
+   "hp_total": 6240,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.3,
+    "charge": 4.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 3.5,
+    "deceleration": 5.0,
+    "turn_deg_s": 180.0
+   },
+   "melee": {
+    "attack": 32,
+    "defence": 26,
+    "charge_bonus": 12,
+    "weapon": "wh_main_emp_sword",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 60,
+   "armour_material": "plate",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 65,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh3_dlc25_unit_passive_blackpowder_discipline"
+   ],
+   "multiplayer_cost": 825,
+   "combat_potential": {
+    "melee": 400.0,
+    "missile": 475.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_rifle_ironsides",
+    "projectile": "wh3_dlc25_emp_rifle_bullet_ironsides",
+    "ammo": 30,
+    "accuracy": 10,
+    "category": "musket",
+    "range_m": 145,
+    "min_range_m": 0,
+    "reload_s": 7.0,
+    "damage": 5,
+    "ap_damage": 17,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 135.0,
+    "calibration_area_m": 0.5,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 30.0,
+    "explosion": null,
+    "penetration": "low",
+    "shot_type": "small_arm_default",
+    "penetration_max": 2,
+    "penetration_cap": "small",
+    "contact_phase": null
+   },
+   "card_check": "no card"
+  },
+  "wh3_dlc25_emp_inf_hochland_long_rifles": {
+   "land_unit": "wh3_dlc25_emp_inf_hochland_long_rifles",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 32,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 3,
+   "entity": "wh_main_infantry_handgunners_blood_dismembers",
+   "spacing": {
+    "template": "wh2_main_inf_chaotic_formation_loose",
+    "h": 2.2,
+    "v": 2.8,
+    "scatter": 2.8,
+    "chaotic": true
+   },
+   "hp_per_man": 120,
+   "hp_total": 3840,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.3,
+    "charge": 4.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 3.5,
+    "deceleration": 5.0,
+    "turn_deg_s": 180.0
+   },
+   "melee": {
+    "attack": 18,
+    "defence": 20,
+    "charge_bonus": 4,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 60,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "hide_forest",
+    "snipe"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 900,
+   "combat_potential": {
+    "melee": 100.0,
+    "missile": 800.0
+   },
+   "missile": {
+    "weapon": "wh3_dlc25_emp_rifle_hochland",
+    "projectile": "wh3_dlc25_emp_inf_rifle_bullet_hochland",
+    "ammo": 24,
+    "accuracy": 10,
+    "category": "musket",
+    "range_m": 260,
+    "min_range_m": 0,
+    "reload_s": 13.0,
+    "damage": 7,
+    "ap_damage": 30,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 160.0,
+    "calibration_area_m": 0.6,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 30.0,
+    "explosion": null,
+    "penetration": "medium_1",
+    "shot_type": "small_arm_default",
+    "penetration_max": 1,
+    "penetration_cap": "medium",
+    "contact_phase": null
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_gutter_runners_0": {
+   "land_unit": "wh2_main_skv_inf_gutter_runners_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 5,
+   "entity": "wh2_main_skv_infantry_fast_360",
+   "spacing": {
+    "template": "wh2_main_inf_chaotic_formation",
+    "h": 1.9,
+    "v": 1.9,
+    "scatter": 2.8,
+    "chaotic": true
+   },
+   "hp_per_man": 58,
+   "hp_total": 6960,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 26,
+    "defence": 20,
+    "charge_bonus": 14,
+    "weapon": "wh2_main_skv_claw_blade",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 54,
+   "damage_resist": {
+    "all": 0,
+    "physical": 20,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "guerrilla_deploy",
+    "mounted_fire_move",
+    "stalk"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_snare_net",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 700,
+   "combat_potential": {
+    "melee": 200.0,
+    "missile": 500.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_throwing_star_gutter_runners",
+    "projectile": "wh2_main_skv_throwing_star_gutter_runners",
+    "ammo": 12,
+    "accuracy": 15,
+    "category": "musket",
+    "range_m": 70,
+    "min_range_m": 0,
+    "reload_s": 7.0,
+    "damage": 11,
+    "ap_damage": 3,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 48.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 50.0,
+    "calibration_area_m": 1.8,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 180.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
+    "contact_phase": null
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_gutter_runners_1": {
+   "land_unit": "wh2_main_skv_inf_gutter_runners_1",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 5,
+   "entity": "wh2_main_skv_infantry_fast_360",
+   "spacing": {
+    "template": "wh2_main_inf_chaotic_formation",
+    "h": 1.9,
+    "v": 1.9,
+    "scatter": 2.8,
+    "chaotic": true
+   },
+   "hp_per_man": 58,
+   "hp_total": 6960,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 26,
+    "defence": 20,
+    "charge_bonus": 14,
+    "weapon": "wh2_main_skv_claw_blade_poison",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": "wh_main_unit_contact_poison"
+   },
+   "armour": 20,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 54,
+   "damage_resist": {
+    "all": 0,
+    "physical": 20,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "guerrilla_deploy",
+    "mounted_fire_move",
+    "stalk"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_snare_net",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 750,
+   "combat_potential": {
+    "melee": 200.0,
+    "missile": 550.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_throwing_star_gutter_runners_poison",
+    "projectile": "wh2_main_skv_throwing_star_gutter_runners_poison",
+    "ammo": 12,
+    "accuracy": 15,
+    "category": "musket",
+    "range_m": 70,
+    "min_range_m": 0,
+    "reload_s": 7.0,
+    "damage": 11,
+    "ap_damage": 3,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 48.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 50.0,
+    "calibration_area_m": 1.8,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 180.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
+    "contact_phase": "wh_main_unit_contact_poison"
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_gutter_runner_slingers_0": {
+   "land_unit": "wh2_main_skv_inf_gutter_runner_slingers_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 5,
+   "entity": "wh2_main_skv_infantry_fast",
+   "spacing": {
+    "template": "wh2_main_inf_chaotic_formation_loose",
+    "h": 2.2,
+    "v": 2.8,
+    "scatter": 2.8,
+    "chaotic": true
+   },
+   "hp_per_man": 58,
+   "hp_total": 6960,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 26,
+    "defence": 20,
+    "charge_bonus": 10,
+    "weapon": "wh2_main_skv_claw_blade",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 54,
+   "damage_resist": {
+    "all": 0,
+    "physical": 20,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "guerrilla_deploy",
+    "stalk"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_snare_net",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 700,
+   "combat_potential": {
+    "melee": 200.0,
+    "missile": 500.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_sling_gutter_runners",
+    "projectile": "wh2_main_skv_sling_gutter_runners",
+    "ammo": 24,
+    "accuracy": 15,
+    "category": "sling",
+    "range_m": 140,
+    "min_range_m": 0,
+    "reload_s": 8.0,
+    "damage": 12,
+    "ap_damage": 2,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "dual_low_fixed",
+    "direct": false,
+    "muzzle_velocity": 50.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 85.0,
+    "calibration_area_m": 3.8,
+    "marksmanship": 15.0,
+    "fire_arc_deg": 30.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
+    "contact_phase": null
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_gutter_runner_slingers_1": {
+   "land_unit": "wh2_main_skv_inf_gutter_runner_slingers_1",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 5,
+   "entity": "wh2_main_skv_infantry_fast",
+   "spacing": {
+    "template": "wh2_main_inf_chaotic_formation_loose",
+    "h": 2.2,
+    "v": 2.8,
+    "scatter": 2.8,
+    "chaotic": true
+   },
+   "hp_per_man": 58,
+   "hp_total": 6960,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 26,
+    "defence": 20,
+    "charge_bonus": 10,
+    "weapon": "wh2_main_skv_claw_blade_poison",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": "wh_main_unit_contact_poison"
+   },
+   "armour": 20,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 54,
+   "damage_resist": {
+    "all": 0,
+    "physical": 20,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "guerrilla_deploy",
+    "stalk"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_snare_net",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 750,
+   "combat_potential": {
+    "melee": 200.0,
+    "missile": 550.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_sling_gutter_runners_poison",
+    "projectile": "wh2_main_skv_sling_gutter_runners_poison",
+    "ammo": 24,
+    "accuracy": 15,
+    "category": "sling",
+    "range_m": 140,
+    "min_range_m": 0,
+    "reload_s": 8.0,
+    "damage": 12,
+    "ap_damage": 2,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "dual_low_fixed",
+    "direct": false,
+    "muzzle_velocity": 50.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 85.0,
+    "calibration_area_m": 3.8,
+    "marksmanship": 15.0,
+    "fire_arc_deg": 30.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
+    "contact_phase": "wh_main_unit_contact_poison"
+   },
+   "card_check": "no card"
+  },
+  "wh2_dlc12_skv_inf_warplock_jezzails_0": {
+   "land_unit": "wh2_dlc12_skv_inf_warplock_jezzails_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 32,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 3,
+   "entity": "wh2_main_skv_infantry_weaponteam_jezzails",
+   "spacing": {
+    "template": "wh2_main_skv_weaponteam_jezzails",
+    "h": 4.4,
+    "v": 4.3,
+    "scatter": 2.0,
+    "chaotic": false
+   },
+   "hp_per_man": 123,
+   "hp_total": 3936,
+   "mass": 150.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 1.3,
+   "radii_ratio": 0.6,
+   "speed": {
+    "walk": 1.4,
+    "run": 4.2,
+    "charge": 4.6,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 16,
+    "defence": 16,
+    "charge_bonus": 2,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 70,
+   "armour_material": "heavy_metal",
+   "shield": {
+    "key": "wh_missile_block_55_wood",
+    "missile_block_chance": 55
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 160,
+    "tree": 160
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 1000,
+   "combat_potential": {
+    "melee": 150.0,
+    "missile": 1050.0
+   },
+   "missile": {
+    "weapon": "wh2_dlc12_skv_warp_jezzails",
+    "projectile": "wh2_dlc12_skv_warp_jezzails_bullet",
+    "ammo": 22,
+    "accuracy": 10,
+    "category": "musket",
+    "range_m": 275,
+    "min_range_m": 0,
+    "reload_s": 12.0,
+    "damage": 6,
+    "ap_damage": 30,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 150.0,
+    "calibration_area_m": 0.6,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 25.0,
+    "explosion": null,
+    "penetration": "medium_1",
+    "shot_type": "small_arm_default",
+    "penetration_max": 1,
+    "penetration_cap": "medium",
+    "contact_phase": "wh2_dlc09_unit_contact_shieldbreaker"
+   },
    "card_check": "no card"
   }
  }

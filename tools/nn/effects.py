@@ -48,12 +48,17 @@ CONDITIONS = {
     "morale_is_higher_than_wavering": "not_wavering",
     "health_below_50%_base": "hp_below_half",
     "health_below_25%": "hp_below_quarter",
+    # (25.10.2026, Blackpowder Discipline) moving: the unit moves (the observed `mv`); climbing or manning siege
+    # equipment on a platform: never on our flat open maps (no walls, towers or ladders)
+    "moving": "moving",
+    "climbing_manning_eq_on_platform": "climbing",
 }
 # Words for the predicates (the `when` text).
 SAY = {"out_of_melee": "out of melee", "in_melee": "in melee",
        "losing_melee": "not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it)",
        "morale_below_half": "morale below half of leadership", "not_wavering": "steady (not wavering or routing)",
-       "hp_below_half": "health below 50 % of the start", "hp_below_quarter": "health below 25 %"}
+       "hp_below_half": "health below 50 % of the start", "hp_below_quarter": "health below 25 %",
+       "moving": "moving", "climbing": "climbing or manning equipment on a platform (never on our maps)"}
 # (stat, how) of the database the simulator lays on a unit (the same as tools/nn/sim/abilities.SIM_STATS).
 SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"): "charge_speed",
              ("stat_melee_attack", "add"): "attack", ("stat_melee_defence", "add"): "defence",
@@ -61,7 +66,12 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
              ("stat_resistance_physical", "add"): "resist_physical",
              # the missile damage (poison's x0.85: the contact effects only, tools/nn/sim/effects.py E_STATS)
-             ("scalar_missile_damage_base", "mult"): "m_damage", ("scalar_missile_damage_ap", "mult"): "m_ap"}
+             ("scalar_missile_damage_base", "mult"): "m_damage", ("scalar_missile_damage_ap", "mult"): "m_ap",
+             # 25.10.2026 (line g43): the shield breaker's -24 to the shield's block chance (percentage points of it), the
+             # Blackpowder Discipline's accuracy (added to land_units accuracy + marksmanship: the spread) and reload
+             # skill (the reload max(4 s, base x (100 - skill) %)); tools/nn/sim/effects.py
+             ("stat_missile_block_chance", "add"): "shield", ("stat_accuracy", "add"): "accuracy",
+             ("stat_reloading", "add"): "reloading"}
 # Rules the simulator acts on (tools/nn/sim/effects.py RULES): rule -> what the simulator does.
 SIM_RULES = {
     "unbreakable": "morale points never below leadership: never wavers or routs (morale.py)",
@@ -71,6 +81,7 @@ SIM_RULES = {
                          "a charge (battle.py)",
     "fire_while_moving": "aims and shoots while moving (battle.py)",
     "fatigue_immune": "gains no fatigue (fatigue.py)",
+    "stalk": "hides anywhere: any ground is cover for it (tools/nn/sim/stealth.py; config/nn/sim.json stealth)",
 }
 # Unit attributes: the database gives the key only (unit_attributes_tables); the engine's rule, its
 # numbers and where they come from. `rules`: the flags the attribute sets; `schema_why`: why the
@@ -107,8 +118,10 @@ ATTRIBUTES = {
     "hide_forest": {"name": "Hide (forest)", "rules": ["hide_forest"], "does": "hidden while in woods",
                     "kb": KB + "abilities.md#attributes-selection",
                     "schema_why": "the simulator's maps have no woods and no hiding"},
-    "stalk": {"name": "Stalk", "rules": ["stalk"], "does": "hidden while moving, anywhere",
-              "kb": KB + "abilities.md#attributes-selection", "schema_why": "the simulator has no hiding"},
+    "stalk": {"name": "Stalk", "rules": ["stalk"],
+              "does": "hides in any terrain, open ground too (fandom 'Stalk'); seen by an enemy within its spotting "
+                      "distance x the unit's hiding_scalar, revealed by firing and melee, not by running",
+              "kb": KB + "abilities.md#attributes-selection"},
     "immune_to_psychology": {"name": "Immune to Psychology", "rules": ["immune_to_psychology"],
                              "does": "immune to fear and terror", "kb": KB + "abilities.md#attributes-selection",
                              "schema_why": "no fear or terror in the simulator: nothing to act on"},
@@ -120,6 +133,12 @@ ATTRIBUTES = {
                       "kb": KB + "morale.md", "schema_why": "terror is not modelled"},
     "fatigue_immune": {"name": "Perfect Vigour", "rules": ["fatigue_immune"], "does": "never tires",
                        "kb": KB + "fatigue.md"},
+    "ignore_trees": {"name": "Ignore Trees", "rules": ["ignore_trees"], "does": "shoots through trees",
+                     "kb": KB + "abilities.md#attributes-selection", "schema_why": "flat maps only: no trees"},
+    "snipe": {"name": "Snipe", "rules": ["snipe"], "does": "firing does not reveal the hidden unit (fandom 'Snipe')",
+              "kb": KB + "abilities.md#attributes-selection",
+              "schema_why": "the unit that has it (Hochland Long Rifles) hides only in woods (hide_forest): no woods on "
+                            "our maps, it is never hidden"},
     "strider": {"name": "Strider", "rules": ["strider"], "does": "ignores terrain penalties, passes trees",
                 "kb": KB + "abilities.md#attributes-selection", "schema_why": "flat maps only"},
     "moulder_monster": {"name": "Moulder Monster", "rules": ["moulder_monster"],
@@ -135,7 +154,8 @@ ATTRIBUTES = {
 # after the attacker began to leave melee, the suppressing fire's 10.5-11 s after the gun's last shot.
 CONTACT_NAMES = {"wh_main_unit_contact_poison": "Poison!",
                  "wh2_main_unit_contact_plague_monk_censer_morale": "Contaminated!",
-                 "wh2_dlc12_unit_contact_suppressive_fire": "Suppressed!"}
+                 "wh2_dlc12_unit_contact_suppressive_fire": "Suppressed!",
+                 "wh2_dlc09_unit_contact_shieldbreaker": "Shieldbreaker"}
 KB_CONTACT = KB + "abilities.md#contact-effects"
 # The ability attributes (special_ability_phase_attribute_effects) that are rules of the simulator.
 ABILITY_ATTRIBUTE_RULES = {"unbreakable": "unbreakable", "immune_to_psychology": "immune_to_psychology",
@@ -146,7 +166,9 @@ KB_ABILITIES = {"strength_in_numbers": KB + "abilities.md#attributes-selection",
                 "frenzy": KB + "abilities.md#attributes-selection",
                 "hold_the_line": KB + "morale.md#modifiers-points",
                 "strength_of_the_penitent": "docs/en/training/units.md#flagellants-greatswords-free-company-militia",
-                "single_entity": KB + "single-entities.md"}
+                "single_entity": KB + "single-entities.md",
+                "snare_net": KB + "abilities.md#attributes-selection",
+                "blackpowder_discipline": KB + "abilities.md#attributes-selection"}
 MISSING = {
     "effect bundles": "effect_bundles / effect_bonus_value_*: campaign effects (skills, techs, the contexts of "
                       "battle_context_unit_attribute_junctions such as causes_fear vs a culture); custom battles have none",
@@ -194,8 +216,17 @@ def ability_effect(key, p):
         stats.append({"stat": e["stat"], "how": e["how"], "value": e["value"], "on": on, "sim": sim})
         if sim is None:
             unknown.append(f"{e['stat']} {e['how']}")
-        if "enemies" in on:
-            unknown.append("effects on enemies")
+    # the charge speed of an effect that lays both scalar_speed and scalar_charge_speed on the same units (the Snare Net
+    # on enemies): the game's charge is the speed's x the charge's - the simulator's rule takes a charge multiplier as
+    # the whole of it, so the catalogue writes the product as its sim_value (0.9 x 0.9 = 0.81)
+    for c in stats:
+        if (c["stat"], c["how"]) != ("scalar_charge_speed", "mult"):
+            continue
+        sp = [s for s in stats if (s["stat"], s["how"]) == ("scalar_speed", "mult") and s["on"] == c["on"]]
+        if sp:
+            c["sim_value"] = round(float(c["value"]) * float(sp[0]["value"]), 6)
+            c["sim_why"] = ("the charge speed as the game moves it: scalar_speed x scalar_charge_speed (the simulator "
+                            "takes an effect's charge multiplier as the whole charge)")
     rules = []
     for a in p.get("attributes") or ():
         rule = ABILITY_ATTRIBUTE_RULES.get(a["attribute"], a["attribute"])
@@ -215,6 +246,13 @@ def ability_effect(key, p):
     else:
         needs = ctx
         when = "always" if not needs else "while " + _say(needs)
+    delay = float(p.get("delay_s") or 0.0)
+    if delay > 0 and not timed:
+        # (the passport's delay_s: its first phases lay nothing - Blackpowder Discipline's 10 s) on once its conditions
+        # have held that long without a break
+        when += f", once that has held {delay:g} s"
+    if any("enemies" in s["on"] for s in stats):
+        when += f"; on enemies whose centre is within {float(p.get('range_m') or 0.0):g} m of its centre"
     if off:
         when += ("; " if timed else ", ") + "off while " + _say(off, " or ")
     when = when.replace("always, off while", "off while")
@@ -239,6 +277,7 @@ def ability_effect(key, p):
     parts = [f"{s['stat']} {s['how']} {s['value']:g}" for s in stats if s["sim"]] + [f"rule {r}" for r in sim_rules]
     return {"kind": "timed" if timed else "passive", "name": name_of(key), "rules": rules, "stats": stats,
             "range_m": float(p.get("range_m") or 0.0), "needs": needs, "off_when": off, "timed": timed,
+            **({"delay_s": delay} if delay > 0 and not timed else {}),
             "when": when, "source": "db: " + ", ".join(sources) + f" ({key}); config/nn/abilities.json",
             "kb": KB_ABILITIES.get(tail), "does": None,
             "modelled": modelled, "sim": ("; ".join(parts) + f" ({when})") if modelled else None,

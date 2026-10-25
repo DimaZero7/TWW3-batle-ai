@@ -182,6 +182,24 @@
       "group": "wh3_default_land_melee_infantry_main_frontline_spears_high_quality",
       "quality": "tier_2_step_1_units"
      }
+    ],
+    "wh2_dlc13_emp_inf_huntsmen_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_backline",
+      "quality": "tier_2_step_2_units"
+     }
+    ],
+    "wh3_dlc25_emp_inf_nuln_ironsides": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_backline",
+      "quality": "tier_2_step_4_units"
+     }
+    ],
+    "wh3_dlc25_emp_inf_hochland_long_rifles": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_backline",
+      "quality": "tier_2_step_5_units"
+     }
     ]
    }
   },
@@ -370,6 +388,36 @@
      {
       "group": "wh3_default_land_monsters_flanking",
       "quality": "tier_2_step_1_units"
+     }
+    ],
+    "wh2_main_skv_inf_gutter_runners_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_skirmisher",
+      "quality": "tier_2_step_3_units"
+     }
+    ],
+    "wh2_main_skv_inf_gutter_runners_1": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_skirmisher",
+      "quality": "tier_2_step_3_units"
+     }
+    ],
+    "wh2_main_skv_inf_gutter_runner_slingers_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_backline",
+      "quality": "tier_2_step_3_units"
+     }
+    ],
+    "wh2_main_skv_inf_gutter_runner_slingers_1": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_backline",
+      "quality": "tier_2_step_3_units"
+     }
+    ],
+    "wh2_dlc12_skv_inf_warplock_jezzails_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_heavy_long_range",
+      "quality": "tier_3_step_1_units"
      }
     ]
    }

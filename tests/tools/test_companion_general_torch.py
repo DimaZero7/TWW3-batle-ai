@@ -293,10 +293,13 @@ def test_without_a_general_the_companion_is_as_it_was():
     plain = policy.Actor(TINY).eval()
     assert cg.config(plain) is None                       # a checkpoint without a general: no general
     assert loop.Brain(plain).general is None
-    # a general whose task input is still at zero: the executor plays the unit network's orders to the bit
+    # a general whose task input is still at zero: the executor plays the unit network's orders to the bit (the task's
+    # masks off: with them the untrained general's random plan may cut a unit's choices - which plan depends on the
+    # random draws of the actor's shape: the token's 19 columns of 25.10.2026 made seed 3's lord a holder)
+    import dataclasses
     torch.manual_seed(3)
     base = policy.Actor(TINY).eval()
-    wrapped = executor.wrap(base, GCFG).eval()
+    wrapped = executor.wrap(base, dataclasses.replace(GCFG, task_mask=False)).eval()
     a = loop.Brain(base, greedy=True)
     b = loop.Brain(wrapped, greedy=True, general=cg.config(wrapped))
     for move, t in enumerate(range(0, 5), start=1):

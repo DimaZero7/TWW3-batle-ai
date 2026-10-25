@@ -58,6 +58,41 @@ def test_path_first_triton_matches_torch():
     assert not bool(hit_own.any())
 
 
+def _path_after_case(dev):
+    """The path_after kernel's case (25.10.2026, a projectile through several men): torch and Triton on device dev."""
+    g, x, z, valid, hit, uid, radius, height = _men(seed=4)
+    B, M = x.shape
+    P = 200
+    lx = torch.rand((B, P), generator=g) * 50
+    lz = torch.rand((B, P), generator=g) * 50
+    a = torch.rand((B, P), generator=g) * 6.283
+    ex, ez = torch.cos(a), torch.sin(a)
+    tan = 0.02 + torch.rand((B, P), generator=g) * 0.3
+    sh = torch.randint(0, M, (B, P), generator=g)
+    ok = torch.rand((B, P), generator=g) < 0.8
+    to = lambda *t: [v.to(dev) for v in t]
+    x, z, valid, hit, uid, radius, height, lx, lz, ex, ez, tan, sh, ok = to(x, z, valid, hit, uid, radius, height,
+                                                                          lx, lz, ex, ez, tan, sh, ok)
+    table = cells.Table(x, z, valid, 3.6, 4096)
+    npts = torch.randint(1, 15, (B, P), generator=g).to(dev)
+    args = (table, 12, 14, x, z, hit, uid, radius, height, lx, lz, ex, ez, tan, sh, ok)
+    first = K.path_first(*args, use_triton=False, npts=npts, own_pass=True)
+    fc = first.clamp(min=0)
+    bmax = -((x.gather(1, fc) - lx) * ex + (z.gather(1, fc) - lz) * ez) - 1e-4
+    ok2 = ok & (first >= 0)
+    args2 = args[:-1] + (ok2,)
+    want = K.path_first(*args2, use_triton=False, npts=npts, own_pass=True, bmax=bmax)
+    got = K.path_first(*args2, use_triton=True, npts=npts, own_pass=True, bmax=bmax)
+    return first, want, got
+
+
+@cuda
+def test_path_after_triton_matches_torch():
+    first, want, got = _path_after_case("cuda")
+    assert int((want >= 0).sum()) > 20 and not bool(((want == first) & (want >= 0)).any())   # the next man, not the first
+    assert torch.equal(got, want)
+
+
 def test_a_projectile_passes_the_men_of_its_own_unit():
     # lab.json missile.own_pass: a flat bullet over its own front man (same unit) goes on to the enemy behind him
     x, z = torch.tensor([[0.0, 0.0, 0.0]]), torch.tensor([[-2.0, 0.0, 20.0]])      # shooter, his front man, the enemy

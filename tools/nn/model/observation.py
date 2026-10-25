@@ -189,15 +189,30 @@ SHAPE_SCALE = (2.0, 1 / 30, 1 / 30, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0) + (4.0,) * SHA
 # seconds (module doc).
 FX_STATS = effects.FX_STAT_NAMES
 FIGHT = ("under_fire", "melee_s")
-NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE + FX_STATS + FIGHT)
+# Then (25.10.2026, line g43; older checkpoints: zero weights) FX_STATS2 - the new units' effect stats (effects.FX_STATS2:
+# charge speed, shield block chance, accuracy, reload skill; own units and seen enemies, as FX_STATS) - and SIGHT: hidden
+# (the unit is hidden from the other side now - the state's vis false: own units, every unit in the critic's view; a
+# hidden enemy is not shown at all), the infantrymen a projectile of it strikes past the first / passport.PIERCE_MEN and
+# its spotting distance / passport.SPOT_M (both sides: the roster's passports, passport.sight).
+FX_STATS2 = effects.FX_STAT2_NAMES
+SIGHT = ("hidden", "pierce_men", "spotting")
+# The innate effects' pairs (effects.NAMES, the catalogue's append-only order): the first FX_MID effects stand in the
+# token's middle, after the passport (as since 11.10.2026); the effects that came with line g43 (25.10.2026: stalk,
+# snipe, ignore_trees, the shield breaker, Snare Net, Blackpowder Discipline) are the tail group FX_NEW after FIGHT - so
+# every older token is a beginning of today's (old_columns, encoder.pad_inputs). The next effects of the catalogue need a
+# group of their own at the end (test_nn_g43_input: FX_MID + len(FX_NEW) pairs = the catalogue's).
+FX_MID = 19
+FX_NEW = effects.NAMES[2 * FX_MID:]
+NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE))
+         + effects.NAMES[:2 * FX_MID] + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE + FX_STATS + FIGHT
+         + FX_NEW + FX_STATS2 + SIGHT)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT)
+TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT, FX_NEW, FX_STATS2, SIGHT)
 
 
 def old_columns(width):
@@ -205,8 +220,8 @@ def old_columns(width):
     grew past OLD_EFFECTS (11.10.2026: the new units' attributes and contact effects, then WEAPON after ORDER) that had
     columns after its effect pairs (VOLLEY 03.10, ARC and ORDER 07.10.2026): its effect pairs keep their places, those
     columns move behind the new pairs to their places by name, the new columns get zero weights (encoder.TokenEncoder).
-    A token of today's columns without the last groups of TAIL (AIM, RECEIVED, 13.10.2026): its columns stay where
-    they are.
+    A token of today's columns without the last groups of TAIL (AIM, RECEIVED, 13.10.2026; ...; FX_NEW, FX_STATS2, SIGHT
+    25.10.2026): its columns stay where they are.
     None: not such a token (today's; a token that ended with its effect pairs, or older still, grew at the end only:
     encoder.pad_inputs)."""
     width_now = TOKEN
@@ -215,7 +230,7 @@ def old_columns(width):
         if width == width_now:
             return list(range(width))
     base = len(DYNAMIC) + len(FLAGS) + passport.SIZE
-    E, after = effects.SIZE // 2, VOLLEY + ARC + ORDER
+    E, after = FX_MID, VOLLEY + ARC + ORDER
     for e_old in OLD_EFFECTS:
         head = base + 2 * e_old
         k = width - head
@@ -271,6 +286,7 @@ class Setup:
         self.arc = np.stack([passport.fire_arc(k) for k in self.keys])        # [B, N] fire arc / 180 (ARC)
         self.weapon = np.stack([passport.weapon(k) for k in self.keys])       # [B, N, len(WEAPON)] (WEAPON)
         self.aim = np.stack([passport.aim(k) for k in self.keys])             # [B, N, len(AIM)] (AIM)
+        self.sight = np.stack([passport.sight(k) for k in self.keys])         # [B, N, 2] (SIGHT's passport numbers)
         ab = [abilities.slots(k) for k in self.keys]
         self.abil_idx = np.stack([a[0] for a in ab])                           # [B, N, SLOTS] row in abilities.table
         self.abil_use = np.stack([a[1] for a in ab])                           # [B, N, SLOTS] may be ordered
@@ -295,7 +311,7 @@ class Setup:
                                        abil_idx=t(self.abil_idx), abil_use=t(self.abil_use),
                                        abil_fx=t(self.abil_fx), fx_owned=t(self.fx_owned), cost=t(self.cost),
                                        reload=t(self.reload), arc=t(self.arc), weapon=t(self.weapon),
-                                       aim=t(self.aim))
+                                       aim=t(self.aim), sight=t(self.sight))
         return self._cache[key]
 
     def character(self, side):
@@ -327,6 +343,7 @@ class _Arrays:
     arc: object = None         # [B, N] passport fire arc / 180 (Setup.arc, ARC); None: unknown, the input 0
     weapon: object = None      # [B, N, len(WEAPON)] (Setup.weapon, WEAPON); None: unknown, the inputs 0
     aim: object = None         # [B, N, len(AIM)] (Setup.aim, AIM); None: unknown, the inputs 0
+    sight: object = None       # [B, N, 2] (Setup.sight, SIGHT's passport numbers); None: unknown, the inputs 0
 
 
 @dataclass
@@ -517,10 +534,14 @@ def observe(state, setup, side, memory=None, full=False):
     shown = S.present if full else (own | sees)
     magic = m.stack([m.where(shown, _f(m, _field(state, k, xs) > 0), xs * 0) for k in ("cast_now", "bm_hit")], -1)
     form = _shape(m, state, shown, xs)
-    fxs = _f(m, effects.stats_on(m, fx_on & shown[..., None]))
+    fxs_all = _f(m, effects.stats_on(m, fx_on & shown[..., None]))
+    nfx = len(FX_STATS)
+    fxs, fxs2 = fxs_all[..., :nfx], fxs_all[..., nfx:]
     fight, melee_t0 = _fight(m, state, S, memory, tn, alive, sees, shown, xs)
-    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx, magic, form, fxs,
-                       fight], -1) * _f(m, S.present)[..., None])
+    sight = _sight(m, state, S, shown, xs)
+    fx_mid, fx_new = fx[..., :2 * FX_MID], fx[..., 2 * FX_MID:]
+    tokens = (_cat(m, [dyn, _f(m, S.passport), fx_mid, late, arc[..., None], order, weapon, aim, rx, magic, form, fxs,
+                       fight, fx_new, fxs2, sight], -1) * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)
@@ -573,6 +594,17 @@ def _fight(m, state, S, memory, tn, alive, sees, shown, like):
     secs = m.where(melee, m.clip((tn - t0) / MELEE_S, 0, 1), zero)
     out = m.stack([_f(m, under), _f(m, secs)], -1)
     return m.where(shown[..., None], out, out * 0), t0
+
+
+def _sight(m, state, S, shown, like):
+    """[B, N, len(SIGHT)] (module doc): hidden - shown (own units; the critic's: all) and the state's vis false (hidden
+    from the other side; missing vis: none hidden) - then the passport's pierce_men and spotting (both sides)."""
+    vis = state.get("vis")
+    hidden = like * 0 if vis is None else _f(m, shown & ~_b(m, vis))
+    sight = getattr(S, "sight", None)
+    if sight is None:
+        return m.stack([hidden, like * 0, like * 0], -1)
+    return _cat(m, [hidden[..., None], _f(m, sight)], -1)
 
 
 def _shape(m, state, shown, like):

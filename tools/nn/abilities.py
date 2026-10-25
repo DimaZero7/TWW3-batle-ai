@@ -178,6 +178,9 @@ FIELDS = {
     "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on "
                "whom (the phase's targets)",
     "attributes": "special_ability_phase_attribute_effects of the phases (attribute, attribute_type: positive/negative)",
+    "delay_s": "only a passive of several phases whose first phases lay nothing (Blackpowder Discipline: phase i 10 s, "
+               "no stats, then phase ii): the special_ability_phases durations of those first phases, in the junctions' "
+               "order - its effects come on once its conditions have held that long (ours: the phases run in order)",
 }
 MISSING = {
     "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet "
@@ -234,6 +237,17 @@ def passport(key, rows, t):
     passive = p["active_time"] < 0 and p["recharge_time"] < 0
     auto = not passive and "_passive_" in key
     friendly, enemy = p["num_effected_friendly_units"], p["num_effected_enemy_units"]
+    extra = {}
+    durations = t.get("phase_duration") or {}
+    if passive and len(phases) > 1 and durations:
+        # (FIELDS delay_s) the first phases that lay no stat run their durations before the rest come on
+        delay = 0.0
+        for ph in sorted(phases, key=lambda r: r.get("order", 0)):
+            if any(e["phase"] == ph["phase"] for e in effects):
+                break
+            delay += max(0.0, float(durations.get(ph["phase"], 0.0)))
+        if delay > 0:
+            extra["delay_s"] = round(delay, 6)
     return {
         "active_s": p["active_time"], "recharge_s": p["recharge_time"],
         "initial_s": max(0.0, p.get("initial_recharge", 0.0)),
@@ -254,6 +268,7 @@ def passport(key, rows, t):
         "phases": [r["phase"] for r in phases], "targets": targets,
         "effects": sorted(effects, key=lambda e: (e["phase"], e["stat"], e["how"])),
         "attributes": sorted(attributes, key=lambda a: (a["phase"], a["attribute"])),
+        **extra,
     }
 
 
@@ -299,7 +314,8 @@ def build(tables, keys, units, roster=ROSTER):
     if PHASES in tables:
         names = sorted({r["phase"] for k in keys
                         for r in phases_of(k, tables["special_ability_to_special_ability_phase_junctions"])})
-        tables = dict(tables, phase_fatigue=phase_fatigue(tables[PHASES], names))
+        tables = dict(tables, phase_fatigue=phase_fatigue(tables[PHASES], names),
+                      phase_duration={r["id"]: r.get("duration", -1.0) for r in tables[PHASES] if r["id"] in names})
     out = {k: passport(k, rows, tables) for k in keys}
     bad = check_cards(out, units, roster)
     assert not bad, "passports differ from the cards:\n" + "\n".join(bad)

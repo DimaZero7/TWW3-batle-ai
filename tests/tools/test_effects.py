@@ -50,7 +50,11 @@ def test_contact_effects_come_from_the_weapons_with_the_database_numbers():
     built, links, _, inflicts = effects.build(UNITS, ABILITIES, (), PHASES)
     # who lays them: the censer (melee), the poisoned Giant Rats (melee), the Ratling Gun (its bullets)
     assert inflicts == {"wh2_main_skv_inf_plague_monk_censer_bearer": [CENSER],
-                        "wh2_dlc16_skv_mon_wolf_rats_1": [POISON], "wh2_dlc12_skv_inf_ratling_gun_0": [SUPPRESS]}
+                        "wh2_dlc16_skv_mon_wolf_rats_1": [POISON], "wh2_dlc12_skv_inf_ratling_gun_0": [SUPPRESS],
+                        # line g43 (25.10.2026): the poisoned stars and slings, the Jezzails' shield breaker
+                        "wh2_main_skv_inf_gutter_runners_1": [POISON],
+                        "wh2_main_skv_inf_gutter_runner_slingers_1": [POISON],
+                        "wh2_dlc12_skv_inf_warplock_jezzails_0": ["wh2_dlc09_unit_contact_shieldbreaker"]}
     # nobody owns a contact effect (it lies on the enemy it hits)
     assert not any(k in v for v in links.values() for k in (POISON, CENSER, SUPPRESS))
     for k in (POISON, CENSER, SUPPRESS):
@@ -65,14 +69,14 @@ def test_contact_effects_come_from_the_weapons_with_the_database_numbers():
 
 def test_what_the_simulator_lacks_is_schema_only_with_the_reason():
     p = {"passive": True, "auto": False, "active_s": -1, "recharge_s": -1, "range_m": 0,
-         "effects": [{"stat": "stat_accuracy", "how": "add", "value": 10, "on": ["self"]}],
+         "effects": [{"stat": "stat_bonus_vs_large", "how": "add", "value": 10, "on": ["self"]}],
          "attributes": [], "off_when": ["some_new_flag"], "recharge_when": []}
     e = effects.ability_effect("x_passive_new", p)
-    assert not e["modelled"] and "stat_accuracy" in e["why"] and "some_new_flag" in e["why"]
+    assert not e["modelled"] and "stat_bonus_vs_large" in e["why"] and "some_new_flag" in e["why"]
     assert not effects.attribute_effect("brand_new_attribute")["modelled"]
-    c = effects.contact_effect("x_contact", {"duration_s": 10.0, "stats": [{"stat": "stat_accuracy", "how": "add",
+    c = effects.contact_effect("x_contact", {"duration_s": 10.0, "stats": [{"stat": "stat_bonus_vs_large", "how": "add",
                                                                              "value": -5}]})
-    assert not c["modelled"] and "stat_accuracy" in c["why"]
+    assert not c["modelled"] and "stat_bonus_vs_large" in c["why"]
 
 
 def test_the_order_is_append_only():

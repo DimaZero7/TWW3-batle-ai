@@ -254,11 +254,12 @@ def full_obs(obs, static):
     return out
 
 
-# The token's RECEIVED columns (observation.py: before MAGIC, SHAPE, FX_STATS and FIGHT, the token's last) are kept as
-# the bitmask they are made of (squeeze_received)
+# The token's RECEIVED columns (observation.py: before MAGIC, SHAPE, FX_STATS, FIGHT, FX_NEW, FX_STATS2 and SIGHT, the
+# token's last) are kept as the bitmask they are made of (squeeze_received)
 _KEPT = ob.INDEX[ob.RECEIVED[0]]
 _AFTER = _KEPT + len(ob.RECEIVED)
-assert ob.NAMES[_KEPT:_AFTER] == ob.RECEIVED and ob.NAMES[_AFTER:] == ob.MAGIC + ob.SHAPE + ob.FX_STATS + ob.FIGHT
+assert ob.NAMES[_KEPT:_AFTER] == ob.RECEIVED and ob.NAMES[_AFTER:] == (ob.MAGIC + ob.SHAPE + ob.FX_STATS + ob.FIGHT
+                                                                        + ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT)
 
 
 def squeeze_received(obs, rx):

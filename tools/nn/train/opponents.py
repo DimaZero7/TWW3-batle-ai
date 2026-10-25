@@ -52,9 +52,16 @@ def _nearest(st):
     dx = u["x"][:, None, :] - u["x"][:, :, None]
     dz = u["z"][:, None, :] - u["z"][:, :, None]
     d = torch.sqrt(dx * dx + dz * dz)
-    enemy = (u["side"][:, :, None] != u["side"][:, None, :]) & standing[:, None, :]
+    # (a hidden enemy is not seen: tools/nn/sim/stealth.py)
+    enemy = (u["side"][:, :, None] != u["side"][:, None, :]) & (standing & _seen(u))[:, None, :]
     d = torch.where(enemy, d, torch.full_like(d, 1e9))
     return d.argmin(2), d.min(2).values
+
+
+def _seen(u):
+    """[B, N] the units the other side sees (tools/nn/sim/stealth.py: not hidden; all without stealth): the scripts
+    pick only among enemies they see, as the game's AI."""
+    return ~u["hid"] if "hid" in u else torch.ones_like(u["side"] > 0)
 
 
 def nearest(st):
@@ -395,7 +402,7 @@ def ai_like(st, p=Line()):
     dx = x[:, None, :] - x[:, :, None]                         # [b, i, j]: from i to j
     dz = z[:, None, :] - z[:, :, None]
     d = torch.sqrt(dx * dx + dz * dz)
-    foe = (side[:, :, None] != side[:, None, :]) & (side[:, :, None] > 0) & standing[:, None, :]
+    foe = (side[:, :, None] != side[:, None, :]) & (side[:, :, None] > 0) & (standing & _seen(u))[:, None, :]
     d_foe = torch.where(foe, d, torch.full_like(d, BIG))
     near_d = d_foe.min(2).values
     has = near_d < BIG
@@ -421,7 +428,7 @@ def ai_like(st, p=Line()):
         ref = torch.where(ref.any(1, keepdim=True), ref, body & mine)
         ref = torch.where(ref.any(1, keepdim=True), ref, standing & mine)
         ox, oz = _centroid(x, z, ref)
-        ex, ez = _centroid(x, z, standing & (side == 3 - s))
+        ex, ez = _centroid(x, z, standing & _seen(u) & (side == 3 - s))
         vx, vz = ex - ox, ez - oz
         n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
         fx = torch.where(mine, (vx / n)[:, None], fx)
@@ -695,7 +702,7 @@ def human(st, p=Human()):
     dx = x[:, None, :] - x[:, :, None]                         # [b, i, j]: from i to j
     dz = z[:, None, :] - z[:, :, None]
     d = torch.sqrt(dx * dx + dz * dz)
-    foe = (side[:, :, None] != side[:, None, :]) & (side[:, :, None] > 0) & standing[:, None, :]
+    foe = (side[:, :, None] != side[:, None, :]) & (side[:, :, None] > 0) & (standing & _seen(u))[:, None, :]
     d_foe = torch.where(foe, d, torch.full_like(d, BIG))
     near_d, near_i = d_foe.min(2)
     has = near_d < BIG
@@ -725,7 +732,7 @@ def human(st, p=Human()):
         ref = torch.where(ref.any(1, keepdim=True), ref, standing & ~lord & mine)
         ref = torch.where(ref.any(1, keepdim=True), ref, standing & mine)
         ox, oz = _centroid(x, z, ref)
-        ex, ez = _centroid(x, z, standing & (side == 3 - s))
+        ex, ez = _centroid(x, z, standing & _seen(u) & (side == 3 - s))
         vx, vz = ex - ox, ez - oz
         n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
         frames[s] = (ox[:, None], oz[:, None], (vx / n)[:, None], (vz / n)[:, None])      # [B, 1] each

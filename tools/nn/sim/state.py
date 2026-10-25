@@ -24,6 +24,9 @@ try:
 except ImportError:          # the layout (names) is importable without torch
     torch = None
 
+# The database's entity sizes in order (battle_entities size, projectile_penetration_junctions entity_size_cap):
+# a penetrating projectile passes a man only of a size below its cap (missile.py penetration).
+SIZE_RANK = {"very_small": 0, "small": 1, "medium": 2, "large": 3, "very_large": 4}
 # Fatigue states in order, as the game names them (`fat` in recordings; `fat` here is the index).
 FATIGUE_LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_tired",
                   "threshold_very_tired", "threshold_exhausted")
@@ -172,6 +175,23 @@ STATIC = {
     "sp1": ("i", "its second spell (-1 none)"),
     "resist_magic": ("f", "spell resistance, 0-1: the database's damage_mod_magic + damage_mod_all (a ward), what cuts a "
                           "magical projectile (magic.py; docs/en/game/mechanics/magic.md)"),
+    # (25.10.2026, line g43: stealth, the penetrating bullet, the reload skill, the delayed passive)
+    "stalk": ("b", "attribute stalk: any ground hides it (tools/nn/sim/stealth.py)"),
+    "spot_m": ("f", "how far it sees a hidden enemy, m (the database's land_units spot_dist_scrub: 80, the Jezzails 160; "
+                    "stealth.py)"),
+    "hide_k": ("f", "its hiding_scalar: an enemy sees it hidden within its spotting distance x this (0.8 the Gutter "
+                    "Runners)"),
+    "reload_db": ("f", "the database's reload_s of its projectile, s (the reload skill's base: max(4 s, base x (100 - "
+                       "skill) %); `reload` is the measured cycle, scaled by it; 0 no missile)"),
+    "pen_max": ("f", "its projectile's penetration counter (the database's projectile_penetration_junctions "
+                     "max_penetration: each man struck adds his pen_res, the projectile goes on while it is at most this; "
+                     "-1 no limit, 0 stops in the first man; missile.py penetration)"),
+    "pen_cap": ("f", "its projectile passes only a man of a smaller size than this (entity_size_cap as SIZE_RANK: "
+                     "very_small 0 ... very_large 4; 99 none)"),
+    "pen_res": ("f", "a man's projectile_penetration_resistance (1 infantry, 2 the Giant Rats)"),
+    "size_k": ("f", "a man's size as SIZE_RANK (battle_entities size: small 1)"),
+    "fxd": ("i", "its delayed innate effect (the catalogue's delay_s: Blackpowder Discipline), index in the order, -1 "
+                 "none (effects.py)"),
     "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
                  "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
                  "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),
@@ -335,6 +355,11 @@ INTERNAL = {
                    "over the passports' order (abilities.keys); the network's effects from others"),
     "fx_rx": ("i", "the innate auras of other units on it in the last step (Hold the Line): the same bitmask "
                    "(effects.py); State.observation() gives ab_rx | fx_rx"),
+    "fxd_s": ("f", "seconds its delayed effect's conditions have held without a break (effects.py delayed: on at delay_s)"),
+    "hid": ("b", "hidden from the enemy now (stealth.py; vis = present and not hid)"),
+    "hid_s": ("f", "the hide clock: seconds it has met the hiding conditions unseen (it hides at stealth.hide_s)"),
+    "hid_t": ("f", "seconds since it hid (the enemies' spotting + stealth.fresh_bonus_m for stealth.fresh_s)"),
+    "hid_g": ("f", "seconds of the grace used out of cover while hidden (stealth.grace_s)"),
 }
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
@@ -456,6 +481,7 @@ def empty(B, N, device="cpu", history=0):
     u["fxt1"].fill_(-1)
     u["mfx"].fill_(-1)
     u["sfx"].fill_(-1)
+    u["fxd"].fill_(-1)
     u["snap_ab"].fill_(-1)
     for name in ("sp0", "sp1", "cq_k", "cq_t", "cast_k", "cast_t", "bm0_s", "bm0_t", "bm1_s", "bm1_t"):
         u[name].fill_(-1)

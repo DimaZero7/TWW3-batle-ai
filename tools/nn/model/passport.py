@@ -132,6 +132,36 @@ def fire_arc(keys, passports=None):
                      for k in keys], dtype=np.float32)
 
 
+SIZE_RANK = {"very_small": 0, "small": 1, "medium": 2, "large": 3, "very_large": 4}   # (tools/nn/sim/state.py's)
+PIERCE_MEN = 4.0      # SIGHT's men a projectile strikes past the first / this (the Jezzails' 1 -> 0.25)
+SPOT_M = 160.0        # SIGHT's spotting distance / this (the Jezzails' 160 -> 1, the rest 80 -> 0.5)
+
+
+def men_struck(p, size="small", resistance=1, limit=8):
+    """The men one projectile of passport p strikes in a formation of men of this size and penetration resistance
+    (the game's rule, tools/nn/sim/missile.py men_struck): 1 without a missile weapon."""
+    m = p.get("missile") or {}
+    mx = m.get("penetration_max") or 0
+    cap = m.get("penetration_cap")
+    cap_r = SIZE_RANK.get(cap, 99) if cap else (99 if mx < 0 else 0)
+    if not m or SIZE_RANK.get(size, 1) >= cap_r:
+        return 1
+    return int(limit if mx < 0 else min(limit, 1 + mx // max(float(resistance), 1e-3)))
+
+
+def sight(keys, passports=None):
+    """[n, 2] the token's SIGHT passport numbers (tools/nn/model/observation.py, 25.10.2026, line g43; both sides: the
+    roster's passports): the infantrymen one projectile strikes past the first (men_struck against a small man of
+    resistance 1, less 1) / PIERCE_MEN, and the spotting distance (land_units spot_dist_scrub) / SPOT_M; padding 0."""
+    passports = passports or load()
+    out = np.zeros((len(keys), 2), np.float32)
+    for i, k in enumerate(keys):
+        if k:
+            p = passports[k]
+            out[i] = ((men_struck(p) - 1) / PIERCE_MEN, float((p.get("spotting") or {}).get("scrub", 80.0)) / SPOT_M)
+    return out
+
+
 VOLLEY_SHOTS = 20.0   # the volley's shots a man / this (the Ratling Gun's 18 -> 0.9)
 
 

@@ -13,7 +13,7 @@
   "modelled": "the simulator acts on it",
   "sim": "what the simulator does",
   "why": "why not (all) of it",
-  "predicates": "the conditions the simulator evaluates: out_of_melee = out of melee, in_melee = in melee, losing_melee = not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it), morale_below_half = morale below half of leadership, not_wavering = steady (not wavering or routing), hp_below_half = health below 50 % of the start, hp_below_quarter = health below 25 % (db flag -> predicate: out_of_melee -> out_of_melee, engaged_in_melee -> in_melee, losing_melee_combat -> losing_melee, morale_is_lower_than_half_of_base_morale -> morale_below_half, morale_is_higher_than_wavering -> not_wavering, health_below_50%_base -> hp_below_half, health_below_25% -> hp_below_quarter)"
+  "predicates": "the conditions the simulator evaluates: out_of_melee = out of melee, in_melee = in melee, losing_melee = not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it), morale_below_half = morale below half of leadership, not_wavering = steady (not wavering or routing), hp_below_half = health below 50 % of the start, hp_below_quarter = health below 25 %, moving = moving, climbing = climbing or manning equipment on a platform (never on our maps) (db flag -> predicate: out_of_melee -> out_of_melee, engaged_in_melee -> in_melee, losing_melee_combat -> losing_melee, morale_is_lower_than_half_of_base_morale -> morale_below_half, morale_is_higher_than_wavering -> not_wavering, health_below_50%_base -> hp_below_half, health_below_25% -> hp_below_quarter, moving -> moving, climbing_manning_eq_on_platform -> climbing)"
  },
  "_missing": {
   "effect bundles": "effect_bundles / effect_bonus_value_*: campaign effects (skills, techs, the contexts of battle_context_unit_attribute_junctions such as causes_fear vs a culture); custom battles have none",
@@ -41,7 +41,13 @@
   "strider",
   "wh2_dlc12_unit_contact_suppressive_fire",
   "wh2_main_unit_contact_plague_monk_censer_morale",
-  "wh_main_unit_contact_poison"
+  "wh_main_unit_contact_poison",
+  "ignore_trees",
+  "snipe",
+  "stalk",
+  "wh2_dlc09_unit_contact_shieldbreaker",
+  "wh2_main_unit_passive_snare_net",
+  "wh3_dlc25_unit_passive_blackpowder_discipline"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -617,6 +623,169 @@
    "modelled": true,
    "sim": "scalar_missile_damage_ap mult 0.85; scalar_missile_damage_base mult 0.85; scalar_speed mult 0.85; stat_melee_damage_ap mult 0.85; stat_melee_damage_base mult 0.85 (for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
    "why": null
+  },
+  "ignore_trees": {
+   "kind": "attribute",
+   "name": "Ignore Trees",
+   "rules": [
+    "ignore_trees"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (ignore_trees)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "shoots through trees",
+   "modelled": false,
+   "sim": null,
+   "why": "flat maps only: no trees"
+  },
+  "snipe": {
+   "kind": "attribute",
+   "name": "Snipe",
+   "rules": [
+    "snipe"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (snipe)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "firing does not reveal the hidden unit (fandom 'Snipe')",
+   "modelled": false,
+   "sim": null,
+   "why": "the unit that has it (Hochland Long Rifles) hides only in woods (hide_forest): no woods on our maps, it is never hidden"
+  },
+  "stalk": {
+   "kind": "attribute",
+   "name": "Stalk",
+   "rules": [
+    "stalk"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (stalk)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "hides in any terrain, open ground too (fandom 'Stalk'); seen by an enemy within its spotting distance x the unit's hiding_scalar, revealed by firing and melee, not by running",
+   "modelled": true,
+   "sim": "hides anywhere: any ground is cover for it (tools/nn/sim/stealth.py; config/nn/sim.json stealth)",
+   "why": null
+  },
+  "wh2_dlc09_unit_contact_shieldbreaker": {
+   "kind": "contact",
+   "name": "Shieldbreaker",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_missile_block_chance",
+     "how": "add",
+     "value": -24.0,
+     "on": [
+      "hit"
+     ],
+     "sim": "shield"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "duration_s": 10.0,
+   "when": "for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)",
+   "source": "db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases (duration), special_ability_phase_stat_effects (wh2_dlc09_unit_contact_shieldbreaker); config/nn/units.json contact_phases",
+   "kb": "docs/en/game/mechanics/abilities.md#contact-effects",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_missile_block_chance add -24 (for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
+   "why": null
+  },
+  "wh2_main_unit_passive_snare_net": {
+   "kind": "passive",
+   "name": "Snare Net",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "scalar_charge_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "enemies"
+     ],
+     "sim": "charge_speed",
+     "sim_value": 0.81,
+     "sim_why": "the charge speed as the game moves it: scalar_speed x scalar_charge_speed (the simulator takes an effect's charge multiplier as the whole charge)"
+    },
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "enemies"
+     ],
+     "sim": "speed"
+    }
+   ],
+   "range_m": 35.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always; on enemies whose centre is within 35 m of its centre",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects (wh2_main_unit_passive_snare_net); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": null,
+   "modelled": true,
+   "sim": "scalar_charge_speed mult 0.9; scalar_speed mult 0.9 (always; on enemies whose centre is within 35 m of its centre)",
+   "why": null
+  },
+  "wh3_dlc25_unit_passive_blackpowder_discipline": {
+   "kind": "passive",
+   "name": "Blackpowder Discipline",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_accuracy",
+     "how": "add",
+     "value": 40.0,
+     "on": [
+      "self"
+     ],
+     "sim": "accuracy"
+    },
+    {
+     "stat": "stat_reloading",
+     "how": "add",
+     "value": 10.0,
+     "on": [
+      "self"
+     ],
+     "sim": "reloading"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [
+    "climbing",
+    "moving"
+   ],
+   "timed": null,
+   "delay_s": 10.0,
+   "when": "always, once that has held 10 s, off while climbing or manning equipment on a platform (never on our maps) or moving",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_auto_deactivate_flags (wh3_dlc25_unit_passive_blackpowder_discipline); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_accuracy add 40; stat_reloading add 10 (always, once that has held 10 s, off while climbing or manning equipment on a platform (never on our maps) or moving)",
+   "why": null
   }
  },
  "units": {
@@ -625,8 +794,19 @@
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
+  "wh2_dlc12_skv_inf_warplock_jezzails_0": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
   "wh2_dlc13_emp_inf_archers_0": [
    "hide_forest"
+  ],
+  "wh2_dlc13_emp_inf_huntsmen_0": [
+   "guerrilla_deploy",
+   "ignore_trees",
+   "mounted_fire_move",
+   "stalk"
   ],
   "wh2_dlc16_skv_mon_wolf_rats_0": [
    "guerrilla_deploy",
@@ -670,6 +850,36 @@
   "wh2_main_skv_inf_clanrats_1": [
    "hide_forest",
    "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_gutter_runner_slingers_0": [
+   "guerrilla_deploy",
+   "stalk",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_snare_net",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_gutter_runner_slingers_1": [
+   "guerrilla_deploy",
+   "stalk",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_snare_net",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_gutter_runners_0": [
+   "guerrilla_deploy",
+   "mounted_fire_move",
+   "stalk",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_snare_net",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_gutter_runners_1": [
+   "guerrilla_deploy",
+   "mounted_fire_move",
+   "stalk",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_snare_net",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
   "wh2_main_skv_inf_night_runners_0": [
@@ -727,6 +937,14 @@
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
+  "wh3_dlc25_emp_inf_hochland_long_rifles": [
+   "hide_forest",
+   "snipe"
+  ],
+  "wh3_dlc25_emp_inf_nuln_ironsides": [
+   "hide_forest",
+   "wh3_dlc25_unit_passive_blackpowder_discipline"
+  ],
   "wh_dlc04_emp_inf_flagellants_0": [
    "hide_forest",
    "unbreakable",
@@ -776,7 +994,16 @@
   "wh2_dlc12_skv_inf_ratling_gun_0": [
    "wh2_dlc12_unit_contact_suppressive_fire"
   ],
+  "wh2_dlc12_skv_inf_warplock_jezzails_0": [
+   "wh2_dlc09_unit_contact_shieldbreaker"
+  ],
   "wh2_dlc16_skv_mon_wolf_rats_1": [
+   "wh_main_unit_contact_poison"
+  ],
+  "wh2_main_skv_inf_gutter_runner_slingers_1": [
+   "wh_main_unit_contact_poison"
+  ],
+  "wh2_main_skv_inf_gutter_runners_1": [
    "wh_main_unit_contact_poison"
   ],
   "wh2_main_skv_inf_plague_monk_censer_bearer": [

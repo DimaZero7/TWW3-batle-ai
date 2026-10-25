@@ -476,12 +476,12 @@ WAVE2 = ["wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dl
 NEW_PASSPORT = 2 + 3          # attributes mounted_fire_move, guerrilla_deploy; direct, spread, muzzle_velocity
 NEW_ABILITY = 8               # abilities.WHEN
 NEW_AB13 = 3                  # abilities WHEN2, VIGOUR, on now (13.10.2026), after WHEN
-NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the second wave)
+NEW_EFFECTS = 2 * ob.FX_MID   # the innate effects' columns (appended after the second wave; the g43 ones: FX_NEW)
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
 NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
 NEW_ORDER = len(ob.ORDER)     # the order in force, appended after the fire arc (07.10.2026)
 NEW_WEAPON = (len(ob.WEAPON) + len(ob.AIM) + len(ob.RECEIVED) + len(ob.MAGIC) + len(ob.SHAPE) + len(ob.FX_STATS)
-              + len(ob.FIGHT))   # the volley's shots and magical
+              + len(ob.FIGHT) + len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT))   # the volley's shots and magical
 #                                       attacks (11.10.2026), the aim and the effects from others (13.10), magic (16.10)
 T0 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
 T1 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_ARC       # the token before the fire arc
@@ -639,7 +639,10 @@ def fx_obs(batch=2, seed=13, **changes):
 
 
 def fx_cols(tokens):
-    return tokens[..., T0 - NEW_EFFECTS:T0]
+    """Every effect's (owned, on) pair in the catalogue's order: the first FX_MID in the middle, FX_NEW at the end."""
+    mid = tokens[..., T0 - NEW_EFFECTS:T0]
+    new = tokens[..., [ob.INDEX[n] for n in ob.FX_NEW]]
+    return np.concatenate([mid, new], -1) if isinstance(tokens, np.ndarray) else torch.cat([mid, new], -1)
 
 
 def test_the_effects_are_owned_by_the_catalogue_and_the_same_on_numpy_and_torch():
@@ -652,7 +655,7 @@ def test_the_effects_are_owned_by_the_catalogue_and_the_same_on_numpy_and_torch(
             assert set(np.nonzero(owned[b, n])[0]) == want, key
     t, _ = ob.observe({k: torch.as_tensor(v) for k, v in state.items()}, setup, 1)
     assert np.allclose(obs.tokens, t.tokens.numpy(), atol=1e-6)
-    assert ob.NAMES[T0 - NEW_EFFECTS:T0] == mfx.NAMES
+    assert ob.NAMES[T0 - NEW_EFFECTS:T0] == mfx.NAMES[:NEW_EFFECTS]
 
 
 def test_on_follows_the_conditions_and_enemies_show_it_only_while_seen():
@@ -790,7 +793,7 @@ def pre_volley_networks(cfg, width=T0):
 
 # the checkpoints saved before 11.10.2026 had 14 effect pairs (observation.OLD_EFFECTS): their token is the new one's
 # first columns (and, after VOLLEY came, those moved by observation.old_columns)
-LEGACY_PAIRS = 2 * (mfx.SIZE // 2 - 14)
+LEGACY_PAIRS = 2 * (ob.FX_MID - 14)
 
 
 def without_volley(o, width=T0):
@@ -892,7 +895,8 @@ def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
     want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
             "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
     assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == (ob.ORDER + ob.WEAPON + ob.AIM + ob.RECEIVED + ob.MAGIC
-                                                                + ob.SHAPE + ob.FX_STATS + ob.FIGHT)
+                                                                + ob.SHAPE + ob.FX_STATS + ob.FIGHT + ob.FX_NEW
+                                                                + ob.FX_STATS2 + ob.SIGHT)
     for b, keys in enumerate(setup.keys):
         for i, k in enumerate(keys):
             assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)

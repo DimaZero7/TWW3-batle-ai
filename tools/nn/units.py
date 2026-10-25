@@ -50,7 +50,16 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # contagion), Giant Rats (war beasts, 9.5 m/s; _1 with poison). Only the v2 army scheme fields them
          # (config/nn/pools.json units_v2): units.md "Ratling Gun, Plague Monks, Censer Bearers, Giant Rats"
          "wh2_dlc12_skv_inf_ratling_gun_0", "wh2_main_skv_inf_plague_monks", "wh2_main_skv_inf_plague_monk_censer_bearer",
-         "wh2_dlc16_skv_mon_wolf_rats_0", "wh2_dlc16_skv_mon_wolf_rats_1")
+         "wh2_dlc16_skv_mon_wolf_rats_0", "wh2_dlc16_skv_mon_wolf_rats_1",
+         # 25.10.2026, line g43 (build/diag_units/new_units.md): the Empire's Huntsmen (bow 160 m, stalk), Nuln Ironsides
+         # (Blackpowder Discipline) and Hochland Long Rifles (260 m, a bullet through two men); the Skaven's Gutter
+         # Runners (stalk, Snare Net; throwing stars or slings, plain or poisoned) and Warplock Jezzails (275 m, a pavise,
+         # the shield breaker, spotting 160 m). Only the v3 army scheme fields them (config/nn/pools.json units_v3):
+         # units.md "Huntsmen, Ironsides, Long Rifles, Gutter Runners, Jezzails"
+         "wh2_dlc13_emp_inf_huntsmen_0", "wh3_dlc25_emp_inf_nuln_ironsides", "wh3_dlc25_emp_inf_hochland_long_rifles",
+         "wh2_main_skv_inf_gutter_runners_0", "wh2_main_skv_inf_gutter_runners_1",
+         "wh2_main_skv_inf_gutter_runner_slingers_0", "wh2_main_skv_inf_gutter_runner_slingers_1",
+         "wh2_dlc12_skv_inf_warplock_jezzails_0")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
@@ -61,7 +70,7 @@ SPELLS = {"wh3_dlc25_emp_cha_wizard_metal": ("wh_main_spell_metal_searing_doom",
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects",
-          "special_ability_phases")
+          "special_ability_phases", "projectile_penetration_junctions")
 
 # Where each passport field comes from: table.column by the RPFM schema's names (tools/nn/dbschema.py). checked:
 # compared with the unit card from battle (check_card); "ours": what we make of a named column.
@@ -128,7 +137,17 @@ FIELDS = {
     "damage_resist": ("land_units.damage_mod_all/physical/missile/magic/flame, %", None),
     "can_skirmish": ("land_units.can_skirmish", None),
     "can_brace": ("land_units.can_brace", None),
-    "hiding_scalar": ("land_units.hiding_scalar", None),
+    "hiding_scalar": ("land_units.hiding_scalar: the unit's own share of an enemy's spotting distance (stealth: "
+                      "a Gutter Runner is seen within 0.8 of it)", None),
+    "spotting.scrub": ("land_units.spot_dist_scrub, m: how far the unit sees a hidden enemy out of woods (80; the "
+                       "Jezzails 160) - the simulator's open ground (tools/nn/sim/stealth.py)", None),
+    "spotting.tree": ("land_units.spot_dist_tree, m: the same into woods (60; the Jezzails 160); no woods in the "
+                      "simulator", None),
+    "projectile_resistance": ("battle_entities.projectile_penetration_resistance: what a man adds to a penetrating "
+                              "projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number "
+                              "means this entity can stop projectiles more easily')", None),
+    "projectile_speed_keep": ("battle_entities.projectile_penetration_speed_change: the share of its speed a projectile "
+                              "keeps passing through the man (0.9 men, 0.95 Skaven)", None),
     "attributes": ("unit_attributes_to_groups_junctions for land_units.attribute_group", None),
     "abilities": ("land_units_to_unit_abilites_junctions.ability", "card owned abilities"),
     "spells": ("ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md "
@@ -166,6 +185,12 @@ FIELDS = {
                              "shooters, 360 for throwing stars), degrees each side", None),
     "missile.explosion": ("projectiles.explosion_type", None),
     "missile.penetration": ("projectiles.projectile_penetration", None),
+    "missile.penetration_max": ("projectile_penetration_junctions.max_penetration of missile.penetration: the counter "
+                                "a projectile goes on through (each man struck adds his projectile_resistance; -1 "
+                                "no limit, absent 0: it stops in the first)", None),
+    "missile.penetration_cap": ("projectile_penetration_junctions.entity_size_cap of missile.penetration: it passes "
+                                "only a man of a smaller size (very_small < small < medium < large < very_large)",
+                                None),
     "missile.shot_type": ("projectiles.shot_type", None),
     "missile.contact_phase": ("projectiles.contact_stat_effect: the contact effect a hit lays on its target "
                               "(the Ratling Gun's suppressing fire)", None),
@@ -180,7 +205,8 @@ PHASE_FIELDS = {
 # Asked for, but not in the tables read (or not decoded): why (docs/*/training/units.md).
 MISSING = {
     "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile "
-                                                "of our units (not in the passport)",
+                                                "of our units but the Huntsmen's arrow (+8 against large; not in the "
+                                                "passport: no large units in the pools)",
     "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit "
                                         "cannot; the others arc over friends (knowledge base, not measured)",
     "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global "
@@ -210,6 +236,7 @@ def passport(key, t):
     armour = _index(t["unit_armour_types"], "key")[land["armour"]]
     shield = _index(t["unit_shield_types"], "key")[land["shield"]]
     sp = _index(t["unit_spacings"], "key")[land["spacing"]]
+    pen = _index(t.get("projectile_penetration_junctions") or (), "key")
     hp = entity["hit_points"] + land["bonus_hit_points"]
     out = {
         "land_unit": land["key"], "caste": main["caste"], "category": land["category"], "class": land["class"],
@@ -240,6 +267,9 @@ def passport(key, t):
         "leadership": land["morale"],
         "damage_resist": {k: land[f"damage_mod_{k}"] for k in ("all", "physical", "missile", "magic", "flame")},
         "can_skirmish": land["can_skirmish"], "can_brace": land["can_brace"], "hiding_scalar": land["hiding_scalar"],
+        "spotting": {"scrub": land["spot_dist_scrub"], "tree": land["spot_dist_tree"]},
+        "projectile_resistance": entity["projectile_penetration_resistance"],
+        "projectile_speed_keep": entity["projectile_penetration_speed_change"],
         "attributes": sorted(r["attribute"] for r in t["unit_attributes_to_groups_junctions"]
                              if land["attribute_group"] and r["attribute_group"] == land["attribute_group"]),
         "abilities": sorted(r["ability"] for r in t["land_units_to_unit_abilites_junctions"]
@@ -262,6 +292,8 @@ def passport(key, t):
             "calibration_area_m": pr["calibration_area"], "marksmanship": pr["marksmanship_bonus"],
             "fire_arc_deg": entity["fire_arc_close"] / 2, "explosion": pr["explosion_type"],
             "penetration": pr["projectile_penetration"], "shot_type": pr["shot_type"],
+            "penetration_max": (pen.get(pr["projectile_penetration"]) or {}).get("max_penetration") or 0,
+            "penetration_cap": (pen.get(pr["projectile_penetration"]) or {}).get("entity_size_cap"),
             "contact_phase": pr["contact_stat_effect"]}
     if key in SPELLS:
         out["spells"] = list(SPELLS[key])

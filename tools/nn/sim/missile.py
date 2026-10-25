@@ -246,7 +246,8 @@ def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, pr
     step's target, kept while it is in range (centre to centre; per_man: in_range), standing and not excluded (the
     game keeps its target; without it the nearest-each-step flips between two close enemies). keep_router [B, N]
     (router_keep): shooters that keep prev though it routs (still in range and not excluded)."""
-    alive = (u["men"] > 0) & ~u["gone"]
+    # (a hidden enemy is no target: stealth.py)
+    alive = (u["men"] > 0) & ~u["gone"] & (~u["hid"] if "hid" in u else True)
     rng = pw["enemy"] & alive[:, None, :] & in_range(u, pw, per_man, reach)
     if exclude is not None:
         rng = rng & ~exclude
@@ -1170,13 +1171,65 @@ def shield_pierce(u, params, shooter=None):
     return 1 - coef * m_a / (m_d + m_a).clamp(min=1e-6)
 
 
-def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None):
+def men_struck(u, limit):
+    """[B, i, j] the men one projectile of i strikes in j at most (the game's penetration, line g43: the database's
+    projectile_penetration_junctions and battle_entities): the first man, and the next along its path while the man it
+    struck is smaller than its size cap (pen_cap > size_k) and its counter - each man struck adds his
+    projectile_penetration_resistance (pen_res) - is at most max_penetration (pen_max; -1 no limit): 1 + floor(pen_max
+    / pen_res) men, at most `limit` (sim.json missile.penetration.max_men). The Jezzails' and Long Rifles' medium_1 (max
+    1, cap medium) strike 2 infantrymen, the Ironsides' low (cap small) 1, very_low 1; the Giant Rats (resistance 2) stop
+    medium_1 in the first. A projectile's speed lost per man (battle_entities projectile_penetration_speed_change 0.9) does
+    not change its damage (the database's damage is the projectile's)."""
+    passes = u["size_k"][:, None, :] < u["pen_cap"][:, :, None]
+    mx = u["pen_max"][:, :, None]
+    more = torch.where(mx < 0, torch.full_like(mx, float(limit)), torch.floor(mx / u["pen_res"][:, None, :].clamp(min=1e-3)))
+    return 1 + torch.where(passes, more.clamp(0, float(limit) - 1), torch.zeros_like(more))
+
+
+def pen_limit(params):
+    """The most men a projectile of the passports can strike (men_struck over every shooter and every target of
+    config/nn/units.json), at most missile.penetration.max_men: 1 when none penetrates (penetration() then does
+    nothing). Worked out once when the parameters are made (params.pen_limit_of: Params.pen_men), read here: the step's
+    loop has a fixed length and no Python over the passports runs in the compiled step."""
+    return int(getattr(params, "pen_men", 1))
+
+
+def penetration(u, pw, params, shield, fs=None):
+    """[B, i, j] the HP of i's hits on formation j that land past the first man, as a factor on its first men's (1: none):
+    1 + sum over k = 1 .. men_struck - 1 of P(a man stands k ranks behind the first struck along the line) x (1 -
+    shield)^k (a blocked projectile stops; each man behind faces the shooter too). The ranks along the line of fire R:
+    the formation's depth / sp_v seen from the front, its front / sp_h from the flank (|cos|, |sin| of the bearing); the
+    first man struck is in the front rank by front_share's chance (a flat projectile meets the front man of its file),
+    else in a rank behind it evenly. A lone man (a lord): 1 (a man behind him is another unit's; not modelled)."""
+    cfg = params.sim["missile"].get("penetration") or {}
+    limit = pen_limit(params)
+    if not cfg.get("on") or limit <= 1:
+        return torch.ones_like(pw["dist"])
+    n = men_struck(u, limit)
+    sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
+    sh = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
+    c, s_ = torch.cos(pw["rel_j"]).abs(), torch.sin(pw["rel_j"]).abs()
+    R = (c * (pw["depth"][:, None, :] / sv) + s_ * (pw["front"][:, None, :] / sh)).clamp(min=1.0)
+    if fs is None:
+        fs = front_share(u, pw, params) if params.sim["missile"].get("accuracy", {}).get("plane") else 1.0 / R
+    keep = 1 - shield
+    out = torch.ones_like(n)
+    for k in range(1, limit):
+        behind = fs * (R - 1 >= k).float() + (1 - fs) * ((R - 1 - k).clamp(min=0) / (R - 1).clamp(min=1.0))
+        out = out + torch.where(n > k, behind * keep ** k, torch.zeros_like(behind))
+    lone = (u["men0"] <= 1)[:, None, :]
+    return torch.where(lone, torch.ones_like(out), out)
+
+
+def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None, info=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
     [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).
     loaded [B, N]: share of the men loaded, who all shoot now (None: men x dt / reload, the steady rate).
     contact [B, N, N]: which units touch in melee. Of the hits aimed at a unit in
     melee, the shooter's friendly_fire share lands on its own units in contact with the target
-    (measured, docs/en/training/simulator.md)."""
+    (measured, docs/en/training/simulator.md). info (a dict): filled with pen [B, N, N], the penetration's factor
+    (penetration(): the pair's HP over its first men's) when missile.penetration is on; its "front" (given: front_share
+    of the step, battle.py) is used for the first man's rank."""
     ms = params.sim["missile"]
     B = params.battle
     shooting = target >= 0
@@ -1276,4 +1329,10 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     hit = melee.per_hit(u["m_damage"][:, :, None], u["m_ap"][:, :, None], u["armour"][:, None, :],
                         u["hp_man"][:, None, :], resist[:, None, :], single=(u["men0"] <= 1)[:, None, :])
     hp = landed * hit * (1 - shield)
+    if (ms.get("penetration") or {}).get("on") and "pen_max" in u:
+        # a projectile through several men (penetration: the Jezzails, the Long Rifles)
+        pen = penetration(u, pw, params, shield, fs=(info or {}).get("front"))
+        hp = hp * pen
+        if info is not None:
+            info["pen"] = pen
     return shots, hp, hit

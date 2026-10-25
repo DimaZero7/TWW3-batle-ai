@@ -122,19 +122,26 @@ FX_STATS = (("scalar_speed", "mult"), ("stat_melee_attack", "add"), ("stat_melee
             ("stat_morale", "add"), ("stat_resistance_physical", "add"), ("scalar_missile_damage_base", "mult"),
             ("scalar_missile_damage_ap", "mult"))
 FX_STAT_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS)
-FX_MULT = np.array([h == "mult" for _, h in FX_STATS])
+# Then (25.10.2026, line g43; the token's FX_STATS2 after FIGHT: older checkpoints load with zero weights) the stats the
+# new units' effects lay: the Snare Net's charge speed (on the enemies it slows: their RECEIVED; here only an own one), the
+# shield breaker's block chance, Blackpowder Discipline's accuracy and reload skill.
+FX_STATS2 = (("scalar_charge_speed", "mult"), ("stat_missile_block_chance", "add"), ("stat_accuracy", "add"),
+             ("stat_reloading", "add"))
+FX_STAT2_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS2)
+FX_ALL = FX_STATS + FX_STATS2
+FX_MULT = np.array([h == "mult" for _, h in FX_ALL])
 _TORCH = {}
 
 
 @lru_cache(maxsize=1)
 def stat_table():
-    """[E, len(FX_STATS)] float32: per effect of the catalogue (keys() order) the log of each multiplier and each
-    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note)."""
+    """[E, len(FX_ALL)] float32: per effect of the catalogue (keys() order) the log of each multiplier and each
+    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note), FX_STATS then FX_STATS2."""
     from tools.nn.model import abilities
     doc = load()
     scale = {(s, h): float(k) for s, h, k in abilities.STATS}
-    col = {sh: j for j, sh in enumerate(FX_STATS)}
-    out = np.zeros((len(keys(doc)), len(FX_STATS)), np.float32)
+    col = {sh: j for j, sh in enumerate(FX_ALL)}
+    out = np.zeros((len(keys(doc)), len(FX_ALL)), np.float32)
     for i, k in enumerate(keys(doc)):
         for e in (doc["effects"].get(k) or {}).get("stats") or ():
             on = set(e.get("on") or ())
@@ -147,7 +154,7 @@ def stat_table():
 
 
 def stats_on(m, on):
-    """[B, N, len(FX_STATS)] float: the stats of the effects on now (on [B, N, E] bool, active() and the visibility
+    """[B, N, len(FX_ALL)] float: the stats of the effects on now (on [B, N, E] bool, active() and the visibility
     already applied): multipliers multiply (value - 1), additions add (/ scale). numpy or torch."""
     if m is np:
         tab, mult = stat_table(), FX_MULT

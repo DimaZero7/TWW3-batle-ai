@@ -93,7 +93,10 @@ def update(u, pw, standing, in_touch, bounds, cal, spacing=1.5, t=None, dt=0.5, 
     after it is given' while the enemy is near)."""
     from tools.nn.sim import morale
     from tools.nn.sim.orders import ATTACK
-    foe = coming(u, pw, standing, knobs.get(u, "sk_cone_deg", cal["cone_deg"], 3), cal["moving_mps"])
+    from tools.nn.sim import stealth
+    # (a hidden enemy starts no run: stealth.py)
+    foe_up = standing & stealth.seen(u)
+    foe = coming(u, pw, foe_up, knobs.get(u, "sk_cone_deg", cal["cone_deg"], 3), cal["moving_mps"])
     sg = soldier_gap(u, spacing)
     big = torch.full_like(sg, 1e9)
     me = torch.arange(u["x"].shape[1], device=u["x"].device)[None, :, None]
@@ -107,7 +110,7 @@ def update(u, pw, standing, in_touch, bounds, cal, spacing=1.5, t=None, dt=0.5, 
     in_other = go <= u["sk_m"]
     # (sk_in: any standing enemy not attacking the unit within sk_m, whatever its way: a new start from such an enemy
     # needs it to come in from beyond the gap - not a flicker of its way in and out of the cone)
-    near_other = (pw["enemy"] & standing[:, None, :] & ~att & (sg <= u["sk_m"][:, :, None])).any(2)
+    near_other = (pw["enemy"] & foe_up[:, None, :] & ~att & (sg <= u["sk_m"][:, :, None])).any(2)
     start = can & ~in_touch & ((ga <= u["sk_m"]) | (in_other & ~u["sk_in"]))
     cut = new_order if new_order is not None else torch.zeros_like(start)
     start = start & ~cut

@@ -18,6 +18,11 @@ flies to one man:
                shield_defence_angle_missile of his facing (to the man he fights, else his unit's)
   damage       the armour-piercing part whole, the base part less his own armour roll, resistance (missile + physical,
                at most 90 %), at least 1: his health, beyond it lost
+  penetration  (25.10.2026, line g43; the simulator's missile.penetration on) a projectile that struck a man and was not
+               stopped by his shield goes on along its low path to the next man past him (kernels.path_first bmax) while
+               the man it struck is smaller than its size cap and its counter - each man struck adds his
+               projectile_penetration_resistance - is at most its max_penetration (the simulator's men_struck: the
+               Jezzails' and Long Rifles' bullet through 2 infantrymen); the same damage to each
 The hits are the men's own: an arrow that falls into the middle of a formation takes that man's health; he dies at 0."""
 import math
 
@@ -144,8 +149,37 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     hittable = live & ~(F.down > 0) if lab.get("knock", {}).get("invulnerable", True) else live
     # lab.json missile.proj_radius_m (the H5 test, 0: off): the projectile's own radius added to the bodies'
     body_r = u["radius"] + float(cfg.get("proj_radius_m", 0.0))
+    path = dict(npts=npts, own_pass=bool(cfg.get("own_pass", False)))
     who = K.path_first(near.table, int(lab["cells"]["cap"]), n_pts, px, pz, hittable, F.uid, body_r, u["height"],
-                       lx, lz, ex, ez, tan, sh, ok, npts=npts, own_pass=bool(cfg.get("own_pass", False)))
+                       lx, lz, ex, ez, tan, sh, ok, **path)
+    hp_pair, stopped = _strike(F, u, params, gu, i, px, pz, sx, sz, who, Pk, salt, gen)
+    # a projectile through several men (module doc: penetration): on to the next man past the one it struck
+    pen_on = (params.sim["missile"].get("penetration") or {}).get("on") and "pen_max" in u
+    limit = sim_missile.pen_limit(params) if pen_on else 1
+    counter = torch.zeros_like(lx)
+    for k in range(1, limit):
+        wc = who.clamp(min=0)
+        ku = F.uid.gather(1, wc)
+        counter = counter + u["pen_res"].gather(1, ku)
+        mx = gu("pen_max")
+        go = ((who >= 0) & ~stopped & (u["size_k"].gather(1, ku) < gu("pen_cap"))
+              & ((mx < 0) | (counter <= mx + 1e-6)))
+        if not go.is_cuda and not bool((go & ok).any()):
+            break          # (the CPU: nothing passes - skip the search; on the GPU the kernel skips them, no sync)
+        back = -((px.gather(1, wc) - lx) * ex + (pz.gather(1, wc) - lz) * ez)
+        who = K.path_first(near.table, int(lab["cells"]["cap"]), n_pts, px, pz, hittable, F.uid, body_r, u["height"],
+                           lx, lz, ex, ez, tan, sh, ok & go, bmax=back - 1e-4, **path)
+        hp_k, stopped = _strike(F, u, params, gu, i, px, pz, sx, sz, who, Pk, salt + 1000 * k, gen)
+        hp_pair = hp_pair + hp_k
+    return hp_pair
+
+
+def _strike(F, u, params, gu, i, px, pz, sx, sz, who, Pk, salt, gen):
+    """(hp [B, N * N] the HP the struck men `who` [B, P] (-1 none) take from their projectiles of shooters i - in F.pend,
+    each man at most his health -, blocked [B, P] a shield stopped it) - _trace's shield and damage (module doc)."""
+    B, M = F.B, F.M
+    N = u["men"].shape[1]
+    dev = who.device
     wc = who.clamp(min=0)
     ku = F.uid.gather(1, wc)                                                 # the struck man's unit
     # the shield: his facing (to the man he fights, else his unit's) within the shield angle of the shooter
@@ -168,4 +202,4 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     k = torch.where(raw > 0, torch.minimum(raw, room) / raw.clamp(min=1e-9), torch.zeros_like(raw))
     eff = amt * k.gather(1, wc)
     F.pend = F.pend.scatter_add(1, wc, eff)
-    return torch.zeros((B, N * N), device=dev).scatter_add(1, i * N + ku, eff)
+    return torch.zeros((B, N * N), device=dev).scatter_add(1, i * N + ku, eff), block

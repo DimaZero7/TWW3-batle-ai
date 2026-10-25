@@ -9,12 +9,13 @@
 Only json; no torch here.
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
 from tools.nn.sim import abilities, magic
 from tools.nn.sim import effects as innate
+from tools.nn.sim.state import SIZE_RANK
 
 ROOT = Path(__file__).resolve().parents[3]
 # Projectile categories a shield blocks (small arms: tw-modding "Missiles and You", fandom "Shielded"; artillery,
@@ -72,6 +73,14 @@ class Params:
     abilities: dict = None   # abilities.json: ability key -> passport
     effects: dict = None     # effects.json: {"order", "effects", "units"}
     spells: dict = None      # abilities.json "spells": spell key -> passport (tools/nn/sim/magic.py)
+    # worked out once from the passports (__post_init__), read by the step (a constant for torch.compile: no Python
+    # loop over the passports inside the compiled step)
+    pen_men: int = field(init=False, default=1)       # the most men a projectile strikes (missile.pen_limit)
+    can_hide: bool = field(init=False, default=False)  # some unit can hide: the attribute stalk (stealth.on)
+
+    def __post_init__(self):
+        self.pen_men = pen_limit_of(self.units or {}, self.sim or {})
+        self.can_hide = any("stalk" in (u.get("attributes") or ()) for u in (self.units or {}).values())
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -189,6 +198,8 @@ class Params:
             "ammo0": men * missile.get("ammo", 0) if missile else 0,
             "range": missile.get("range_m", 0) if missile else 0,
             "reload": reload_s,
+            # the database's reload (the reload skill's base, effects.py: Blackpowder Discipline's +10)
+            "reload_db": float(missile.get("reload_s") or 0.0) if missile else 0.0,
             "m_damage": missile.get("damage", 0) if missile else 0,
             "m_ap": missile.get("ap_damage", 0) if missile else 0,
             "hit_rate": ms["hit_rate"].get(cat, ms["hit_rate_other"]) if missile else 0,
@@ -215,6 +226,15 @@ class Params:
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "rout_death_s": (self.sim["morale"]["lord_fall"].get("rout_death_s") or {}).get(faction, 0),
             "cost": u.get("multiplayer_cost", 0),
+            # stealth (stealth.py): its spotting distance (open ground: spot_dist_scrub) and hiding_scalar
+            "spot_m": float((u.get("spotting") or {}).get("scrub", 80.0)),
+            "hide_k": float(u.get("hiding_scalar") or 1.0),
+            # the penetrating projectile (missile.py penetration): its counter and size cap, a man's resistance and size
+            "pen_max": float(missile.get("penetration_max") or 0) if missile else 0.0,
+            "pen_cap": float(SIZE_RANK.get(missile.get("penetration_cap"), 99) if missile.get("penetration_cap")
+                             else (99 if (missile.get("penetration_max") or 0) < 0 else 0)) if missile else 0.0,
+            "pen_res": float(u.get("projectile_resistance") or 1),
+            "size_k": float(SIZE_RANK.get(u.get("size", "small"), 1)),
             # the army destruction's strength (morale.army_collapse): the database's combat potential
             "cp_fixed": (u.get("combat_potential") or {}).get("melee", u.get("multiplayer_cost", 0)) + sum(
                 sum((self.abilities.get(k) or {}).get("cp") or (0, 0)) for k in u.get("abilities") or ()),
@@ -229,6 +249,24 @@ class Params:
             # its spells (the passport's `spells`, config/nn/abilities.json spells; magic.py)
             **{f"sp{k}": i for k, i in enumerate(magic.slots_of(self, key))},
         }
+
+
+def pen_limit_of(units, sim):
+    """The most men a projectile of the passports `units` can strike (tools/nn/sim/missile.py men_struck over every
+    shooter and every target), at most sim.json missile.penetration.max_men: 1 when none penetrates."""
+    limit = int(((sim.get("missile") or {}).get("penetration") or {}).get("max_men", 8))
+    sizes = [SIZE_RANK.get(u.get("size", "small"), 1) for u in units.values()] or [1]
+    resists = [float(u.get("projectile_resistance") or 1) for u in units.values()] or [1.0]
+    small, res = min(sizes), min(resists)
+    out = 1
+    for u in units.values():
+        m = u.get("missile") or {}
+        mx = m.get("penetration_max") or 0
+        cap = m.get("penetration_cap")
+        cap_r = SIZE_RANK.get(cap, 99) if cap else (99 if mx < 0 else 0)
+        if cap_r > small:
+            out = max(out, limit if mx < 0 else min(limit, 1 + int(mx // max(res, 1e-3))))
+    return out
 
 
 def _read(path):

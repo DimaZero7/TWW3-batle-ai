@@ -59,7 +59,9 @@ def nearest_attack(st, run=True):
     dx = u["x"][:, None, :] - u["x"][:, :, None]
     dz = u["z"][:, None, :] - u["z"][:, :, None]
     d = torch.sqrt(dx * dx + dz * dz)
-    enemy = (u["side"][:, :, None] != u["side"][:, None, :]) & standing[:, None, :]
+    # (a hidden enemy is not seen: stealth.py)
+    seen = ~u["hid"] if "hid" in u else torch.ones_like(standing)
+    enemy = (u["side"][:, :, None] != u["side"][:, None, :]) & (standing & seen)[:, None, :]
     d = torch.where(enemy, d, torch.full_like(d, 1e9))
     near = d.argmin(2)
     has = d.min(2).values < 1e9

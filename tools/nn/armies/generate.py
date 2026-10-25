@@ -68,7 +68,7 @@ TRAIN_SEEDS = range(0, 1_000_000_000)
 EVAL_SEEDS = range(1_000_000_000, 1_001_000_000)
 BUDGET_TRIES = 1000
 ARMIES = ("v1", "v2", "v3")    # the army schemes (module doc); v1 the default
-COUNT_SCHEMES = ("v2", "v3")   # the schemes that draw the numbers of units first (generate_v2); their pools are v2's
+COUNT_SCHEMES = ("v2", "v3")   # the schemes that draw the numbers of units first (generate_v2); v3's pools add units_v3
 
 
 def _shift(a, offs, back=False):
@@ -229,6 +229,9 @@ class Generator:
         self.pools = pools or P.load()
         # the v2 scheme's pools: the factions' units_v2 join (config/nn/pools.json; given pools: those)
         self.pools_v2 = pools or P.load(scheme="v2")
+        # the v3 scheme's pools: units_v2 and units_v3 join (25.10.2026, line g43: the Huntsmen, Ironsides, Long Rifles,
+        # Gutter Runners, Jezzails); v2 stays bit for bit
+        self.pools_v3 = pools or P.load(scheme="v3")
         self.mix = mix or P.mix()
         # the config's budget cap goes with the config's pools (pools given: no cap)
         self.budget_max = P.budget_max() if pools is None else None
@@ -243,10 +246,10 @@ class Generator:
         self._markets = {}
 
     def market(self, faction, max_units=None, scheme="v1"):
-        scheme = "v2" if scheme in COUNT_SCHEMES else scheme      # v3 fields v2's pools
         key = (faction, max_units or self.max_units, scheme)
         if key not in self._markets:
-            self._markets[key] = Market((self.pools_v2 if scheme == "v2" else self.pools)[faction], key[1])
+            pools = {"v2": self.pools_v2, "v3": self.pools_v3}.get(scheme, self.pools)
+            self._markets[key] = Market(pools[faction], key[1])
         return self._markets[key]
 
     def shares(self, factions):
@@ -352,7 +355,7 @@ class Generator:
         own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
         top = max_units or self.max_units
         fac = {"own": own, "enemy": enemy}
-        pools = self.pools_v2           # the v2 scheme's pools (units_v2 too)
+        pools = self.pools_v3 if scheme == "v3" else self.pools_v2      # the scheme's pools (units_v2, units_v3)
         markets = {s: self.market(f, max_units, scheme) for s, f in fac.items()}
         full = cfg.get("full", 0.0) > 0 and rng.random() < cfg["full"]
         share = self.shares((own, enemy))

@@ -97,7 +97,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
     # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026), nor the
     # third wave (07.10.2026).
-    assert checked >= 9 and len(units.UNITS) == 28           # + the 5 new units of 11.10.2026 (no cards yet)
+    assert checked >= 9 and len(units.UNITS) == 36           # + the 5 new units of 11.10.2026, the 8 of 25.10 (no cards)
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -113,7 +113,12 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
                 # the third wave (07.10.2026)
                 "wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen", "wh2_main_skv_inf_night_runners_0",
                 # the Ratling Gun (11.10.2026)
-                "wh2_dlc12_skv_inf_ratling_gun_0")
+                "wh2_dlc12_skv_inf_ratling_gun_0",
+                # line g43 (25.10.2026): every one of them shoots
+                "wh2_dlc13_emp_inf_huntsmen_0", "wh3_dlc25_emp_inf_nuln_ironsides",
+                "wh3_dlc25_emp_inf_hochland_long_rifles", "wh2_main_skv_inf_gutter_runners_0",
+                "wh2_main_skv_inf_gutter_runners_1", "wh2_main_skv_inf_gutter_runner_slingers_0",
+                "wh2_main_skv_inf_gutter_runner_slingers_1", "wh2_dlc12_skv_inf_warplock_jezzails_0")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)
@@ -228,7 +233,7 @@ def test_the_new_units_and_their_contact_phases():
     assert poison["melee"]["contact_phase"] == "wh_main_unit_contact_poison" and not poison["melee"]["magic"]
     assert "wh_main_unit_passive_frenzy" in u["wh2_main_skv_inf_plague_monks"]["abilities"]
     assert set(ph) == {"wh2_dlc12_unit_contact_suppressive_fire", "wh2_main_unit_contact_plague_monk_censer_morale",
-                       "wh_main_unit_contact_poison"}
+                       "wh_main_unit_contact_poison", "wh2_dlc09_unit_contact_shieldbreaker"}     # (+ the Jezzails')
     assert all(p["duration_s"] == 10.0 and p["effect"] == "negative" for p in ph.values())
     assert ph["wh2_main_unit_contact_plague_monk_censer_morale"]["stats"] == [
         {"stat": "stat_morale", "how": "add", "value": -10.0}]

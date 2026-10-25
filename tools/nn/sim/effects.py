@@ -51,25 +51,36 @@ except ImportError:          # the table's layout is importable without torch
 
 from tools.nn.sim.abilities import MULT, SIM_STATS, SLOTS, STATS
 
-# The effects' stats: the abilities' and the missile damage (poison: x0.85, scalar_missile_damage_base / _ap)
-E_STATS = STATS + ("m_damage", "m_ap")
+# The effects' stats: the abilities' and the missile damage (poison: x0.85, scalar_missile_damage_base / _ap); since
+# 25.10.2026 (line g43) the shield's block chance (the shield breaker's -24: percentage points off the chance, at least 0 -
+# how the game adds it is not described: an assumption), the accuracy (Blackpowder Discipline's +40, added to land_units
+# accuracy + marksmanship, at most 100) and the reload skill (its +10: the reload is max(4 s, base x (100 - skill) %), the
+# game's rule, base the database's reload_s; the measured cycle scales with it)
+E_STATS = STATS + ("m_damage", "m_ap", "shield", "accuracy", "reloading")
 E_MULT = MULT + ("m_damage", "m_ap")
 E_SIM_STATS = {**SIM_STATS, ("scalar_missile_damage_base", "mult"): "m_damage",
-               ("scalar_missile_damage_ap", "mult"): "m_ap"}
+               ("scalar_missile_damage_ap", "mult"): "m_ap", ("stat_missile_block_chance", "add"): "shield",
+               ("stat_accuracy", "add"): "accuracy", ("stat_reloading", "add"): "reloading"}
+RELOAD_MIN_S = 4.0  # the game's floor of a reload cut by the reload skill (max(4 s, base x (100 - skill) %))
 CONTACT_SLOTS = 4   # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx3_s)
 
 PREDICATES =("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "not_wavering", "hp_below_half",
-              "hp_below_quarter")
+              "hp_below_quarter", "moving", "climbing")
 # The catalogue's rules the simulator acts on -> the unit field that carries the flag for the step.
 RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
-         "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune"}
+         "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
+         "stalk": "stalk"}
 TIMERS = 2          # timed effects a unit can carry (fxt0, fxt1)
 MAX_EFFECTS = 62    # the bitmask is an int64
-GROUPS = ("self", "friends")
+# self: the owner; friends: an aura's (range_m); enemies (25.10.2026, the Snare Net): the enemies whose centre is within
+# range_m of a living owner's - one owner's or several (the same effect does not stack: an assumption, not described),
+# its multipliers ADDED to the unit's other multipliers of the stat (x0.9 with poison's x0.85: x0.75; the game adds its
+# stat multipliers), scalar_speed scaling the charge speed and scalar_charge_speed on top (the net's charge x0.81)
+GROUPS = ("self", "friends", "enemies")
 # A list to append each step's {effect key: [B, N] bool - on the unit, its own or an owner's aura} to, or None
 # (training: off); the probes' simulator twins read it (tools/nn/morale_probe.py).
 RECEIVED = None
-HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability", "contact", "duration_s")
+HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability", "contact", "duration_s", "delay_s")
 COLS = HEAD + tuple(f"{w}_{p}" for w in ("need", "off", "fire", "rcg") for p in PREDICATES) + tuple(
     f"rule_{r}" for r in RULES) + tuple(f"{g}_{s}" for g in GROUPS for s in E_STATS)
 COL = {c: i for i, c in enumerate(COLS)}
@@ -146,7 +157,11 @@ def static(params, key):
     assert len(timed) <= TIMERS, f"{key}: {len(timed)} timed effects, the state holds {TIMERS}"
     timed += [-1] * (TIMERS - len(timed))
     mfx, sfx = laid_by(params, key)
-    return {"fx": bits, **{f"fxt{j}": t for j, t in enumerate(timed)}, **rules, "mfx": mfx, "sfx": sfx}
+    # a delayed effect (delay_s: its first phases lay nothing - Blackpowder Discipline): one a unit, its clock fxd_s
+    delayed = [idx[k] for k in own if float((eff.get(k) or {}).get("delay_s") or 0.0) > 0 and modelled(params, k)]
+    assert len(delayed) <= 1, f"{key}: {len(delayed)} delayed effects, the state holds 1"
+    return {"fx": bits, **{f"fxt{j}": t for j, t in enumerate(timed)}, **rules, "mfx": mfx, "sfx": sfx,
+            "fxd": delayed[0] if delayed else -1}
 
 
 def row(params, key):
@@ -160,7 +175,8 @@ def row(params, key):
                active_s=float(t.get("active_s", 0)), recharge_s=float(max(t.get("recharge_s", 0), 0)),
                range_m=float(e.get("range_m") or 0.0),
                ability=float(ab_keys.index(key)) if key in ab_keys else -1.0,
-               contact=float(contact), duration_s=float(e.get("duration_s") or 0.0))
+               contact=float(contact), duration_s=float(e.get("duration_s") or 0.0),
+               delay_s=float(e.get("delay_s") or 0.0))
     for w, preds in (("need", e.get("needs") or ()), ("off", e.get("off_when") or ()),
                      ("fire", t.get("fires_when") or ()), ("rcg", t.get("recharge_needs") or ())):
         for p in preds:
@@ -171,15 +187,20 @@ def row(params, key):
     for g in GROUPS:
         for s in E_STATS:
             out[f"{g}_{s}"] = 1.0 if s in E_MULT else 0.0
+    # (sim.json effects.stats_off: stats of an effect the game does not show acting - a measurement, with its why)
+    stats_off = set(((params.sim.get("effects") or {}).get("stats_off") or {}).get(key) or ())
     for st in e.get("stats") or ():
         s = E_SIM_STATS.get((st["stat"], st["how"]))
-        if s is None:
+        if s is None or st["stat"] in stats_off:
             continue
         # (a contact effect's stats lie on the unit hit: "self" of the unit carrying it)
+        # (sim_value: the catalogue's number for the simulator where it is not the database's alone - the Snare Net's
+        # charge 0.81 = its speed 0.9 x its charge 0.9, tools/nn/effects.py)
+        v = float(st.get("sim_value", st["value"]))
         for g in ("self",) if contact else st.get("on") or ():
             if g in GROUPS:
                 k = f"{g}_{s}"
-                out[k] = out[k] * float(st["value"]) if s in E_MULT else out[k] + float(st["value"])
+                out[k] = out[k] * v if s in E_MULT else out[k] + v
     return [out[c] for c in COLS]
 
 
@@ -193,6 +214,17 @@ def table(params, device):
     # an effect in the order that no unit owns any more (the order is append-only) has an empty row
     rows = [row(params, k) if k in params.effects["effects"] else empty for k in order(params)]
     return torch.tensor(rows + [empty], device=device)
+
+
+def hexes(params):
+    """Indices of the effects that reach enemies (range_m > 0 and a stat on enemies: the Snare Net), modelled."""
+    out = []
+    for i, k in enumerate(order(params)):
+        e = params.effects["effects"].get(k) or {}
+        if modelled(params, k) and (e.get("range_m") or 0) > 0 and any(
+                "enemies" in (s.get("on") or ()) and s.get("sim") for s in e.get("stats") or ()):
+            out.append(i)
+    return out
 
 
 def auras(params):
@@ -220,7 +252,9 @@ def predicates(u, engaged, params):
             "hp_below_half": u["hp"] < 0.5,
             # below a quarter: once fallen there, for the effect's initial cooldown (Wounds: 5 s, the database's
             # initial_recharge; the recordings: on 5-6 s after, to the end - Update 2.0), never back (u low_s)
-            "hp_below_quarter": (u["low_s"] >= quarter_delay(params)) if "low_s" in u else u["hp"] < 0.25}
+            "hp_below_quarter": (u["low_s"] >= quarter_delay(params)) if "low_s" in u else u["hp"] < 0.25,
+            # moving: the observed flag (the game's IsMoving); climbing or manning on a platform: never on our maps
+            "moving": u["mv"], "climbing": torch.zeros_like(u["mv"])}
 
 
 def quarter_delay(params):
@@ -297,6 +331,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
             match = has & (ab >= 0) & (u[f"ab{k}"] == ab)
             u[f"ab{k}_on"] = torch.where(match, t_on, u[f"ab{k}_on"])
             u[f"ab{k}_cd"] = torch.where(match, t_cd, u[f"ab{k}_cd"])
+    # a delayed effect (delay_s: Blackpowder Discipline's 10 s): on once its conditions have held delay_s without a break
+    on = delayed(u, params, T, E, on, dt)
     # contact effects: on while their timer runs (lay(); a living unit)
     on = on | contact_on(u, params, E, alive)
     bit = torch.arange(E, device=u["fx"].device)
@@ -326,19 +362,52 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
                 log[s] = log[s] + give.sum(1) * torch.log(v.clamp(min=1e-6))
             else:
                 add[s] = add[s] + give.sum(1) * v
+    # effects on enemies (GROUPS: the Snare Net): on the enemies within range_m of a living owner, once whatever the owners;
+    # their multipliers add to the others' (hexm: value - 1 summed)
+    hexm = {s: torch.zeros_like(u["men"]) for s in E_MULT}
+    for i in hexes(params):
+        give = (~same_side & present[:, None, :] & (dist <= T[i, COL["range_m"]])
+                & (on[..., i] & alive)[:, :, None])                     # owner i -> enemy j
+        got_i = (give.any(1) & present).float()
+        if RECEIVED is not None:
+            got[i] = got_i > 0
+        key = order(params)[i]
+        if rx is not None and key in ab_keys:
+            rx = rx | ((got_i > 0).long() << ab_keys.index(key))
+        for s in E_STATS:
+            v = T[i, COL[f"enemies_{s}"]]
+            if s in E_MULT:
+                hexm[s] = hexm[s] + got_i * (v - 1)
+            else:
+                add[s] = add[s] + got_i * v
     fields = ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack", "defence",
-              "morale_bonus", "resist_physical", "m_damage", "m_ap") + tuple(RULES.values())
+              "morale_bonus", "resist_physical", "m_damage", "m_ap") + tuple(RULES.values()) + tuple(
+        f for f in ("shield", "acc", "reload") if f in u)
     old = {k: u[k] for k in fields}
-    u["m_damage"] = u["m_damage"] * torch.exp(log["m_damage"])
-    u["m_ap"] = u["m_ap"] * torch.exp(log["m_ap"])
-    speed = torch.exp(log["speed"])
-    # scalar_charge_speed, when an effect gives it, sets the charge speed; else scalar_speed scales it too
-    charge_speed = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
+    mult = lambda s: (torch.exp(log[s]) + hexm[s]).clamp(min=0.05)
+    u["m_damage"] = u["m_damage"] * mult("m_damage")
+    u["m_ap"] = u["m_ap"] * mult("m_ap")
+    speed = mult("speed")
+    # scalar_charge_speed, when an effect gives it, sets the charge speed; else scalar_speed scales it too - an enemy's
+    # (the Snare Net: its catalogue charge 0.81, the game's 0.9 x 0.9) as the others, added to them
+    own_c = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
+    charge_speed = (own_c + torch.where(hexm["charge_speed"].abs() > 1e-9, hexm["charge_speed"],
+                                        hexm["speed"])).clamp(min=0.05)
     u["walk"], u["run"] = u["walk"] * speed, u["run"] * speed
     u["charge_speed"] = u["charge_speed"] * charge_speed
-    u["damage"] = u["damage"] * torch.exp(log["damage"])
-    u["ap_damage"] = u["ap_damage"] * torch.exp(log["ap"])
-    u["charge_bonus"] = u["charge_bonus"] * torch.exp(log["charge"])
+    u["damage"] = u["damage"] * mult("damage")
+    u["ap_damage"] = u["ap_damage"] * mult("ap")
+    u["charge_bonus"] = u["charge_bonus"] * mult("charge")
+    # the shield's block chance (the shield breaker: -24 percentage points, at least 0), the accuracy (at most 100) and
+    # the reload skill (E_STATS' note): only where an effect gives one (the rest keep their numbers to the bit)
+    if "shield" in u:
+        u["shield"] = torch.where(add["shield"] != 0, (u["shield"] + add["shield"] / 100).clamp(0, 1), u["shield"])
+    if "acc" in u:
+        u["acc"] = torch.where(add["accuracy"] != 0, (u["acc"] + add["accuracy"]).clamp(0, 100), u["acc"])
+    if "reload" in u and "reload_db" in u:
+        base = u["reload_db"]
+        cut = (base * (1 - add["reloading"] / 100)).clamp(min=RELOAD_MIN_S) / base.clamp(min=RELOAD_MIN_S)
+        u["reload"] = torch.where((add["reloading"] != 0) & (base > 0), u["reload"] * cut, u["reload"])
     u["attack"] = u["attack"] + add["attack"]
     u["defence"] = u["defence"] + add["defence"]
     u["morale_bonus"] = u["morale_bonus"] + add["leadership"]
@@ -381,6 +450,7 @@ def refresh_on(u, params):
     bit = torch.arange(E, device=u["fx"].device)
     was = ((u["fx_on"][..., None] >> bit) & 1) > 0
     on = torch.where(timed, was & alive[..., None], own & alive[..., None] & ~unmet & ~off)
+    on = delayed(u, params, T, E, on, None)
     on = on | contact_on(u, params, E, alive)
     u["fx_on"] = (on.long() << bit).sum(-1)
 
@@ -401,6 +471,25 @@ def card(u, params):
         out[s] = (torch.exp(torch.einsum("bne,e->bn", on, torch.log(v.clamp(min=1e-6)))) if s in E_MULT
                   else torch.einsum("bne,e->bn", on, v))
     return out
+
+
+def delayed(u, params, T, E, on, dt):
+    """on [B, N, E] with the unit's delayed effect (STATIC fxd, the catalogue's delay_s > 0: Blackpowder Discipline) on
+    only once its conditions have held delay_s without a break: its clock fxd_s (INTERNAL) runs while they hold (dt:
+    advance it, apply(); None: read it, refresh_on()) and is 0 when they break. Without the clock (an older state) a
+    delayed effect is off."""
+    if "fxd" not in u:
+        return on
+    d_i = u["fxd"]
+    has = d_i >= 0
+    pick = torch.nn.functional.one_hot(d_i.clamp(min=0), E + 1)[..., :E].bool() & has[..., None]
+    if "fxd_s" not in u:
+        return on & ~pick
+    cond = (on & pick).any(-1)
+    if dt is not None:
+        u["fxd_s"] = torch.where(cond, u["fxd_s"] + dt, torch.zeros_like(u["fxd_s"]))
+    ready = cond & (u["fxd_s"] >= T[d_i, COL["delay_s"]] - 1e-6)
+    return on & ~(pick & ~ready[..., None])
 
 
 def contact_on(u, params, E, alive):

@@ -294,9 +294,10 @@ class Hook:
             return rate, out[1], out[2], men, torch.zeros_like(rate)
         return rate, out[1], out[2], men
 
-    def volley(self, u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None):
+    def volley(self, u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None, info=None):
+        # (info: the rectangles' penetration factor - the men's projectiles trace their own, fighters/missile.py)
         shots, hp, hit = self.orig["volley"](u, pw, target, dt, params, contact=contact, clear=clear, loaded=loaded,
-                                             catch=catch)
+                                             catch=catch, info=info)
         if not self.on or u is not self.st.u:
             return shots, hp, hit
         hp_f, traced, wanted = FS.fire(self.F, u, params, self.lab, shots, target, self.near, dt)

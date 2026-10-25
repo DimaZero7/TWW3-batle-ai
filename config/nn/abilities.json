@@ -21,7 +21,8 @@
   "phases": "special_ability_to_special_ability_phase_junctions for the ability: the phase named as the ability when there is one, else all its phases",
   "targets": "the phases' target_self / target_friends / target_enemies (self-only abilities have 1 0 0, auras 1 1 0, hexes 0 0 1)",
   "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on whom (the phase's targets)",
-  "attributes": "special_ability_phase_attribute_effects of the phases (attribute, attribute_type: positive/negative)"
+  "attributes": "special_ability_phase_attribute_effects of the phases (attribute, attribute_type: positive/negative)",
+  "delay_s": "only a passive of several phases whose first phases lay nothing (Blackpowder Discipline: phase i 10 s, no stats, then phase ii): the special_ability_phases durations of those first phases, in the junctions' order - its effects come on once its conditions have held that long (ours: the phases run in order)"
  },
  "_missing": {
   "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet (Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode; it throws the men around the Warlord back: probe T-E3, 2 s after the cast no swordsman within 6 m, the nearest 6.5-8.6 m away, in contact again after ~8 s - its force is not decoded, the simulator has no knockback)",
@@ -122,6 +123,56 @@
    ],
    "attributes": []
   },
+  "wh2_main_unit_passive_snare_net": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0,
+   "cp": [
+    0,
+    0
+   ],
+   "range_m": 35.0,
+   "passive": true,
+   "targets_own": false,
+   "friendly_units": 0,
+   "enemy_units": -1,
+   "self_cast": false,
+   "update_targets": true,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [
+    "wh2_main_unit_passive_snare_net"
+   ],
+   "targets": {
+    "self": false,
+    "friends": false,
+    "enemies": true
+   },
+   "effects": [
+    {
+     "stat": "scalar_charge_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "enemies"
+     ],
+     "phase": "wh2_main_unit_passive_snare_net"
+    },
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "enemies"
+     ],
+     "phase": "wh2_main_unit_passive_snare_net"
+    }
+   ],
+   "attributes": []
+  },
   "wh2_main_unit_passive_strength_in_numbers": {
    "active_s": -1.0,
    "recharge_s": -1.0,
@@ -182,6 +233,61 @@
     }
    ],
    "attributes": []
+  },
+  "wh3_dlc25_unit_passive_blackpowder_discipline": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    49,
+    101
+   ],
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "update_targets": false,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [
+    "climbing_manning_eq_on_platform",
+    "moving"
+   ],
+   "phases": [
+    "wh3_dlc25_unit_passive_blackpowder_discipline_i",
+    "wh3_dlc25_unit_passive_blackpowder_discipline_ii"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_accuracy",
+     "how": "add",
+     "value": 40.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh3_dlc25_unit_passive_blackpowder_discipline_ii"
+    },
+    {
+     "stat": "stat_reloading",
+     "how": "add",
+     "value": 10.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh3_dlc25_unit_passive_blackpowder_discipline_ii"
+    }
+   ],
+   "attributes": [],
+   "delay_s": 10.0
   },
   "wh3_main_unit_passive_single_entity": {
    "active_s": -1.0,
