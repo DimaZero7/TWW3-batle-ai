@@ -39,9 +39,12 @@ def side_of_target(pw):
     return torch.where(thru_j, torch.where(c_j >= 0, 0, 3), torch.where(s_j >= 0, 1, 2))
 
 
-def stacked(u, pw, contact, side_j, dt=0.5):
+def stacked(u, pw, contact, side_j, dt=0.5, side_i=None):
     """(cover [B, N, 4], ahead [B, N], behind [B, N, N], side_k [B, N, N]) - the module's doc. contact [B, N, N]: i
-    strikes j (melee.strikes' contact); side_j: side_of_target(pw)."""
+    strikes j (melee.strikes' contact); side_j: side_of_target(pw). side_i [B, N, N] (the side of i that meets j,
+    melee.strikes' codes): cover is then [B, N, N] - per pair, the share of the part of i's side that faces j (j's box
+    seen along that side's line, within the side) the ones ahead cover: a target opposite the free part of the front
+    is struck by the men there in full (a target that faces none of the side: the whole side's share)."""
     Bn, N = u["men"].shape
     dev = u["men"].device
     form = (u["men0"] > 1) & (u["men"] > 0)
@@ -67,11 +70,13 @@ def stacked(u, pw, contact, side_j, dt=0.5):
         return torch.maximum(off - ext, -half), torch.minimum(off + ext, half)
 
     def hull(lo, hi, half, A):
+        """(the ones ahead's span along the line [B, N, 2] - empty: lo > hi -, its share of the side [B, N])"""
         big = torch.full_like(lo, 1e9)
         lo_all = torch.where(A, lo, big).min(2).values
         hi_all = torch.where(A, hi, -big).max(2).values
-        return torch.where(A.any(2), ((hi_all - lo_all).clamp(min=0) / (2 * half[:, :, 0])).clamp(max=1.0),
-                           torch.zeros_like(lo_all))
+        share = torch.where(A.any(2), ((hi_all - lo_all).clamp(min=0) / (2 * half[:, :, 0])).clamp(max=1.0),
+                            torch.zeros_like(lo_all))
+        return torch.stack((lo_all, hi_all), dim=2), share
 
     # i's front line (cos b, -sin b) - as geometry.blocked_share, along i's own front - and its facing (its flanks)
     half_f = (pw["front"] / 2).clamp(min=1e-6)[:, :, None]
@@ -82,8 +87,21 @@ def stacked(u, pw, contact, side_j, dt=0.5):
     A = A & ((own > 0) | (hi_s > lo_s))
     off_f = rx * sb[:, :, None] + rz * cb[:, :, None]                      # k's centre along i's facing
     off_l = rx * cb[:, :, None] - rz * sb[:, :, None]                      # ... along i's front line
-    cover = torch.stack((hull(lo, hi, half_f, A & (off_f >= -half_s)), hull(lo_s, hi_s, half_s, A & (off_l >= 0)),
-                         hull(lo_s, hi_s, half_s, A & (off_l <= 0)), hull(lo, hi, half_f, A & (off_f <= half_s))), dim=2)
+    sides = (hull(lo, hi, half_f, A & (off_f >= -half_s)), hull(lo_s, hi_s, half_s, A & (off_l >= 0)),
+             hull(lo_s, hi_s, half_s, A & (off_l <= 0)), hull(lo, hi, half_f, A & (off_f <= half_s)))
+    cover = torch.stack([sh for _, sh in sides], dim=2)
+    if side_i is not None:
+        # per pair: the part of i's side facing j (j's span along that side's line, every unit's span is lo / hi)
+        g = side_i.clamp(0, 3)
+        bound = torch.stack([bd for bd, _ in sides], dim=2)                 # [B, N, 4, 2]
+        h_lo = bound[..., 0].gather(2, g)
+        h_hi = bound[..., 1].gather(2, g)
+        thru = (g == 0) | (g == 3)
+        s_lo, s_hi = torch.where(thru, lo, lo_s), torch.where(thru, hi, hi_s)
+        seg = (s_hi - s_lo).clamp(min=0)
+        got = (torch.minimum(h_hi, s_hi) - torch.maximum(h_lo, s_lo)).clamp(min=0)
+        whole = cover.gather(2, g)
+        cover = torch.where(seg > 1e-3, (got / seg.clamp(min=1e-3)).clamp(max=1.0), whole)
     k = torch.where(A, own, torch.full_like(own, -1.0)).argmax(2)
     ahead = torch.where(A.any(2), k, torch.full_like(k, -1))
     # behind: ahead touches j too, and i is not nearer to j than ahead's near edge on ahead's side of j

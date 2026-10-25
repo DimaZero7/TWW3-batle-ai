@@ -139,6 +139,61 @@ def blocked_line(F, u, near, tgt, live, other_units=False):
     return inway.any(2) & (tgt >= 0)
 
 
+TOUCH_EPS = 0.02    # m: bodies pressed together (the push holds them at the two radii) count as touching - a guard
+                    # against float equality, not a number of the game
+
+
+def touch_start(F, u, near, up, c_live, rad, permit, pref_unit, combat, tether, cfg, best=None, has=None):
+    """(lab.json melee.start_touch) (start [B, M], whom [B, M]): the enemy man each man may begin to fight - the game's
+    rule: a man starts a blow only when his body touches an enemy man's body - their centres closer than the sum of their
+    radii (the database's battle_entities radius) plus lead_s x the speed at which they close (their units' velocities
+    along the line between them), never beyond the reach (the formed combat distance + the struck man's radius) -, the
+    enemy within angle_deg of his gaze (to the man he closed on last step, F.eng, else his unit's facing). Checked on
+    best [B, M] - the scan's pick among the enemy men in reach (has: one there; melee_scan: the nearest, a man of his
+    unit's attack target 2 m nearer); without them, on every man in reach (the nearest touching). Formations' men only:
+    a lone man (a lord) keeps the reach."""
+    from tools.nn.fighters import scans as _SC
+    px, pz = near.px, near.pz
+    lead = float(cfg.get("lead_s", 3.0))
+    cos_max = math.cos(float(cfg.get("angle_deg", 15.0)) * geometry.DEG)
+    e = F.eng.clamp(min=0) if hasattr(F, "eng") else torch.zeros_like(F.tgt)
+    has_e = (F.eng >= 0) if hasattr(F, "eng") else torch.zeros_like(F.tgt, dtype=torch.bool)
+    b = S.ugather(u, F, "b") * geometry.DEG
+    gx = torch.where(has_e, px.gather(1, e) - px, torch.sin(b))
+    gz = torch.where(has_e, pz.gather(1, e) - pz, torch.cos(b))
+    gn = torch.sqrt(gx * gx + gz * gz).clamp(min=1e-6)
+    r_me = S.ugather(u, F, "radius")
+    vx_me, vz_me = S.ugather(u, F, "vx"), S.ugather(u, F, "vz")
+    if best is not None:
+        c = best.clamp(min=0)
+        cu = F.uid.gather(1, c)
+        rx, rz = px.gather(1, c) - px, pz.gather(1, c) - pz
+        d = torch.sqrt(rx * rx + rz * rz).clamp(min=1e-3)
+        closing = (((vx_me - u["vx"].gather(1, cu)) * rx + (vz_me - u["vz"].gather(1, cu)) * rz) / d).clamp(min=0)
+        touch = r_me + u["radius"].gather(1, cu) + lead * closing + TOUCH_EPS
+        ok = has & (best >= 0) & (d <= touch) & ((rx * gx + rz * gz) / (d * gn) >= cos_max)
+        return ok, torch.where(ok, best, torch.full_like(best, -1))
+    cand, d, c_uid, inreach, _ = _SC.melee_rows(near, None, up, c_live, F.uid, u["side"], rad, permit, combat, tether)
+    cc = cand.clamp(min=0)
+    rx = cells_gather(px, cc) - px[:, :, None]
+    rz = cells_gather(pz, cc) - pz[:, :, None]
+    dd = d.clamp(min=1e-3)
+    closing = (((vx_me[:, :, None] - _SC._by_unit(u["vx"], c_uid)) * rx
+                + (vz_me[:, :, None] - _SC._by_unit(u["vz"], c_uid)) * rz) / dd).clamp(min=0)
+    touch = r_me[:, :, None] + _SC._by_unit(u["radius"], c_uid) + lead * closing + TOUCH_EPS
+    cosang = (rx * gx[:, :, None] + rz * gz[:, :, None]) / (dd * gn[:, :, None])
+    ok = inreach & (d <= touch) & (cosang >= cos_max)
+    pref = (c_uid == pref_unit[:, :, None]).float()
+    whom = cand.gather(2, torch.where(ok, d - 2.0 * pref, torch.full_like(d, 1e9)).argmin(2)[:, :, None]).squeeze(2)
+    return ok.any(2), torch.where(ok.any(2), whom, torch.full_like(whom, -1))
+
+
+def cells_gather(t, idx):
+    """t [B, M] at idx [B, M, K] (fighters.cells.gather2)."""
+    from tools.nn.fighters import cells
+    return cells.gather2(t, idx)
+
+
 def pick_score(F, u, near, up, c_live, rad, permit, combat, tether, cfg):
     """(lab.json melee.pick "score") [B, M] whom each man strikes (-1: no enemy man in reach): of the `cands` nearest
     enemy men in reach, the highest score = 1 / his rank by distance (1 the nearest) + `front` if he is within front_deg
@@ -254,12 +309,23 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     rad = u["radius"] if lab["melee"].get("reach_radius", True) else torch.zeros_like(u["radius"])
     scan = (near, up, c_live, F.uid, u["side"], rad, permit, F.tgt, pref_unit, combat, tether)
     keep, has, new_t, has_e, eng = SC.melee_scan(*scan)
+    has_new = has
     if lab["melee"].get("pick", "nearest") == "score":
         # (lab.json melee.pick "score") the scored pick among the enemy men in reach (pick_score)
         tgt = pick_score(F, u, near, up, c_live, rad, permit, combat, tether, lab["melee"].get("pick_score") or {})
         keep = (tgt >= 0) & (tgt == F.tgt)
     else:
         tgt = torch.where(keep, F.tgt, torch.where(has, new_t, torch.full_like(F.tgt, -1)))
+    st_cfg = lab["melee"].get("start_touch") or {}
+    if st_cfg.get("on"):
+        # (lab.json melee.start_touch) a man who fought nobody last step begins only on touching an enemy man's body
+        # (touch_start); a man already fighting goes on while an enemy man is in reach (the formed combat, as before)
+        start, whom = touch_start(F, u, near, up, c_live, rad, permit, pref_unit, combat, tether, st_cfg,
+                                  best=new_t, has=has_new)
+        newbie = (F.tgt < 0) & (u["men0"] > 1).gather(1, F.uid)
+        tgt = torch.where(newbie, whom, tgt)
+        has = torch.where(newbie, start, has)
+        keep = keep & ~newbie
     eng = torch.where(has_e, eng, torch.full_like(tgt, -1))
     F.eng = torch.where(has, tgt, eng)
     if lab["melee"].get("clear_line"):

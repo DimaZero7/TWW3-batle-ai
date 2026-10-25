@@ -2677,6 +2677,29 @@ class TestStack:
         # the one in melee longer is ahead: nothing covers it
         assert float(cover[0, 0].max()) == 0.0 and int(ahead[0, 0]) == -1 and not bool(behind[0, 0, H])
 
+    def test_a_target_opposite_the_free_part_of_the_front_is_struck_in_full(self):
+        # unit 1's left part (z < -3) is under unit 0 (in melee longer, fighting slaves 2 in front of it); slaves 1 face
+        # only unit 1's free right part: unit 1's men on them as without unit 0 there (the share covered is elsewhere)
+        def men_on_target(friend):
+            st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, -50, 0, 90), (SPEAR, -300, 600, 90)],
+                                      [(SLAVE, 50, 15, 270), (SLAVE, 50, -40, 270), (SLAVE, 300, -600, 270)])], P)
+            H = st.N // 2
+            front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+            x_own = -(depth[0, 0] / 2 + TOUCH / 2)
+            st.u["x"][0, 0] = st.u["x"][0, 1] = x_own
+            st.u["z"][0, 1] = 0.0
+            st.u["z"][0, 0] = -18.0 if friend else -300.0
+            st.u["x"][0, H] = st.u["x"][0, H + 1] = depth[0, H] / 2 + TOUCH / 2
+            st.u["z"][0, H], st.u["z"][0, H + 1] = 18.0, -36.0
+            st.u["contact_s"][0, 0] = st.u["melee_s"][0, 0] = 10.0
+            pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"], rect=True)
+            contact = pw["enemy"] & (pw["gap"] <= 1.0)
+            assert bool(contact[0, 1, H]) and not bool(contact[0, 1, H + 1])
+            if friend:
+                assert bool(contact[0, 0, H + 1]) and float(pw["gap"][0, 0, 1]) < 0
+            return float(melee.strikes(st.u, pw, contact, P, torch.zeros_like(st.u["men"]))[3][0, 1, H])
+        assert men_on_target(True) == pytest.approx(men_on_target(False), rel=1e-4)
+
     def test_a_unit_beside_the_targets_flank_is_not_behind_the_front_unit(self):
         st, H, front, depth = _stack_state(P, clock=(10.0, 0.0))
         # unit 1 beside the slaves' left flank facing it, its corner in unit 0's box

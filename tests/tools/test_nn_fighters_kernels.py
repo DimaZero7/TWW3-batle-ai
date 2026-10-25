@@ -128,6 +128,18 @@ def test_neighbour_scans_triton_match_torch():
     b = SC.push_scan(near, ax, az, up, rad_m, use_triton=True)
     assert float(a[0].abs().sum()) > 1.0
     assert torch.allclose(a[0], b[0], atol=1e-5) and torch.allclose(a[1], b[1], atol=1e-5)
+    # move.stop_own's scan (block_scan): men stopped by a man of another unit of their side in contact ahead
+    ang = torch.rand((B, M), generator=torch.Generator().manual_seed(5)).to("cuda") * 6.283
+    ex, ez = torch.sin(ang), torch.cos(ang)
+    side_m = torch.ones((B, N), dtype=side.dtype, device="cuda")                # one side: many own of other units
+    fight = torch.rand((B, M), generator=torch.Generator().manual_seed(6)).to("cuda") < 0.3
+    prio = torch.where(torch.rand((B, M), generator=torch.Generator().manual_seed(7)).to("cuda") < 0.5,
+                       torch.rand((B, M), generator=torch.Generator().manual_seed(8)).to("cuda") * 10, -1e9)
+    c_me = torch.rand((B, M), generator=torch.Generator().manual_seed(9)).to("cuda") * 10
+    base = up & ~fight
+    a = SC.block_scan(near, base, uid, ex, ez, c_me, side_m, radius, valid, fight, prio, 1.95, use_triton=False)
+    b = SC.block_scan(near, base, uid, ex, ez, c_me, side_m, radius, valid, fight, prio, 1.95, use_triton=True)
+    assert int(a.sum()) > 50 and torch.equal(a, b)
 
 
 @cuda

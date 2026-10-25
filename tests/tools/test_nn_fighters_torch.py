@@ -112,7 +112,8 @@ def test_a_blow_needs_reach_and_lands_on_one_man():
     st, F = _melee_pair(2.0)
     u = st.u
     lab = dict(hook.LAB)
-    lab["melee"] = dict(lab["melee"], blow_share=1.0)
+    # (men who fight already: melee.start_touch off - touching to begin has its own test)
+    lab["melee"] = dict(lab["melee"], blow_share=1.0, start_touch={"on": False})
     near = hook.Near(F, u, lab)
     N = st.N
     permit = torch.zeros((1, N, N), dtype=torch.bool)
@@ -365,6 +366,7 @@ def test_a_man_takes_at_most_k_attackers_blows():
         N = st.N
         lab = copy.deepcopy(hook.LAB)
         lab["melee"]["max_attackers"] = K
+        lab["melee"]["start_touch"] = {"on": False}           # (men who fight already)
         permit = torch.zeros((1, N, N), dtype=torch.bool)
         permit[0, 0, N // 2] = True
         pw = geometry.pairwise(u, 1.5)
@@ -387,6 +389,7 @@ def test_a_man_is_fought_by_at_most_k_men_and_the_rest_re_pair():
         N = st.N
         lab = copy.deepcopy(hook.LAB)
         lab["melee"]["pairs"] = K
+        lab["melee"]["start_touch"] = {"on": False}           # (men who fight already)
         permit = torch.zeros((1, N, N), dtype=torch.bool)
         permit[0, 0, N // 2] = True
         pw = geometry.pairwise(u, 1.5)
@@ -410,6 +413,7 @@ def test_a_man_is_fought_by_at_most_k_men_and_the_rest_re_pair():
     N = st.N
     lab = copy.deepcopy(hook.LAB)
     lab["melee"]["pairs"] = 1
+    lab["melee"]["start_touch"] = {"on": False}               # (men who fight already)
     permit = torch.zeros((1, N, N), dtype=torch.bool)
     permit[0, 0, N // 2] = True
     near = hook.Near(F, u, lab)
@@ -427,6 +431,7 @@ def _resolve_once(**melee_lab):
     u = st.u
     N = st.N
     lab = copy.deepcopy(hook.LAB)
+    lab["melee"]["start_touch"] = {"on": False}               # (men who fight already: touching to begin has its own test)
     lab["melee"].update(melee_lab)
     permit = torch.zeros((1, N, N), dtype=torch.bool)
     permit[0, 0, N // 2] = True
@@ -512,6 +517,120 @@ def test_a_man_with_a_friend_in_the_way_is_blocked():
     u3 = {"side": torch.tensor([[1, 2, 1]]), "radius": torch.tensor([[0.65, 0.65, 0.65]])}
     got = FM.blocked_line(SimpleNamespace(uid=uid3, B=1), u3, near3, tgt, live, other_units=True)[0].tolist()
     assert got == [False, False, False, False, False, False, True]
+
+
+def _men(xs, zs, uids):
+    """A batch of one: men at (xs, zs) of units uids, each seeing every other man (near lists of all)."""
+    from types import SimpleNamespace
+    px, pz = torch.tensor([xs]), torch.tensor([zs])
+    uid = torch.tensor([uids])
+    M = px.shape[1]
+    cand = torch.tensor([[[j for j in range(M) if j != i] for i in range(M)]])
+    d = torch.sqrt((cells.gather2(px, cand) - px[:, :, None]) ** 2 + (cells.gather2(pz, cand) - pz[:, :, None]) ** 2)
+    near = SimpleNamespace(px=px, pz=pz, cand=cand, d=d, c_uid=cells.gather2(uid, cand))
+    return near, uid
+
+
+def test_a_man_begins_to_fight_only_on_touching_an_enemy_body():
+    # lab.json melee.start_touch (the game's rule): centres within the two radii (+ 3 s x the closing speed), the enemy
+    # within 15 deg of his gaze. Man 0 touches 1 (1.2 m < 1.3); man 2 has 3 in reach (2.5 m) but not touching; man 4's
+    # unit closes at 1 m/s (1.3 + 3 = 4.3 m: 5 at 2.5 m starts); man 6 touches 7 at his side (90 deg): not
+    from types import SimpleNamespace
+    near, uid = _men([0.0, 0.0, 10.0, 10.0, 20.0, 20.0, 30.0, 31.2], [0.0, 1.2, 0.0, 2.5, 0.0, 2.5, 0.0, 0.0],
+                     [0, 1, 0, 1, 2, 1, 0, 1])
+    M = uid.shape[1]
+    F = SimpleNamespace(uid=uid, B=1, tgt=torch.full((1, M), -1), eng=torch.full((1, M), -1))
+    u = {"side": torch.tensor([[1, 2, 1]]), "radius": torch.tensor([[0.65, 0.65, 0.65]]),
+         "b": torch.tensor([[0.0, 180.0, 0.0]]), "vx": torch.zeros((1, 3)), "vz": torch.tensor([[0.0, 0.0, 1.0]]),
+         "men0": torch.full((1, 3), 100.0)}
+    up = torch.ones((1, M), dtype=torch.bool)
+    permit = torch.ones((1, 3, 3), dtype=torch.bool)
+    cfg = hook.LAB["melee"]["start_touch"]
+    assert cfg["on"] and cfg["lead_s"] == 3.0 and cfg["angle_deg"] == 15.0
+    start, whom = FM.touch_start(F, u, near, up, up, u["radius"], permit, torch.full((1, M), -1), 2.5, 2.0, cfg)
+    assert start[0].tolist() == [True, True, False, False, True, True, False, False]
+    assert whom[0, 0] == 1 and whom[0, 4] == 5 and whom[0, 2] == -1
+
+
+def test_a_man_stops_behind_a_man_of_another_unit_of_his_side():
+    # lab.json move.stop_own (the game's rule): man 0 (unit 0, moving +z) has man 1 of unit 2 (his side, in melee longer
+    # than unit 0) 1.5 m ahead: he stops (unit 2 in melee no longer than unit 0 and man 1 not fighting: he goes on -
+    # fighting_only; two units in each other do not hold each other's men); man 2 has a man of his own unit (3) ahead: he goes on; man 4 has a man of unit 2 1.5 m beside his way: goes
+    # on; a fighting man (5, with a target) is not stopped
+    from types import SimpleNamespace
+    from tools.nn.fighters import move as MV
+    near, uid = _men([0.0, 0.0, 10.0, 10.0, 20.0, 21.5, 30.0, 30.0], [0.0, 1.5, 0.0, 1.5, 0.0, 0.0, 0.0, 1.5],
+                     [0, 2, 0, 0, 0, 2, 0, 2])
+    M = uid.shape[1]
+    tgt = torch.full((1, M), -1)
+    tgt[0, 6] = 1
+    F = SimpleNamespace(uid=uid, B=1, tgt=tgt, down=torch.zeros((1, M)), hp=torch.ones((1, M)),
+                        valid=torch.ones((1, M), dtype=torch.bool), x_last=torch.zeros((1, 3)),
+                        z_last=torch.tensor([[-1.0, 0.0, 0.0]]))
+    u = {"side": torch.tensor([[1, 2, 1]]), "radius": torch.full((1, 3), 0.65), "b": torch.zeros((1, 3)),
+         "x": torch.zeros((1, 3)), "z": torch.zeros((1, 3)), "men0": torch.full((1, 3), 100.0),
+         "r": torch.zeros((1, 3), dtype=torch.bool), "m": torch.tensor([[True, False, True]]),
+         "contact_s": torch.tensor([[2.0, 0.0, 5.0]])}
+    u["side"][0, 2] = 1
+    got = MV.blocked_own(F, u, hook.LAB, near)[0].tolist()
+    assert got == [True, False, False, False, False, False, False, False]
+    u["contact_s"][0, 2] = 2.0
+    assert not bool(MV.blocked_own(F, u, hook.LAB, near)[0, 0])
+    F.tgt = torch.where(torch.arange(M)[None] == 1, torch.full_like(tgt, 3), tgt)    # man 1 fights: he stops man 0
+    assert bool(MV.blocked_own(F, u, hook.LAB, near)[0, 0])
+    lab = {"move": {"stop_own": {"on": False}}}
+    assert MV.blocked_own(F, u, lab, near) is None
+
+
+def test_a_long_fight_goes_on_when_the_front_ranks_fall():
+    # melee.start_touch / move.stop_own: two formations front to front; their fighting men all killed at 10 s - the men
+    # behind step up, touch and fight on: the HP both lose in the last 10 s as without the two rules (not dying out)
+    import copy
+
+    def last_10s(lab):
+        a = army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 4.0, 180, None)])
+        with hook.installed(lab=lab) as h:
+            st = scenario.build([a], P)
+            H = st.N // 2
+            st.u["unbreakable"][:] = True
+            lost = []
+            for k in range(int(round(40 / P.dt))):
+                hp = st.u["hp_abs"][0, [0, H]].clone()
+                battle.step(st, replay.nearest_attack(st), P, P.dt)
+                lost.append(float((hp - st.u["hp_abs"][0, [0, H]]).sum()))
+                if k == int(round(10 / P.dt)):
+                    F = h.F
+                    F.hp = torch.where(F.tgt >= 0, torch.zeros_like(F.hp), F.hp)
+            return sum(lost[-int(round(10 / P.dt)):])
+    off = copy.deepcopy(hook.LAB)
+    off["melee"]["start_touch"] = {"on": False}
+    off["move"]["stop_own"] = {"on": False}
+    assert last_10s(hook.LAB) > 0.7 * last_10s(off) > 0
+
+
+def test_three_own_units_on_a_lone_lord_keep_fighting_him():
+    # move.stop_own / melee.start_touch: three own formations in each other attack the enemy Warlord - the one in melee
+    # first holds the later ones' men behind it, not the other way round, and its front rank touches him: the fight
+    # does not stand (an exam battle stood 1800 s round a lone lord while each unit held the others' men)
+    from tools.nn.sim import orders as O
+    lord = "wh2_main_skv_cha_warlord_0"
+    a = army([(SWORDS, -40.0 - 6.0 * n, 3.0 * n, 90, None) for n in range(3)], [(lord, 0.0, 0.0, 270, None)])
+    with hook.installed() as h:
+        st = scenario.build([a], P)
+        H = st.N // 2
+        st.u["unbreakable"][:] = True
+        hp = []
+        for k in range(int(round(60 / P.dt))):
+            o = replay.hold(st)
+            o.kind[:, :3] = O.ATTACK
+            o.target[:, :3] = H
+            battle.step(st, o, P, P.dt)
+            hp.append(float(st.u["hp_abs"][0, H]))
+        n20 = int(round(20 / P.dt))
+        assert hp[-1] < hp[-n20] - 20.0                            # the lord still loses health in the last 20 s
+        assert bool(st.u["m"][0, :3].any())
+        F = h.F
+        assert int(((F.uid < 3) & (F.tgt >= 0) & (F.hp > 0)).sum()) >= 3
 
 
 def test_a_man_holding_his_enemy_is_not_carried_by_his_unit():

@@ -33,6 +33,41 @@ def held(F, u, lab):
     return live & (F.tgt >= 0) & unit_ok.gather(1, F.uid)
 
 
+def blocked_own(F, u, lab, near):
+    """[B, M] the men stopped by their own (lab.json move.stop_own; None when off) - the game's rule: own bodies do not let
+    a man through; a man who runs into a man of his side ahead (closer than ahead_m, 1.95 m) stops and does not walk
+    round. A man of a formation, alive, standing, not routing, who fights nobody (F.tgt) with a living man of another
+    unit of his side in contact - who fights, or of a unit in melee longer than his (fighting_only; else any) within ahead_m in front of him - along his way (his unit's move since the last step; standing: its
+    facing), his body's path crossing that man's (sideways closer than their two radii). Such a man is not carried by
+    his unit's centre (hook._post) and keeps where he stands (step) - the bodies' push still acts. Positions: the step's
+    neighbour pass (before the carry)."""
+    cfg = lab["move"].get("stop_own") or {}
+    if not cfg.get("on"):
+        return None
+    live = S.alive(F) & (F.down <= 0)
+    base = live & (F.tgt < 0) & ((u["men0"] > 1) & ~u["r"]).gather(1, F.uid)
+    cx = (u["x"] - F.x_last).gather(1, F.uid)
+    cz = (u["z"] - F.z_last).gather(1, F.uid)
+    cn = torch.sqrt(cx * cx + cz * cz)
+    b = S.ugather(u, F, "b") * S.geometry.DEG
+    moving = cn > 0.05
+    ex = torch.where(moving, cx / cn.clamp(min=1e-6), torch.sin(b))
+    ez = torch.where(moving, cz / cn.clamp(min=1e-6), torch.cos(b))
+    clock = u["contact_s"] if "contact_s" in u else torch.zeros_like(u["men"])
+    c_me = clock.gather(1, F.uid)
+    if cfg.get("fighting_only", True):
+        # (only a man in contact stops him - one who fights, or of a unit that came into its melee before his: the
+        # simulator moves the units' centres through each other, so held by every own man in his way a man is left
+        # behind his unit in any crowd; and two units in each other must not hold each other's men for good)
+        fight_k = F.tgt >= 0
+        prio_k = torch.where(u["m"], clock, torch.full_like(clock, -1e9)).gather(1, F.uid)
+    else:
+        fight_k = torch.ones_like(base)
+        prio_k = torch.zeros_like(c_me)
+    return SC.block_scan(near, base, F.uid, ex, ez, c_me, u["side"], u["radius"], live, fight_k, prio_k,
+                         float(cfg.get("ahead_m", 1.95)))
+
+
 def free_units(u, lab):
     """[B, N] the units that fight free (lab.json move.free): a beast - an ellipse body (the database's battle_entities
     radii_ratio < 1) with no missile weapon (a weapon team has one) - of more than one man."""
@@ -64,6 +99,10 @@ def free_attack(F, u, lab, up, px, pz, ux, uz, gx, gz):
     t_i = u["melee_s"].gather(1, F.uid) if "melee_s" in u else torch.zeros_like(px)
     t_j = u["melee_s"].gather(1, F.uid.gather(1, fc)) if "melee_s" in u else torch.zeros_like(px)
     s = FM.standoff(lab, torch.minimum(t_i, t_j))
+    if (lab["melee"].get("start_touch") or {}).get("on"):
+        # (start_touch) a man not fighting yet aims into the body of the man he closes on (the push holds him at touch)
+        r_me = S.ugather(u, F, "radius")
+        s = torch.where(F.tgt < 0, 0.5 * (r_me + r_me.gather(1, fc)), s)
     wx, wz = ex + vx / n * s - ux, ez + vz / n * s - uz
     tu = ot.clamp(min=0).gather(1, F.uid)
     cx, cz = u["x"].gather(1, tu) - ux, u["z"].gather(1, tu) - uz
@@ -92,8 +131,16 @@ def step(F, u, params, lab, dt, near):
         1, F.uid, torch.where(live, clean, torch.full_like(clean, -1e9)), reduce="amax")
     front = live & (clean >= top.gather(1, F.uid) - 0.5 * v)
     fighting = live & (F.tgt >= 0) & ~S.ugather(u, F, "r")
+    # (lab.json melee.start_touch) a man who fights nobody yet walks up to the enemy man he closes on (F.eng) until their
+    # bodies touch - only then may he begin (melee.touch_start); own bodies stop him on the way (the push below)
+    touch_on = bool((lab["melee"].get("start_touch") or {}).get("on")) and hasattr(F, "eng")
+    closing_in = (live & (F.tgt < 0) & (F.eng >= 0) & ~S.ugather(u, F, "r") & (u["men0"] > 1).gather(1, F.uid)
+                  if touch_on else torch.zeros_like(fighting))
     if lab["move"].get("front_only", True):
+        # (the front rank closes in - a unit gives targets to its front rank only, the game's rule; the rest keep places)
+        closing_in = closing_in & front
         fighting = fighting & front
+    fighting = fighting | closing_in
     # the formation keeps its ranks behind its fighting front (lab.json move.front_anchor): its places shift along its
     # facing by the mean way its fighting front men stand off their own places
     if lab["move"].get("front_anchor", True):
@@ -105,7 +152,7 @@ def step(F, u, params, lab, dt, near):
         sf = sf + F.sh.gather(1, F.uid)
     gx, gz = S.to_world(u, F, sa, sf)                       # the place, as an offset from the unit's centre
     # in a fight: the standoff from the man he fights (the front rank's men only: the men behind keep their places)
-    eng = torch.where(fighting, F.tgt, torch.full_like(F.tgt, -1))
+    eng = torch.where(fighting, torch.where(F.tgt >= 0, F.tgt, F.eng if touch_on else F.tgt), torch.full_like(F.tgt, -1))
     if True:
         ec = eng.clamp(min=0)
         ex, ez = px.gather(1, ec), pz.gather(1, ec)
@@ -114,11 +161,18 @@ def step(F, u, params, lab, dt, near):
         t_i = u["melee_s"].gather(1, F.uid) if "melee_s" in u else torch.zeros_like(px)
         t_j = u["melee_s"].gather(1, F.uid.gather(1, ec)) if "melee_s" in u else torch.zeros_like(px)
         s = FM.standoff(lab, torch.minimum(t_i, t_j))
+        if touch_on:
+            # (start_touch) not fighting yet: he aims into the enemy man's body - the bodies' push holds him at touch
+            r_me = S.ugather(u, F, "radius")
+            s = torch.where(closing_in, 0.5 * (r_me + r_me.gather(1, ec)), s)
         wx, wz = ex + vx / n * s - ux, ez + vz / n * s - uz          # where he would stand, from the unit's centre
         tether = float(params.battle.get("entity_action_attack_formed_tether_distance", 2.0))
         ox, oz = wx - gx, wz - gz
         on = torch.sqrt(ox * ox + oz * oz).clamp(min=1e-6)
         k = (tether / on).clamp(max=1.0)
+        if touch_on:
+            # (start_touch) a man walking up to touch an enemy man is not held back by the tether to his place
+            k = torch.where(closing_in, torch.ones_like(k), k)
         fight = eng >= 0
         if lab["move"].get("tether_all"):
             # (lab.json move.tether_all) a man behind the front with an enemy man in reach stands where he is while
@@ -143,6 +197,11 @@ def step(F, u, params, lab, dt, near):
         fr = hold & (eng >= 0)
         gx = torch.where(hold, torch.where(fr, wx, F.dx), gx)
         gz = torch.where(hold, torch.where(fr, wz, F.dz), gz)
+    blk = getattr(F, "blk", None)
+    if blk is not None:
+        # (lab.json move.stop_own) a man stopped by his own keeps where he stands (hook._post took him off the carry)
+        gx = torch.where(blk, F.dx, gx)
+        gz = torch.where(blk, F.dz, gz)
     # the pace
     mx, mz = gx - F.dx, gz - F.dz
     dist = torch.sqrt(mx * mx + mz * mz).clamp(min=1e-6)

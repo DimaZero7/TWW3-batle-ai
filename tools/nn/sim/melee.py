@@ -306,7 +306,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # belongs to that one's side of the target, and brings only the part of its front the other leaves free.
     behind = cover = side_k = None
     if cal.get("stack_block") or cal.get("stack_side") or cal.get("stack_no_wrap"):
-        cover, _, behind, side_k = stack.stacked(u, pw, contact, stack.side_of_target(pw), float(params.dt))
+        side_ij = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
+        cover, _, behind, side_k = stack.stacked(u, pw, contact, stack.side_of_target(pw), float(params.dt),
+                                                 side_i=side_ij)
         behind = behind & ~single_i & ~single_j
         if cal.get("stack_side"):
             # (its side of the target is the one ahead's: the length it meets is that side's)
@@ -377,9 +379,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     F = torch.where(contact, F, torch.zeros_like(F))
     if cover is not None and cal.get("stack_block"):
         # (melee.stack_block) own bodies ahead: the men of i's side behind them do not reach the enemy - the share of the
-        # side of i that meets j (front, a flank, back) the ones ahead cover; formations only
-        side_ij = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
-        F = torch.where(~single_i & ~single_j, F * (1 - cover.gather(2, side_ij)), F)
+        # part of i's side that faces j (front, a flank, back) the ones ahead cover; formations only
+        F = torch.where(~single_i & ~single_j, F * (1 - cover), F)
     # Across several contacts a unit brings to each side of its formation (front, left, right, back)
     # no more men than that side holds, and no more than it has in all; a single man is split
     # between his opponents. (Men on a flank turn to fight: measured, a unit already fighting hits a

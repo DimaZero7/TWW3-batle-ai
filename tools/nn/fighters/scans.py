@@ -122,10 +122,44 @@ if triton is not None:
         tl.store(sz_ptr + rows, tl.sum(over * rz / d, axis=1), mask=ex)
 
 
+    @triton.jit
+    def _block_kernel(start_ptr, count_ptr, man_ptr, sx_ptr, sz_ptr, sok_ptr, suid_ptr, sfight_ptr, sprio_ptr,
+                      px_ptr, pz_ptr, base_ptr, uid_ptr, ex_ptr, ez_ptr, cme_ptr, side_ptr, rad_ptr, out_ptr,
+                      BM, M, N, H, c, ahead, P1: tl.constexpr, P2: tl.constexpr, CAP: tl.constexpr,
+                      BLOCK: tl.constexpr, MB: tl.constexpr):
+        rows, b, m = _rows(M, MB)
+        ex_ = rows < BM
+        me = ex_ & (tl.load(base_ptr + rows, mask=ex_, other=0) != 0)
+        mx = tl.load(px_ptr + rows, mask=me, other=0.0)
+        mz = tl.load(pz_ptr + rows, mask=me, other=0.0)
+        um = tl.load(uid_ptr + rows, mask=me, other=0)
+        bn = b * N
+        sm = tl.load(side_ptr + bn + um, mask=me, other=0)
+        rm = tl.load(rad_ptr + bn + um, mask=me, other=0.0)
+        ux = tl.load(ex_ptr + rows, mask=me, other=0.0)
+        uz = tl.load(ez_ptr + rows, mask=me, other=0.0)
+        cm = tl.load(cme_ptr + rows, mask=me, other=0.0)
+        at, ok, man, lanes = _lanes(start_ptr, count_ptr, man_ptr, b, mx, mz, me, H, c, P1, P2, CAP, BLOCK)
+        ok = ok & (man != m[:, None]) & (tl.load(sok_ptr + at, mask=ok, other=0) != 0)
+        cu = tl.load(suid_ptr + at, mask=ok, other=0)
+        ok = ok & (cu != um[:, None]) & (tl.load(side_ptr + bn[:, None] + cu, mask=ok, other=0) == sm[:, None])
+        elig = (tl.load(sfight_ptr + at, mask=ok, other=0) != 0) | (tl.load(sprio_ptr + at, mask=ok, other=-1e9)
+                                                                      > cm[:, None] + 1e-3)
+        ok = ok & elig
+        dx = tl.load(sx_ptr + at, mask=ok, other=0.0) - mx[:, None]
+        dz = tl.load(sz_ptr + at, mask=ok, other=0.0) - mz[:, None]
+        along = dx * ux[:, None] + dz * uz[:, None]
+        perp = tl.abs(dx * uz[:, None] - dz * ux[:, None])
+        d = tl.sqrt_rn(dx * dx + dz * dz)
+        rc = tl.load(rad_ptr + bn[:, None] + cu, mask=ok, other=0.0)
+        blk = ok & (along > 0) & (d <= ahead) & (perp < rm[:, None] + rc)
+        tl.store(out_ptr + rows, tl.max(blk.to(tl.int8), axis=1), mask=ex_)
+
     _C = ("P1", "P2", "CAP", "BLOCK")
     K.register("contact", _contact_kernel, (torch.int64, torch.int64), _C, (4, 2))
     K.register("melee", _melee_kernel, (torch.int8, torch.int8, torch.int64, torch.int8, torch.int64), _C, (2, 1))
     K.register("push", _push_kernel, (torch.float32, torch.float32), _C, (2, 2))
+    K.register("block", _block_kernel, (torch.int8,), _C, (2, 2))
 
 
 def _table(near):
@@ -235,3 +269,30 @@ def push_scan(near, ax, az, mov, rad, use_triton=None):
     need = rad[:, :, None] + cells.gather2(rad, cand)
     over = torch.where(ok & (d < need), (need - d) / 2, torch.zeros_like(d))
     return (over * rx / d).sum(2), (over * rz / d).sum(2)
+
+
+def block_scan(near, base, uid, ex, ez, c_me, side_u, rad_u, ok_k, fight_k, prio_k, ahead, use_triton=None):
+    """[B, M] the men of base [B, M] with a man of another unit of their side ahead (move.blocked_own): along (ex, ez)
+    [B, M] in front of him within ahead m, his body's path crossing that man's (sideways closer than their two radii),
+    that man eligible (ok_k [B, M]: alive, standing) and in contact - fighting (fight_k [B, M]) or of a unit in melee
+    longer than his (prio_k [B, M] his unit's melee clock, -1e9 out of melee, against c_me [B, M] his own)."""
+    B, M = base.shape
+    if _triton_ok(base, use_triton):
+        t = near.table
+        ins = [*_table(near), t.sorted_of(near.px), t.sorted_of(near.pz), t.sorted_of(_i8(ok_k)),
+               t.sorted_of(uid.to(torch.int32)), t.sorted_of(_i8(fight_k)), t.sorted_of(prio_k.float()),
+               near.px, near.pz, _i8(base), uid, ex.float(), ez.float(), c_me.float(), side_u, rad_u.float()]
+        (out,) = K.launch("block", B * M, ins, (B * M, M, side_u.shape[1], t.H),
+                          (t.c, ahead), _consts(near))
+        return out.reshape(B, M).bool()
+    cand, c_uid = near.cand, near.c_uid
+    rx = cells.gather2(near.px, cand) - near.px[:, :, None]
+    rz = cells.gather2(near.pz, cand) - near.pz[:, :, None]
+    along = rx * ex[:, :, None] + rz * ez[:, :, None]
+    perp = (rx * ez[:, :, None] - rz * ex[:, :, None]).abs()
+    side_m = side_u.gather(1, uid)
+    ok = ((cand >= 0) & cells.gather2(ok_k, cand) & (_by_unit(side_u, c_uid) == side_m[:, :, None])
+          & (c_uid != uid[:, :, None]))
+    ok = ok & (cells.gather2(fight_k, cand) | (cells.gather2(prio_k, cand) > c_me[:, :, None] + 1e-3))
+    blk = ok & (along > 0) & (near.d <= ahead) & (perp < rad_u.gather(1, uid)[:, :, None] + _by_unit(rad_u, c_uid))
+    return base & blk.any(2)
