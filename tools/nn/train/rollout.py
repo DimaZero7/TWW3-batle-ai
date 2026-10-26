@@ -33,8 +33,9 @@ Past slots (past_slots=K; run.py --past-slots): up to K past versions play at on
 a past version keeps the slot it began with to its end (battle_slot [B]; a restarting battle takes the active slot),
 so its version never changes mid-battle and its memory (GRU) runs on. The trainer loads a new version only into a
 slot that holds no battle (slot_counts) and makes it the active one (activate). Every slot in use decides on all past
-rows (one batch shape for the compiled step) and each row takes its own slot's orders; slot_stats counts the ended
-games and the learner's wins per slot (the pool's quality scores, league.Pool). One slot = the old single version.
+rows (one batch shape for the compiled step) and each row takes its own slot's orders - with fixed slots (fix_slots,
+run.py --opponents) each slot's version decides for its own rows only (_past_own: the same orders, a fixed shape per
+slot); slot_stats counts the ended games and the learner's wins per slot (the pool's quality scores, league.Pool). One slot = the old single version.
 A pinned slot (pin_slot; run.py --past-pin): one more slot holds a fixed version for the whole run, apart from the pool
 (no quality score, never replaced); a past battle that starts takes it with probability pin_share, else the active
 slot; its battles count as "pinned" (take_stats), the pool's as "past". With cells (run.py --past-pin-cells:
@@ -517,6 +518,9 @@ class Battles:
         # run.py --opponents (fix_slots): each past row's own slot for the whole run; per slot the learner's games,
         # wins, seconds by role and games, wins, gold trade by matchup (take_named)
         self.row_slot = None
+        # ... and then each version decides for its own rows only (_past_own; False: on all past rows, as before)
+        self.past_own = True
+        self._slot_idx = None         # (_slot_rows' cache)
         F = len(PIN_FACTIONS)
         self.slot_rstats = torch.zeros(self.past_slots, 2, 3, device=self.device)
         self.slot_mstats = torch.zeros(self.past_slots, 2 * F * F, 3, device=self.device)
@@ -668,6 +672,7 @@ class Battles:
         """run.py --opponents: every past battle row plays the version of its own slot row_slot [B] (league.Named; -1:
         not a past row) for the whole run - no pool, no draw; the battles running now take it at once."""
         self.row_slot = torch.as_tensor(row_slot, device=self.device).long()
+        self._slot_idx = None
         self.battle_slot = torch.where(self.row_slot >= 0, self.row_slot, torch.zeros_like(self.row_slot))
         self.slot_used = set(range(self.past_slots))
 
@@ -769,20 +774,24 @@ class Battles:
                 self.cstate[k][rows] = new[k]
         return obs_r, h, logits, action, orders, h_new
 
-    def _act_past(self, a, frame):
+    def _act_past(self, a, frame, greedy=False):
         """The past rows' Orders and {slot: new memory}: each slot's version decides for the rows of its battles
         (every slot in use runs on all past rows - one batch shape for the compiled step - and the rows take their
-        own slot's orders); (None, None) without a version."""
+        own slot's orders; with fixed slots, run.py --opponents, each version runs on its own rows only: _past_own);
+        (None, None) without a version. greedy: the versions' most likely actions (tests)."""
         live = [k for k in sorted(self.slot_used) if self.past[k] is not None]
         if not live:
             return None, None
         rows = self.rows_past
         if len(live) == 1:
             k = live[0]
-            _, _, lg, _, orders, h_new = self._act(self.past[k], a, frame, rows, self.past_h[k], False)
+            _, _, lg, _, orders, h_new = self._act(self.past[k], a, frame, rows, self.past_h[k], greedy)
             if "nan_fixed" in lg:
                 self.nan_stats += lg["nan_fixed"].sum()
             return orders, {k: h_new}
+        own = self._slot_rows(live) if self.past_own else None
+        if own is not None:
+            return self._past_own(a, frame, live, own, greedy)
         slot = self.battle_slot[rows % self.B]                                   # [P]
         obs_r = rows_of(a, rows)
         fr, bounds = frame_rows(frame, rows), self.bounds2[rows]
@@ -799,7 +808,7 @@ class Battles:
             o_in = obs_v2 if actor.cfg.sectors else obs_r
             o_in = self._task(actor, rows, o_in, fr)
             h = self.past_h[k] if self.past_h[k] is not None else actor.initial(o_in)
-            logits, act, o, hs[k] = self._decide(actor, o_in, h, fr, bounds, False)
+            logits, act, o, hs[k] = self._decide(actor, o_in, h, fr, bounds, greedy)
             mine = slot == k
             if "nan_fixed" in logits:
                 nf = logits["nan_fixed"]
@@ -811,6 +820,72 @@ class Battles:
             orders = O.merge(orders, o, use)
             action = hd.Action(*(None if getattr(action, f) is None or getattr(act, f) is None
                                  else torch.where(use, getattr(act, f), getattr(action, f)) for f in hd.Action.FIELDS))
+        if v2:
+            new = self._commit_apply(cs, obs_v2, t, action)
+            for k in mcommit.KEYS:
+                self.cstate[k][rows] = new[k]
+        return orders, hs
+
+    def _slot_rows(self, live):
+        """{slot: [P_k] positions in rows_past of its own rows} under fixed slots (fix_slots: a past row keeps its
+        slot for the whole run), cached until the rows change (narrow); None without fixed slots or when some past
+        row's slot holds no version (the all-rows way then)."""
+        if self.row_slot is None:
+            return None
+        key = (id(self.rows_past), len(self.rows_past), self.B, tuple(live))
+        if self._slot_idx is None or self._slot_idx[0] != key:
+            slot = self.row_slot[self.rows_past % self.B]
+            idx = {k: (slot == k).nonzero().squeeze(1) for k in live}           # (reads the GPU: once a run)
+            self._slot_idx = (key, idx if sum(len(v) for v in idx.values()) == len(slot) else None)
+        return self._slot_idx[1]
+
+    def _past_own(self, a, frame, live, own, greedy):
+        """_act_past with fixed slots: each slot's version decides for its own rows only (own: _slot_rows) - the same
+        orders, actions and memories of those rows as on all past rows (test_nn_past_own_torch.py), without the
+        other slots' rows (5 versions on 696 rows: 8.8 s of a 95 s step, build/diag_exec). The memories are kept
+        over all past rows as before (another slot's rows keep theirs: never read)."""
+        rows = self.rows_past
+        P = len(rows)
+        obs_r = rows_of(a, rows)
+        fr, bounds = frame_rows(frame, rows), self.bounds2[rows]
+        t = self.st.t[rows % self.B]
+        cs = {k: v[rows] for k, v in self.cstate.items()}
+        obs_v2 = None
+        parts, hs, v2 = [], {}, False
+
+        def sub(d, sel):
+            return {k: (v[sel] if torch.is_tensor(v) and v.dim() > 0 and v.shape[0] == P else v) for k, v in d.items()}
+        for k in live:
+            actor, sel = self.past[k], own[k]
+            if not len(sel):
+                hs[k] = self.past_h[k]
+                continue
+            if actor.cfg.sectors:
+                v2 = True
+                if obs_v2 is None:
+                    obs_v2 = self._v2_inputs(cs, obs_r, t, fr, bounds)
+            fr_k = frame_rows(fr, sel)
+            o_in = self._task(actor, rows[sel], sub(obs_v2 if actor.cfg.sectors else obs_r, sel), fr_k)
+            h_all = self.past_h[k]
+            h = h_all[sel] if h_all is not None else actor.initial(o_in)
+            logits, act, o, h_new = self._decide(actor, o_in, h, fr_k, bounds[sel], greedy)
+            if "nan_fixed" in logits:
+                self.nan_stats += logits["nan_fixed"].sum()
+            full = h_all.clone() if h_all is not None else h_new.new_zeros((P,) + tuple(h_new.shape[1:]))
+            full[sel] = h_new
+            hs[k] = full
+            parts.append((sel, act, o))
+
+        def scatter(f, get):
+            vals = [get(p, f) for p in parts]
+            if any(v is None for v in vals):
+                return None
+            out = vals[0].new_zeros((P,) + tuple(vals[0].shape[1:]))
+            for (sel, _, _), v in zip(parts, vals):
+                out[sel] = v
+            return out
+        orders = O.Orders(*(scatter(f, lambda p, f: getattr(p[2], f)) for f in O.FIELDS))
+        action = hd.Action(*(scatter(f, lambda p, f: getattr(p[1], f)) for f in hd.Action.FIELDS))
         if v2:
             new = self._commit_apply(cs, obs_v2, t, action)
             for k in mcommit.KEYS:
@@ -1390,6 +1465,7 @@ class Battles:
         self.rows_past = (flat == league.CODE["past"]).nonzero().squeeze(1)
         self.place_learn = placement(self.rows_learn, self.B)
         self.place_past = placement(self.rows_past, self.B)
+        self._slot_idx = None
         # self.scripts stays: the compiled assembly is keyed by it (an unused script costs little)
         return keep
 

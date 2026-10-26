@@ -38,6 +38,8 @@ class ModelConfig:
     critic_d: int = 128      # the centralised critic (training only)
     critic_layers: int = 3
     critic_heads: int = 4
+    critic_ff: int = 0       # the critic's feed-forward width = critic_ff * critic_d (0: ff, the actor's: every checkpoint
+    #                          saved before this field); the thin executor (tools/nn/general/thin.py) keeps the wide critic
 
     @property
     def points(self):

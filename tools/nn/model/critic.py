@@ -21,7 +21,8 @@ class Critic(nn.Module):
         self.cfg = cfg
         self.encoder = TokenEncoder(d, n_ctx=ob.CONTEXT_FULL)
         self.dist = nn.Embedding(cfg.dist_bins + 1, cfg.critic_heads)
-        self.blocks = nn.ModuleList(Block(d, cfg.critic_heads, cfg.ff) for _ in range(cfg.critic_layers))
+        ff = getattr(cfg, "critic_ff", 0) or cfg.ff               # (ModelConfig.critic_ff: 0 - the actor's)
+        self.blocks = nn.ModuleList(Block(d, cfg.critic_heads, ff) for _ in range(cfg.critic_layers))
         self.norm = nn.LayerNorm(d)
         self.value = nn.Sequential(nn.Linear(3 * d, d), nn.GELU(), nn.Linear(d, 1))
 

@@ -149,3 +149,25 @@ def freeze_but_general(actor, critic, prefixes=("general.",)):
             p.grad = None
             frozen += p.numel()
     return frozen, trainable
+
+
+# the general's parameters only the executor reads (GeneralConfig.split_kinds: the executor's own mission kind table,
+# net.General.exec_table; the general's choice never reads it): they learn with the executor under freeze_general
+EXECUTOR_OWN = ("general.exec_kinds",)
+
+
+def freeze_general(actor):
+    """run.py --general-freeze 1 (the reverse of --general-only): the general's network (every general.* parameter but
+    the executor's own kind table, EXECUTOR_OWN, under GeneralConfig.split_kinds) requires no gradient and has none,
+    so no loss reaches it and Adam never moves it; the executor (the unit network, its task input, the kind table) and
+    the critic learn. -> (frozen, trainable) weights of the actor."""
+    own = EXECUTOR_OWN if getattr(actor.gcfg, "split_kinds", False) else ()
+    frozen = trainable = 0
+    for n, p in actor.named_parameters():
+        if n.startswith("general.") and not n.startswith(own):
+            p.requires_grad_(False)
+            p.grad = None
+            frozen += p.numel()
+        else:
+            trainable += p.numel()
+    return frozen, trainable

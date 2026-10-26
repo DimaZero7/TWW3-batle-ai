@@ -422,3 +422,30 @@ def test_the_open_loop_and_greedy_flags_reach_the_branches():
         ab.play_pair = real
     assert calls and all(c == (True, True) for c in calls)
     assert env.brancher.stats["replayed_presses"] + env.brancher.stats["replayed_missed"] > 0
+
+
+def test_every_second_chunk_replays_nothing_and_the_flag_reaches_the_branches():
+    from tools.nn.train import run
+    assert run.parser().parse_args([]).ability_branch_every == 1                    # (the default: every update)
+    assert run.parser().parse_args(["--ability-branch-every", "2"]).ability_branch_every == 2
+    cfg = ab.Config(share=1.0, missed=1.0, copies=2, horizon_s=3.0, batch=4, every=2)
+    br = ab.Brancher(cfg)
+    env = env_of()
+    skips = []
+    for _ in range(4):
+        br.begin(env, 3)
+        skips.append(br.chunk.skip)
+    assert skips == [False, True, False, True]                     # the run's first chunk replays, then every 2nd
+    got = []
+    for begun in (0, 1):                                           # the same fresh battles: a replaying chunk, a skipped
+        actor, crit = tiny()
+        env = env_of()
+        env.brancher = ab.Brancher(cfg)
+        env.brancher.begun = begun
+        batch = rollout.collect(env, actor, crit, 3)
+        st = env.brancher.stats
+        got.append((batch["abil_branch"] is not None, st["replayed_presses"] + st["replayed_missed"],
+                    st["presses"] + st["missed_moments"]))
+    (b0, r0, m0), (b1, r1, m1) = got
+    assert b0 and r0 > 0 and m0 > 0
+    assert not b1 and r1 == 0 and m1 == m0                         # skipped: the moments counted, nothing replayed

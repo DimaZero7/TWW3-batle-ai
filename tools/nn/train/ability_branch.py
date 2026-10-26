@@ -94,6 +94,14 @@ less the own, less k_winds x the winds it spent; the user, 16.10.2026): every ca
 the spell's own per-ability scale; the spells' moments (presses, a ready spell left) are neither replayed nor in the
 critic. "branch": as any ability (the replays, the bonus price of the spell bricks).
 
+Every k-th update (Config.every; run.py --ability-branch-every): the branches cost the sequential decisions of their
+batch (2 x horizon a chunk, ~20 s of a 95 s step at cap 128: build/diag_exec), whatever the share or the cap - with
+the cap binding (~850 candidates a chunk at share 0.2 for 128 slots) a smaller share replays as much. So the replays are
+thinned by chunks: every k-th chunk of a run (its first included) replays as before; in the others nothing is
+snapshotted - the press rates, the own signal's log-probabilities (lp_all) and the critic's moments are recorded as
+always, and once the critic is ready every moment of such a chunk is priced by it (no measured prices: its buffer
+takes nothing new, it refits on what it has). k 2: half the replays and about half their time.
+
 Extension points (not used yet): a bootstrapped (TD) target of the critic (Brancher.target), a cost of an ability left
 unused through a battle (Config.unused_penalty: must be 0).
 """
@@ -137,6 +145,8 @@ class Config:
     horizon_s: float = 60.0     # seconds of battle each branch plays
     cap: int = 0                # snapshots a chunk at most (0: no cap); spread over the decisions
     batch: int = 128            # snapshots per branch batch (x copies battles in each of the two branches)
+    every: int = 1              # the branches play every this many chunks (updates) of a run, from its first; the
+    #                             chunks between replay nothing (module doc "Every k-th update")
     seed: int = 0
     hold_s: float = 0.0         # "not": the unit's slot also stays unused this many seconds (0: the network goes on as
     #                             it would - and may press it a decision later; module doc)
@@ -605,6 +615,7 @@ class _Chunk:
     lp_all: list = field(default_factory=list)       # with Config.own: per decision (t, [R, N] the ability head's
     #                                                    log-probability of the choice made)
     rates: object = None                             # [A + 1, 2, 2] on the device: (ability, in melee, (ready, pressed))
+    skip: bool = False                               # Config.every: nothing of this chunk is replayed
 
 
 class AbilityNorm:
@@ -687,6 +698,7 @@ class Brancher:
         self.copies = None                       # the last chunk's prices per copy [E, copies] (_play)
         self.comp = None                         # {kind: slots} of a branch batch (composition), set at begin
         self.kind_b = None                       # [B] each main battle's kind, on the host
+        self.begun = 0                           # chunks begun (Config.every)
 
     def slots(self):
         """Snapshots a branch batch holds."""
@@ -702,8 +714,11 @@ class Brancher:
         if self.cfg.cap:
             rounds = max(1, math.ceil(self.cfg.cap / sum(self.comp.values())))
             room = {k: v * rounds for k, v in self.comp.items()}
+        every = max(1, int(getattr(self.cfg, "every", 1)))
         self.chunk = _Chunk(T=T, presses=z.clone(), missed=z.clone(), room=room,
-                            rates=torch.zeros(len(self.keys) + 1, 2, 2, device=env.device))
+                            rates=torch.zeros(len(self.keys) + 1, 2, 2, device=env.device),
+                            skip=self.begun % every != 0)
+        self.begun += 1
 
     def price_kind(self):
         """The kind of price the critic learns (a buffer of another kind restarts, run.py): open loop or not, and
@@ -784,6 +799,8 @@ class Brancher:
         where = None
         if self.critic is not None:
             where = self._moments(env, info, press | missed, t)
+        if c.skip:                                 # (Config.every: a chunk without replays)
+            return
         nz = take.nonzero()                                                 # [k, 2] (r, n): reads the GPU
         if not len(nz):
             return
