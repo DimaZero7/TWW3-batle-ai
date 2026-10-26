@@ -20,7 +20,9 @@ arrows' fire taken by own units, the share of arrows forced to a 45 deg lob). Th
 table, from the run's log build/nn-train/runs/test5_<label>/log.jsonl "general", the mean of its updates): our groups a
 plan, the composition changes a battle (re-plans whose membership of our side differed from the last plan's) and their
 share of the re-plans, the share of our groups with shooters and melee together, and with groups "learned" the ARI
-to the rule, K and the share of plans that kept the last groups (GeneralConfig.groups_sticky). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
+to the rule, K and the share of plans that kept the last groups (GeneralConfig.groups_sticky), and the share of the
+fire of our units with a mission that friends took away in the training's battles (runtime exec_fire_skip; under the
+shoot mission: exec_fire_skip_shoot; run.py --general-exec-fireline pays for it). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
 says so under the table. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
@@ -295,7 +297,9 @@ def computed(pts, rep=None):
 
 GROUP_KEYS = (("groups_own", "groups a plan", "{:.2f}"), ("group_changes_per_battle", "composition changes a battle", "{:.2f}"),
               ("group_change_share", "of re-plans", "{:.3f}"), ("mixed_share", "shoot+melee groups", "{:.3f}"),
-              ("assign_ari", "ARI to rule", "{:.3f}"), ("assign_k", "K", "{:.2f}"), ("assign_kept", "plans kept", "{:.3f}"))
+              ("assign_ari", "ARI to rule", "{:.3f}"), ("assign_k", "K", "{:.2f}"), ("assign_kept", "plans kept", "{:.3f}"),
+              ("exec_fire_skip", "fire friends took (training)", "{:.3f}"),
+              ("exec_fire_skip_shoot", "of it under shoot", "{:.3f}"))
 
 
 def general_groups(folder):

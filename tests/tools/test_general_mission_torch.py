@@ -30,9 +30,9 @@ def state(pos, side, **kw):
     return u
 
 
-def run(u, main, missions, tiles=None):
+def run(u, main, missions, tiles=None, **kw):
     """The measures of side 1's units: main [n] the plan's groups, missions {group: (kind name, target)}, tiles
-    {group: (x, z)} of a tile target. -> (m [n], ok [n])."""
+    {group: (x, z)} of a tile target; kw: measure's options (blocked, fireline). -> (m [n], ok [n])."""
     n = len(main)
     kind = torch.zeros(1, G, dtype=torch.long)
     target = torch.full((1, G), 2 * G, dtype=torch.long)          # (no mission: attack a tile - not counted)
@@ -42,7 +42,7 @@ def run(u, main, missions, tiles=None):
     for g, p in (tiles or {}).items():
         tgt[0, g] = torch.tensor(p)
     m, ok, _ = mission.measure(u, torch.tensor([0]), torch.tensor([1]), torch.tensor([main]), kind, target, tgt,
-                               torch.ones(1, n, dtype=torch.bool), G, C, HALF, CFG)
+                               torch.ones(1, n, dtype=torch.bool), G, C, HALF, CFG, **kw)
     return m[0].tolist(), ok[0].tolist()
 
 
@@ -129,6 +129,31 @@ def test_shoot_keeps_the_target_in_range_out_of_melee():
     m, _ = run(melee, MAIN, {0: ("shoot", G)})
     assert m[0] == 0.0                                                      # in melee
     assert m[1] == pytest.approx(1.0)                                       # no missiles: at 100 m (50-250) of it
+
+
+def test_the_line_of_fire_lowers_the_shoot_measure_by_the_fire_friends_took():
+    """--general-exec-fireline F: a shooter's shoot measure x (1 - F x the share of its fire friends took away over the
+    decision, the simulator's fc_skip / fc_cap); 0 where it had no fire; F 0 or no shares: as before; other kinds and
+    a shooter group's units without missiles untouched."""
+    cap = torch.tensor([[2.0, 4.0, 0.0, 1.0]])
+    skip = torch.tensor([[1.0, 4.0, 0.0, 3.0]])
+    assert mission.fireline_share(cap, skip)[0].tolist() == pytest.approx([0.5, 1.0, 0.0, 1.0])
+    u = state([(0, 0), (0, 0), (0, 0), (0, 100), (0, 100), (900, 900)], SIDE,
+              fire=[True, False, False, False, False, False], target=[3, -1, -1, -1, -1, -1],
+              range=[150.0, 150.0, 0.0, 0, 0, 0], a=[10.0, 10.0, 0.0, 0, 0, 0])
+    blocked = torch.tensor([[0.5, 1.0, 0.7, 0.0, 0.0, 0.0]])
+    m0, _ = run(u, MAIN, {0: ("shoot", G), 1: ("hold", 2 * G)}, tiles={1: (0.0, 0.0)})
+    m, _ = run(u, MAIN, {0: ("shoot", G), 1: ("hold", 2 * G)}, tiles={1: (0.0, 0.0)}, blocked=blocked, fireline=1.0)
+    assert m[0] == pytest.approx(0.5) and m[1] == pytest.approx(0.0)    # firing, half its men blocked; held in range
+    assert m[2] == pytest.approx(m0[2])                                  # hold: not a shoot measure
+    m, _ = run(u, MAIN, {0: ("shoot", G)}, blocked=blocked, fireline=0.5)
+    assert m[0] == pytest.approx(0.75) and m[1] == pytest.approx(0.25)
+    m, _ = run(u, MAIN, {0: ("shoot", G)}, blocked=blocked, fireline=0.0)
+    assert m[:2] == pytest.approx(m0[:2])                                # F 0: as before
+    nm = state([(0, 0), (0, 0), (500, 0), (0, 100), (0, 100), (900, 900)], SIDE, range=[150.0, 0.0, 0.0, 0, 0, 0],
+               a=[10.0, 0.0, 0.0, 0, 0, 0])
+    m, _ = run(nm, MAIN, {0: ("shoot", G)}, blocked=blocked, fireline=1.0)
+    assert m[1] == pytest.approx(1.0)                                    # no missiles: its keep-distance measure
 
 
 def test_withdraw_goes_to_the_point_away_from_the_enemy_out_of_melee():

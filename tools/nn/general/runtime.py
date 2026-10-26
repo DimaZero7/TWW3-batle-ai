@@ -40,7 +40,9 @@ training (docs/en/training/general.md "How it runs").
   steps, each learner unit with a mission gets its measure 0..1 (execute; mission.py), summed by kind for the log; the
   executor's bonus of the decision, W x (the measure - its kind's running mean), goes out with the decision (the
   rollout's step "exec" [R, N]) into the units' own advantage (ppo.update, signal.exec_advantage) - never into the
-  reward: the unit critic and the general's return do not see it.
+  reward: the unit critic and the general's return do not see it. The fire friends took away is summed over the
+  decision's steps (note_fire; logged as exec_fire_skip, under "shoot" exec_fire_skip_shoot) and, at run.py
+  --general-exec-fireline F > 0, lowers the shoot measure (mission.py "The line of fire").
 * The teacher (run.py --general-teacher P: `teacher` = P): a share P of the battles (drawn at their start) has the
   learner's missions made by the rule (teacher.py; the groups stay the network's); such plans ("teach") play and train
   the executor but leave no record for the general's PPO, the classifier or the branches.
@@ -101,7 +103,8 @@ COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy",
           "assign_plans", "assign_ari", "assign_k", "assign_groups", "assign_kept", "churn_plans", "churn_changed",
           "changes_ended",
           "mixed_groups", "mixed_of",
-          "gae_seqs", "gae_plans", "gae_cut", "gae_d_sum", "gae_d_sq", "gae_a_sum", "gae_a_sq")
+          "gae_seqs", "gae_plans", "gae_cut", "gae_d_sum", "gae_d_sq", "gae_a_sum", "gae_a_sq",
+          "fire_cap", "fire_skip", "fire_cap_shoot", "fire_skip_shoot")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -203,6 +206,10 @@ class Runtime:
         self.teach_fire_s = gteacher.FIRE_S       # --general-teacher-fire-s: ... and our shooters fired less than this
         self.teach_flank = True                   # --general-teacher-flank: two groups on one target - the second flanks
         self.flank_measure = "contact"            # --general-flank-measure: flank's melee part by the contact's side
+        self.fireline = 0.0                       # --general-exec-fireline F: the shoot measure x (1 - F x the fire
+        #                                           friends took away; mission.py); 0: off
+        self.fire_acc = None                      # [2, B, N] the simulator's fc_cap, fc_skip summed over this
+        #                                           decision's steps (note_fire; with the measures on)
         # --general-kind-q outcome|both: the plans' outcomes over q_h seconds (module doc; 0: off, nothing kept)
         self.q_h = 0.0
         self.q_next = 0                           # the next ended plan's id
@@ -1158,6 +1165,15 @@ class Runtime:
         ok = (n > 0) & r["active"][rows][:, :G]
         return beh, ok
 
+    def note_fire(self, u):
+        """After every simulator step of a decision (rollout._play; Battles.step zeroes it first): the units' fire they
+        had and of it what friends took away (the simulator's fc_cap / fc_skip, missile.friend_los) summed into
+        fire_acc - with the measures on only (nothing kept else)."""
+        if self.frozen or not self.measure or "fc_cap" not in u:
+            return
+        now = torch.stack([u["fc_cap"], u["fc_skip"]]).float()
+        self.fire_acc = now if self.fire_acc is None else self.fire_acc + now
+
     def execute(self, env, acting):
         """After a decision's simulator steps (before after(): the plans in force are the decision's): how well each of
         the learner's units with a mission carried it out (mission.measure, 0..1) into the log's sums by kind, and ->
@@ -1170,9 +1186,22 @@ class Runtime:
         has = r["has"][rows] & (r["owner"][rows] == 0)
         C = self.gcfg.target_grid ** 2
         half = self.mcfg.grid_half / self.gcfg.target_grid             # a coarse tile's half side, m
+        acc, self.fire_acc = self.fire_acc, None
+        blocked = None
+        if acc is not None:
+            cap, skip = acc[0][rows % B], acc[1][rows % B]
+            blocked = gmission.fireline_share(cap, skip)
         m, ok, k = gmission.measure(env.st.u, rows % B, rows // B + 1, r["main"][rows], r["kind"][rows],
                                     r["target"][rows], r["tgt"][rows], acting & has[:, None], G, C, half, self.gcfg,
-                                    flank_by=self.flank_measure)
+                                    flank_by=self.flank_measure, blocked=blocked, fireline=self.fireline)
+        if acc is not None:
+            # the fire of the units counted that friends took away (the log's exec_fire_skip; under "shoot": _shoot)
+            okd = ok.double()
+            sh_k = okd * (k == gtaskmask.KIND["shoot"]).double()
+            self.stats.add("fire_cap", (cap.double() * okd).sum())
+            self.stats.add("fire_skip", (skip.double() * okd).sum())
+            self.stats.add("fire_cap_shoot", (cap.double() * sh_k).sum())
+            self.stats.add("fire_skip_shoot", (skip.double() * sh_k).sum())
         K = self.gcfg.kinds
         okf = ok.to(torch.float64)
         kk = k.clamp(0, K - 1).reshape(-1)
@@ -1522,6 +1551,10 @@ class Runtime:
                     if ex[1, k.index] > 0} if self.measure else {}),
                 **({"exec_base": [round(float(x), 4) for x in self.exec_base.tolist()],
                     "exec_units": int(ex[1].sum()), "exec_weight": round(float(self.exec_w), 6)} if self.measure else {}),
+                **({"exec_fire_skip": round(s["fire_skip"] / s["fire_cap"], 4),
+                    "exec_fire_skip_shoot": (round(s["fire_skip_shoot"] / s["fire_cap_shoot"], 4)
+                                             if s["fire_cap_shoot"] > 0 else None),
+                    "exec_fireline": self.fireline} if self.measure and s["fire_cap"] > 0 else {}),
                 **({"exec_bonus": round(s["exec_bonus"] / max(1.0, s["exec_units"]), 5),
                     "exec_bonus_abs": round(s["exec_bonus_abs"] / max(1.0, s["exec_units"]), 5)}
                    if self.measure and self.exec_w else {})}

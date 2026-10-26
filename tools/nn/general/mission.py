@@ -22,7 +22,13 @@ measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
     screen    on the segment from the target group's centre to the standing enemy unit nearest to it (its projection
               0..1 of the way) and near(the distance off the segment, SCREEN_M)
     shoot     a shooter (range and ammunition): 0 in melee, 1 shooting at a unit of the target group, 0.5 within its
-              range of one, else 0; without missiles: 0 in melee, 1 at KEEP_M of the target group's nearest unit
+              range of one, else 0; without missiles: 0 in melee, 1 at KEEP_M of the target group's nearest unit.
+              The line of fire (run.py --general-exec-fireline F > 0; 0: off, as before): a shooter's part x (1 - F x
+              the share of its fire over the decision's steps that friends took away - the simulator's fc_skip / fc_cap,
+              missile.friend_los: held for a closed line, or its men's paths blocked; fireline_share). In the sim
+              g44_3 vs S27 (build/diag_fireline/sim) 95 % of the shooters' direct fire is under "shoot", 28 % of it
+              lost, ~80 % of the loss to our other groups' melee units in the line: the measure said 1 for a unit that
+              fired with half its men blocked
     withdraw  0 in melee, else 0.5 x near(d to the target point, the reach) + 0.5 x (distance to the nearest standing
               enemy / AWAY_M, at most 1)
 
@@ -62,13 +68,21 @@ def _gather(x, idx):
 FLANK_BY = ("contact", "angle")   # run.py --general-flank-measure
 
 
-def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flank_by="contact"):
+def fireline_share(cap, skip):
+    """The share 0..1 of a unit's fire friends took away (the simulator's bookkeeping summed over steps: cap the fire
+    it had, skip of it what friends took; missile.friend_los): skip / cap, 0 where it had no fire."""
+    return torch.where(cap > 0, (skip / cap.clamp(min=1e-9)).clamp(0.0, 1.0), torch.zeros_like(cap))
+
+
+def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flank_by="contact", blocked=None,
+            fireline=0.0):
     """-> (m [R, N] 0..1, ok [R, N] the units counted, k [R, N] each unit's mission kind) of rows [R] (b their battles,
     s their sides 1 / 2) on the simulator's state u ([B, N] fields): main [R, N] the plan's group numbers (ours
     0..G-1, theirs G..2G-1, -1 none), kind / target [R, G] our groups' missions, tgt [R, G, 2] a tile target's world
     point (NaN else), acting [R, N] (the plan in force and the unit deciding), C coarse tiles, tile_half (m) their
     half side, cfg the GeneralConfig (its kinds); flank_by: the flank's melee part by the contact's side ("contact")
-    or the angle now ("angle")."""
+    or the angle now ("angle"); blocked [R, N] (fireline_share over the decision) and fireline F: the shoot measure of a
+    shooter x (1 - F x blocked) (module doc; None or F 0: as before)."""
     f = (lambda k: u[k][b])
     x, z = f("x").float(), f("z").float()
     side = f("side")
@@ -138,6 +152,8 @@ def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flan
     s_sh = torch.where(firing, torch.ones_like(dT), torch.where(grp_ok & (dT <= rng), 0.5 * torch.ones_like(dT),
                                                                torch.zeros_like(dT)))
     s_no = (grp_ok & (dT >= KEEP_M[0]) & (dT <= KEEP_M[1])).float()
+    if blocked is not None and fireline > 0:
+        s_sh = s_sh * (1.0 - fireline * blocked.to(s_sh.dtype)).clamp(min=0.0)     # the line of fire (module doc)
     shoot = torch.where(melee, torch.zeros_like(dT), torch.where(shooter, s_sh, s_no))
     # withdraw
     dE = torch.where(foe_st[:, None, :], D, big).min(-1).values

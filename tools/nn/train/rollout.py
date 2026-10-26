@@ -954,6 +954,8 @@ class Battles:
                 self.brancher.capture(self, info)
             if gb is not None:
                 gb.capture(self, info)
+        if rt is not None:
+            rt.fire_acc = None                       # this decision's fire (Runtime.note_fire, execute)
         r_rows, finished = self._play(parts, scripted, delay, attacks, rb, rs, each)
         d_rows = finished[rb]
         executed = None
@@ -1008,6 +1010,8 @@ class Battles:
             base = None if scripted is None else self._landing(scripted, None, land)
             was_done = self.st.done.clone()
             r, fin = self._sim_step(now, attacks, rb, rs, was_done, base)
+            if self.general_rt is not None:
+                self.general_rt.note_fire(self.st.u)       # the fire friends took away (--general-exec measures)
             r_rows = r if r_rows is None else r_rows + r
             finished = finished | fin
             if each is not None:

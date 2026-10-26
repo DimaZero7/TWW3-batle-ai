@@ -1009,6 +1009,7 @@ def _train(args, every=None, teacher=None, normal=None):
             env.general_rt.teach_fire_s = glearn_cfg.teacher_fire_s
             env.general_rt.teach_flank = glearn_cfg.teacher_flank
             env.general_rt.flank_measure = glearn_cfg.flank_measure
+            env.general_rt.fireline = args.general_exec_fireline
             from tools.nn.general.learn import exec_kinds
             env.general_rt.exec_kind = torch.tensor(exec_kinds(glearn_cfg.exec_kind, env.general_rt.gcfg.kinds),
                                                     device=env.general_rt.dev)
@@ -1020,7 +1021,9 @@ def _train(args, every=None, teacher=None, normal=None):
                                                                    if glearn_cfg.imitate_decay else "")
                      if glearn_cfg.teacher > 0 else "")
                   + f"; the general's execution bonus S {glearn_cfg.exec_general:g}; the kinds' weights "
-                  + f"{glearn_cfg.exec_kind}; the task's masks {'on' if env.general_rt.gcfg.task_mask else 'off'}",
+                  + f"{glearn_cfg.exec_kind}; the task's masks {'on' if env.general_rt.gcfg.task_mask else 'off'}"
+                  + (f"; the line of fire F {args.general_exec_fireline:g} (the shoot measure x (1 - F x the fire "
+                     "friends took away))" if args.general_exec_fireline > 0 else ""),
                   flush=True)
         # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
         env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
@@ -2086,6 +2089,12 @@ def parser():
                     help="general: the flank mission's measure in melee - 'contact': the side of the target the "
                          "contact began on (the simulator's hit_sec, morale 'attacked in the flank / rear'); 'angle': "
                          "where the unit stands now off the target unit's facing (mission.py)")
+    ap.add_argument("--general-exec-fireline", type=float, default=0.0,
+                    help="general: F, the line of fire in the shoot mission's measure (mission.py) - a shooter's "
+                         "measure x (1 - F x the share of its fire over the decision that friends took away: the "
+                         "simulator's fc_skip / fc_cap, missile.friend_los), so the executor learns not to shoot "
+                         "through its own (and the general's execution bonus sees it); the share is logged as "
+                         "exec_fire_skip(_shoot) either way (0: off, as before)")
     ap.add_argument("--general-exec-kind", default="withdraw=2,screen=2",
                     help="general: the executor's mission bonus x each kind's weight, 'name=w,...' (kinds not named: 1)")
     ap.add_argument("--general-imitate", type=float, default=0.3,
