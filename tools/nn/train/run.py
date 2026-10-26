@@ -1010,6 +1010,9 @@ def _train(args, every=None, teacher=None, normal=None):
             env.general_rt.teach_flank = glearn_cfg.teacher_flank
             env.general_rt.flank_measure = glearn_cfg.flank_measure
             env.general_rt.fireline = args.general_exec_fireline
+            env.general_rt.blocker = args.general_exec_blocker
+            env.general_rt.screen_clear = bool(args.general_screen_clear)
+            env.general_rt.shoot_strict = args.general_exec_shoot_strict
             from tools.nn.general.learn import exec_kinds
             env.general_rt.exec_kind = torch.tensor(exec_kinds(glearn_cfg.exec_kind, env.general_rt.gcfg.kinds),
                                                     device=env.general_rt.dev)
@@ -1023,7 +1026,12 @@ def _train(args, every=None, teacher=None, normal=None):
                   + f"; the general's execution bonus S {glearn_cfg.exec_general:g}; the kinds' weights "
                   + f"{glearn_cfg.exec_kind}; the task's masks {'on' if env.general_rt.gcfg.task_mask else 'off'}"
                   + (f"; the line of fire F {args.general_exec_fireline:g} (the shoot measure x (1 - F x the fire "
-                     "friends took away))" if args.general_exec_fireline > 0 else ""),
+                     "friends took away))" if args.general_exec_fireline > 0 else "")
+                  + (f"; the blocker B {args.general_exec_blocker:g} (a measure out of melee x (1 - B x the share of "
+                     "the decision in a line of fire that lost fire))" if args.general_exec_blocker > 0 else "")
+                  + ("; screens clear of our lines of fire" if args.general_screen_clear else "")
+                  + (f"; strict shoot S {args.general_exec_shoot_strict:g} (target in range and seen, not fired at: "
+                     "0.5 x (1 - S))" if args.general_exec_shoot_strict > 0 else ""),
                   flush=True)
         # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
         env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
@@ -2095,6 +2103,21 @@ def parser():
                          "simulator's fc_skip / fc_cap, missile.friend_los), so the executor learns not to shoot "
                          "through its own (and the general's execution bonus sees it); the share is logged as "
                          "exec_fire_skip(_shoot) either way (0: off, as before)")
+    ap.add_argument("--general-exec-blocker", type=float, default=0.0,
+                    help="general: B, the blocker in every mission's measure (mission.py, fireline.py) - a unit not "
+                         "in melee x (1 - B x the share of the decision's steps it stood in the line of fire of "
+                         "another own direct-fire shooter that lost fire to friends, the simulator's fc_skip); the "
+                         "share is logged as exec_blocking(_free) either way (0: off, as before)")
+    ap.add_argument("--general-exec-shoot-strict", type=float, default=0.0,
+                    help="general: S, the strict shoot measure (mission.py) - while the target group's nearest unit is "
+                         "in the shooter's range and seen, firing at another group or silence gives 0.5 x (1 - S) "
+                         "instead of 0.5 (S 1: 0); the share of our firing shooters under 'shoot' that fire at the "
+                         "target group is logged as exec_shoot_obey either way (0: off, as before)")
+    ap.add_argument("--general-screen-clear", type=int, default=0, choices=(0, 1),
+                    help="general: 1 - the screen mission's measure is 0 while the unit stands in a line of fire of a "
+                         "standing own direct-fire shooter (its aim, else its nearest enemy in range; fireline.py): a "
+                         "screen stands beside or ahead off our shooters' lines; the share is logged as "
+                         "exec_screen_in_line either way (0: off, as before)")
     ap.add_argument("--general-exec-kind", default="withdraw=2,screen=2",
                     help="general: the executor's mission bonus x each kind's weight, 'name=w,...' (kinds not named: 1)")
     ap.add_argument("--general-imitate", type=float, default=0.3,

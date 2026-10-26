@@ -22,7 +22,10 @@ plan, the composition changes a battle (re-plans whose membership of our side di
 share of the re-plans, the share of our groups with shooters and melee together, and with groups "learned" the ARI
 to the rule, K and the share of plans that kept the last groups (GeneralConfig.groups_sticky), and the share of the
 fire of our units with a mission that friends took away in the training's battles (runtime exec_fire_skip; under the
-shoot mission: exec_fire_skip_shoot; run.py --general-exec-fireline pays for it). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
+shoot mission: exec_fire_skip_shoot; run.py --general-exec-fireline pays for it), the share of the time our units out of
+melee stood in a line of fire that lost fire (exec_blocking_free; --general-exec-blocker) and of the screens standing in
+our shooters' lines (exec_screen_in_line; --general-screen-clear), the share of our firing shooters under "shoot" that
+fire at the mission's target group (exec_shoot_obey; --general-exec-shoot-strict). A step of test5 --no-script-metrics has no rating, pair gold or script-battle rows ("-"); the card
 says so under the table. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
@@ -299,7 +302,10 @@ GROUP_KEYS = (("groups_own", "groups a plan", "{:.2f}"), ("group_changes_per_bat
               ("group_change_share", "of re-plans", "{:.3f}"), ("mixed_share", "shoot+melee groups", "{:.3f}"),
               ("assign_ari", "ARI to rule", "{:.3f}"), ("assign_k", "K", "{:.2f}"), ("assign_kept", "plans kept", "{:.3f}"),
               ("exec_fire_skip", "fire friends took (training)", "{:.3f}"),
-              ("exec_fire_skip_shoot", "of it under shoot", "{:.3f}"))
+              ("exec_fire_skip_shoot", "of it under shoot", "{:.3f}"),
+              ("exec_blocking_free", "time in a lost line of fire (out of melee)", "{:.3f}"),
+              ("exec_screen_in_line", "screens in our lines", "{:.3f}"),
+              ("exec_shoot_obey", "shooters' fire at the mission's target", "{:.3f}"))
 
 
 def general_groups(folder):

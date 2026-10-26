@@ -42,7 +42,10 @@ training (docs/en/training/general.md "How it runs").
   rollout's step "exec" [R, N]) into the units' own advantage (ppo.update, signal.exec_advantage) - never into the
   reward: the unit critic and the general's return do not see it. The fire friends took away is summed over the
   decision's steps (note_fire; logged as exec_fire_skip, under "shoot" exec_fire_skip_shoot) and, at run.py
-  --general-exec-fireline F > 0, lowers the shoot measure (mission.py "The line of fire").
+  --general-exec-fireline F > 0, lowers the shoot measure (mission.py "The line of fire"). The learner's units in a
+  line of fire of an own shooter that lost fire (fireline.blocking) are counted every step too: the share of the
+  decision, exec_blocking (exec_blocking_free: not in melee), at --general-exec-blocker B > 0 lowers every measure of
+  such a unit not in melee; the screens in our shooters' lines (exec_screen_in_line) get 0 at --general-screen-clear 1.
 * The teacher (run.py --general-teacher P: `teacher` = P): a share P of the battles (drawn at their start) has the
   learner's missions made by the rule (teacher.py; the groups stay the network's); such plans ("teach") play and train
   the executor but leave no record for the general's PPO, the classifier or the branches.
@@ -76,6 +79,7 @@ import numpy as np
 import torch
 
 from tools.nn.general import deploy as gdeploy
+from tools.nn.general import fireline as gfire
 from tools.nn.general import groups as ggroups
 from tools.nn.general import mission as gmission
 from tools.nn.general import signal as gsignal
@@ -104,7 +108,8 @@ COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy",
           "changes_ended",
           "mixed_groups", "mixed_of",
           "gae_seqs", "gae_plans", "gae_cut", "gae_d_sum", "gae_d_sq", "gae_a_sum", "gae_a_sq",
-          "fire_cap", "fire_skip", "fire_cap_shoot", "fire_skip_shoot")
+          "fire_cap", "fire_skip", "fire_cap_shoot", "fire_skip_shoot", "block_sum", "block_n", "block_free_sum",
+          "block_free_n", "screen_n", "screen_lined", "obey_fire", "obey_hit")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -210,6 +215,12 @@ class Runtime:
         #                                           friends took away; mission.py); 0: off
         self.fire_acc = None                      # [2, B, N] the simulator's fc_cap, fc_skip summed over this
         #                                           decision's steps (note_fire; with the measures on)
+        self.blocker = 0.0                        # --general-exec-blocker B: every measure x (1 - B x the share of the
+        #                                           decision a unit stood in a line of fire that lost fire; mission.py)
+        self.screen_clear = False                 # --general-screen-clear: no screen in our shooters' lines of fire
+        self.shoot_strict = 0.0                   # --general-exec-shoot-strict S: fire at the mission's target or less
+        self.block_acc = None                     # [R, N] the learner rows' steps in such a line this decision ...
+        self.block_steps = 0                      # ... of this many steps (note_fire)
         # --general-kind-q outcome|both: the plans' outcomes over q_h seconds (module doc; 0: off, nothing kept)
         self.q_h = 0.0
         self.q_next = 0                           # the next ended plan's id
@@ -1165,7 +1176,7 @@ class Runtime:
         ok = (n > 0) & r["active"][rows][:, :G]
         return beh, ok
 
-    def note_fire(self, u):
+    def note_fire(self, u, rows=None):
         """After every simulator step of a decision (rollout._play; Battles.step zeroes it first): the units' fire they
         had and of it what friends took away (the simulator's fc_cap / fc_skip, missile.friend_los) summed into
         fire_acc - with the measures on only (nothing kept else)."""
@@ -1173,6 +1184,11 @@ class Runtime:
             return
         now = torch.stack([u["fc_cap"], u["fc_skip"]]).float()
         self.fire_acc = now if self.fire_acc is None else self.fire_acc + now
+        if rows is not None:
+            # the learner rows' units in a line of fire that lost fire this step (fireline.blocking)
+            blk = gfire.blocking(u, rows % self.B, rows // self.B + 1).float()
+            self.block_acc = blk if self.block_acc is None else self.block_acc + blk
+            self.block_steps += 1
 
     def execute(self, env, acting):
         """After a decision's simulator steps (before after(): the plans in force are the decision's): how well each of
@@ -1187,13 +1203,47 @@ class Runtime:
         C = self.gcfg.target_grid ** 2
         half = self.mcfg.grid_half / self.gcfg.target_grid             # a coarse tile's half side, m
         acc, self.fire_acc = self.fire_acc, None
+        bacc, n_st, self.block_acc, self.block_steps = self.block_acc, self.block_steps, None, 0
+        blocking = None
+        if bacc is not None and n_st > 0 and bacc.shape[0] == rows.shape[0]:
+            blocking = bacc / n_st                                      # the share of the decision in such a line
         blocked = None
         if acc is not None:
             cap, skip = acc[0][rows % B], acc[1][rows % B]
             blocked = gmission.fireline_share(cap, skip)
         m, ok, k = gmission.measure(env.st.u, rows % B, rows // B + 1, r["main"][rows], r["kind"][rows],
                                     r["target"][rows], r["tgt"][rows], acting & has[:, None], G, C, half, self.gcfg,
-                                    flank_by=self.flank_measure, blocked=blocked, fireline=self.fireline)
+                                    flank_by=self.flank_measure, blocked=blocked, fireline=self.fireline,
+                                    blocking=blocking, blocker=self.blocker, screen_clear=self.screen_clear,
+                                    shoot_strict=self.shoot_strict)
+        # the obedience: of our firing shooters under "shoot", those firing at the mission's target group (the
+        # simulator's fire and target slot after the decision's steps; exec_shoot_obey)
+        uu, bb = env.st.u, rows % B
+        main_r = r["main"][rows]
+        slot = uu["target"][bb]
+        t_u = r["target"][rows].gather(1, main_r.clamp(0, G - 1))
+        at_t = (slot >= 0) & (main_r.gather(1, slot.clamp(min=0)) == t_u)
+        fire_sh = ok & (k == gtaskmask.KIND["shoot"]) & uu["fire"][bb] & (uu["range"][bb] > 0) & ~uu["m"][bb]
+        self.stats.add("obey_fire", fire_sh.sum())
+        self.stats.add("obey_hit", (fire_sh & at_t).sum())
+        if blocking is not None:
+            # the share of the decision our counted units stood in a line of fire that lost fire (all; not in melee:
+            # the ones the blocker's rule touches)
+            okd = ok.double()
+            free = okd * (~env.st.u["m"][rows % B]).double()
+            self.stats.add("block_sum", (blocking.double() * okd).sum())
+            self.stats.add("block_n", okd.sum())
+            self.stats.add("block_free_sum", (blocking.double() * free).sum())
+            self.stats.add("block_free_n", free.sum())
+        on_sc = ok & (k == gtaskmask.KIND["screen"])
+        if acc is not None:
+            # the screens standing in a line of fire of our standing direct-fire shooters (fireline.screen_lines: what
+            # --general-screen-clear pays 0 for), logged either way
+            uu, bb, ss = env.st.u, rows % B, rows // B + 1
+            sd = uu["side"][bb]
+            foe = (sd > 0) & (sd != ss[:, None]) & (uu["men"][bb] > 0) & ~uu["gone"][bb] & ~uu["r"][bb]
+            self.stats.add("screen_n", on_sc.sum())
+            self.stats.add("screen_lined", (on_sc & gfire.screen_lines(uu, bb, ss, foe)).sum())
         if acc is not None:
             # the fire of the units counted that friends took away (the log's exec_fire_skip; under "shoot": _shoot)
             okd = ok.double()
@@ -1555,6 +1605,13 @@ class Runtime:
                     "exec_fire_skip_shoot": (round(s["fire_skip_shoot"] / s["fire_cap_shoot"], 4)
                                              if s["fire_cap_shoot"] > 0 else None),
                     "exec_fireline": self.fireline} if self.measure and s["fire_cap"] > 0 else {}),
+                **({"exec_blocking": round(s["block_sum"] / s["block_n"], 4),
+                    "exec_blocking_free": round(s["block_free_sum"] / max(1.0, s["block_free_n"]), 4),
+                    "exec_blocker": self.blocker} if self.measure and s["block_n"] > 0 else {}),
+                **({"exec_shoot_obey": round(s["obey_hit"] / s["obey_fire"], 4),
+                    "exec_shoot_strict": self.shoot_strict} if self.measure and s["obey_fire"] > 0 else {}),
+                **({"exec_screen_in_line": round(s["screen_lined"] / s["screen_n"], 4),
+                    "screen_clear": bool(self.screen_clear)} if self.measure and s["screen_n"] > 0 else {}),
                 **({"exec_bonus": round(s["exec_bonus"] / max(1.0, s["exec_units"]), 5),
                     "exec_bonus_abs": round(s["exec_bonus_abs"] / max(1.0, s["exec_units"]), 5)}
                    if self.measure and self.exec_w else {})}

@@ -1011,7 +1011,7 @@ class Battles:
             was_done = self.st.done.clone()
             r, fin = self._sim_step(now, attacks, rb, rs, was_done, base)
             if self.general_rt is not None:
-                self.general_rt.note_fire(self.st.u)       # the fire friends took away (--general-exec measures)
+                self.general_rt.note_fire(self.st.u, self.rows_learn)   # the fire friends took, who stood in the line
             r_rows = r if r_rows is None else r_rows + r
             finished = finished | fin
             if each is not None:

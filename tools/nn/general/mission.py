@@ -20,7 +20,10 @@ measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
               (config/nn/sim.json contact.front_deg 45: CA's front +-45)
     hold      near(d to the target point, the reach): a tile's half side (the tile itself), GROUP_M around a group
     screen    on the segment from the target group's centre to the standing enemy unit nearest to it (its projection
-              0..1 of the way) and near(the distance off the segment, SCREEN_M)
+              0..1 of the way) and near(the distance off the segment, SCREEN_M). With run.py --general-screen-clear 1:
+              0 while the unit stands in a line of fire of a standing own direct-fire shooter (fireline.screen_lines:
+              its aim, else the nearest enemy in its range) - a screen stands beside or ahead off the shooters' lines,
+              not in them (in the sim g45_2 vs S27 screens were 18 % of the friends in the lines, build/diag_fireline)
     shoot     a shooter (range and ammunition): 0 in melee, 1 shooting at a unit of the target group, 0.5 within its
               range of one, else 0; without missiles: 0 in melee, 1 at KEEP_M of the target group's nearest unit.
               The line of fire (run.py --general-exec-fireline F > 0; 0: off, as before): a shooter's part x (1 - F x
@@ -28,9 +31,18 @@ measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
               missile.friend_los: held for a closed line, or its men's paths blocked; fireline_share). In the sim
               g44_3 vs S27 (build/diag_fireline/sim) 95 % of the shooters' direct fire is under "shoot", 28 % of it
               lost, ~80 % of the loss to our other groups' melee units in the line: the measure said 1 for a unit that
-              fired with half its men blocked
+              fired with half its men blocked.
+              Strict (run.py --general-exec-shoot-strict S > 0; 0: off): while the target group's nearest unit is in
+              the shooter's range and seen by our side (the state's vis), not firing at the target group (firing at
+              another or silent) gives 0.5 x (1 - S) instead of 0.5; out of range or unseen - as before. The shooters
+              did not take the mission's target: a changed target left the fire by groups as it was (26.4 % -> 26.3 %,
+              build/diag_intel/targets)
     withdraw  0 in melee, else 0.5 x near(d to the target point, the reach) + 0.5 x (distance to the nearest standing
               enemy / AWAY_M, at most 1)
+
+The blocker (run.py --general-exec-blocker B > 0; 0: off): every measure of a unit not in melee x (1 - B x the share of
+the decision's steps it stood in the line of fire of another own direct-fire shooter that lost fire to friends -
+fireline.blocking, Runtime.note_fire): the friends in the lines were ~80 % of the lost fire, and none of them paid.
 
 Every measure x the group's cohesion: 1 within COHESION_M[0] of its own group's centre (its standing units), down to 0
 at COHESION_M[1] - a unit that leaves its group does not carry out the group's mission.
@@ -75,14 +87,17 @@ def fireline_share(cap, skip):
 
 
 def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flank_by="contact", blocked=None,
-            fireline=0.0):
+            fireline=0.0, blocking=None, blocker=0.0, screen_clear=False, shoot_strict=0.0):
     """-> (m [R, N] 0..1, ok [R, N] the units counted, k [R, N] each unit's mission kind) of rows [R] (b their battles,
     s their sides 1 / 2) on the simulator's state u ([B, N] fields): main [R, N] the plan's group numbers (ours
     0..G-1, theirs G..2G-1, -1 none), kind / target [R, G] our groups' missions, tgt [R, G, 2] a tile target's world
     point (NaN else), acting [R, N] (the plan in force and the unit deciding), C coarse tiles, tile_half (m) their
     half side, cfg the GeneralConfig (its kinds); flank_by: the flank's melee part by the contact's side ("contact")
     or the angle now ("angle"); blocked [R, N] (fireline_share over the decision) and fireline F: the shoot measure of a
-    shooter x (1 - F x blocked) (module doc; None or F 0: as before)."""
+    shooter x (1 - F x blocked) (module doc; None or F 0: as before); blocking [R, N] (the share of the decision a unit
+    stood in a line of fire that lost fire) and blocker B: every measure of a unit not in melee x (1 - B x blocking);
+    screen_clear: the screen measure 0 in our shooters' lines of fire; shoot_strict S: the shoot measure of a shooter whose
+    target is in range and seen but not fired at 0.5 x (1 - S) (module doc)."""
     f = (lambda k: u[k][b])
     x, z = f("x").float(), f("z").float()
     side = f("side")
@@ -145,12 +160,19 @@ def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flan
     along = (w * v).sum(-1) / vv
     lat = (w[..., 0] * v[..., 1] - w[..., 1] * v[..., 0]).abs() / vv.sqrt()
     screen = ((along >= 0.0) & (along <= 1.0)).float() * near(lat, SCREEN_M)
+    if screen_clear:
+        from tools.nn.general import fireline as gfire
+        screen = screen * (~gfire.screen_lines(u, b, s, foe_st)).float()
     # shoot
     shooter = (f("range") > 0) & (f("a") > 0)
     firing = f("fire") & hit_t
     rng = f("range").float()
-    s_sh = torch.where(firing, torch.ones_like(dT), torch.where(grp_ok & (dT <= rng), 0.5 * torch.ones_like(dT),
-                                                               torch.zeros_like(dT)))
+    in_rng = grp_ok & (dT <= rng)
+    half = torch.full_like(dT, 0.5)
+    if shoot_strict > 0:
+        seen = _gather(f("vis"), jT) if "vis" in u else torch.ones_like(in_rng)
+        half = torch.where(seen, half * (1.0 - shoot_strict), half)        # in range and seen: fire at it or less
+    s_sh = torch.where(firing, torch.ones_like(dT), torch.where(in_rng, half, torch.zeros_like(dT)))
     s_no = (grp_ok & (dT >= KEEP_M[0]) & (dT <= KEEP_M[1])).float()
     if blocked is not None and fireline > 0:
         s_sh = s_sh * (1.0 - fireline * blocked.to(s_sh.dtype)).clamp(min=0.0)     # the line of fire (module doc)
@@ -172,6 +194,8 @@ def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flan
     co = torch.einsum("rij,rjc->ric", mate.float(), p) / mate.sum(-1).clamp(min=1)[..., None]
     lo, hi = COHESION_M
     m = m * (1.0 - ((p - co).norm(dim=-1) - lo) / (hi - lo)).clamp(0.0, 1.0)
+    if blocking is not None and blocker > 0:
+        m = torch.where(melee, m, m * (1.0 - blocker * blocking.to(m.dtype)).clamp(min=0.0))   # the blocker
     ok = in_g & v_all.gather(-1, kk)[..., 0]
     return torch.where(ok, m, torch.zeros_like(m)), ok, k_u
 
