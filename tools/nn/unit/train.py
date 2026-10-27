@@ -125,7 +125,16 @@ def orders_now(raw_d, area, pace, arrived):
     return Nt.order_of(raw_d[:, 0], {k: v[:, 0] for k, v in area.items() if k != "on"}, pace, arrived)
 
 
-SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup}
+def multi_setup(cfg, P, device, gen=None, sp=None):
+    """Drill U3 (drill_multi.py): hold the area against two enemies; the branches' kit of four variants."""
+    from tools.nn.unit import branch as Br
+    from tools.nn.unit import drill_multi as DM
+    sp = sp if sp is not None else DM.specs(cfg["battles"], gen or torch.Generator())
+    st, own, area = DM.build(sp, P, device)
+    return {"st": st, "own": own, "area": area, "ender": DM.Ender(st.B, device), "specs": sp, "kit": Br.KIT_MULTI}
+
+
+SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup, "multi": multi_setup}
 
 
 def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, branch=None):
@@ -169,6 +178,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         contact_d = torch.full((B,), -1, dtype=torch.long, device=device)
         beh = torch.full((B,), Br.OTHER, dtype=torch.long, device=device)
         brace = Br.bracing_deg(P)
+        kit = setup.get("kit", Br.KIT1)
     for d in range(D):
         duty.start()
         valid[d] = ~st.done
@@ -226,11 +236,10 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
                     idx = m.nonzero()[:, 0]
                     snaps.append((idx, Br.take(st, idx)))
                     branched = branched | m
-                hit = st.u["hit_sec"][:, H * st.N + 0] > 0
-                first = (contact_d < 0) & hit & ~was_done
+                first = (contact_d < 0) & Br.contact(st) & ~was_done
                 if bool(first.any()):
                     contact_d = torch.where(first, d, contact_d)
-                    beh = torch.where(first, Br.behaviour(st, brace), beh)
+                    beh = torch.where(first, kit.behaviour(st, brace), beh)
             if watch is not None:
                 watch(st, hp0, was_done, area, d * steps + j + 1)
             u = st.u
@@ -252,32 +261,39 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             break
     if branch is not None:
         tb = time.time()
-        info = {"branched": branched, "contact_d": contact_d, "behaviour": beh,
-                "t_stand": torch.full((B,), float("nan"), device=device),
-                "t_attack": torch.full((B,), float("nan"), device=device)}
+        Vn = len(kit.variants)
+        info = {"branched": branched, "contact_d": contact_d, "behaviour": beh, "names": kit.names(),
+                "trades": torch.full((B, Vn), float("nan"), device=device),
+                "best": torch.full((B,), -1, dtype=torch.long, device=device)}
         if snaps:
             idx = torch.cat([i for i, _ in snaps])
             snap = Br.cat([x for _, x in snaps])
             rep = {}
-            ts, ta = Br.play(snap, {k: v[idx] for k, v in area.items()}, P, sim_step, branch["horizon_s"],
-                             rows=B, report=rep)
-            info["t_stand"][idx], info["t_attack"][idx] = ts, ta
+            # (pad the branches to a fixed size - twice the expected share - so the compiled step keeps its shape)
+            rows = max(1, int(round(B * min(1.0, 2 * branch["share"]))))
+            info["trades"][idx] = kit.play(snap, {k: v[idx] for k, v in area.items()}, P, sim_step,
+                                           branch["horizon_s"], rows=rows, report=rep)
             ok = branched & (contact_d >= 0) & (contact_d < D)
-            bon, best = Br.bonus(beh, info["t_stand"], info["t_attack"], branch["weight"])
+            bon, best = Br.bonus_of(beh, torch.nan_to_num(info["trades"]), branch["weight"])
             bon = torch.where(ok, bon, torch.zeros_like(bon))
             rew[contact_d.clamp(0, D - 1), torch.arange(B, device=device)] += bon
             info["best"] = torch.where(branched, best, torch.full_like(best, -1))
+            _, margin = Br.best_of(torch.nan_to_num(info["trades"]))
             n = max(int(ok.sum()), 1)
+            stand_v = [v for v, (k_, _) in enumerate(kit.variants) if k_ == "stand"]
+            braced = rep["braced"][:, stand_v][rep["contact"][:, stand_v]]
             stats["branch"] = {"share": round(float(branched.float().mean()), 3),
-                               "stand_better": round(float((best[branched] == Br.STAND).float().mean()), 3),
-                               "diff": round(float((info["t_stand"] - info["t_attack"])[branched].abs().mean()), 4),
-                               "beh_stand": round(float((beh[ok] == Br.STAND).float().sum()) / n, 3),
-                               "beh_attack": round(float((beh[ok] == Br.ATTACK).float().sum()) / n, 3),
+                               "best": {nm: round(float((best[branched] == v).float().mean()), 3)
+                                        for v, nm in enumerate(kit.names())},
+                               "margin": round(float(margin[branched].mean()), 4),
+                               "beh": {nm: round(float((beh[ok] == v).float().sum()) / n, 3)
+                                       for v, nm in enumerate(kit.names())},
                                "chose_best": round(float((beh[ok] == best[ok]).float().sum()) / n, 3),
                                "bonus_mean": round(float(bon.sum()) / B, 4), "weight": branch["weight"],
-                               "stand_branch_braced": round(float(rep["stand_braced"][rep["stand_contact"]].float().mean()), 3)
-                               if bool(rep["stand_contact"].any()) else None,
+                               "stand_branch_braced": round(float(braced.float().mean()), 3) if braced.numel() else None,
                                "seconds": round(time.time() - tb, 1)}
+        if Vn == 2:                         # (U1's names in the exam)
+            info["t_stand"], info["t_attack"] = info["trades"][:, Br.STAND], info["trades"][:, Br.ATTACK]
         stats["_branch"] = info
     last_value = torch.zeros(B, device=device)
     if critic is not None:
@@ -392,7 +408,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     torch.manual_seed(a.seed)
     P = load()
-    seconds = a.seconds or {"hold": 180.0, "go": 700.0}.get(a.drill, 120.0)
+    seconds = a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0}.get(a.drill, 120.0)
     cfg = {"battles": a.battles, "seconds": seconds, "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0,
            "bounds": None, "gamma": 0.9994, "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": a.drill}
     dev = a.device
@@ -415,7 +431,7 @@ def main(argv=None):
             break
         t0 = time.time()
         br = None
-        if a.branch_share > 0 and a.drill == "hold":
+        if a.branch_share > 0 and a.drill in ("hold", "multi"):
             from tools.nn.unit import branch as Br
             # (the decay counts this run's updates: a run going on from a checkpoint starts the bonus afresh)
             br = {"share": a.branch_share, "weight": Br.weight_at(a.branch_bonus, k, a.branch_decay),
@@ -451,6 +467,9 @@ def main(argv=None):
         if a.drill == "go":
             from tools.nn.unit import exam_go
             exam_go.run(net, P, dev, duty, out / "exam.json")
+        elif a.drill == "multi":
+            from tools.nn.unit import exam_multi
+            exam_multi.run(net, P, dev, duty, out / "exam.json")
         else:
             from tools.nn.unit import exam_hold
             exam_hold.run(net, P, dev, duty, out / "exam.json")

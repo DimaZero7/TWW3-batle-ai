@@ -97,7 +97,7 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     from tools.nn.unit import branch as Br
     _, rs = T.rollout(net, None, cfg, P, device, duty, setup, watch=w,
                       branch={"share": 1.0, "weight": 0.0, "lead_s": Br.LEAD_S, "horizon_s": Br.HORIZON_S})
-    bi = {k: v.cpu() for k, v in rs.pop("_branch").items()}
+    bi = {k: (v.cpu() if torch.is_tensor(v) else v) for k, v in rs.pop("_branch").items()}
     stand_braced = (rs.get("branch") or {}).get("stand_branch_braced")
     net.train(was)
     m1 = reward.measure(st)

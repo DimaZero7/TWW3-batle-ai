@@ -22,8 +22,12 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
               'going' -> 'in place' on arrival, the pace fast / slow by the order, the enemy goes to the area (to_area)
               with a race early / close / held; the limit 3 min after the arrival
     exam_go.py     its fixed exam (360): reached, when, before the enemy, the area ours, head-on, out after arrival, trade
-    branch.py the approach's branches (U1): the skirmish copied when the enemy is within its charge distance + 4 s of
-              its run, played on as 'stand braced' and 'attack'; a decaying bonus when the network did the better one
+    drill_multi.py drill U3 'several enemies': as U1 with two enemies A and B (front + flank / front + rear / both ahead
+              at an angle; together or B 5-20 s later), both under `nearest`
+    exam_multi.py  its fixed exam (240): chose the best of 4 variants, which is best, damage front / flank-rear, head-on
+    branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
+              of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
+              bonus x the best's margin over the second when the network did the best
 
 Outside tools/nn/model on purpose: that folder is part of the simulator's version (tools/nn/train/version.py).
 """
