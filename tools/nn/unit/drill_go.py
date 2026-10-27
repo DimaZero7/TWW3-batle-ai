@@ -201,3 +201,30 @@ class Ender:
         st.winner = torch.where(new, torch.where(we_out, 2, torch.where(foe_gone, 1, 0)), st.winner)
         st.done = self.over.clone()
         return new
+
+
+OURS, EMPTY, THEIRS = 1, 0, -1
+
+
+def whose_area(st, area):
+    """[B] whose the area of our unit (slot 0) is now (the user's definition, 28.10):
+        OURS    our unit in the area (its centre, standing) and no standing enemy's centre in it, or our unit in melee
+                contact with an enemy whose centre stands in the area (wherever our centre is: the fight at its edge);
+        THEIRS  a standing enemy's centre in the area and nobody fighting it from our side;
+        EMPTY   neither (we have not arrived, nobody holds it).
+    Contact: the simulator's pair contact (state hit_sec) either way between our unit and that enemy."""
+    u = st.u
+    N = st.N
+    a0 = {k: v[:, :1] for k, v in area.items() if k != "on"}
+    sd = Dc.signed_dist(u["x"], u["z"], a0)                                  # [B, N]
+    standing = (u["men"] > 0) & ~u["gone"] & ~u["r"]
+    foe_in = (u["side"] == 2) & standing & (sd >= 0)
+    hs = u["hit_sec"].view(st.B, N, N)
+    touch = (hs[:, :, 0] > 0) | (hs[:, 0, :] > 0)                            # [B, j]: j and our unit in contact
+    we_up = standing[:, 0]
+    fight_in = (foe_in & touch).any(1) & we_up
+    we_in = we_up & (sd[:, 0] >= 0)
+    ours = (we_in & ~foe_in.any(1)) | fight_in
+    theirs = foe_in.any(1) & ~fight_in
+    return torch.where(ours, OURS, torch.where(theirs, THEIRS, EMPTY))
+

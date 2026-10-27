@@ -4,7 +4,8 @@ early / close / held x pace fast / slow), the network sampling with a fixed seed
     bash tools/nn/dock.sh tools.nn.unit.exam_go [--ckpt build/.../latest.pt] [--device cuda]
 
 Metrics: reached the area (share) and in how many seconds; before the enemy (our centre in the area first); the area
-ours (the share of the skirmish's seconds our centre is in it, standing); met head-on (the enemy's centre in our front
+ours / the enemy's (drill_go.whose_area: shares of the skirmish's seconds; area_ours_old - our centre in it, standing -
+the first measure, kept to compare); met head-on (the enemy's centre in our front
 sector at the contact, as exam_hold); out of the area after the arrival, of its own choice / pushed; the trade; the
 choice's entropy; all also by pace and by race.
 """
@@ -32,6 +33,8 @@ class Watch(EH.Watch):
         super().__init__(B, N, P, device)
         self.ender = ender
         self.ours_s = torch.zeros(B, device=device)
+        self.own_s = torch.zeros(B, device=device)          # whose_area: ours
+        self.theirs_s = torch.zeros(B, device=device)       # ... the enemy's
         self.after_s = torch.zeros(B, device=device)
 
     def __call__(self, st, hp0, was_done, area, step):
@@ -55,6 +58,9 @@ class Watch(EH.Watch):
         self.out_free += (after & (sd < -0.5) & ~pushed).float() * self.dt
         self.out_pushed += (after & (sd < -0.5) & pushed).float() * self.dt
         self.ours_s += (alive & (sd >= 0) & ~u["r"][:, 0]).float() * self.dt
+        wa = DG.whose_area(st, area)
+        self.own_s += (live & (wa == DG.OURS)).float() * self.dt
+        self.theirs_s += (live & (wa == DG.THEIRS)).float() * self.dt
 
 
 def _mean(x, m):
@@ -83,13 +89,15 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     first = arr & ((et < 0) | (at <= et))
     dur = st.t.cpu().clamp(min=1e-6)
     ours = w.ours_s.cpu() / dur
+    own = w.own_s.cpu() / dur
+    theirs = w.theirs_s.cpu() / dur
     ct, cs = w.contact_t.cpu(), w.contact_sec.cpu()
     met = ct >= 0
     after = w.after_s.cpu().clamp(min=1e-6)
 
     def block(m):
         return {"n": int(m.sum()), "reached": _mean(arr, m), "reach_s": _mean(at, m & arr), "before_enemy": _mean(first, m),
-                "area_ours": _mean(ours, m), "contact": _mean(met, m), "front_at_contact": _mean(cs == 0, m & met),
+                "area_ours_old": _mean(ours, m), "area_ours": _mean(own, m), "area_theirs": _mean(theirs, m), "contact": _mean(met, m), "front_at_contact": _mean(cs == 0, m & met),
                 "out_free": round(float(w.out_free.cpu()[m].sum() / after[m].sum()), 4),
                 "trade": _mean(trade, m)}
     allm = torch.ones(len(sp), dtype=torch.bool)

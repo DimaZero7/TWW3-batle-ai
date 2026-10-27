@@ -31,6 +31,7 @@ from tools.nn.unit import view as V
 
 ME, FOE = "wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_clanrat_spearmen_0"
 KIND = "unit_v1"
+AREA_REWARD = 0.001     # per second the area is ours / the enemy's (U2): 150 s ~ 0.15 of the budget, the trade ~0.4
 
 
 class Duty:
@@ -230,6 +231,15 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
                 finished = st.done & ~was_done
             r = r + torch.where(was_done, torch.zeros_like(r),
                                 reward.step(before, reward.measure(st), finished, st.winner)[:, 0])
+            if cfg.get("area_reward"):
+                # the area's signal (drill_go.whose_area): + per second ours; - per second the enemy's once we have
+                # arrived (before, the march is the order's - its pace, the way - not the unit's choice: 0); 0 empty
+                from tools.nn.unit import drill_go as DG
+                wa = DG.whose_area(st, area)
+                arr = getattr(ender, "arrived", None)
+                if arr is not None:
+                    wa = torch.where((wa == DG.THEIRS) & ~arr, torch.zeros_like(wa), wa)
+                r = r + torch.where(was_done, torch.zeros_like(r), cfg["area_reward"] * P.dt * wa.float())
             if branch is not None:
                 m = will & ~branched & ~was_done & Br.moment(st, spacing, branch["lead_s"])
                 if bool(m.any()):
@@ -401,6 +411,8 @@ def main(argv=None):
     ap.add_argument("--branch-decay", type=int, default=20, help="the weight falls linearly to 0 over this many updates of this run")
     ap.add_argument("--branch-lead-s", type=float, default=4.0)
     ap.add_argument("--branch-horizon-s", type=float, default=60.0)
+    ap.add_argument("--area-reward", type=float, default=None, help="per second the area is ours +W, the enemy's -W (after our arrival) "
+                    "(drill_go.whose_area); default 0.001 for --drill go (~0.15 of the budget over 150 s), else 0")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default="build/diag_g49/smoke")
@@ -410,7 +422,8 @@ def main(argv=None):
     P = load()
     seconds = a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0}.get(a.drill, 120.0)
     cfg = {"battles": a.battles, "seconds": seconds, "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0,
-           "bounds": None, "gamma": 0.9994, "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": a.drill}
+           "bounds": None, "gamma": 0.9994, "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": a.drill,
+           "area_reward": a.area_reward if a.area_reward is not None else (AREA_REWARD if a.drill == "go" else 0.0)}
     dev = a.device
     net, critic = Nt.UnitNet().to(dev), Nt.Critic().to(dev)
     opt = torch.optim.Adam(list(net.parameters()) + list(critic.parameters()), lr=a.lr)
