@@ -9,6 +9,11 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
               raw() per decision and rebuilds the view
     net.py    the network (~0.32 M weights: map convs, row encoder, memory GRU, attention, core; heads where / face 64 /
               target pointer / pace with hard bans) and the critic (the same trunk, own weights, the whole skirmish)
+    decode.py the choices -> the simulator's orders (a target: ATTACK; a cell: MOVE to its centre, my own cell: HOLD; the
+              facing); the leash: a pursuit about to carry the unit out of its area stops at the edge facing the
+              target until the target is back (not in melee, not routing); the unit's row shows it
+    train.py  the level's own small PPO loop and the smoke battle (spearmen vs clanrat spearmen under `nearest`);
+              stores only the raw state per decision and rebuilds the views in the update; checkpoint kind unit_v1
 
 Outside tools/nn/model on purpose: that folder is part of the simulator's version (tools/nn/train/version.py).
 """

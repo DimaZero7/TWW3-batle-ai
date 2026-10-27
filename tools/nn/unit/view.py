@@ -15,7 +15,8 @@ own units (each by the gap). A row always describes the whole formation, however
 A row (ROW, raw numbers in the viewer's frame): j's centre right / forward of i's (/ 100 m), j's front against i's
 (cos, sin), j's velocity in i's frame (/ 5 m/s), front and depth (/ 50 m), men left (share of its start), health,
 MoralePercent, MoraleState / 7, the flags (routing, shattered, wavering, in melee, moving, running, firing), fatigue
-state / 5, projectiles left (share), whose (self / own / enemy) and 'the target of my order'. The card (the unit's
+state / 5, projectiles left (share), whose (self / own / enemy), 'the target of my order' and (its own row only)
+'my order is now replaced by the leash' (decode.py). The card (the unit's
 passport, tools/nn/model/passport.py) is a separate input. Memory: the same row of the same unit from each of the T
 past snapshots, put into i's frame of NOW (so the network sees how it moved); a snapshot where it was dead, gone or
 (an enemy) unseen is empty. Rows not in the zone are zeros under a false mask - nothing of an enemy outside the zone
@@ -29,17 +30,19 @@ K = 16                 # rows: the unit itself + up to 15 others
 T = 10                 # memory snapshots, one a second
 REACH_S = 15.0         # s: the zone's time (the order's span) - a parameter
 RAW = ("x", "z", "b", "vx", "vz", "front", "depth", "fill", "men", "hp", "mp", "ms", "r", "s", "w", "m", "mv", "f",
-       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run")
+       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash")
 I = {k: i for i, k in enumerate(RAW)}
 ROW = ("right", "forward", "front_cos", "front_sin", "v_right", "v_forward", "front", "depth", "men", "hp", "mp",
-       "ms", "r", "s", "w", "m", "mv", "f", "fire", "fat", "ammo", "self", "own", "enemy", "my_target")
+       "ms", "r", "s", "w", "m", "mv", "f", "fire", "fat", "ammo", "self", "own", "enemy", "my_target", "leashed")
 DEG = torch.pi / 180
 SELF, OWN, ENEMY = 0, 1, 2
 
 
-def raw(st, spacing, melee_depth=0.0):
+def raw(st, spacing, melee_depth=0.0, leash=None):
     """[B, N, len(RAW)] the slots' raw state now (world frame; tools/nn/sim/state.py names). alive: present, men left,
-    not gone; vis: visible to the other side; fill: the share of the formation's places filled (zmap.rects_of)."""
+    not gone; vis: visible to the other side; fill: the share of the formation's places filled (zmap.rects_of);
+    leash [B, N] bool: the unit's order is now replaced by the leash (tools/nn/unit/decode.py; only its own row shows
+    it)."""
     u = st.u
     r = Z.rects_of(u, spacing, melee_depth)
     men0 = u["men0"].clamp(min=1)
@@ -49,7 +52,7 @@ def raw(st, spacing, melee_depth=0.0):
             "depth": r["depth"], "fill": r["fill"], "men": u["men"] / men0, "hp": u["hp"], "mp": u["mp"], "ms": u["ms"],
             "r": u["r"], "s": u["s"], "w": u["w"], "m": u["m"], "mv": u["mv"], "f": u["f"], "fire": u["fire"],
             "fat": u["fat"], "ammo": ammo, "alive": alive, "vis": u["vis"], "side": u["side"], "range": u["range"],
-            "run": u["run"]}
+            "run": u["run"], "leash": leash if leash is not None else torch.zeros_like(alive)}
     return torch.stack([cols[k].float() for k in RAW], -1)
 
 
@@ -81,7 +84,8 @@ def _row(j, me, whose, target):
             j[..., I["front"]] / 50, j[..., I["depth"]] / 50, j[..., I["men"]], j[..., I["hp"]], j[..., I["mp"]],
             j[..., I["ms"]] / 7] + [j[..., I[k]] for k in ("r", "s", "w", "m", "mv", "f", "fire")] + [
             j[..., I["fat"]] / 5, j[..., I["ammo"]],
-            (whose == SELF).float(), (whose == OWN).float(), (whose == ENEMY).float(), target.float()]
+            (whose == SELF).float(), (whose == OWN).float(), (whose == ENEMY).float(), target.float(),
+            j[..., I["leash"]] * (whose == SELF).float()]
     return torch.stack(cols, -1)
 
 

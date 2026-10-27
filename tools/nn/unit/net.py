@@ -12,7 +12,8 @@ frozen and handed to the levels above):
                 area banned), face: 64 sectors of 5.625 deg (relative to my front), target: a pointer over the enemy rows
                 + 'nobody' (enemies outside the area banned), pace: walk / run (slow bans the run, fast the walk)
 
-A ban is a logit of -inf: its probability is exactly 0 and it is never sampled. The critic (Critic) is the same trunk
+A ban is a logit of NEG (-1e9): its probability is exactly 0 in fp32 and it is never sampled (-inf would make
+the entropy's gradient NaN). The critic (Critic) is the same trunk
 with its own weights over the view of the whole skirmish (view.build everyone=True), no bans, a value head.
 
 The order (ORDER): pace any / slow / fast (one-hot), stage going / in place, a target given, an area given.
@@ -33,7 +34,7 @@ FACES = 64
 ORDER = ("pace_any", "pace_slow", "pace_fast", "going", "in_place", "has_target", "has_area")
 PACE_ANY, PACE_SLOW, PACE_FAST = 0, 1, 2
 WALK, RUN = 0, 1
-NEG = float("-inf")
+NEG = -1e9      # a banned choice: exp(NEG - max) is exactly 0 in fp32 (never drawn); -inf would give NaN gradients
 
 
 class MapConv(nn.Module):
