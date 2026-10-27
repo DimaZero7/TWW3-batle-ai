@@ -1,10 +1,12 @@
-"""The exam of drill U3 'several enemies' (drill_multi.py): the fixed set drill_multi.exam_specs() (240: 40 per layout x
-timing), the network sampling with a fixed seed, the branches (branch.KIT_MULTI) in every skirmish.
+"""The exam of drill U3 'several enemies' (drill_multi.py): the fixed set drill_multi.exam_specs() (360: 40 ordinary per
+layout x timing and 120 hard - a weak enemy first, a dangerous one later), the network sampling with a fixed seed, the
+branches (branch.KIT_MULTI: 5 variants with 'attack A, then B') in every skirmish.
 
     bash tools/nn/dock.sh tools.nn.unit.exam_multi [--ckpt build/.../latest.pt] [--device cuda]
 
-Metrics: chose the best of the 4 variants (attack A / attack B / stand facing A / facing B; the network's behaviour at
-its first contact, branch.Kit.behaviour); which variant was best how often (attack vs stand, A vs B) and the margin;
+Metrics: chose the best of the 5 variants (attack A / attack B / stand facing A / facing B / attack A then B; the
+network's behaviour at its first contact, branch.Kit.behaviour, and the switch to B later, Kit.track); the yardstick 'a
+network that always attacks the first' (how often that is the best, what it loses to the best); which variant was best how often (attack vs stand, A vs B) and the margin;
 melee damage taken to the front / the flank and rear (each step's loss split among the enemies in contact by the sector
 each is in: within contact.front_deg 45 deg of our facing the front, beyond rear_deg 135 the rear); met the first
 enemy head-on (the first contact's enemy in our front sector); the trade; out of the area (own choice / pushed); by
@@ -97,7 +99,8 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     beh, best, brd = bi["behaviour"], bi["best"], bi["branched"]
     ok = brd & (bi["contact_d"] >= 0)
     names = bi["names"]
-    _, margin = Br.best_of(torch.nan_to_num(bi["trades"]))
+    tr = torch.nan_to_num(bi["trades"])
+    _, margin = Br.best_of(tr)
     fs = w.first_sec.cpu()
 
     def block(m):
@@ -105,15 +108,20 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
         return {"n": int(m.sum()), "chose_best": _mean(beh == best, m & ok),
                 "best": {nm: _mean(best == v, m & brd) for v, nm in enumerate(names)},
                 "behaviour": {nm: _mean(beh == v, m & ok) for v, nm in enumerate(names)},
-                "best_attack": _mean(best <= 1, m & brd), "best_on_A": _mean((best == 0) | (best == 2), m & brd),
+                "best_attack": _mean((best <= 1) | (best == 4), m & brd),
+                "best_on_A": _mean((best == 0) | (best == 2) | (best == 4), m & brd),
+                # the yardstick: a network that always attacks the first enemy - how often that is the best, and what it
+                # loses against the best variant (budget, the branches' trades from the moment)
+                "always_first_best": _mean(best == 0, m & brd), "always_first_loss": _mean(tr.max(1).values - tr[:, 0], m & brd),
                 "margin": _mean(margin, m & brd), "head_on_first": _mean(fs == 0, m & (fs >= 0)),
                 "dmg_front": round(float(w.dmg_front.cpu()[m].sum() / da), 3),
                 "dmg_flank_rear": round(float(w.dmg_side.cpu()[m].sum() / da), 3), "trade": _mean(trade, m)}
     allm = torch.ones(len(sp), dtype=torch.bool)
     alive = float(w.alive_s.sum())
-    table = {"all": block(allm),
-             "by_layout": {k: block(torch.tensor([s["layout"] == k for s in sp])) for k in DM.LAYOUTS},
-             "by_timing": {k: block(torch.tensor([s["timing"] == k for s in sp])) for k in DM.TIMINGS},
+    hard = torch.tensor([bool(s.get("hard")) for s in sp])
+    table = {"all": block(allm), "ordinary": block(~hard), "hard": block(hard),
+             "by_layout": {k: block(torch.tensor([s["layout"] == k for s in sp]) & ~hard) for k in DM.LAYOUTS},
+             "by_timing": {k: block(torch.tensor([s["timing"] == k for s in sp]) & ~hard) for k in DM.TIMINGS},
              "out_of_area_free": round(float(w.out_free.sum()) / max(alive, 1e-6), 4),
              "out_of_area_pushed": round(float(w.out_pushed.sum()) / max(alive, 1e-6), 4),
              "end": rs.get("end"), "duration_s": round(float(st.t.mean()), 1), "entropy": rs["entropy"],

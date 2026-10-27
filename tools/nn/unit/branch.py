@@ -18,8 +18,11 @@ The network's behaviour at its first contact (the main battle): ("attack", j) if
 j) if HOLD, not moving (0.3 m/s) and j - of the enemies the one nearest its front's axis - within bracing_attack_angle
 of its front; else OTHER (no bonus).
 
-Kits: Kit1 (U1: one enemy - stand, attack: STAND 0, ATTACK 1), KitMulti (U3: attack A, attack B, stand facing A, stand
-facing B; A the first enemy slot).
+Kits: KIT1 (U1: one enemy - stand, attack: STAND 0, ATTACK 1), KIT_MULTI (U3: attack A, attack B, stand facing A, stand
+facing B, and 'switch' - attack A, then, after our first contact, attack B once B is within its charge distance + LEAD_S
+of its run (a leave from A's melee: the simulator lets a formation in melee neither turn to a facing - 2 deg/s - nor
+fight two ways, so 'stand facing B' after A is not a variant); A the first enemy slot). The network 'did the switch'
+when it attacked A at its first contact and its order turned to attacking B once B was within that moment (track()).
 """
 import torch
 
@@ -96,7 +99,31 @@ class Kit:
         self.variants = variants
 
     def names(self):
-        return [f"{k}_{'AB'[j]}" if len(self.variants) > 2 else k for k, j in self.variants]
+        if len(self.variants) <= 2:
+            return [k for k, _ in self.variants]
+        return ["attack_A_then_B" if k == "switch" else f"{k}_{'AB'[j]}" for k, j in self.variants]
+
+    def switch_moment(self, st, spacing, lead_s=LEAD_S):
+        """[B] B (slot H + 1) within its charge distance + lead_s of its run of our unit - the 'switch' variant's moment
+        (the branches' own moment rule, for the second enemy)."""
+        u = st.u
+        Hb = st.N // 2 + 1
+        reach = u["charge_dist"][:, Hb] + u["run"][:, Hb] * lead_s
+        return (edge_gaps(st, spacing)[:, Hb] <= reach) & (u["men"][:, Hb] > 0) & ~u["gone"][:, Hb]
+
+    def track(self, st, beh, spacing):
+        """[B] the behaviour after the first contact: 'attack A at the contact' becomes 'attack A, then B' when the
+        unit's order turns to B (an attack on it) once B is within its switch moment - the variant's own rule; the
+        network decides once a second, its order lands 0.36 s later, so the window is open from B's moment on (until the
+        branch's end), not one exact step. Without a switch variant: beh unchanged."""
+        names = [k for k, _ in self.variants]
+        if "switch" not in names:
+            return beh
+        u = st.u
+        H = st.N // 2
+        a_idx = self.variants.index(("attack", 0))
+        to_b = (u["order_kind"][:, 0] == O.ATTACK) & (u["order_target"][:, 0] == H + 1)
+        return torch.where((beh == a_idx) & to_b & self.switch_moment(st, spacing), names.index("switch"), beh)
 
     def behaviour(self, st, bracing_deg):
         """[B] the index of the variant our unit's behaviour now is, OTHER none."""
@@ -113,6 +140,8 @@ class Kit:
         axis = torch.where(alive, rels.abs(), torch.full_like(rels, 1e9))
         still = (kind == O.HOLD) & (speed <= 0.3)
         for v, (k, j) in enumerate(self.variants):
+            if k == "switch":
+                continue                        # (known later: track())
             if k == "attack":
                 hit = (kind == O.ATTACK) & (tgt == H + j)
             else:
@@ -147,10 +176,15 @@ class Kit:
             rows_v = var == v
             face = torch.remainder(torch.rad2deg(torch.atan2(u["x"][:, H + j] - u["x"][:, 0],
                                                              u["z"][:, H + j] - u["z"][:, 0])), 360.0)
-            if k == "attack":
+            if k in ("attack", "switch"):
                 mine.kind[rows_v, 0], mine.target[rows_v, 0], mine.run[rows_v, 0] = O.ATTACK, H + j, True
             else:
                 mine.face[rows_v, 0] = face[rows_v]
+        sw_v = [v for v, (k, _) in enumerate(self.variants) if k == "switch"]
+        sw_rows = torch.zeros(st.B, dtype=torch.bool, device=dev)
+        for v in sw_v:
+            sw_rows = sw_rows | (var == v)
+        spacing = P.sim["formation"]["spacing_m"]
         leash = Dc.Leash(st.B, st.N, dev)
         m0 = reward.measure(st)
         t0 = st.t.clone()
@@ -159,6 +193,11 @@ class Kit:
         brace = bracing_deg(P)
         foe = enemies(st)
         while not bool(st.done.all()):
+            if sw_v:
+                # 'attack A, then B': after our first contact, at B's moment the attack turns to B (a leave from A's
+                # melee by the simulator's rule: an attack on a target out of contact)
+                now = sw_rows & (tc >= 0) & (mine.target[:, 0] == H) & self.switch_moment(st, spacing) & ~st.done
+                mine.target[:, 0] = torch.where(now, H + 1, mine.target[:, 0])
             o = O.merge(opponents.nearest(st), leash.apply(st, mine, ar, own), own)
             was = st.done.clone()
             step(st, o, P)
@@ -180,7 +219,7 @@ class Kit:
 
 
 KIT1 = Kit([("stand", 0), ("attack", 0)])                                   # STAND 0, ATTACK 1
-KIT_MULTI = Kit([("attack", 0), ("attack", 1), ("stand", 0), ("stand", 1)])
+KIT_MULTI = Kit([("attack", 0), ("attack", 1), ("stand", 0), ("stand", 1), ("switch", 0)])
 
 
 def behaviour(st, bracing_deg):

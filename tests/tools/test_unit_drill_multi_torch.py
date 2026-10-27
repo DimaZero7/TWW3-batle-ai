@@ -29,7 +29,7 @@ def rel(st, b, j):
 
 
 def test_two_enemies_from_the_layouts_sides_and_with_the_timing_wanted():
-    sp = DM.specs(60, torch.Generator().manual_seed(7))
+    sp = DM.specs(60, torch.Generator().manual_seed(7), hard_share=0.0)
     st, own, area = DM.build(sp, P, "cpu")
     H = st.N // 2
     pp = __import__("tools.nn.unit.drill_hold", fromlist=["_passports"])._passports()
@@ -44,7 +44,7 @@ def test_two_enemies_from_the_layouts_sides_and_with_the_timing_wanted():
         else:
             assert DM.LAG_S[0] - 1e-6 <= tb - ta <= DM.LAG_S[1] + 1e-6
     assert {s["layout"] for s in sp} == set(DM.LAYOUTS) and {s["timing"] for s in sp} == set(DM.TIMINGS)
-    assert (st.u["side"][:, H:H + 2] == 2).all() and len(DM.exam_specs()) == 240
+    assert (st.u["side"][:, H:H + 2] == 2).all() and len(DM.exam_specs()) == 360
 
 
 def test_the_behaviour_names_whom_it_attacks_or_faces():
@@ -52,7 +52,7 @@ def test_the_behaviour_names_whom_it_attacks_or_faces():
     H = st.N // 2
     Bt.step(st, replay.hold(st), P)
     k = Br.KIT_MULTI
-    assert k.names() == ["attack_A", "attack_B", "stand_A", "stand_B"]
+    assert k.names() == ["attack_A", "attack_B", "stand_A", "stand_B", "attack_A_then_B"]
     assert int(k.behaviour(st, Br.bracing_deg(P))[0]) == 2          # facing A (ahead)
     st.u["b"][0, 0] = 90.0                                           # now facing B (east)
     assert int(k.behaviour(st, Br.bracing_deg(P))[0]) == 3
@@ -71,8 +71,8 @@ def test_four_variants_play_from_the_copy():
     area = {"x": f(0), "z": f(0), "b": f(0), "front": f(200), "depth": f(200)}
     rep = {}
     t = Br.KIT_MULTI.play(st, area, P, Bt.step, horizon_s=15.0, cap_s=30.0, rows=2, report=rep)
-    assert t.shape == (1, 4) and torch.isfinite(t).all() and len(set(t[0].tolist())) > 1
-    assert rep["braced"].shape == (1, 4)
+    assert t.shape == (1, 5) and torch.isfinite(t).all() and len(set(t[0].tolist())) > 1
+    assert rep["braced"].shape == (1, 5)
     for k, v in before.items():
         assert torch.equal(st.u[k], v), k
 
@@ -107,5 +107,40 @@ def test_a_short_rollout_of_the_drill_with_branches():
                              branch=br)
     assert stats["bans_broken"] == 0 and stats["nan"] == 0
     info = stats["_branch"]
-    assert info["trades"].shape == (4, 4) and info["names"] == Br.KIT_MULTI.names()
+    assert info["trades"].shape == (4, 5) and info["names"] == Br.KIT_MULTI.names()
     assert bool(info["branched"].any()) and set(stats["branch"]["best"]) == set(Br.KIT_MULTI.names())
+
+
+def test_hard_skirmishes_a_weak_one_first_a_dangerous_one_later_not_opposite():
+    sp = DM.specs(400, torch.Generator().manual_seed(12))
+    hard = [s for s in sp if s["hard"]]
+    assert 0.4 < len(hard) / len(sp) < 0.6
+    for s in hard:
+        assert DM.danger(s["foe_b"]) >= DM.HARD_RATIO * DM.danger(s["foe"])
+        assert s["layout"] in DM.HARD_LAYOUTS and s["timing"] == "staggered" and s["lag"] >= DM.LAG_S[0]
+    assert any(s["theirs"] == s["ours"] for s in hard)                 # mirrors (Empire against Empire ...)
+    st, own, area = DM.build(hard[:8], P, "cpu")                       # the simulator takes them
+    for b, s in enumerate(hard[:8]):
+        assert st.keys[b][st.N // 2] == s["foe"] and st.keys[b][st.N // 2 + 1] == s["foe_b"]
+    ex = DM.exam_specs()
+    assert sum(s["hard"] for s in ex) == 120
+
+
+def test_the_switch_variant_and_its_tracking():
+    st = battle([(SPEAR, 0, 0, 0)], [(CLANRAT, 0, 40, 180), (SLAVE, 120, 0, 270)])
+    H = st.N // 2
+    k = Br.KIT_MULTI
+    beh = torch.tensor([0])                                            # attacked A at the first contact
+    o = replay.hold(st)
+    o.kind[0, 0], o.target[0, 0] = O.ATTACK, H + 1
+    Bt.step(st, o, P)
+    assert int(k.track(st, beh, SP)[0]) == 0                           # B still far: not the switch
+    st.u["x"][0, H + 1] = 40.0                                         # B within its moment
+    assert bool(k.switch_moment(st, SP)[0])
+    assert int(k.track(st, beh, SP)[0]) == 4
+    assert int(k.track(st, torch.tensor([2]), SP)[0]) == 2             # (a stand stays a stand)
+    f = lambda v: torch.full((1, st.N), float(v))       # noqa: E731
+    st2 = battle([(SPEAR, 0, 0, 0)], [(CLANRAT, 0, 45, 180), (SLAVE, 110, 0, 270)])
+    area = {"x": f(0), "z": f(0), "b": f(0), "front": f(200), "depth": f(200)}
+    t = k.play(st2, area, P, Bt.step, horizon_s=30.0, cap_s=60.0, rows=1)
+    assert float(t[0, 4]) != float(t[0, 0])                            # the switch played out differently

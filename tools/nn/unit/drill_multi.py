@@ -9,6 +9,10 @@ the layout (the bearings from our front, each +-JITTER deg; the side of the flan
 the timing: 'together' (both arrive at once) or 'staggered' (B LAG_S s after A): A's centre GAP_M m away (as U1), B's
 (A's time at its run + the lag) x B's run speed. A is the first to arrive (the branches' A); its bearing is relative to our front,
 so 'ahead' means where our unit faces at the start, which is random anyway.
+Hard skirmishes (HARD_SHARE of them): a weak A first and a dangerous B 5-20 s later (danger(): the database's melee
+combat potential, B >= HARD_RATIO x A, both of one faction), front + flank or both ahead - where 'take A, then turn to B'
+can pay (the probe build/diag_g49/probe_gs); the enemies' faction at random against ours (Empire against Empire, Skaven
+against Skaven too: the simulator takes any two factions - the probe ran greatswords against greatswords).
 The end (Ender): our rout - over; both enemies dead, gone or routed out of our zone - over; at most LIMIT_S.
 """
 import math
@@ -25,6 +29,9 @@ TIMINGS = ("together", "staggered")
 JITTER = 15.0
 LAG_S = (5.0, 20.0)
 LIMIT_S = DH.LIMIT_S
+HARD_SHARE = 0.5                                     # the share of hard skirmishes in training
+HARD_RATIO = 1.6                                     # B's combat potential at least this x A's
+HARD_LAYOUTS = ("front_flank", "front_angle")        # not from the opposite side
 
 
 def _spec(me, a, b, ours, layout, timing, u, gen, lo, pp):
@@ -40,14 +47,41 @@ def _spec(me, a, b, ours, layout, timing, u, gen, lo, pp):
     return base
 
 
-def specs(n, gen, fixed=None):
-    """n random skirmishes; fixed: a list of (layout, timing) to cycle (the exam)."""
+def danger(key):
+    """A unit's strength: the database's melee combat potential (main_units.melee_cp, the passport's
+    combat_potential.melee: slaves 125, clanrats 300, shield spearmen 375, greatswords 850, stormvermin 1050)."""
+    return float(DH._passports()[key]["combat_potential"]["melee"])
+
+
+def hard_pairs():
+    """{faction: [(A, B)]}: a weak first enemy and a dangerous second of the same faction (B's combat potential at least
+    HARD_RATIO x A's)."""
+    R = DH.roster()
+    return {f: [(a, b) for a in ks for b in ks if danger(b) >= HARD_RATIO * danger(a)] for f, ks in R.items()}
+
+
+def specs(n, gen, fixed=None, hard_share=None):
+    """n random skirmishes; fixed: a list of (layout, timing) to cycle (the exam's ordinary ones); hard_share (default
+    HARD_SHARE, the exam 0): the share of hard ones - a weak enemy first and a dangerous one 5-20 s later, not from the
+    opposite side (front + flank or both ahead), the enemies of either faction against ours of either (a mirror too)."""
     R = DH.roster()
     pp = DH._passports()
     lo = DH.min_cells()
+    hp = hard_pairs()
+    hs = HARD_SHARE if hard_share is None else hard_share
     out = []
     for k in range(n):
         u = lambda x, y: x + (y - x) * float(torch.rand(1, generator=gen))       # noqa: E731
+        if float(torch.rand(1, generator=gen)) < hs:
+            ours = "emp" if float(torch.rand(1, generator=gen)) < 0.5 else "skv"
+            theirs = "emp" if float(torch.rand(1, generator=gen)) < 0.5 else "skv"
+            me = R[ours][int(torch.randint(len(R[ours]), (1,), generator=gen))]
+            a, b = hp[theirs][int(torch.randint(len(hp[theirs]), (1,), generator=gen))]
+            layout = HARD_LAYOUTS[int(torch.randint(len(HARD_LAYOUTS), (1,), generator=gen))]
+            sp = _spec(me, a, b, ours, layout, "staggered", u, gen, lo, pp)
+            sp.update({"theirs": theirs, "hard": True})
+            out.append(sp)
+            continue
         ours = "emp" if float(torch.rand(1, generator=gen)) < 0.5 else "skv"
         theirs = "skv" if ours == "emp" else "emp"
         pick = lambda: R[theirs][int(torch.randint(len(R[theirs]), (1,), generator=gen))]   # noqa: E731
@@ -55,15 +89,17 @@ def specs(n, gen, fixed=None):
         layout, timing = fixed[k % len(fixed)] if fixed else (
             list(LAYOUTS)[int(torch.randint(len(LAYOUTS), (1,), generator=gen))],
             TIMINGS[int(torch.randint(len(TIMINGS), (1,), generator=gen))])
-        out.append(_spec(me, pick(), pick(), ours, layout, timing, u, gen, lo, pp))
+        sp = _spec(me, pick(), pick(), ours, layout, timing, u, gen, lo, pp)
+        sp.update({"theirs": theirs, "hard": False})
+        out.append(sp)
     return out
 
 
-def exam_specs(seed=4905, per=40):
-    """The fixed exam: per skirmishes for each layout x timing (6 x 40 = 240)."""
+def exam_specs(seed=4905, per=40, hard=120):
+    """The fixed exam: per ordinary skirmishes for each layout x timing (6 x 40 = 240) and `hard` hard ones (360)."""
     gen = torch.Generator().manual_seed(seed)
     cells = [(l_, t_) for l_ in LAYOUTS for t_ in TIMINGS]
-    return specs(per * len(cells), gen, fixed=cells)
+    return specs(per * len(cells), gen, fixed=cells, hard_share=0.0) + specs(hard, gen, hard_share=1.0)
 
 
 def build(sp, P, device):
@@ -76,7 +112,8 @@ def build(sp, P, device):
             ex, ez = gap * math.sin(a), gap * math.cos(a)
             foes.append({"key": key, "x": ex, "z": ez, "b": math.degrees(math.atan2(-ex, -ez)) % 360})
         mine = {"key": s["me"], "x": 0.0, "z": 0.0, "b": s["b"], "width": s["front"]}
-        f_me, f_foe = DH.FACTIONS[s["ours"]], DH.FACTIONS["skv" if s["ours"] == "emp" else "emp"]
+        f_me = DH.FACTIONS[s["ours"]]
+        f_foe = DH.FACTIONS[s.get("theirs") or ("skv" if s["ours"] == "emp" else "emp")]
         armies.append({"attacker": 2, "sides": {1: {"faction": f_me, "units": [mine]},
                                                 2: {"faction": f_foe, "units": foes}}})
     st = scenario.build(armies, P, device=device)

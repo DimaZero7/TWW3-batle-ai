@@ -177,6 +177,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         branched = torch.zeros(B, dtype=torch.bool, device=device)
         snaps = []
         contact_d = torch.full((B,), -1, dtype=torch.long, device=device)
+        beh_d = torch.full((B,), -1, dtype=torch.long, device=device)     # the decision that settled the behaviour
         beh = torch.full((B,), Br.OTHER, dtype=torch.long, device=device)
         brace = Br.bracing_deg(P)
         kit = setup.get("kit", Br.KIT1)
@@ -249,7 +250,12 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
                 first = (contact_d < 0) & Br.contact(st) & ~was_done
                 if bool(first.any()):
                     contact_d = torch.where(first, d, contact_d)
+                    beh_d = torch.where(first, d, beh_d)
                     beh = torch.where(first, kit.behaviour(st, brace), beh)
+                if hasattr(kit, "track") and bool(branched.any()):
+                    nb = kit.track(st, beh, spacing)
+                    beh_d = torch.where((nb != beh) & branched & ~was_done, d, beh_d)
+                    beh = torch.where(branched & ~was_done, nb, beh)
             if watch is not None:
                 watch(st, hp0, was_done, area, d * steps + j + 1)
             u = st.u
@@ -272,7 +278,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     if branch is not None:
         tb = time.time()
         Vn = len(kit.variants)
-        info = {"branched": branched, "contact_d": contact_d, "behaviour": beh, "names": kit.names(),
+        info = {"branched": branched, "contact_d": contact_d, "beh_d": beh_d, "behaviour": beh, "names": kit.names(),
                 "trades": torch.full((B, Vn), float("nan"), device=device),
                 "best": torch.full((B,), -1, dtype=torch.long, device=device)}
         if snaps:
@@ -286,7 +292,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             ok = branched & (contact_d >= 0) & (contact_d < D)
             bon, best = Br.bonus_of(beh, torch.nan_to_num(info["trades"]), branch["weight"])
             bon = torch.where(ok, bon, torch.zeros_like(bon))
-            rew[contact_d.clamp(0, D - 1), torch.arange(B, device=device)] += bon
+            rew[beh_d.clamp(0, D - 1), torch.arange(B, device=device)] += bon
             info["best"] = torch.where(branched, best, torch.full_like(best, -1))
             _, margin = Br.best_of(torch.nan_to_num(info["trades"]))
             n = max(int(ok.sum()), 1)
