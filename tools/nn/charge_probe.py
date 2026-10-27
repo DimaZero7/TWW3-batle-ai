@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -773,6 +773,15 @@ def battles(plan):
                      after={"at_s": 10, "kind": kind, "dx": 0, "dz": 5, "walk": kind == "move_near"})
                 for kind in FRESH]
         out += [base, rotate(base, 2)]
+    elif plan == "meleeturn":
+        # a facing order in melee (build/diag_g49/turn_melee): spearmen / greatswords <-> clanrats attacking each other
+        # from 3 m; 10 s after contact the Empire unit gets a facing order where it stands, its bearing + 90 / + 180 deg
+        # (orders.move_formation at its own place: the game's goto_location_angle_width), or nothing (the control)
+        def mt(a, turn):
+            af = {"at_s": 10, "kind": "face" if turn else "none", "turn_deg": turn or 0, "dx": 0, "dz": 0, "walk": False}
+            return lane(a, "clanrat", "attack_walk", "both", gap_m=3, fight_s=40, max_s=60, lane_dx=190,
+                        kind=f"turn{turn}" if turn else "control", after=af)
+        out.append([mt("spear", 90), mt("spear", 180), mt("spear", 0), mt("gs", 90), mt("gs", 180), mt("gs", 0)])
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1250,7 +1259,7 @@ def run_config(plan, index):
     """(entry config, model seconds, arena) of battle `index` (1-based) of a plan."""
     specs = battles(plan)[index - 1]
     lanes, park, arena = layout(specs)
-    turn = plan == "move" and any(l["mode"] == "script" for l in lanes)
+    turn = (plan == "move" and any(l["mode"] == "script" for l in lanes)) or plan == "meleeturn"
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
               "men_ms": 500 if turn or plan == "ratcharge" else MEN_MS,
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
@@ -1261,7 +1270,7 @@ def run_config(plan, index):
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
               "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "armour", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2",
                                                                                                   "shootcontact", "recontact")
-                              else 90 if plan in ("hit", "move", "vv") else 30),
+                              else 90 if plan in ("hit", "move", "vv", "meleeturn") else 30),
               "lanes": lanes, "park": park}
     if plan in ("swing", "crowd", "hitchance"):
         config.update(tick_ms=SWING_MS, men_ms=SWING_MS, men_after_s=200)

@@ -148,7 +148,7 @@ M.ABILITY_CCO = {'Key', 'Name', 'IsActive', 'IsEnabled', 'CanUse', 'IsUsable', '
     'NumUses', 'UsesRemaining', 'TimeRemaining', 'AbilityRecordContext.Key', 'UnitAbilityContext.Key'}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true,
     skirmish = true}
-M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
+M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true, face = true}
 M.AT_ROUT = {halt = true, none = true, away = true}
 -- The card values a lane with card_rows samples (its row's cs): leadership, speed, melee attack / defence, weapon damage,
 -- missile damage (the contact effects' stats: poison, the censer's contagion, suppressing fire; frenzy).
@@ -732,8 +732,18 @@ function M.main(bm, config, globals)
                         elseif af.kind == 'move_near' then
                             local p = read(function() return lane.a.unit:position() end)
                             if p then orders.move(lane.a.uc, vec(p:get_x() + (af.dx or 0), p:get_z() + (af.dz or 0)), not walk) end
+                        elseif af.kind == 'face' then
+                            -- (the meleeturn plan) a facing order where the unit stands: its bearing + af.turn_deg
+                            local p = read(function() return lane.a.unit:position() end)
+                            local b = read(function() return lane.a.unit:bearing() end)
+                            if p and b then
+                                af.goal = (b + (af.turn_deg or 90)) % 360
+                                orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), af.goal, lane.a_width,
+                                    af.run == true)
+                            end
                         end
-                        emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, n = n, t = now - lane.t0})
+                        emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, n = n, t = now - lane.t0,
+                            goal = af.goal and round(af.goal, 0) or nil})
                     end
                 end
                 -- lane.t_stop_fire_s (a 'skirmish' target, the suppress2 plan): the shooter falls silent that long after
