@@ -44,8 +44,10 @@ LIMIT_S = 3600.0
 Z95 = 1.959964
 PAIRS = ("2-0", "1-1", "0-2")
 # The behaviour sums the proxy keeps (behaviour.Tracker without the liveliness: the friends in the way, missile time in
-# melee, flanks, piles, ability uses); "behaviour" in its summary.
-MEASURE = ("behaviour",)
+# melee, flanks, piles, ability uses); "behaviour" in its summary. craft: the craft by unit class (tools/nn/train/craft.py:
+# the enemy gold each class of ours destroyed and its own lost, its time in melee and in rout, the shooters' fire);
+# "craft" in its summary.
+MEASURE = ("behaviour", "craft")
 
 
 def battle_seeds(seeds=SEEDS, r=R):
@@ -185,7 +187,7 @@ def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fight
          measure=MEASURE):
     """The proxy of one network (an actor) -> summary() + {enemy, R, seeds, armies, fighters, seconds, lord_dead_own,
     behaviour (behaviour.Tracker's sums over our units, `measure`: e.g. friend_skip_share_direct / _arc,
-    forced_lob_share_arc; {} with measure ()), per_battle: {won, side, seed, trade, margin, destroyed, lost, budget}}. enemy: a checkpoint path or an actor. The draws (the
+    forced_lob_share_arc; {} with measure ()), craft (craft.summary: by unit class; with "craft" in measure), per_battle: {won, side, seed, trade, margin, destroyed, lost, budget}}. enemy: a checkpoint path or an actor. The draws (the
     orders, the latency) come from their own random state: the caller's (a training's) is left as it was."""
     import torch
 
@@ -212,6 +214,8 @@ def play(actor, enemy=ENEMY, r=R, seeds=SEEDS, device="cpu", cadence=None, fight
     if lord is not None:
         out["lord_dead_own"] = round(float(lord), 4)
     out["behaviour"] = res["by_opponent"]["past"].get("behaviour") or {}
+    if "craft" in res["by_opponent"]["past"]:
+        out["craft"] = res["by_opponent"]["past"]["craft"]
     out["lord"] = lord_means(b)
     out.update(enemy=name, R=int(r), seeds=[int(s) for s in seeds], armies=ARMIES, fighters=bool(fighters),
                seconds=round(time.time() - t0),
@@ -255,6 +259,9 @@ def main(argv=None):
     lo = res.get("lord") or {}
     print(f"own lord: dead {lo.get('dead')}, mean second of death {lo.get('dead_at_s')}, mean seconds in melee "
           f"{lo.get('melee_s')}", flush=True)
+    from tools.nn.train import craft
+    for text in craft.lines(res.get("craft")):
+        print(text, flush=True)
     if args.out:
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)

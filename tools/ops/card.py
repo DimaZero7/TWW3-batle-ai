@@ -16,7 +16,9 @@ distance from the start; where the exam's proxy was played (profile exam, tools/
 (± 95 %), wins per 12, pairs 2-0/1-1/0-2 and own lord deaths in its battles; the training window since the last point
 (test5 "window", run.py log): the win rate against the pinned version (--past-pin) and own lord deaths in the
 training's battles; the friends in the way in the proxy's battles (behaviour.py: the share of the bullets' / the
-arrows' fire taken by own units, the share of arrows forced to a 45 deg lob). The general's groups (a line under the
+arrows' fire taken by own units, the share of arrows forced to a 45 deg lob); the craft by unit class in the proxy's
+battles (craft.py: per class of ours - lord, melee, spear, missile, fast, stalk - its trade (enemy gold it destroyed -
+its own lost) / budget, ± 95 %, with the gold killed / lost / fielded a battle, its melee, rout and fire shares). The general's groups (a line under the
 table, from the run's log build/nn-train/runs/test5_<label>/log.jsonl "general", the mean of its updates): our groups a
 plan, the composition changes a battle (re-plans whose membership of our side differed from the last plan's) and their
 share of the re-plans, the share of our groups with shooters and melee together, and with groups "learned" the ARI
@@ -167,6 +169,9 @@ def rows(point):
     if e and e.get("lord_dead_own") is not None:
         out.append(("lord_exam", "own lord dead, exam's proxy", e["lord_dead_own"], _binom(e["lord_dead_own"], e.get("battles")),
                     "{:.3f}"))
+    for name, c in (((e or {}).get("craft") or {}).get("classes") or {}).items():   # craft by unit class (craft.py)
+        out.append((f"craft_{name}", f"exam craft {name}: trade (killed - lost) / budget", (c.get("trade") or {}).get("value"),
+                    None, "{:+.3f}" + craft_text(c)))
     for d, v in (point.get("drills") or {}).items():
         sk = _g(v, "scripts", "skilled", "win_rate")
         out.append((f"drill_{d}", f"drill {d}: win" + (f" (skilled {sk:.2f})" if sk is not None else ""),
@@ -197,6 +202,16 @@ def rows(point):
     out.append(("seconds", "evaluation, s", point.get("seconds"), None, "{:.0f}"))
     out.append(("kl", "KL from the start (mean of the updates)", _g(point, "distance", "start_kl"), None, "{:.3f}"))
     return out
+
+
+def craft_text(c):
+    """' ± 0.030 (killed 512 / lost 830 of 1200, melee 0.41, rout 0.12, fire 0.55)' of a craft class row (craft.py)."""
+    se = (c.get("trade") or {}).get("se")
+    parts = [f"killed {c['killed']:.0f} / lost {c['lost']:.0f} of {c['cost']:.0f}"]
+    for k, title in (("melee_share", "melee"), ("rout_share", "rout"), ("fire_share", "fire")):
+        if c.get(k) is not None:
+            parts.append(f"{title} {c[k]:.2f}")
+    return (f" ± {Z * 0.98 * se:.3f}" if se else "") + f" ({', '.join(parts)})"
 
 
 def fmt(value, se, f):

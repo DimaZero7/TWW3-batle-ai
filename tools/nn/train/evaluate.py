@@ -31,7 +31,7 @@ from tools.nn.sim import check, scenario
 from tools.nn.sim import magic as sim_magic
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
-from tools.nn.train import behaviour, checkpoint, league, matchups, randomise, reward, rollout, scenes, skill
+from tools.nn.train import behaviour, checkpoint, craft, league, matchups, randomise, reward, rollout, scenes, skill
 from tools.nn.train import cadence as cad
 from tools.nn.train import opponents as scripts
 from tools.nn.train import version as sim_ver
@@ -389,7 +389,8 @@ class _Full:
 
 
 # What Graphed walks for the tensors a decision reads and writes (the bank and the setup are only read).
-_WALK = (S.State, rollout.Battles, behaviour.Tracker, behaviour.Fatigue, drill_transfer.Tracker, LordMelee, SimpleNamespace,
+_WALK = (S.State, rollout.Battles, behaviour.Tracker, behaviour.Fatigue, drill_transfer.Tracker, craft.Tracker, LordMelee,
+         SimpleNamespace,
          rollout.ob.Memory,
          rollout.Frame)
 _SKIP = {"source", "bank", "setup", "params", "weights", "layout", "scripts", "past_actor", "gen"}
@@ -537,8 +538,10 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
              if want("behaviour") or want("liveliness") else None)
     xfer = drill_transfer.Tracker(env.st, env.params, mine, wrap=fast) if want("transfer") else None
     fat = behaviour.Fatigue(env.st, env.params, mine, wrap=fast) if want("fatigue") else None
+    # craft by unit class (craft.py): opt-in, only when named (the exam's proxy)
+    crafted = craft.Tracker(env.st, env.params, mine, wrap=fast) if measure is not None and "craft" in measure else None
     lordw = LordMelee(env.st, env.params, mine)          # the own lord's seconds in melee (per battle)
-    watches = tuple(w for w in (watch, xfer, fat, lordw) if w is not None)
+    watches = tuple(w for w in (watch, xfer, fat, crafted, lordw) if w is not None)
     full = _Full(env, watches) if compact else None
     acc = SimpleNamespace(contact=contact, fired=fired, mine=mine)
 
@@ -565,7 +568,8 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
             if (cuda_graph and env.device.type == "cuda" and env.B in BUCKETS and n_steps - i > 4 * CHECK_EVERY
                     and (graph is None or graph.B != env.B)):
                 graph = None                     # (a graph of another size: its memory goes)
-                graph = Graphed(one, SimpleNamespace(env=env, watch=watch, xfer=xfer, fat=fat, acc=acc), env.B)
+                graph = Graphed(one, SimpleNamespace(env=env, watch=watch, xfer=xfer, fat=fat, crafted=crafted, acc=acc),
+                                env.B)
                 i += graph.warm
         elif bool(env.st.done.all()):
             break
@@ -601,6 +605,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     gold_b = reward.gold_sides(env.st.u, env.weights.rout_share).cpu().numpy()   # [B, side]
     gold = (gold_b[np.arange(B), side - 1], gold_b[np.arange(B), 2 - side], reward.budget(env.st.u).cpu().numpy())
     margin = skill.margin(winner, side, gold_b, start_cost(env.st.u))
+    craft_b = crafted.battles(env.st, env.weights.rout_share, gold[2]) if crafted is not None else None
     trade = (gold[1] - gold[0]) / np.maximum(gold[2], 1e-9)
     fac_b = env.setup.factions                                       # [(side 1, side 2)] per battle
     own_f = np.array([fac_b[b][side[b] - 1] for b in range(B)], dtype=object)
@@ -627,6 +632,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                        "switches_per_minute": float(sw / max(1e-9, steps * minutes)),
                        "kinds": {kd: float(k[i] / max(1, k.sum())) for i, kd in enumerate(O.KINDS)},
                        "behaviour": observed(this),
+                       **({"craft": craft.summary(craft_b, this)} if craft_b is not None else {}),
                        "roles": {"attack": _summary(attacks, won, t, hp_own, hp_enemy, limit_s, *lords, gold=gold),
                                  "defend": _summary(this & ~attacks, won, t, hp_own, hp_enemy, limit_s, *lords,
                                                     gold=gold)}})
