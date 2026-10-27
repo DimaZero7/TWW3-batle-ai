@@ -14,6 +14,10 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
               target until the target is back (not in melee, not routing); the unit's row shows it
     train.py  the level's own small PPO loop and the smoke battle (spearmen vs clanrat spearmen under `nearest`);
               stores only the raw state per decision and rebuilds the views in the update; checkpoint kind unit_v1
+    drill_hold.py  drill U1 'hold the line': melee infantry Empire x Skaven, an area of 6..10 x 10 cells on the unit's
+              grid, the enemy from any side 75-160 m away under `nearest`, the end rule (our rout; the enemy's rout
+              goes on until it leaves the zone; a 3 min cut)
+    exam_hold.py   its fixed exam (360 skirmishes): met head-on, melee damage to the front, out of the area, trade
 
 Outside tools/nn/model on purpose: that folder is part of the simulator's version (tools/nn/train/version.py).
 """
