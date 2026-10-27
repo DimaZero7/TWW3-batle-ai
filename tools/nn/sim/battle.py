@@ -120,6 +120,12 @@ def step(st, orders, params=None, dt=None):
             # (missile.burst_cut_reload; the ratlingrt / ratlingrt2 probes)
             missile.burst_cut(u, changed, float(cal["missile"].get("burst_cut_spread_s") or 0.0))
     u["order_kind"], u["order_target"], u["order_run"] = kind, tgt, run
+    if "oface" in u:
+        # the facing to stand at (Orders.face snapped to the game's 64 sectors, orders.snap_face; -1 none): a new order
+        # (not KEEP) replaces it; another facing restarts the re-form's clock (the same one re-issued does not)
+        face = torch.where(take, O.snap_face(orders.face), u["oface"])
+        u["oface_s"] = torch.where(face != u["oface"], torch.zeros_like(u["oface_s"]), u["oface_s"])
+        u["oface"] = face
     if "order_s" in u:
         # the order's clock (contact.fresh_incidental, melee.py): a new order given in melee starts it at 0, out of
         # melee at the window (an order given before the fight is not a fresh order in melee)
@@ -1256,6 +1262,22 @@ def step(st, orders, params=None, dt=None):
     # Out of melee a standing unit turns in place at turn.formation_deg_s (measured, config/nn/sim.json turn.why); a
     # lord or another single entity at his turn rate (the database's battle_entities turn_rate; turn.single_deg_s, if
     # set, overrides it). A unit on the move turns as above (turn.move_turn), else it faces the way it walks.
+    if "oface" in u:
+        # The facing order (Orders.face; turn.face_delay_s, config/nn/sim.json turn.face_why - the game's
+        # goto_location_angle_width): a unit standing at its point (HOLD, or its move / withdraw ended within 1 m), out
+        # of melee, not touching an enemy, not shooting, aiming or turning to a missile target, re-forms for
+        # face_delay_s (a lone man: face_delay_single_s) with its facing unchanged, then turns to the facing at the
+        # standing rate below (formation_deg_s; a lone man his own). Under ATTACK and in melee the facing does nothing;
+        # a shooter's own target wins over it.
+        arrived = ~point | (goal_d <= 1.0)
+        shooting = (aim_at >= 0) | firing | turning
+        off = (torch.remainder(u["oface"] - u["b"] + 180, 360) - 180).abs()
+        face_ready = (standing & (u["oface"] >= 0) & (kind != O.ATTACK) & arrived & ~mv & ~engaged & ~steer & ~has_opp
+                 & ~shooting & (off > 1e-3))
+        u["oface_s"] = torch.where(face_ready, u["oface_s"] + dt, torch.zeros_like(u["oface_s"]))
+        delay = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal.get("face_delay_s", 0.0))),
+                            torch.full_like(u["b"], float(t_cal.get("face_delay_single_s", 0.0))))
+        u["b"] = torch.where(face_ready & (u["oface_s"] >= delay - 1e-6), u["oface"], u["b"])
     if t_cal.get("formation_deg_s"):
         single = (torch.full_like(u["b"], float(t_cal["single_deg_s"])) if t_cal.get("single_deg_s") is not None
                   else u["turn"])

@@ -300,6 +300,9 @@ INTERNAL = {
     "order_kind": ("i", "the order in force (tools/nn/sim/orders.py)"),
     "order_target": ("i", "its target slot"),
     "order_run": ("b", "its run flag"),
+    "oface": ("f", "its facing to stand at (Orders.face snapped to the game's 64 sectors), degrees; -1 none"),
+    "oface_s": ("f", "seconds the unit has stood ready to take that facing (the re-form's clock: it turns from "
+                     "turn.face_delay_s on; battle.py)"),
     "ab0_on": ("f", "seconds ability 0 stays active"),
     "ab0_cd": ("f", "seconds until ability 0 is ready"),
     "ab1_on": ("f", "seconds ability 1 stays active"),
@@ -476,6 +479,7 @@ def empty(B, N, device="cpu", history=0):
         u[name] = torch.zeros((B, N * N), device=device)
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
+    u["oface"].fill_(-1)
     u["aim_tgt"].fill_(-1)
     u["fxt0"].fill_(-1)
     u["fxt1"].fill_(-1)

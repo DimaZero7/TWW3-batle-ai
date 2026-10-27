@@ -13,6 +13,11 @@ Each decision step every unit of the batch gets one order, as six tensors [B, N]
                     still works). Independent of kind: a lord may move and use an ability at once.
     cast_target int64  a spell's target: the unit (a slot of the state's layout) whose centre the bombardment falls
                     on (magic.request), -1 none. Optional (-1 everywhere).
+    face     float  HOLD / MOVE / WITHDRAW: the facing to stand at, degrees of the world's bearing 0..360 (as the
+                    state's b), < 0 none (the default: Orders made without it face nowhere - the old behaviour bit
+                    for bit). The simulator snaps it to the middle of one of the game's 64 sectors (snap_face) and
+                    turns a standing unit to it as the game does on goto_location_angle_width (battle.py: the
+                    formation re-forms, turn.face_delay_s, then turns); ignored under ATTACK and in melee.
 
     HOLD      stay; shoot at will at enemies in range; fight back when attacked.
     MOVE      go to (x, z) and stop there; missile units do not shoot on the move. A unit in
@@ -57,7 +62,12 @@ FIELDS = {
     "run": ("b", "run instead of walk"),
     "ability": ("i", "ability slot to use now, -1 none (SPELL_AT + k: spell k)"),
     "cast_target": ("i", "a spell's target slot, -1 none"),
+    "face": ("f", "the facing to stand at, degrees 0..360, < 0 none (snapped to the game's 64 sectors)"),
 }
+# The game keeps a unit's facing in 64 sectors of 5.625 deg and stands at the sector's middle (measured 28.09.2026:
+# src/apps/orders/facing.lua engine / command).
+FACE_SECTORS = 64
+FACE_SECTOR_DEG = 360.0 / FACE_SECTORS
 
 
 @dataclass
@@ -69,12 +79,15 @@ class Orders:
     run: "torch.Tensor"
     ability: "torch.Tensor" = None
     cast_target: "torch.Tensor" = None
+    face: "torch.Tensor" = None
 
     def __post_init__(self):
         if self.ability is None:
             self.ability = torch.full_like(self.kind, -1)
         if self.cast_target is None:
             self.cast_target = torch.full_like(self.kind, -1)
+        if self.face is None:
+            self.face = torch.full_like(self.x, -1.0)
 
     def spell(self):
         """[B, N] the spell slot ordered (0..SPELLS-1), -1 none."""
@@ -95,7 +108,16 @@ def hold(B, N, device="cpu"):
                   target=torch.full((B, N), -1, dtype=torch.int64, device=device),
                   run=torch.zeros((B, N), dtype=torch.bool, device=device),
                   ability=torch.full((B, N), -1, dtype=torch.int64, device=device),
-                  cast_target=torch.full((B, N), -1, dtype=torch.int64, device=device))
+                  cast_target=torch.full((B, N), -1, dtype=torch.int64, device=device),
+                  face=torch.full((B, N), -1.0, device=device))
+
+
+def snap_face(face):
+    """[B, N] the facing the game stands at for an ordered one (degrees): the middle of its 64-sector
+    (facing.lua engine: 0..5.62 -> 2.81, 90..95.62 -> 92.81); < 0 (none) stays -1."""
+    k = torch.floor(torch.remainder(face, 360.0) / FACE_SECTOR_DEG)
+    mid = torch.remainder((k + 0.5) * FACE_SECTOR_DEG, 360.0)
+    return torch.where(face >= 0, mid, torch.full_like(face, -1.0))
 
 
 def merge(first, second, use_second):
@@ -120,3 +142,5 @@ def check(orders, N):
         raise ValueError("order ability slot out of range")
     if ((orders.cast_target < -1) | (orders.cast_target >= N)).any():
         raise ValueError("order cast target out of range")
+    if not torch.isfinite(orders.face).all() or (orders.face >= 360).any():
+        raise ValueError("order facing not finite or >= 360 (degrees 0..360, < 0 none)")
