@@ -165,8 +165,9 @@ class Ender:
         self.over = torch.zeros(B, dtype=torch.bool, device=device)
         self.why = torch.zeros(B, dtype=torch.long, device=device)      # 1 we routed, 2 the enemy left, 3 the limit
         self.limit = limit_s
+        self.arrived = torch.ones(B, dtype=torch.bool, device=device)      # U1: in place from the start
 
-    def after_step(self, st, spacing):
+    def after_step(self, st, spacing, area=None):
         u = st.u
         H = st.N // 2
         we_out = u["r"][:, 0] | (u["men"][:, 0] <= 0) | u["gone"][:, 0]

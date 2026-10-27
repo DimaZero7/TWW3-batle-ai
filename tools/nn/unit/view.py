@@ -29,6 +29,7 @@ from tools.nn.unit import zmap as Z
 K = 16                 # rows: the unit itself + up to 15 others
 T = 10                 # memory snapshots, one a second
 REACH_S = 15.0         # s: the zone's time (the order's span) - a parameter
+TOWARD_DEG = 30.0      # the area beyond the map: the edge cells within this of the way to it are allowed
 RAW = ("x", "z", "b", "vx", "vz", "front", "depth", "fill", "men", "hp", "mp", "ms", "r", "s", "w", "m", "mv", "f",
        "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash")
 I = {k: i for i, k in enumerate(RAW)}
@@ -178,7 +179,8 @@ def _inside(x, z, ar):
 
 def allowed(me, J, enemy_rows, ar, cell_m, bounds, cells=Z.CELLS):
     """The hard bans' masks: cells_ok [R, C, C] (the cell's centre in the area and on the map; no area: on the map; if
-    no cell is left, the one nearest the area's centre) and target_ok [R, K] (an enemy row whose centre is in the area)."""
+    no cell of the area is on the map, the edge ring's cells towards it, see below) and target_ok [R, K] (an enemy row
+    whose centre is in the area)."""
     R = me.shape[0]
     dev = me.device
     k = torch.arange(cells, device=dev, dtype=torch.float32)
@@ -193,12 +195,24 @@ def allowed(me, J, enemy_rows, ar, cell_m, bounds, cells=Z.CELLS):
         on = ar.get("on", torch.ones(R, dtype=torch.bool, device=dev))
         ok = ok & (_inside(x, z, ar) | ~on.view(R, 1, 1))
         t_ok = t_ok & (_inside(J[..., I["x"]], J[..., I["z"]], ar) | ~on[:, None])
-        # no cell left (an area smaller than a cell, or off the map): the cell nearest the area's centre
+        # no cell of the area on the map (U2: the area far away): the cells of the map's edge ring within TOWARD_DEG
+        # of the way to the area's centre - the unit walks towards it and still chooses how; none of those either: the
+        # cell nearest the area's centre
         none = ~ok.flatten(1).any(1)
         if bool(none.any()):
+            ring = torch.zeros((cells, cells), dtype=torch.bool, device=dev)
+            ring[0, :], ring[-1, :], ring[:, 0], ring[:, -1] = True, True, True, True
+            sa, fa = Z.local(ar["x"], ar["z"], me[:, I["x"]], me[:, I["z"]], me[:, I["b"]])
+            way = torch.atan2(sa, fa).view(R, 1, 1)
+            off = torch.remainder(torch.atan2(s, f) - way + torch.pi, 2 * torch.pi) - torch.pi
+            toward = ring[None] & (off.abs() <= TOWARD_DEG * DEG)
+            if bounds is not None:
+                toward = toward & (x.abs() <= bounds) & (z.abs() <= bounds)
             d = (x - ar["x"].view(R, 1, 1)) ** 2 + (z - ar["z"].view(R, 1, 1)) ** 2
             best = d.flatten(1).argmin(1)
             one = torch.zeros_like(ok).flatten(1)
             one[torch.arange(R, device=dev), best] = True
-            ok = torch.where(none.view(R, 1, 1), one.view(R, cells, cells), ok)
+            one = one.view(R, cells, cells)
+            pick = torch.where(toward.flatten(1).any(1).view(R, 1, 1), toward, one)
+            ok = torch.where(none.view(R, 1, 1), pick, ok)
     return ok, t_ok

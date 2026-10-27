@@ -16,7 +16,9 @@ A ban is a logit of NEG (-1e9): its probability is exactly 0 in fp32 and it is n
 the entropy's gradient NaN). The critic (Critic) is the same trunk
 with its own weights over the view of the whole skirmish (view.build everyone=True), no bans, a value head.
 
-The order (ORDER): pace any / slow / fast (one-hot), stage going / in place, a target given, an area given.
+The order (ORDER): pace any / slow / fast (one-hot), stage going / in place, a target given, an area given, and the
+area as raw numbers in the unit's frame (U2: it may lie far beyond the map): its centre right / forward of the unit
+(/ 100 m), its front and depth (/ 100 m), its bearing against the unit's front (cos, sin).
 """
 import math
 
@@ -31,7 +33,8 @@ from tools.nn.unit import zmap as Z
 D = 96          # a row's width
 CORE = 128
 FACES = 64
-ORDER = ("pace_any", "pace_slow", "pace_fast", "going", "in_place", "has_target", "has_area")
+ORDER = ("pace_any", "pace_slow", "pace_fast", "going", "in_place", "has_target", "has_area",
+         "area_right", "area_forward", "area_front", "area_depth", "area_cos", "area_sin")
 PACE_ANY, PACE_SLOW, PACE_FAST = 0, 1, 2
 WALK, RUN = 0, 1
 NEG = -1e9      # a banned choice: exp(NEG - max) is exactly 0 in fp32 (never drawn); -inf would give NaN gradients
@@ -199,6 +202,27 @@ def order_vec(R, pace=PACE_ANY, going=False, has_target=False, has_area=False, d
     o[:, ORDER.index("going" if going else "in_place")] = 1.0
     o[:, ORDER.index("has_target")] = float(has_target)
     o[:, ORDER.index("has_area")] = float(has_area)
+    return o
+
+
+def order_of(me, area, pace, arrived, device=None):
+    """[R, len(ORDER)] the orders of R units from their raw state me [R, view.RAW], their areas {x, z, b, front, depth} [R],
+    pace [R] long (PACE_*) and arrived [R] bool (in place; else going)."""
+    from tools.nn.unit import view as V
+    R = me.shape[0]
+    o = torch.zeros((R, len(ORDER)), device=me.device)
+    o[torch.arange(R, device=me.device), pace] = 1.0
+    o[:, ORDER.index("going")] = (~arrived).float()
+    o[:, ORDER.index("in_place")] = arrived.float()
+    o[:, ORDER.index("has_area")] = 1.0
+    s, f = Z.local(area["x"], area["z"], me[:, V.I["x"]], me[:, V.I["z"]], me[:, V.I["b"]])
+    rel = (area["b"] - me[:, V.I["b"]]) * math.pi / 180
+    o[:, ORDER.index("area_right")] = s / 100
+    o[:, ORDER.index("area_forward")] = f / 100
+    o[:, ORDER.index("area_front")] = area["front"] / 100
+    o[:, ORDER.index("area_depth")] = area["depth"] / 100
+    o[:, ORDER.index("area_cos")] = torch.cos(rel)
+    o[:, ORDER.index("area_sin")] = torch.sin(rel)
     return o
 
 

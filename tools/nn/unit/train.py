@@ -111,7 +111,21 @@ def hold_setup(cfg, P, device, gen=None, sp=None):
     return {"st": st, "own": own, "area": area, "ender": DH.Ender(st.B, device), "specs": sp}
 
 
-SETUPS = {"smoke": smoke_setup, "hold": hold_setup}
+def go_setup(cfg, P, device, gen=None, sp=None):
+    """Drill U2 (drill_go.py): reach the area and hold it; the enemy goes to the area too."""
+    from tools.nn.unit import drill_go as DG
+    sp = sp if sp is not None else DG.specs(cfg["battles"], gen or torch.Generator())
+    st, own, area, pace = DG.build(sp, P, device)
+    return {"st": st, "own": own, "area": area, "ender": DG.Ender(sp, device), "specs": sp, "pace": pace,
+            "script": lambda s_: DG.to_area(s_, area)}
+
+
+def orders_now(raw_d, area, pace, arrived):
+    """[B] orders (net.order_of) of the network's unit (slot 0) from its raw state raw_d [B, N, RAW]."""
+    return Nt.order_of(raw_d[:, 0], {k: v[:, 0] for k, v in area.items() if k != "on"}, pace, arrived)
+
+
+SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup}
 
 
 def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, branch=None):
@@ -138,7 +152,9 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     valid = torch.zeros((D, B), dtype=torch.bool, device=device)
     stats = {"bans_broken": 0, "leash_s": 0.0, "out_free_s": 0.0, "out_pushed_s": 0.0, "nan": 0,
              "entropy": {k: 0.0 for k in Nt.HEADS}, "n_dec": 0}
-    order = Nt.order_vec(B, pace=Nt.PACE_ANY, going=False, has_area=True, device=device)
+    pace = setup.get("pace", torch.full((B,), Nt.PACE_ANY, dtype=torch.long, device=device))
+    script = setup.get("script", opponents.nearest)
+    arrived_d = torch.ones((D, B), dtype=torch.bool, device=device)
     cm = torch.full((B,), cfg["cell_m"], device=device)
     d_all = torch.arange(D, device=device)
     t_sim = 0.0
@@ -160,6 +176,10 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         with torch.no_grad():
             b_idx = torch.arange(B, device=device)
             v = views(raws, d_all[d].expand(B), b_idx, card, own, area, cfg)
+            arrived = getattr(ender, "arrived", None)
+            arrived = torch.ones(B, dtype=torch.bool, device=device) if arrived is None else arrived.clone()
+            arrived_d[d] = arrived
+            order = orders_now(raws[d], area, pace, arrived)
             lg = net(v, order, cm)
             act = Nt.sample(lg, greedy=greedy)
             lp, ent = Nt.log_prob(lg, act)
@@ -189,12 +209,12 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             was_done = st.done.clone()
             now_in = lands <= j
             mine = O.Orders(*(torch.where(now_in[:, None], getattr(intended, f), getattr(in_force, f)) for f in O.FIELDS))
-            o = O.merge(opponents.nearest(st), leash.apply(st, mine, area, own), own)
+            o = O.merge(script(st), leash.apply(st, mine, area, own), own)
             before = reward.measure(st)
             hp0 = st.u["hp_abs"][:, 0].clone()
             sim_step(st, o, P)
             if ender is not None:
-                finished = ender.after_step(st, spacing)
+                finished = ender.after_step(st, spacing, area)
                 st.winner = torch.where(st.done, st.winner, torch.zeros_like(st.winner))
             else:
                 finished = st.done & ~was_done
@@ -267,10 +287,12 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             vc = views(last, torch.full((B,), D, device=device), torch.arange(B, device=device), card, own, area, cfg,
                        everyone=True)
             cut = (ender.why == 3) if ender is not None else torch.zeros_like(st.done)
+            arr = getattr(ender, "arrived", None)
+            order = orders_now(nxt, area, pace, torch.ones(B, dtype=torch.bool, device=device) if arr is None else arr)
             last_value = torch.where(st.done & ~cut, torch.zeros(B, device=device), critic(vc, order, cm))
     batch = {"raws": raws[:D], "act": {k: v_[:D] for k, v_ in store.items()}, "lp": lp_old[:D], "value": val[:D],
              "reward": rew[:D], "done": done[:D], "valid": valid[:D], "last_value": last_value, "card": card, "own": own,
-             "area": area, "order": order}
+             "area": area, "pace": pace, "arrived": arrived_d[:D]}
     n = max(stats.pop("n_dec"), 1)
     stats["entropy"] = {k: round(v_ / n, 4) for k, v_ in stats["entropy"].items()}
     stats.update({"decisions": D, "battles": B, "win1": float((st.winner == 1).float().mean()),
@@ -298,7 +320,8 @@ def update(net, critic, opt, batch, cfg, device, duty):
             di, bi = d_idx[j], b_idx[j]
             v = views(batch["raws"], di, bi, batch["card"], batch["own"], batch["area"], cfg)
             vc = views(batch["raws"], di, bi, batch["card"], batch["own"], batch["area"], cfg, everyone=True)
-            order = batch["order"][bi]
+            order = Nt.order_of(batch["raws"][di, bi, 0], {k: v[bi, 0] for k, v in batch["area"].items() if k != "on"},
+                                batch["pace"][bi], batch["arrived"][di, bi])
             cm = torch.full((len(j),), cfg["cell_m"], device=device)
             lg = net(v, order, cm)
             act = {k: batch["act"][k][di, bi] for k in Nt.HEADS}
@@ -354,7 +377,8 @@ def main(argv=None):
     ap.add_argument("--minibatch", type=int, default=2048)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--init", default=None, help="go on from this checkpoint (latest.pt of a run): weights, Adam, counter")
-    ap.add_argument("--exam", action="store_true", help="the drill's exam at the end (exam_hold.py) -> exam.json")
+    ap.add_argument("--exam", action="store_true", help="the drill's exam at the end (exam_hold.py / exam_go.py) -> "
+                    "exam.json")
     ap.add_argument("--branch-share", type=float, default=0.0, help="drill hold: the share of battles branched at the "
                     "approach (stand / attack, branch.py); 0 off")
     ap.add_argument("--branch-bonus", type=float, default=1.0, help="the bonus's weight x the branches' trade difference")
@@ -368,7 +392,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     torch.manual_seed(a.seed)
     P = load()
-    seconds = a.seconds or (180.0 if a.drill == "hold" else 120.0)
+    seconds = a.seconds or {"hold": 180.0, "go": 700.0}.get(a.drill, 120.0)
     cfg = {"battles": a.battles, "seconds": seconds, "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0,
            "bounds": None, "gamma": 0.9994, "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": a.drill}
     dev = a.device
@@ -424,8 +448,12 @@ def main(argv=None):
                       "minutes": round((time.time() - start) / 60, 1)}), flush=True)
     (out / "log.json").write_text(json.dumps(log, indent=1), encoding="utf-8")
     if a.exam:
-        from tools.nn.unit import exam_hold
-        exam_hold.run(net, P, dev, duty, out / "exam.json")
+        if a.drill == "go":
+            from tools.nn.unit import exam_go
+            exam_go.run(net, P, dev, duty, out / "exam.json")
+        else:
+            from tools.nn.unit import exam_hold
+            exam_hold.run(net, P, dev, duty, out / "exam.json")
     return log, same
 
 

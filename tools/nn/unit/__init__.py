@@ -18,6 +18,10 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
               grid, the enemy from any side 75-160 m away under `nearest`, the end rule (our rout; the enemy's rout
               goes on until it leaves the zone; a 3 min cut)
     exam_hold.py   its fixed exam (360 skirmishes): met head-on, melee damage to the front, out of the area, trade
+    drill_go.py    drill U2 'reach and hold': the unit starts out of its area (10-700 m), the order 'hold' at the stage
+              'going' -> 'in place' on arrival, the pace fast / slow by the order, the enemy goes to the area (to_area)
+              with a race early / close / held; the limit 3 min after the arrival
+    exam_go.py     its fixed exam (360): reached, when, before the enemy, the area ours, head-on, out after arrival, trade
     branch.py the approach's branches (U1): the skirmish copied when the enemy is within its charge distance + 4 s of
               its run, played on as 'stand braced' and 'attack'; a decaying bonus when the network did the better one
 
