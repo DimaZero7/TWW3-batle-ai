@@ -14,7 +14,9 @@ Metrics (more is better unless said):
 * out of the area (should be ~0): seconds our centre is over 0.5 m out of its area, of its own choice (not in melee, not
   routing) and pushed (in melee or routing) - shares of the alive seconds;
 * trade: (enemy gold lost - ours) / budget per skirmish, by pair (the safety: should not fall);
-* the choice's entropy per head; how the skirmishes ended (we routed / the enemy left / the 3 min limit).
+* the choice's entropy per head; how the skirmishes ended (we routed / the enemy left / the 3 min limit);
+* the branches (branch.py, every skirmish): met the charge standing braced (HOLD, still, the enemy within 80 deg at the
+  contact), attacked, chose the better branch; the share of skirmishes / pairs where standing is better.
 """
 import argparse
 import json
@@ -92,7 +94,11 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     t0 = time.time()
     was = net.training
     net.eval()
-    _, rs = T.rollout(net, None, cfg, P, device, duty, setup, watch=w)
+    from tools.nn.unit import branch as Br
+    _, rs = T.rollout(net, None, cfg, P, device, duty, setup, watch=w,
+                      branch={"share": 1.0, "weight": 0.0, "lead_s": Br.LEAD_S, "horizon_s": Br.HORIZON_S})
+    bi = {k: v.cpu() for k, v in rs.pop("_branch").items()}
+    stand_braced = (rs.get("branch") or {}).get("stand_branch_braced")
     net.train(was)
     m1 = reward.measure(st)
     trade = ((m0[:, 1, 3] - m1[:, 1, 3]) - (m0[:, 0, 3] - m1[:, 0, 3])).cpu()
@@ -103,12 +109,18 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     met = ct >= 0
     had = met & (ct >= need)
     table = {"by_start": {}, "by_time": {}}
+    beh, best, br = bi["behaviour"], bi.get("best", torch.full((len(sp),), -1)), bi["branched"]
+    okb = br & (bi["contact_d"] >= 0)
     for name in DH.STARTS:
         m = torch.tensor([s == name for s in starts])
         table["by_start"][name] = {"n": int(m.sum()), "contact": _share(met, m)[0],
                                    "front_at_contact": _share(cs == 0, m & met)[0],
                                    "front_game_label": _share(cg == 0, m & met)[0],
                                    "had_time": _share(had, m & met)[0],
+                                   "braced_at_contact": _share(beh == Br.STAND, m & okb)[0],
+                                   "attacked": _share(beh == Br.ATTACK, m & okb)[0],
+                                   "chose_best": _share(beh == best, m & okb)[0],
+                                   "stand_better": _share(best == Br.STAND, m & br)[0],
                                    "melee_dmg_front": round(float(w.dmg_front.cpu()[m].sum() / w.dmg_all.cpu()[m].sum().clamp(min=1e-6)), 3)}
     for name, m in (("had_time", had), ("no_time", met & ~had)):
         table["by_time"][name] = {"n": int(m.sum()), "front_at_contact": _share(cs == 0, m)[0]}
@@ -117,6 +129,11 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     for s, t in zip(sp, trade.tolist()):
         pairs.setdefault(f'{s["me"]} vs {s["foe"]}', []).append(t)
     pairs = {k: round(sum(v) / len(v), 3) for k, v in pairs.items()}
+    stand_pairs = {}
+    for s_, b_, ok_ in zip(sp, best.tolist(), br.tolist()):
+        if ok_:
+            stand_pairs.setdefault(f'{s_["me"]} vs {s_["foe"]}', []).append(float(b_ == Br.STAND))
+    stand_pairs = {k: round(sum(v) / len(v), 3) for k, v in stand_pairs.items()}
     table.update({
         "skirmishes": len(sp), "contact": round(float(met.float().mean()), 3),
         "melee_dmg_front": round(float(w.dmg_front.sum() / w.dmg_all.sum().clamp(min=1e-6)), 3),
@@ -128,10 +145,15 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
         "end": rs.get("end"), "duration_s": round(float(st.t.mean()), 1),
         "contact_t_s": round(float(ct[met].mean()), 1) if bool(met.any()) else None,
         "entropy": rs["entropy"], "bans_broken": rs["bans_broken"], "leash_s": rs["leash_s"],
-        "seconds": round(time.time() - t0, 1), "pairs": pairs})
+        "branch": {"branched": round(float(br.float().mean()), 3),
+                   "braced_at_contact": _share(beh == Br.STAND, okb)[0], "attacked": _share(beh == Br.ATTACK, okb)[0],
+                   "chose_best": _share(beh == best, okb)[0], "stand_better": _share(best == Br.STAND, br)[0],
+                   "pairs_stand_mostly_better": round(sum(v > 0.5 for v in stand_pairs.values()) / max(len(stand_pairs), 1), 3),
+                   "stand_branch_braced": stand_braced, "diff_mean": round(float((bi["t_stand"] - bi["t_attack"])[br].abs().mean()), 4) if bool(br.any()) else None},
+        "seconds": round(time.time() - t0, 1), "pairs": pairs, "pairs_stand_better": stand_pairs})
     if out_path:
         Path(out_path).write_text(json.dumps(table, indent=1), encoding="utf-8")
-    short = {k: v for k, v in table.items() if k != "pairs"}
+    short = {k: v for k, v in table.items() if k not in ("pairs", "pairs_stand_better")}
     print(json.dumps({"exam": short}), flush=True)
     return table
 

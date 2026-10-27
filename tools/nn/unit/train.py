@@ -114,10 +114,13 @@ def hold_setup(cfg, P, device, gen=None, sp=None):
 SETUPS = {"smoke": smoke_setup, "hold": hold_setup}
 
 
-def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False):
+def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, branch=None):
     """One batch of battles played by the network (its unit) against the script `nearest`; the orders land after the
     game's latency (tools/nn/train/cadence.py: 0.36 s on average - one 0.5 s step late with probability 0.72), the
-    leash every step. critic None: no values (the exam). watch(st, before_hp, step_was_done): the exam's metrics."""
+    leash every step. critic None: no values (the exam). watch(st, before_hp, step_was_done): the exam's metrics.
+    branch {share, weight, lead_s, horizon_s} (drill U1, branch.py): the share of the battles copied at the approach and
+    played on as 'stand' and 'attack'; the network's behaviour at the contact matching the better one earns weight x
+    their trade difference at the contact's decision. Per battle results in stats["_branch"]."""
     st, own, area, ender = setup["st"], setup["own"], setup["area"], setup["ender"]
     B = st.B
     card = cards(st, device)
@@ -141,6 +144,15 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False):
     t_sim = 0.0
     sim_step = battle.stepper(device)          # compiled on CUDA (~10x), plain on the CPU
     in_force = O.hold(B, st.N, device)        # the orders in force until the new ones land
+    if branch is not None:
+        from tools.nn.unit import branch as Br
+        H = st.N // 2
+        will = torch.rand(B, device=device) < branch["share"]
+        branched = torch.zeros(B, dtype=torch.bool, device=device)
+        snaps = []
+        contact_d = torch.full((B,), -1, dtype=torch.long, device=device)
+        beh = torch.full((B,), Br.OTHER, dtype=torch.long, device=device)
+        brace = Br.bracing_deg(P)
     for d in range(D):
         duty.start()
         valid[d] = ~st.done
@@ -188,6 +200,17 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False):
                 finished = st.done & ~was_done
             r = r + torch.where(was_done, torch.zeros_like(r),
                                 reward.step(before, reward.measure(st), finished, st.winner)[:, 0])
+            if branch is not None:
+                m = will & ~branched & ~was_done & Br.moment(st, spacing, branch["lead_s"])
+                if bool(m.any()):
+                    idx = m.nonzero()[:, 0]
+                    snaps.append((idx, Br.take(st, idx)))
+                    branched = branched | m
+                hit = st.u["hit_sec"][:, H * st.N + 0] > 0
+                first = (contact_d < 0) & hit & ~was_done
+                if bool(first.any()):
+                    contact_d = torch.where(first, d, contact_d)
+                    beh = torch.where(first, Br.behaviour(st, brace), beh)
             if watch is not None:
                 watch(st, hp0, was_done, area, d * steps + j + 1)
             u = st.u
@@ -207,6 +230,35 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False):
         if bool(st.done.all()):
             D = d + 1
             break
+    if branch is not None:
+        tb = time.time()
+        info = {"branched": branched, "contact_d": contact_d, "behaviour": beh,
+                "t_stand": torch.full((B,), float("nan"), device=device),
+                "t_attack": torch.full((B,), float("nan"), device=device)}
+        if snaps:
+            idx = torch.cat([i for i, _ in snaps])
+            snap = Br.cat([x for _, x in snaps])
+            rep = {}
+            ts, ta = Br.play(snap, {k: v[idx] for k, v in area.items()}, P, sim_step, branch["horizon_s"],
+                             rows=B, report=rep)
+            info["t_stand"][idx], info["t_attack"][idx] = ts, ta
+            ok = branched & (contact_d >= 0) & (contact_d < D)
+            bon, best = Br.bonus(beh, info["t_stand"], info["t_attack"], branch["weight"])
+            bon = torch.where(ok, bon, torch.zeros_like(bon))
+            rew[contact_d.clamp(0, D - 1), torch.arange(B, device=device)] += bon
+            info["best"] = torch.where(branched, best, torch.full_like(best, -1))
+            n = max(int(ok.sum()), 1)
+            stats["branch"] = {"share": round(float(branched.float().mean()), 3),
+                               "stand_better": round(float((best[branched] == Br.STAND).float().mean()), 3),
+                               "diff": round(float((info["t_stand"] - info["t_attack"])[branched].abs().mean()), 4),
+                               "beh_stand": round(float((beh[ok] == Br.STAND).float().sum()) / n, 3),
+                               "beh_attack": round(float((beh[ok] == Br.ATTACK).float().sum()) / n, 3),
+                               "chose_best": round(float((beh[ok] == best[ok]).float().sum()) / n, 3),
+                               "bonus_mean": round(float(bon.sum()) / B, 4), "weight": branch["weight"],
+                               "stand_branch_braced": round(float(rep["stand_braced"][rep["stand_contact"]].float().mean()), 3)
+                               if bool(rep["stand_contact"].any()) else None,
+                               "seconds": round(time.time() - tb, 1)}
+        stats["_branch"] = info
     last_value = torch.zeros(B, device=device)
     if critic is not None:
         with torch.no_grad():
@@ -303,6 +355,12 @@ def main(argv=None):
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--init", default=None, help="go on from this checkpoint (latest.pt of a run): weights, Adam, counter")
     ap.add_argument("--exam", action="store_true", help="the drill's exam at the end (exam_hold.py) -> exam.json")
+    ap.add_argument("--branch-share", type=float, default=0.0, help="drill hold: the share of battles branched at the "
+                    "approach (stand / attack, branch.py); 0 off")
+    ap.add_argument("--branch-bonus", type=float, default=1.0, help="the bonus's weight x the branches' trade difference")
+    ap.add_argument("--branch-decay", type=int, default=20, help="the weight falls linearly to 0 over this many updates of this run")
+    ap.add_argument("--branch-lead-s", type=float, default=4.0)
+    ap.add_argument("--branch-horizon-s", type=float, default=60.0)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default="build/diag_g49/smoke")
@@ -332,7 +390,14 @@ def main(argv=None):
         if a.minutes > 0 and time.time() - start > a.minutes * 60:
             break
         t0 = time.time()
-        batch, rs = rollout(net, critic, cfg, P, dev, duty, SETUPS[a.drill](cfg, P, dev, gen))
+        br = None
+        if a.branch_share > 0 and a.drill == "hold":
+            from tools.nn.unit import branch as Br
+            # (the decay counts this run's updates: a run going on from a checkpoint starts the bonus afresh)
+            br = {"share": a.branch_share, "weight": Br.weight_at(a.branch_bonus, k, a.branch_decay),
+                  "lead_s": a.branch_lead_s, "horizon_s": a.branch_horizon_s}
+        batch, rs = rollout(net, critic, cfg, P, dev, duty, SETUPS[a.drill](cfg, P, dev, gen), branch=br)
+        rs.pop("_branch", None)
         t1 = time.time()
         us = update(net, critic, opt, batch, cfg, dev, duty)
         t2 = time.time()

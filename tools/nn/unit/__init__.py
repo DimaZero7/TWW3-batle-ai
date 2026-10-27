@@ -18,6 +18,8 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
               grid, the enemy from any side 75-160 m away under `nearest`, the end rule (our rout; the enemy's rout
               goes on until it leaves the zone; a 3 min cut)
     exam_hold.py   its fixed exam (360 skirmishes): met head-on, melee damage to the front, out of the area, trade
+    branch.py the approach's branches (U1): the skirmish copied when the enemy is within its charge distance + 4 s of
+              its run, played on as 'stand braced' and 'attack'; a decaying bonus when the network did the better one
 
 Outside tools/nn/model on purpose: that folder is part of the simulator's version (tools/nn/train/version.py).
 """
