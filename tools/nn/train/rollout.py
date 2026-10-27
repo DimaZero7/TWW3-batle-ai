@@ -579,6 +579,8 @@ class Battles:
         self.ability_hold = None
         # the general's plans (tools/nn/general/runtime.py; made at the first step with a network that has one)
         self.general_rt = None
+        # the executor's local trade (tools/nn/train/local_trade.Local; run.py --exec-local-trade W > 0): None off
+        self.local_trade = None
         self.start()
 
     @property
@@ -1031,8 +1033,13 @@ class Battles:
                 gb.capture(self, info)
         if rt is not None:
             rt.fire_acc = None                       # this decision's fire (Runtime.note_fire, execute)
+        if self.local_trade is not None:
+            self.local_trade.before(self.st)         # the units' gold struck and lost before the decision's steps
         r_rows, finished = self._play(parts, scripted, delay, attacks, rb, rs, each)
         d_rows = finished[rb]
+        # each unit's own trade over the decision (--exec-local-trade): [R, N] (advantage, not reward), before a
+        # finished battle restarts
+        local = self.local_trade.after(self.st, self.rows_learn, self.B, acting) if self.local_trade is not None else None
         executed = None
         if rt is not None:
             # how the units carried out their missions (--general-exec): their bonus [R, N] (advantage, not reward)
@@ -1064,7 +1071,8 @@ class Battles:
                 if c is not None:
                     c = dict(squeeze_received(c, rx_r), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth, "exec": executed}
+                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth, "exec": executed,
+                "exec_local": local}
 
     def _delay(self):
         """When the decision's orders land: None (a fixed step), or [B] the step per battle (a latency between steps:
@@ -1562,6 +1570,9 @@ def collect(env, actor, critic, T):
     if all(s.get("exec") is not None for s in steps):
         # the executor's bonus for carrying out its missions [T, R, N] (ppo.update: the units' own advantage)
         out["exec"] = torch.stack([s["exec"] for s in steps])
+    if all(s.get("exec_local") is not None for s in steps):
+        # each unit's own trade of a decision [T, R, N] (--exec-local-trade; ppo.update: the units' own advantage)
+        out["exec_local"] = torch.stack([s["exec_local"] for s in steps])
     if steps[0].get("teach") is not None:
         # the teachers: labels [T, R, N], where they count [T, R, N], the unit's teacher [T, R, N] (index into
         # names), the unit's battle labelled [T, R, N] (the share), the shares

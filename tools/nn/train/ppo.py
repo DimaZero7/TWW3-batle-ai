@@ -51,6 +51,7 @@ from tools.nn.general import signal as gsignal
 from tools.nn.model import eyes as meyes
 from tools.nn.model import heads as hd
 from tools.nn.train import head_entropy
+from tools.nn.train import local_trade as ltrade
 from tools.nn.train.drills import teach as drill_teach
 from tools.nn.train.rollout import full_obs
 
@@ -93,6 +94,9 @@ class PPOConfig:
     #                                 body's share of the ability term (0: none); used under ability_own
     ability_epochs: int = 1    # passes of the ability term over the update's priced rows: the main one + this - 1 of the
     #                            ability head alone on the stored thoughts (ability_epochs; run.py --ability-epochs)
+    local_trade: float = 0.0   # W of the executor's local trade (batch["exec_local"], local_trade.py; run.py
+    #                            --exec-local-trade): each unit's own trade's reward-to-go / the side's advantage's
+    #                            spread x W into its own advantage; 0 off
     amp: str = ""              # "bf16" / "bf16h": the update's actor and critic passes under torch.autocast(bfloat16)
     #                            ("bf16h": the actor's heads in float32; _amp, run.py --amp)
 
@@ -561,6 +565,20 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
     # units), added to the side's after its normalisation; the reward, the returns and the critic do not see it
     ex_adv = (gsignal.exec_advantage(batch["exec"].float(), batch["done"].float(), cfg.gamma * cfg.lam)
               if batch.get("exec") is not None and train_policy else None)
+    mis_adv = ex_adv
+    # the executor's local trade (--exec-local-trade W; local_trade.py): each unit's own trade of a decision [T, R, N]
+    # in the reward's units, its reward-to-go at gamma x lambda / the side's advantage's spread before the
+    # normalisation (by role under adv_norm "role") x W - the same channel as the mission bonus
+    lt_adv = None
+    if batch.get("exec_local") is not None and train_policy and cfg.local_trade:
+        lt_rtg = ltrade.advantage(batch["exec_local"].float(), batch["done"].float(), cfg.gamma * cfg.lam)
+        lt_spread = torch.full_like(adv, float(adv.std()) + 1e-8)
+        if cfg.adv_norm == "role" and batch.get("attacks") is not None:
+            for m in (batch["attacks"], ~batch["attacks"]):
+                if int(m.sum()) > 1:
+                    lt_spread[m] = float(adv[m].std()) + 1e-8
+        lt_adv = cfg.local_trade * lt_rtg / lt_spread[..., None]
+        ex_adv = lt_adv if ex_adv is None else ex_adv + lt_adv
     # The actor's and the critic's gradients are clipped apart (each to max_grad). Clipped together
     # (until 02.10), a critic loss's gradient (then the per-unit value's, norm 200-2000; the actor's
     # 0.2-0.5) scaled the actor's by 0.0006-0.0025: per parameter ~1e-8, far below Adam's eps 1e-5, so
@@ -801,6 +819,21 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
             out["observe"].update(loss=obs_acc["loss"] / max(1, obs_n), **obs_loss.summary(obs_sums))
         observe.after()
     out["reward"] = float(batch["reward"].sum(0).mean())
+    if lt_adv is not None:
+        # the local trade's part of the units' advantage over the units that decided (the side's part: std 1), its share
+        # of the units' advantage's variance (1 + the mission bonus's + its own, taken as independent)
+        on = batch["obs"]["free"] if "free" in batch["obs"] else batch["obs"]["ctrl"]
+        on = on.bool()
+        if bool(on.any()):
+            v_lt = float(lt_adv[on].var()) if int(on.sum()) > 1 else 0.0
+            v_mis = float(mis_adv[on].var()) if mis_adv is not None and int(on.sum()) > 1 else 0.0
+            out["local_trade_adv_mean"] = float(lt_adv[on].mean())
+            out["local_trade_adv_std"] = v_lt ** 0.5
+            out["local_trade_adv_share"] = v_lt / (1.0 + v_mis + v_lt)
+            out["local_trade_rtg_std"] = float(lt_rtg[on].std()) if int(on.sum()) > 1 else 0.0
+            out["local_trade_spread"] = float(lt_spread.mean())
+            out["local_trade_weight"] = cfg.local_trade
+    ex_adv = mis_adv
     if ex_adv is not None:
         # the mission bonus's part of the units' advantage (the side's is normalised: std 1), over the units paid
         paid = batch["exec"] != 0

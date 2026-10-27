@@ -557,6 +557,16 @@ def general_text(g):
                if "exec_general_term" in g else ""))
 
 
+def local_trade_text(t):
+    """The log line of the executor's local trade (--exec-local-trade; row["local_trade"])."""
+    return (f"local trade (W {t.get('weight', 0):g}, centre {t.get('center')}): engaged {t.get('engaged', 0):.2f} of "
+            f"the deciding units; an engaged unit-decision raw {t.get('raw_mean', 0):+.5f} sd {t.get('raw_sd', 0):.5f} "
+            f"(above 0 {t.get('raw_pos', 0):.2f}), paid {t.get('paid_mean', 0):+.5f} sd {t.get('paid_sd', 0):.5f}; "
+            f"in the advantage {t.get('adv_mean', 0):+.3f} sd {t.get('adv_std', 0):.3f} (side's 1, spread "
+            f"{t.get('spread', 0):.4f}), variance share {t.get('adv_share', 0):.3f}; classes "
+            + " ".join(f"{c} {v['mean']:+.5f}/{v['base']:+.5f}" for c, v in (t.get("classes") or {}).items()))
+
+
 def fighters_installed(args):
     """--fighters: the fighters lab in the simulator for the run (tools/nn/train/men.py: the hook installed, nothing
     built adopted, the units' shape for the network); else nothing."""
@@ -674,7 +684,8 @@ def _train(args, every=None, teacher=None, normal=None):
     # seconds, so the horizon in seconds stays whatever the cadence (cadence.py)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=cadence.discount(args.gamma), lam=cadence.discount(ppo.PPOConfig.lam),
                         epochs=args.epochs, minibatch=args.minibatch,
-                        entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm, eyes=args.eyes_weight)
+                        entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm, eyes=args.eyes_weight,
+                        local_trade=args.exec_local_trade)
     width = actor.cfg.d / model_config.SMALL.d
     if general_only:
         from tools.nn.general.executor import freeze_but_general
@@ -1000,6 +1011,12 @@ def _train(args, every=None, teacher=None, normal=None):
         glearn_cfg = imitate_floor(args, glearn_cfg, carried)
     t_warm = time.time()
     env.step(actor, critic)                       # compiles the simulator's step (not counted)
+    if args.exec_local_trade > 0:
+        # the executor's local trade: each unit's own trade of a decision into its own advantage (local_trade.py)
+        from tools.nn.train import local_trade as ltrade
+        env.local_trade = ltrade.Local(env.weights, args.exec_local_center, device)
+        print(f"executor's local trade: W {args.exec_local_trade:g} (each unit's own gold struck - lost / budget, "
+              f"lords x {env.weights.lord:g}; centred by {args.exec_local_center}) into its own advantage", flush=True)
     if env.general_rt is not None:
         # the general's plans: the return's rule and the discount per decision (the trainer's)
         env.general_rt.ret, env.general_rt.gamma = args.general_return, cfg.gamma
@@ -1356,6 +1373,10 @@ def _train(args, every=None, teacher=None, normal=None):
             row["observe"] = {k: round(v, 4) for k, v in observed.items()}
         if args.kite_share:
             row["kite"] = env.kite_stats()
+        if env.local_trade is not None:
+            row["local_trade"] = dict(env.local_trade.take_stats(),
+                                      **{k[len("local_trade_"):]: round(v, 5) for k, v in st.items()
+                                         if k.startswith("local_trade_")})
         if env.general_rt is not None:
             row["general"] = dict(env.general_rt.take_stats(),
                                   **{k[len("general_"):]: round(v, 5) for k, v in st.items() if k.startswith("general_")})
@@ -1394,6 +1415,8 @@ def _train(args, every=None, teacher=None, normal=None):
                 print("      " + kitesp.text(row["kite"]), flush=True)
             if "general" in row:
                 print("      " + general_text(row["general"]), flush=True)
+            if "local_trade" in row:
+                print("      " + local_trade_text(row["local_trade"]), flush=True)
             if args.ability_branch:
                 print("      ability branches " + " ".join(f"{k} {v}" for k, v in row["ability_branch"].items()),
                       flush=True)
@@ -2108,6 +2131,15 @@ def parser():
                          "into the unit's own advantage as a reward-to-go (in the normalised advantage's units: W = 1 "
                          "pays one advantage std for a measure 1 above the mean) - never into the reward, so the critic "
                          "and the general's return do not see it (0: measured and logged, not paid)")
+    ap.add_argument("--exec-local-trade", type=float, default=0.0,
+                    help="W, the executor's local trade (tools/nn/train/local_trade.py): each unit's own trade of a "
+                         "decision (the enemy gold it struck off + its share of their routs / deaths - its own gold "
+                         "lost, / budget; lords x the reward's lord weight), centred (--exec-local-center), its "
+                         "reward-to-go / the side's advantage's spread x W into the unit's own advantage (beside the "
+                         "mission bonus; never the reward, the critic or the general). 0: off")
+    ap.add_argument("--exec-local-center", choices=("class", "none"), default="class",
+                    help="the local trade's centring: class - an engaged unit-decision (struck or lost something) "
+                         "less its class's running mean, 0 out of the fight (neutral on fighting at all); none - raw")
     ap.add_argument("--general-exec-decay", type=int, default=0,
                     help="general: the mission bonus's W down to 0 linearly over this many updates of the chain (0: no "
                          "decay)")
