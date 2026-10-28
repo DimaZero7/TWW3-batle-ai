@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -654,6 +654,24 @@ TERRAIN = {
     "melee": [(130, -290, 45, 0.448), (120, 100, 75, 0.425), (-280, -30, 210, 0.415), (-220, 230, 315, 0.417),
               (-400, -210, 240, 0.418), (10, 0, 270, 0.383)],
     "park_z": 470.0,
+}
+# the ground plan (build/diag_g49/ground; sites from the ground layer of build/maps/ksl_plains_01, find*.py there):
+# battle 1 archers on clanrats 100 m off - the target in forest / on grass / on grass with a forest strip between
+# (shooter x, z, target x, z, forest metres on the way); battle 2 a run 60 m to and fro in forest / on grass, spearmen
+# and Empire knights (x0, z0, bearing)
+GROUND = {
+    "shoot": {"forest_1": (258.0, 225.4, 208, 312, 0), "forest_2": (480.0, 276.0, 480, 376, 0),
+              "grass_1": (-217.4, -2.0, -304, 48, 0), "grass_2": (-140.0, -224.0, -240, -224, 0),
+              "grass_3": (-354.0, -198.6, -304, -112, 0),
+              "strip_57": (160.6, -366.1, 64, -392, 57), "strip_7": (8.0, 324.0, 8, 224, 7),
+              "strip_11": (336.0, 380.0, 336, 480, 11)},
+    "run": {"spear_forest_1": ("spear", -48, -360, 0), "spear_forest_2": ("spear", -80, -200, 150),
+            "spear_grass_1": ("spear", 416, 232, 90), "spear_grass_2": ("spear", 88, -480, 120),
+            "knights_forest_1": ("wh_main_emp_cav_empire_knights", 120, -360, 150),
+            "knights_forest_2": ("wh_main_emp_cav_empire_knights", 408, 456, 180),
+            "knights_grass_1": ("wh_main_emp_cav_empire_knights", 272, -24, 210),
+            "knights_grass_2": ("wh_main_emp_cav_empire_knights", -176, 64, 300)},
+    "leg_m": 60,
 }
 # the terrain2 plan: fatigue one way (a flat pre-run at a run to pre_s, then teleported to the foot of a slope, or its
 # top, and up / down it: (pre x, z, b), (main x, z, b uphill, leg m, slope), down), and the hits apart from the damage a hit:
@@ -918,6 +936,26 @@ def battles(plan):
                         morale_both=True, morale_rows=True, kind=f"a{aw}_t{tw}_{k}")
         out.append([wr("swords", "clanrat", 70, 20, 1), wr("swords", "clanrat", 20, 70, 1), wr("swords", "clanrat", 40, 40, 1),
                     wr("gs", "cspear", 20, 70, 1), wr("swords", "clanrat", 70, 20, 2), wr("swords", "clanrat", 20, 70, 2)])
+    elif plan == "ground":
+        g, gr = TERRAIN, GROUND
+        common = dict(map=g["map"], catchment=g["catchment"])
+        b1 = []
+        for kind, (sx, sz, tx, tz, fm) in gr["shoot"].items():
+            b = math.degrees(math.atan2(tx - sx, tz - sz)) % 360
+            b1.append(lane("archer", "clanrat", "shoot", "hold", gap_m=round(math.hypot(tx - sx, tz - sz)), fight_s=60,
+                           max_s=60, answer=False, kind=f"shoot_{kind}", forest_m=fm, **common,
+                           a_at={"x": float(sx), "z": float(sz), "b": round(b, 1)},
+                           t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)},
+                           place=(float(sx), float(sz))))
+        b2 = []
+        for k, (kind, (unit, x0, z0, b)) in enumerate(gr["run"].items()):
+            x1 = x0 + gr["leg_m"] * math.sin(math.radians(b))
+            z1 = z0 + gr["leg_m"] * math.cos(math.radians(b))
+            b2.append(lane(unit, "clanrat", "shuttle", "hold", gap_m=250, fight_s=60, max_s=60, answer=False,
+                           kind=f"run_{kind}", **common, a_at={"x": float(x0), "z": float(z0), "b": float(b)},
+                           p2={"x": round(x1, 1), "z": round(z1, 1)},
+                           t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(float(x0), float(z0))))
+        out += [b1, b2]
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1426,7 +1464,7 @@ def run_config(plan, index):
         config.update(men_after_s=0, men_near_m=0)
     if plan == "wrap":
         config.update(men_ms=1000, men_after_s=130, men_near_m=80)
-    if plan in ("terrain", "terrain2"):
+    if plan in ("terrain", "terrain2", "ground"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)
         if index == 1 and plan == "terrain":
