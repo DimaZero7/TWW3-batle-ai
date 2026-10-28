@@ -31,6 +31,7 @@ from tools.nn.unit import view as V
 
 ME, FOE = "wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_clanrat_spearmen_0"
 KIND = "unit_v1"
+FACE_CHANGE_DEG = 22.5   # a facing order this far from the one in force is a change (main training has no facing)
 AREA_REWARD = 0.001     # per second the area is ours / the enemy's (U2): 150 s ~ 0.15 of the budget, the trade ~0.4
 
 
@@ -83,6 +84,21 @@ def history(raws, d, T=V.T):
         if d - 1 - k >= 0:
             out[k] = raws[d - 1 - k]
     return out
+
+
+def order_changes(new, old, bi, ii, move_m=reward.Weights.order_move_m, face_deg=FACE_CHANGE_DEG):
+    """[R] bool: the network's own order (decode.to_orders, before the leash) really changes from its previous one, as
+    the main training counts it (reward.order_changes: another kind, another attack target, a move / withdraw point
+    more than move_m from the previous one) and a facing face_deg or more from the previous facing (or one given / taken
+    away). The leash's replacements are the decoder's, not the network's: they are never compared."""
+    k, k0 = new.kind[bi, ii], old.kind[bi, ii]
+    new_kind = k != k0
+    new_target = (k == O.ATTACK) & (new.target[bi, ii] != old.target[bi, ii])
+    point = (k == O.MOVE) | (k == O.WITHDRAW)
+    moved = point & ((new.x[bi, ii] - old.x[bi, ii]) ** 2 + (new.z[bi, ii] - old.z[bi, ii]) ** 2 > move_m ** 2)
+    f, f0 = new.face[bi, ii], old.face[bi, ii]
+    turned = ((f >= 0) != (f0 >= 0)) | ((f >= 0) & (f0 >= 0) & ((torch.remainder(f - f0 + 180, 360) - 180).abs() >= face_deg))
+    return (k != O.KEEP) & (new_kind | new_target | moved | turned)
 
 
 def views(raws, d_idx, b_idx, i_idx, card, area, cfg, everyone=False):
@@ -201,7 +217,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     rew = torch.zeros((D, R), device=device)
     done = torch.zeros((D, R), dtype=torch.bool, device=device)
     valid = torch.zeros((D, R), dtype=torch.bool, device=device)
-    stats = {"bans_broken": 0, "leash_s": 0.0, "out_free_s": 0.0, "out_pushed_s": 0.0, "nan": 0,
+    stats = {"bans_broken": 0, "leash_s": 0.0, "out_free_s": 0.0, "out_pushed_s": 0.0, "nan": 0, "order_changes": 0,
              "entropy": {k: 0.0 for k in Nt.HEADS}, "n_dec": 0}
     pace = setup.get("pace", torch.full((B,), Nt.PACE_ANY, dtype=torch.long, device=device))
     script = setup.get("script", opponents.nearest)
@@ -307,6 +323,14 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             pushed = u["m"] | u["r"]
             stats["out_free_s"] += float((out & alive & ~pushed).sum()) * P.dt
             stats["out_pushed_s"] += float((out & alive & pushed).sum()) * P.dt
+        # the order changes' cost (the main training's: reward.order_change, divided by the side's network units; the
+        # first decision's orders are no change - the order in force at the start is the drill's)
+        ch = order_changes(intended, in_force, bi, ii) & valid[d] if d > 0 else torch.zeros(R, dtype=torch.bool,
+                                                                                               device=device)
+        stats["order_changes"] += int(ch.sum())
+        n_units = torch.zeros(B, device=device).index_add_(0, bi, torch.ones(R, device=device))
+        side_ch = torch.zeros(B, device=device).index_add_(0, bi, ch.float())
+        r = r - float(cfg.get("order_change", 0.0)) * side_ch / n_units.clamp(min=1)
         in_force = intended
         t_sim += time.time() - t0
         rew[d] = r[bi]                      # the side's reward, shared by its network units
@@ -477,6 +501,10 @@ def main(argv=None):
     ap.add_argument("--branch-decay", type=int, default=20, help="the weight falls linearly to 0 over this many updates of this run")
     ap.add_argument("--branch-lead-s", type=float, default=4.0)
     ap.add_argument("--branch-horizon-s", type=float, default=60.0)
+    ap.add_argument("--order-change-cost", type=float, default=reward.Weights.order_change,
+                    help="the cost of a real order change of the network (kind, target, a point 10 m or more away, a "
+                         "facing 22.5 deg or more away; divided by the side's network units; the leash's are free), as "
+                         "the main training's reward.order_change (0.001)")
     ap.add_argument("--area-reward", type=float, default=None, help="per second the area is ours +W, the enemy's -W (after our arrival) "
                     "(drill_go.whose_area); default 0.001 for --drill go (~0.15 of the budget over 150 s), else 0")
     ap.add_argument("--device", default="cpu")
@@ -495,7 +523,8 @@ def main(argv=None):
                 "seconds": a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0, "hold2": 180.0,
                                          "shoot1": 180.0, "withdraw": 400.0}.get(drill, 120.0),
                 "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0, "bounds": None, "gamma": 0.9994,
-                "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": drill, "area_reward": area}
+                "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": drill, "area_reward": area,
+                "order_change": a.order_change_cost}
     cfg = cfg_of(drills[0])
     dev = a.device
     net, critic = Nt.UnitNet().to(dev), Nt.Critic().to(dev)
