@@ -163,7 +163,7 @@ def test_the_exam_kit_adds_attack_a_then_face_b():
 
 
 def test_mix_trains_the_three_drills_in_turn(tmp_path):
-    log, same = T.main(["--drill", "mix", "--battles", "3", "--seconds", "15", "--updates", "6", "--minibatch", "64",
+    log, same = T.main(["--drill", "mix", "--battles", "3", "--seconds", "15", "--updates", "7", "--minibatch", "64",
                         "--out", str(tmp_path)])
-    assert [r["drill"] for r in log] == ["hold", "go", "multi", "hold2", "shoot1", "withdraw"] and same
+    assert [r["drill"] for r in log] == ["hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2"] and same
     assert all(r["bans_broken"] == 0 and r["nan"] == 0 for r in log)

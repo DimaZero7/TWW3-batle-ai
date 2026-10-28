@@ -35,6 +35,9 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
     drill_withdraw.py  drill U6 'withdraw from melee': in melee (5 s of it), ordered to a new area 40-150 m behind or
               aside at a random pace; the simulator's melee exit, the enemy's pursuit under `nearest`
     exam_withdraw.py   its fixed exam (240): reached, when, losses on the way, routed, damage in the back, trade
+    drill_shoot2.py    drill U5b 'a clean line of fire': two shooters side by side / in file, or a shooter behind our
+              infantry; the simulator's line of fire past friends (missile.friend_los)
+    exam_shoot2.py     its fixed exam (240): fire time, fire lost to friends, damage by fire, trade, out of the position
     branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
               of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
               bonus x the best's margin over the second when the network did the best
