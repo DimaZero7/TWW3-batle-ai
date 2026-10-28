@@ -32,6 +32,7 @@ from tools.nn.unit import view as V
 ME, FOE = "wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_clanrat_spearmen_0"
 KIND = "unit_v1"
 FACE_CHANGE_DEG = 22.5   # a facing order this far from the one in force is a change (main training has no facing)
+WIDTH_CHANGE_M = 1.0     # a width order this far (m, snapped) from the one in force is a change: any file (h >= 1.4 m)
 AREA_REWARD = 0.001     # per second the area is ours / the enemy's (U2): 150 s ~ 0.15 of the budget, the trade ~0.4
 
 
@@ -86,11 +87,14 @@ def history(raws, d, T=V.T):
     return out
 
 
-def order_changes(new, old, bi, ii, move_m=reward.Weights.order_move_m, face_deg=FACE_CHANGE_DEG):
+def order_changes(new, old, bi, ii, move_m=reward.Weights.order_move_m, face_deg=FACE_CHANGE_DEG, widths=None,
+                  width_m=WIDTH_CHANGE_M):
     """[R] bool: the network's own order (decode.to_orders, before the leash) really changes from its previous one, as
     the main training counts it (reward.order_changes: another kind, another attack target, a move / withdraw point
     more than move_m from the previous one) and a facing face_deg or more from the previous facing (or one given / taken
-    away). The leash's replacements are the decoder's, not the network's: they are never compared."""
+    away), and a width order (not 'keep') whose width differs from the one in force by more than width_m (widths:
+    (in force, ordered) [R] - widths_of; None: widths not counted). The leash's replacements are the decoder's, not the
+    network's: they are never compared."""
     k, k0 = new.kind[bi, ii], old.kind[bi, ii]
     new_kind = k != k0
     new_target = (k == O.ATTACK) & (new.target[bi, ii] != old.target[bi, ii])
@@ -98,7 +102,22 @@ def order_changes(new, old, bi, ii, move_m=reward.Weights.order_move_m, face_deg
     moved = point & ((new.x[bi, ii] - old.x[bi, ii]) ** 2 + (new.z[bi, ii] - old.z[bi, ii]) ** 2 > move_m ** 2)
     f, f0 = new.face[bi, ii], old.face[bi, ii]
     turned = ((f >= 0) != (f0 >= 0)) | ((f >= 0) & (f0 >= 0) & ((torch.remainder(f - f0 + 180, 360) - 180).abs() >= face_deg))
-    return (k != O.KEEP) & (new_kind | new_target | moved | turned)
+    wide = torch.zeros_like(turned)
+    if widths is not None:
+        force, goal = widths
+        wide = (new.width[bi, ii] >= 0) & ((goal - force).abs() > width_m)
+    return (k != O.KEEP) & (new_kind | new_target | moved | turned | wide)
+
+
+def widths_of(st, P, intended, bi, ii):
+    """([R], [R]) the width in force of each network unit (the one being formed, else its own) and the width its order
+    intended would form (reform.snap: whole files within its limits), m - order_changes' widths."""
+    from tools.nn.sim import reform
+    u = st.u
+    rf = P.sim["formation"].get("reform") or {}
+    force = torch.where(u["wnew"] >= 0, u["wnew"], u["width"])
+    goal = reform.snap(u, intended.width.clamp(min=0), rf, P.sim["formation"]["spacing_m"])
+    return force[bi, ii], goal[bi, ii]
 
 
 def prio_now(raw_d, prio, bi, ii):
@@ -130,10 +149,13 @@ def views(raws, d_idx, b_idx, i_idx, card, area, cfg, everyone=False, prio=None)
     p = prio_now(now, None if prio is None else prio[b_idx], m_idx, i_idx)
     tgt = torch.full(now.shape[:2], -1, dtype=torch.long, device=now.device)
     tgt[m_idx, i_idx] = p
-    v = V.build(now, hist, card[b_idx], who, order_target=tgt, area=ar, cell_m=cfg["cell_m"], bounds=cfg["bounds"],
+    # the map's cell: infantry cfg cell_m, a shooter its range / view.RANGE_CELLS (its range circle on the map)
+    cm = V.cell_size(now[m_idx, i_idx], cfg["cell_m"])
+    v = V.build(now, hist, card[b_idx], who, order_target=tgt, area=ar, cell_m=cm, bounds=cfg["bounds"],
                 everyone=everyone)
     v["bi"] = b_idx
     v["prio"] = p
+    v["cell_m"] = cm
     return v
 
 
@@ -294,7 +316,6 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         zb = lambda: torch.zeros(B, device=device)       # noqa: E731
         pr = {"allowed_s": zb(), "obeyed_s": zb(), "allowed_melee_s": zb(), "obeyed_melee_s": zb()}
     arrived_d = torch.ones((D, B), dtype=torch.bool, device=device)
-    cm = torch.full((R,), cfg["cell_m"], device=device)
     d_all = torch.arange(D, device=device)
     t_sim = 0.0
     sim_step = battle.stepper(device)          # compiled on CUDA (~10x), plain on the CPU
@@ -314,7 +335,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     for d in range(D):
         duty.start()
         valid[d] = ~st.done[bi] & viewer_ok(st, bi, ii)
-        raws[d] = V.raw(st, spacing, leash=leash.on)
+        raws[d] = V.raw(st, spacing, leash=leash.on, missile=P.sim["missile"])
         with torch.no_grad():
             dd = d_all[d].expand(R)
             v = views(raws, dd, bi, ii, card, area, cfg, prio=prio)
@@ -322,12 +343,12 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             arrived = torch.ones(B, dtype=torch.bool, device=device) if arrived is None else arrived.clone()
             arrived_d[d] = arrived
             order = orders_now(raws[d], area, pace, arrived, bi, ii, prio=prio)
-            lg = net(v, order, cm)
+            lg = net(v, order, v["cell_m"])
             act = Nt.sample(lg, greedy=greedy)
             lp, ent = Nt.log_prob(lg, act)
             if critic is not None:
                 vc = views(raws, dd, bi, ii, card, area, cfg, everyone=True, prio=prio)
-                val[d] = critic(vc, order, cm)
+                val[d] = critic(vc, order, vc["cell_m"])
         live = valid[d]
         if prio is not None:
             # obedience (drill U8): the named target allowed now and the network's target another one (or nobody)
@@ -352,7 +373,8 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         for k in Nt.HEADS:
             store[k][d] = act[k]
         lp_old[d] = lp
-        intended = Dc.to_orders(act, v, raws[d], cfg["cell_m"], B, st.N)
+        intended = Dc.to_orders(act, v, raws[d], v["cell_m"], B, st.N, wlim=Dc.width_limits(st, P))
+        wid = widths_of(st, P, intended, bi, ii)               # (the width in force before this decision's orders)
         lands = cad.delays(P.dt, B, device)                   # [B] the step this decision's orders land at
         r = torch.zeros(B, device=device)
         t0 = time.time()
@@ -406,8 +428,8 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             stats["out_pushed_s"] += float((out & alive & pushed).sum()) * P.dt
         # the order changes' cost (the main training's: reward.order_change, divided by the side's network units; the
         # first decision's orders are no change - the order in force at the start is the drill's)
-        ch = order_changes(intended, in_force, bi, ii) & valid[d] if d > 0 else torch.zeros(R, dtype=torch.bool,
-                                                                                               device=device)
+        ch = order_changes(intended, in_force, bi, ii, widths=wid) & valid[d] if d > 0 else torch.zeros(
+            R, dtype=torch.bool, device=device)
         stats["order_changes"] += int(ch.sum())
         n_units = torch.zeros(B, device=device).index_add_(0, bi, torch.ones(R, device=device))
         side_ch = torch.zeros(B, device=device).index_add_(0, bi, ch.float())
@@ -466,7 +488,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     last_value = torch.zeros(R, device=device)
     if critic is not None:
         with torch.no_grad():
-            nxt = V.raw(st, spacing, leash=leash.on)
+            nxt = V.raw(st, spacing, leash=leash.on, missile=P.sim["missile"])
             last = torch.cat([raws[:D], nxt[None]])
             vc = views(last, torch.full((R,), D, device=device), bi, ii, card, area, cfg, everyone=True, prio=prio)
             cut = (ender.why == 3) if ender is not None else torch.zeros_like(st.done)
@@ -474,7 +496,7 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
             order = orders_now(nxt, area, pace, torch.ones(B, dtype=torch.bool, device=device) if arr is None else arr,
                                bi, ii, prio=prio)
             going = (~st.done[bi] & viewer_ok(st, bi, ii)) | (st.done[bi] & cut[bi])
-            last_value = torch.where(going, critic(vc, order, cm), torch.zeros(R, device=device))
+            last_value = torch.where(going, critic(vc, order, vc["cell_m"]), torch.zeros(R, device=device))
     batch = {"raws": raws[:D], "act": {k: v_[:D] for k, v_ in store.items()}, "lp": lp_old[:D], "value": val[:D],
              "reward": rew[:D], "done": done[:D], "valid": valid[:D], "last_value": last_value, "card": card, "own": own,
              "area": area, "pace": pace, "arrived": arrived_d[:D], "bi": bi, "ii": ii, "prio": prio}
@@ -517,13 +539,12 @@ def update(net, critic, opt, batch, cfg, device, duty):
             order = Nt.order_of(batch["raws"][di, bi, si], {k: v[bi, si] for k, v in batch["area"].items() if k != "on"},
                                 batch["pace"][bi], batch["arrived"][di, bi],
                                 has_target=None if pq is None else v["prio"] >= 0)
-            cm = torch.full((len(j),), cfg["cell_m"], device=device)
-            lg = net(v, order, cm)
+            lg = net(v, order, v["cell_m"])
             act = {k: batch["act"][k][di, ri] for k in Nt.HEADS}
             lp, ent = Nt.log_prob(lg, act)
             pl, clip = ppo.policy_loss(lp[:, None], batch["lp"][di, ri][:, None], a_all[j], torch.ones_like(lp[:, None]),
                                        cfg["clip"])
-            value = critic(vc, order, cm)
+            value = critic(vc, order, vc["cell_m"])
             vl = F.mse_loss(value, r_all[j])
             loss = pl + cfg["vf"] * vl - cfg["entropy"] * ent.mean()
             opt.zero_grad()
@@ -558,7 +579,8 @@ def restore(path, device="cpu"):
     net, critic = Nt.UnitNet().to(device), Nt.Critic().to(device)
     ck["padded"] = False
     for mod, key in ((net, "net"), (critic, "critic")):
-        sd = ck[key]
+        sd = dict(ck[key])
+        own = mod.state_dict()
         w = sd["trunk.core.net.0.weight"]
         want = mod.trunk.core.net[0].weight.shape[1]
         if w.shape[1] < want:
@@ -567,9 +589,22 @@ def restore(path, device="cpu"):
             new = torch.zeros((w.shape[0], want), dtype=w.dtype, device=w.device)
             new[:, :w.shape[1] - 1] = w[:, :-1]
             new[:, -1] = w[:, -1]
-            sd = dict(sd)
             sd["trunk.core.net.0.weight"] = new
             ck["padded"] = True
+        w = sd["trunk.map.c1.weight"]
+        want = own["trunk.map.c1.weight"].shape[1]
+        if w.shape[1] < want:
+            # a checkpoint from before the shooter's map layers (zmap.LAYERS: reach, fire_arc - the last ones): their
+            # input channels zero, the old map features unchanged
+            new = torch.zeros((w.shape[0], want) + tuple(w.shape[2:]), dtype=w.dtype, device=w.device)
+            new[:, :w.shape[1]] = w
+            sd["trunk.map.c1.weight"] = new
+            ck["padded"] = True
+        for name, p in own.items():
+            if name not in sd and name.startswith("width."):
+                # a checkpoint from before the width head: its start (net.init_width: zero weights, 'keep' first)
+                sd[name] = p
+                ck["padded"] = True
         mod.load_state_dict(sd)
     return net, critic, ck
 
@@ -597,7 +632,8 @@ def main(argv=None):
     ap.add_argument("--branch-horizon-s", type=float, default=60.0)
     ap.add_argument("--order-change-cost", type=float, default=reward.Weights.order_change,
                     help="the cost of a real order change of the network (kind, target, a point 10 m or more away, a "
-                         "facing 22.5 deg or more away; divided by the side's network units; the leash's are free), as "
+                         "facing 22.5 deg or more away, another width; divided by the side's network units; the leash's "
+                         "are free), as "
                          "the main training's reward.order_change (0.001)")
     ap.add_argument("--prio-cost", type=float, default=PRIO_COST,
                     help="drill U8 (prio, in the mix too): the cost a second while the main target the order names is "
@@ -674,7 +710,7 @@ def main(argv=None):
     raws = V.raw(st, P.sim["formation"]["spacing_m"])[None]
     v = views(raws, torch.zeros(4, dtype=torch.long, device=dev), torch.arange(4, device=dev),
               torch.zeros(4, dtype=torch.long, device=dev), cards(st, dev), area, cfg)
-    o, cm = Nt.order_vec(4, has_area=True, device=dev), torch.full((4,), 8.0, device=dev)
+    o, cm = Nt.order_vec(4, has_area=True, device=dev), v["cell_m"]
     with torch.no_grad():
         same = all(torch.equal(net.eval()(v, o, cm)[k], net2.eval()(v, o, cm)[k]) for k in Nt.HEADS)
     net.train()

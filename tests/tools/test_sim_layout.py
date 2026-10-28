@@ -32,7 +32,7 @@ class TestLayout:
         assert (orders.HOLD, orders.MOVE, orders.ATTACK, orders.WITHDRAW, orders.KEEP) == (0, 1, 2, 3, 4)
         # ability (the slot to use now, -1 none), a spell's cast target and the facing to stand at came last and are
         # optional: the first five are as before
-        assert list(orders.FIELDS) == ["kind", "x", "z", "target", "run", "ability", "cast_target", "face"]
+        assert list(orders.FIELDS) == ["kind", "x", "z", "target", "run", "ability", "cast_target", "face", "width"]
 
     def test_the_network_reads_the_ability_timers(self):
         assert {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")} <= set(state.INTERNAL)
@@ -63,6 +63,10 @@ class TestCalibration:
         spear = p.static("wh_main_emp_inf_spearmen_0")
         # the default order: men / rank_depth files (20) of the template's spacing across the front (1.48 m)
         assert spear["range"] == 0 and abs(spear["width"] - 20 * 1.48) < 1e-6 and spear["sp_v"] == 1.6
+        # the narrowest line's share of the men by class (formation.reform): infantry 0.04, cavalry 0.10, artillery fixed
+        rf = p.sim["formation"]["reform"]
+        assert spear["wmin_k"] == 0.04 and params.reform_share("cav_mel", rf) == 0.10
+        assert params.reform_share("art_fld", rf) == 0.0
 
     def test_changing_a_calibrated_number_keeps_the_rest(self):
         p = params.load()

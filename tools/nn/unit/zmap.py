@@ -20,6 +20,11 @@ Layers (numbers fixed, new ones go last):
     8 own_sin    their front's sin
     9 self       the frame's own unit's density (its front is up: no direction layers)
    10 area       share of the cell inside my area (a turned rectangle; zeros without one)
+   11 reach      a shooter's range circle round the frame's centre (where it can fire if it turns: the circle the
+                 player sees), the share of the cell within its range (the cell centre's distance, edge smoothed over
+                 one cell); zeros without a missile weapon
+   12 fire_arc   the part of that circle it fires in now without turning: within its fire arc now each side of the
+                 frame's heading (view.fire_arc: standing 45 deg, on the move 90 or 0; the edge smoothed over a cell)
 
 A formation is a turned rectangle (front x depth, its bearing); every cell it covers is painted by the exact share of
 the cell's area inside it (Green's theorem: the integral of x dy over the parts of the rectangle's edges inside the
@@ -34,7 +39,8 @@ import torch
 
 CELLS = 30
 LAYERS = ("field", "off_map", "obstacle", "enemy", "enemy_cos", "enemy_sin", "own", "own_cos", "own_sin", "self",
-          "area")
+          "area", "reach", "fire_arc")
+LAYERS_BEFORE_FIRE = 11      # the layers before the shooter's (checkpoints made before them: train.restore pads them)
 L = {name: i for i, name in enumerate(LAYERS)}
 NONE, ENEMY, OWN, SELF = 0, 1, 2, 3          # a unit's role on the map
 DIRECTION = (L["enemy_cos"], L["enemy_sin"], L["own_cos"], L["own_sin"])
@@ -218,14 +224,32 @@ def _paint(flat, nlayers, mi, rs, rf, a, front, depth, value, layer, cell, cells
         flat.index_add_(0, idx.reshape(-1), (share * value[:, v, None, None]).reshape(-1))
 
 
-def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CELLS, chunk=None):
+def fire_layers(rng, arc, cell_m, cells=CELLS):
+    """([R, C, C], [R, C, C]) the reach and fire_arc layers for ranges rng [R] (m, 0: none) and fire arcs now arc [R]
+    (degrees each side of the heading): by the cell centre's distance d, the share min(1, max(0, (range - d) / cell +
+    1/2)); the arc's by the angle off the heading, smoothed over the cell's angular size at d."""
+    k = torch.arange(cells, device=rng.device, dtype=torch.float32)
+    s, f = cell_centre(k[:, None], k[None, :], cell_m.view(-1, 1, 1), cells)
+    s, f = s.expand(-1, cells, cells), f.expand(-1, cells, cells)
+    d = torch.sqrt(s * s + f * f)
+    cm = cell_m.view(-1, 1, 1)
+    reach = ((rng.view(-1, 1, 1) - d) / cm + 0.5).clamp(0.0, 1.0) * (rng.view(-1, 1, 1) > 0).float()
+    off = torch.atan2(s, f).abs()                                    # radians off the heading (forward: f > 0)
+    span = (cm / d.clamp(min=1e-3)).clamp(max=math.pi)
+    inarc = ((arc.view(-1, 1, 1) * DEG - off) / span + 0.5).clamp(0.0, 1.0)
+    inarc = torch.where(arc.view(-1, 1, 1) >= 180.0, torch.ones_like(inarc), inarc)
+    return reach, reach * inarc
+
+
+def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CELLS, chunk=None, fire=None):
     """[R, len(LAYERS), cells, cells] float maps.
 
     cx, cz, heading (degrees), cell_m: [R] the frames. units: {x, z, b, front, depth, fill, role} [R, K] (role NONE:
     an empty slot). area: {x, z, b, front, depth} [R] my area (a turned rectangle; front across its bearing) and
     optionally on [R] bool, or None. bounds: the square map's half-size (a number or [R]; the map is centred on 0, as
     State.bounds), None: no edge. chunk: maps per pass. A rectangle is painted only on the cells of its bounding
-    box, an empty slot (role NONE) not at all (_paint)."""
+    box, an empty slot (role NONE) not at all (_paint). fire: {range, arc} [R] the frame's unit's missile range (m)
+    and fire arc now (degrees each side) for the reach / fire_arc layers (fire_layers), None: zeros."""
     R = cx.shape[0]
     dev = cx.device
     K = 0 if units is None else units["x"].shape[1]
@@ -236,7 +260,9 @@ def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CEL
         return torch.cat([build(part(cx, i), part(cz, i), part(heading, i), part(cell_m, i),
                                 None if units is None else {k: part(v, i) for k, v in units.items()},
                                 None if area is None else {k: part(v, i) for k, v in area.items()},
-                                part(bounds, i), cells, chunk) for i in range(0, R, chunk)])
+                                part(bounds, i), cells, chunk,
+                                None if fire is None else {k: part(v, i) for k, v in fire.items()})
+                          for i in range(0, R, chunk)])
     out = torch.zeros((R, len(LAYERS), cells, cells), device=dev)
     if bounds is None:
         out[:, L["field"]] = 1.0
@@ -272,4 +298,6 @@ def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CEL
         if "on" in area:
             cov = cov * area["on"].float()[:, None, None]
         out[:, L["area"]] = cov
+    if fire is not None:
+        out[:, L["reach"]], out[:, L["fire_arc"]] = fire_layers(fire["range"], fire["arc"], cell_m, cells)
     return out

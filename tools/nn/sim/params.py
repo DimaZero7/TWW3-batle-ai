@@ -51,6 +51,21 @@ def aim_times(missile, ms):
     return aim_s, rt_s, quiet_s
 
 
+def reform_share(cls, rf):
+    """STATIC wmin_k of a unit of the database's class `cls` (land_units.class) by sim.json formation.reform `rf`: the
+    narrowest formation's files as a share of its men - the cavalry's, monsters' and chariots' (classes starting with
+    large_classes) large_share, the others' share; 0 (the width fixed) for a class starting with fixed_classes
+    (artillery) or with the rule off."""
+    if not rf.get("on"):
+        return 0.0
+    c = str(cls or "")
+    if c.startswith(tuple(rf.get("fixed_classes") or ())):
+        return 0.0
+    if c.startswith(tuple(rf.get("large_classes") or ())):
+        return float(rf["large_share"])
+    return float(rf["share"])
+
+
 def retarget_silence(aim_s, rt_s, quiet_s, ms):
     """Seconds without a shot after an attack order on another target, for a unit that aims at one (battle.py): the
     new order takes the aim back by rt_s (-1: to 0, missile.aim_reset_on_order), the switch of target by rt_s (-1:
@@ -167,6 +182,8 @@ class Params:
             "body_ratio": u.get("radii_ratio", 1.0),
             # the default order: men / rank_depth files (the database's ranks), h apart
             "width": (men / max(1, u.get("rank_depth") or 1)) * h if men > 1 else 2 * u["radius_m"],
+            # the narrowest formation's files as a share of the men by the database's class (formation.reform; 0: fixed)
+            "wmin_k": reform_share(u.get("class"), self.sim["formation"].get("reform") or {}),
             "walk": u["speed"]["walk"], "run": u["speed"]["run"], "charge_speed": u["speed"]["charge"],
             "charge_dist": u["speed"].get("charge_distance", 0.0),
             "charge_pose": u["speed"].get("charge_pose_distance", 0.0),

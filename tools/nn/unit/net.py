@@ -2,7 +2,8 @@
 each copy sees only its own view (tools/nn/unit/view.py). Modules (each its own class, so that the row encoder can be
 frozen and handed to the levels above):
 
-    MapConv     the zone map 11 x 30 x 30: 4 x 3x3 convs (32; the last two stride 2), the mean over the field (32) and
+    MapConv     the zone map 13 x 30 x 30 (zmap.LAYERS; the shooter's two layers last - an older checkpoint's first conv
+                gets zero weights for them, train.restore): 4 x 3x3 convs (32; the last two stride 2), the mean over the field (32) and
                 the 30 x 30 features of the second conv (for the 'where' head)
     RowEncoder  a row: the card (passport, 69) -> 64, the state (ROW, 25) -> 64, merged -> 96
     MemoryGRU   the row's T past snapshots (newest first; run oldest to newest) -> 64, merged with the row -> 96
@@ -10,7 +11,11 @@ frozen and handed to the levels above):
     Core        [me 96, attention 96, map 32, order ORDER, cell size 1] -> 128 -> 128
     heads       where: a cell of the 30 x 30 map (the core added to the high-resolution map features; cells outside the
                 area banned), face: 64 sectors of 5.625 deg (relative to my front), target: a pointer over the enemy rows
-                + 'nobody' (enemies outside the area banned), pace: walk / run (slow bans the run, fast the walk)
+                + 'nobody' (enemies outside the area banned), pace: walk / run (slow bans the run, fast the walk),
+                width: keep the width in force, or one of WIDTHS - 1 steps evenly from the unit's narrowest to its
+                widest (within WIDTH_MAX_M) frontage (decode.py; the simulator re-forms over the game's time,
+                tools/nn/sim/reform.py). Its weights start at zero and its bias at WIDTH_KEEP_BIAS on 'keep': a new
+                or an older network re-forms rarely until it learns when it pays
 
 A ban is a logit of NEG (-1e9): its probability is exactly 0 in fp32 and it is never sampled (-inf would make
 the entropy's gradient NaN). The critic (Critic) is the same trunk
@@ -41,6 +46,9 @@ ORDER_BEFORE_SECTOR = 13   # the fields before the fire sector's (checkpoints ma
 PACE_ANY, PACE_SLOW, PACE_FAST = 0, 1, 2
 WALK, RUN = 0, 1
 NEG = -1e9      # a banned choice: exp(NEG - max) is exactly 0 in fp32 (never drawn); -inf would give NaN gradients
+WIDTHS = 8      # the width head: 0 keep, 1..7 the narrowest .. the widest frontage (decode.width_of)
+WIDTH_KEEP = 0
+WIDTH_KEEP_BIAS = 6.0   # 'keep' at the start: p(another width) = 7 / (e^6 + 7) = 1.7 % a decision
 
 
 class MapConv(nn.Module):
@@ -143,9 +151,12 @@ class UnitNet(nn.Module):
         self.t_key = nn.Linear(D, D)
         self.t_none = nn.Linear(CORE, 1)
         self.pace = nn.Linear(CORE, 2)
+        self.width = nn.Linear(CORE, WIDTHS)
+        init_width(self.width)
 
     def forward(self, v, order, cell_m):
-        """Masked logits: where [R, 900], face [R, 64], target [R, K + 1] (the last: nobody), pace [R, 2]."""
+        """Masked logits: where [R, 900], face [R, 64], target [R, K + 1] (the last: nobody), pace [R, 2], width
+        [R, WIDTHS] (0: keep)."""
         core, r, hi = self.trunk(v, order, cell_m)
         y = F.relu(hi + self.where_core(core)[:, :, None, None])
         where = self.where_b(F.relu(self.where_a(y)))[:, 0].flatten(1)
@@ -159,7 +170,15 @@ class UnitNet(nn.Module):
         fast = order[:, ORDER.index("pace_fast")] > 0
         ban = torch.stack([fast, slow], 1)                                # fast bans the walk, slow the run
         pace = pace.masked_fill(ban, NEG)
-        return {"where": where, "face": self.face(core), "target": target, "pace": pace}
+        return {"where": where, "face": self.face(core), "target": target, "pace": pace, "width": self.width(core)}
+
+
+def init_width(layer):
+    """The width head's start: zero weights, the bias WIDTH_KEEP_BIAS on 'keep' and 0 on the widths."""
+    with torch.no_grad():
+        layer.weight.zero_()
+        layer.bias.zero_()
+        layer.bias[WIDTH_KEEP] = WIDTH_KEEP_BIAS
 
 
 class Critic(nn.Module):
@@ -175,7 +194,7 @@ class Critic(nn.Module):
         return self.value(core)[:, 0]
 
 
-HEADS = ("where", "face", "target", "pace")
+HEADS = ("where", "face", "target", "pace", "width")
 
 
 def sample(logits, greedy=False):
@@ -250,6 +269,7 @@ def report(net):
     out = {"map": weights(t.map), "rows": weights(t.rows), "memory": weights(t.memory), "among": weights(t.among),
            "me": weights(t.me), "core": weights(t.core),
            "where": weights(net.where_core) + weights(net.where_a) + weights(net.where_b), "face": weights(net.face),
-           "target": weights(net.t_query) + weights(net.t_key) + weights(net.t_none), "pace": weights(net.pace)}
+           "target": weights(net.t_query) + weights(net.t_key) + weights(net.t_none), "pace": weights(net.pace),
+           "width": weights(net.width)}
     out["total"] = weights(net)
     return out

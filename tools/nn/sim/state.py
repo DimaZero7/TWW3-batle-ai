@@ -70,7 +70,10 @@ STATIC = {
     "hp0": ("f", "health of the unit at the start"),
     "mass": ("f", "a man's mass"),
     "radius": ("f", "a man's radius, m"),
-    "width": ("f", "frontage ordered at the start, m (files = floor(width / sp_h))"),
+    "width": ("f", "frontage ordered, m (files = floor(width / sp_h)): the deployment's, then re-formed by a width "
+                   "order (Orders.width; tools/nn/sim/reform.py changes it over the re-form's time)"),
+    "wmin_k": ("f", "the narrowest formation's files as a share of the men (formation.reform: 0.04 infantry, 0.10 "
+                    "cavalry, monsters, chariots by the database's class); 0: the width is fixed (artillery)"),
     "sp_h": ("f", "a man's place across the front, m (the formation template's close spacing, the database)"),
     "sp_v": ("f", "a man's place between ranks, m (the same)"),
     "body_ratio": ("f", "a man's body across over its radius (the database's battle_entities radii_ratio of an ellipse "
@@ -305,6 +308,12 @@ INTERNAL = {
                      "turn.face_delay_s on; battle.py)"),
     "fim_s": ("f", "seconds left of the 10 s after a facing order given in melee in which it strikes nobody but its "
                    "order's target (melee_breakoff_total_immunity_secs; battle.py contact.face_breakoff)"),
+    "ow": ("f", "the width order in force (Orders.width as given, m; -1 none): the same number re-given is no new order"),
+    "wnew": ("f", "the width the unit re-forms to (Orders.width snapped to whole files: tools/nn/sim/reform.py), m; "
+                  "-1 none"),
+    "w0": ("f", "the width the re-form started from, m (the width goes from it to wnew evenly over wT)"),
+    "wT": ("f", "the re-form's time, s (reform.ready_s)"),
+    "ws": ("f", "seconds into the re-form"),
     "ab0_on": ("f", "seconds ability 0 stays active"),
     "ab0_cd": ("f", "seconds until ability 0 is ready"),
     "ab1_on": ("f", "seconds ability 1 stays active"),
@@ -484,6 +493,8 @@ def empty(B, N, device="cpu", history=0):
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
     u["oface"].fill_(-1)
+    u["wnew"].fill_(-1)
+    u["ow"].fill_(-1)
     u["aim_tgt"].fill_(-1)
     u["fxt0"].fill_(-1)
     u["fxt1"].fill_(-1)

@@ -18,6 +18,10 @@ Each decision step every unit of the batch gets one order, as six tensors [B, N]
                     for bit). The simulator snaps it to the middle of one of the game's 64 sectors (snap_face) and
                     turns a standing unit to it as the game does on goto_location_angle_width (battle.py: the
                     formation re-forms, turn.face_delay_s, then turns); ignored under ATTACK and in melee.
+    width    float  HOLD / MOVE / WITHDRAW: the frontage to re-form to, m, < 0 none (the default: the width in force
+                    stays - the old behaviour bit for bit). The simulator snaps it to whole files within the unit's
+                    limits and re-forms over the game's time (tools/nn/sim/reform.py; in melee it opens the melee
+                    exit's window as a facing does); ignored under ATTACK, by a lone man and by a fixed-width unit.
 
     HOLD      stay; shoot at will at enemies in range; fight back when attacked.
     MOVE      go to (x, z) and stop there; missile units do not shoot on the move. A unit in
@@ -63,6 +67,7 @@ FIELDS = {
     "ability": ("i", "ability slot to use now, -1 none (SPELL_AT + k: spell k)"),
     "cast_target": ("i", "a spell's target slot, -1 none"),
     "face": ("f", "the facing to stand at, degrees 0..360, < 0 none (snapped to the game's 64 sectors)"),
+    "width": ("f", "the frontage to re-form to, m, < 0 none (snapped to whole files within the unit's limits)"),
 }
 # The game keeps a unit's facing in 64 sectors of 5.625 deg and stands at the sector's middle (measured 28.09.2026:
 # src/apps/orders/facing.lua engine / command).
@@ -80,6 +85,7 @@ class Orders:
     ability: "torch.Tensor" = None
     cast_target: "torch.Tensor" = None
     face: "torch.Tensor" = None
+    width: "torch.Tensor" = None
 
     def __post_init__(self):
         if self.ability is None:
@@ -88,6 +94,8 @@ class Orders:
             self.cast_target = torch.full_like(self.kind, -1)
         if self.face is None:
             self.face = torch.full_like(self.x, -1.0)
+        if self.width is None:
+            self.width = torch.full_like(self.x, -1.0)
 
     def spell(self):
         """[B, N] the spell slot ordered (0..SPELLS-1), -1 none."""
@@ -109,7 +117,8 @@ def hold(B, N, device="cpu"):
                   run=torch.zeros((B, N), dtype=torch.bool, device=device),
                   ability=torch.full((B, N), -1, dtype=torch.int64, device=device),
                   cast_target=torch.full((B, N), -1, dtype=torch.int64, device=device),
-                  face=torch.full((B, N), -1.0, device=device))
+                  face=torch.full((B, N), -1.0, device=device),
+                  width=torch.full((B, N), -1.0, device=device))
 
 
 def snap_face(face):
@@ -144,3 +153,5 @@ def check(orders, N):
         raise ValueError("order cast target out of range")
     if not torch.isfinite(orders.face).all() or (orders.face >= 360).any():
         raise ValueError("order facing not finite or >= 360 (degrees 0..360, < 0 none)")
+    if not torch.isfinite(orders.width).all():
+        raise ValueError("order width not finite (m, < 0 none)")

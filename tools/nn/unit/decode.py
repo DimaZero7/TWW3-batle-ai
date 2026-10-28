@@ -2,7 +2,9 @@
 user's decision on the pursuit: not a penalty, a hard ban in the decoder).
 
 to_orders: a target chosen -> ATTACK it (run by the pace); else the cell chosen: the cell I stand in -> HOLD, another
--> MOVE to its centre; both with the facing chosen (64 sectors from my front: tools/nn/sim/orders.py Orders.face).
+-> MOVE to its centre; both with the facing chosen (64 sectors from my front: tools/nn/sim/orders.py Orders.face) and
+the width chosen (width_of: 'keep' -> none, else a step between the unit's narrowest and widest frontage; Orders.width,
+the simulator re-forms: tools/nn/sim/reform.py). An attack carries neither.
 The bans (cells and targets outside the area, the pace) are in the network's logits (net.py); the decoder never
 widens them.
 
@@ -23,10 +25,30 @@ from tools.nn.unit import zmap as Z
 EDGE_M = 10.0      # m: a target this far beyond the edge still is 'at the edge': the attack goes on
 INSET_M = 2.0      # m: the leash's stand inside the edge; a unit closer to the edge than this is 'about to leave'
 LOOK_S = 1.0       # s: 'about to leave' looks this far ahead at the unit's speed
+WIDTH_MAX_M = 80.0     # m: the widest choice (the game's 80 m orders gave 77-79 m for all 13 roster units; wider unread)
 
 
-def to_orders(act, v, now, cell_m, B, N, face_sectors=64, cells=Z.CELLS):
-    """Orders [B, N] for the viewers v["bi"], v["ii"] (the rest: KEEP) from the sampled act (net.sample)."""
+def width_limits(st, params):
+    """(narrowest, widest) [B, N] m of each unit's choices: the simulator's limits for its men at the start (reform.limits;
+    the widest within WIDTH_MAX_M) - the same numbers all the skirmish, so a choice kept is the same order (the simulator
+    clamps to the men left)."""
+    from tools.nn.sim import reform
+    rf = params.sim["formation"].get("reform") or {}
+    lo, hi = reform.limits(st.u, rf, params.sim["formation"]["spacing_m"], men=st.u["men0"])
+    return lo, torch.maximum(torch.minimum(hi, torch.full_like(hi, WIDTH_MAX_M)), lo)
+
+
+def width_of(k, lo, hi, widths=None):
+    """[R] the ordered width (m) of the width head's choice k [R] (0 keep -> -1; 1..W-1 evenly from lo to hi [R])."""
+    from tools.nn.unit import net as Nt
+    W = widths or Nt.WIDTHS
+    frac = (k.float() - 1) / max(W - 2, 1)
+    return torch.where(k == Nt.WIDTH_KEEP, torch.full_like(lo, -1.0), lo + frac.clamp(0, 1) * (hi - lo))
+
+
+def to_orders(act, v, now, cell_m, B, N, face_sectors=64, cells=Z.CELLS, wlim=None):
+    """Orders [B, N] for the viewers v["bi"], v["ii"] (the rest: KEEP) from the sampled act (net.sample). wlim:
+    width_limits [B, N] (None or no act["width"]: no width order)."""
     dev = now.device
     bi, ii = v["bi"], v["ii"]
     R = bi.shape[0]
@@ -52,6 +74,9 @@ def to_orders(act, v, now, cell_m, B, N, face_sectors=64, cells=Z.CELLS):
     o.z[bi, ii] = torch.where(kind == O.MOVE, z, me[:, V.I["z"]])
     o.run[bi, ii] = act["pace"] == 1
     o.face[bi, ii] = torch.where(attack, torch.full_like(face, -1.0), face)
+    if wlim is not None and "width" in act:
+        w = width_of(act["width"], wlim[0][bi, ii], wlim[1][bi, ii])
+        o.width[bi, ii] = torch.where(attack, torch.full_like(w, -1.0), w)
     return o
 
 

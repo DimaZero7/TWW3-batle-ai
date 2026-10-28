@@ -30,8 +30,9 @@ K = 16                 # rows: the unit itself + up to 15 others
 T = 10                 # memory snapshots, one a second
 REACH_S = 15.0         # s: the zone's time (the order's span) - a parameter
 TOWARD_DEG = 30.0      # the area beyond the map: the edge cells within this of the way to it are allowed
+RANGE_CELLS = 14.0     # a shooter's map: cell = its range / this (its range circle fits the 30 x 30 map: 15 cells a side)
 RAW = ("x", "z", "b", "vx", "vz", "front", "depth", "fill", "men", "hp", "mp", "ms", "r", "s", "w", "m", "mv", "f",
-       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash")
+       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash", "arc")
 I = {k: i for i, k in enumerate(RAW)}
 ROW = ("right", "forward", "front_cos", "front_sin", "v_right", "v_forward", "front", "depth", "men", "hp", "mp",
        "ms", "r", "s", "w", "m", "mv", "f", "fire", "fat", "ammo", "self", "own", "enemy", "my_target", "leashed")
@@ -39,12 +40,34 @@ DEG = torch.pi / 180
 SELF, OWN, ENEMY = 0, 1, 2
 
 
-def raw(st, spacing, melee_depth=0.0, leash=None):
+def fire_arc(u, missile):
+    """[B, N] the half-angle (degrees) a unit fires in now without turning (the 'fire arc now' map layer): a standing
+    shooter missile.stand_fire_arc_deg (the simulator turns it to a target beyond), one on the move that fires on the
+    move (fire_move) missile.move_fire_arc_deg or its own fire arc if wider (move_fire_own_arc), 0 on the move otherwise
+    and without a missile weapon (config/nn/sim.json missile; battle.py)."""
+    stand = torch.full_like(u["x"], float(missile.get("stand_fire_arc_deg", 180.0)))
+    move = torch.full_like(u["x"], float(missile.get("move_fire_arc_deg", 180.0)))
+    if missile.get("move_fire_own_arc"):
+        move = torch.maximum(move, u["arc"])
+    moving = torch.where(u["fire_move"], move, torch.zeros_like(move))
+    return torch.where(u["range"] > 0, torch.where(u["mv"], moving, stand), torch.zeros_like(stand))
+
+
+def cell_size(me, base=8.0):
+    """[R] the map's cell of each viewer (m) from its raw row me [R, RAW]: base (infantry 8 m), a shooter its range /
+    RANGE_CELLS if larger - its range circle on its map (the user's decision 28.10)."""
+    return torch.maximum(torch.full_like(me[:, I["range"]], float(base)), me[:, I["range"]] / RANGE_CELLS)
+
+
+def raw(st, spacing, melee_depth=0.0, leash=None, missile=None):
     """[B, N, len(RAW)] the slots' raw state now (world frame; tools/nn/sim/state.py names). alive: present, men left,
     not gone; vis: visible to the other side; fill: the share of the formation's places filled (zmap.rects_of);
     leash [B, N] bool: the unit's order is now replaced by the leash (tools/nn/unit/decode.py; only its own row shows
-    it)."""
+    it); arc: the half-angle it fires in now (fire_arc; missile: config/nn/sim.json missile, None: the loaded one)."""
     u = st.u
+    if missile is None:
+        from tools.nn.sim.params import load
+        missile = load().sim["missile"]
     r = Z.rects_of(u, spacing, melee_depth)
     men0 = u["men0"].clamp(min=1)
     ammo = torch.where(u["ammo0"] > 0, u["a"] / u["ammo0"].clamp(min=1), torch.zeros_like(u["a"]))
@@ -53,7 +76,8 @@ def raw(st, spacing, melee_depth=0.0, leash=None):
             "depth": r["depth"], "fill": r["fill"], "men": u["men"] / men0, "hp": u["hp"], "mp": u["mp"], "ms": u["ms"],
             "r": u["r"], "s": u["s"], "w": u["w"], "m": u["m"], "mv": u["mv"], "f": u["f"], "fire": u["fire"],
             "fat": u["fat"], "ammo": ammo, "alive": alive, "vis": u["vis"], "side": u["side"], "range": u["range"],
-            "run": u["run"], "leash": leash if leash is not None else torch.zeros_like(alive)}
+            "run": u["run"], "leash": leash if leash is not None else torch.zeros_like(alive),
+            "arc": fire_arc(u, missile)}
     return torch.stack([cols[k].float() for k in RAW], -1)
 
 
@@ -163,7 +187,9 @@ def build(now, hist, card, who, order_target=None, area=None, cell_m=8.0, bounds
              "depth": J[..., I["depth"]], "fill": J[..., I["fill"]] * mask, "role": role}
     cm = torch.full((R,), float(cell_m), device=dev) if not torch.is_tensor(cell_m) else cell_m
     ar = None if area is None else {k: v[bi, ii] for k, v in area.items()}
-    zm = Z.build(me[:, I["x"]], me[:, I["z"]], me[:, I["b"]], cm, units, area=ar, bounds=bounds)
+    # the shooter's range circle and its fire arc now (the user's decision 28.10: layers of the map)
+    fire = {"range": me[:, I["range"]], "arc": me[:, I["arc"]]}
+    zm = Z.build(me[:, I["x"]], me[:, I["z"]], me[:, I["b"]], cm, units, area=ar, bounds=bounds, fire=fire)
     cells_ok, target_ok = allowed(me, J, mask & (whose == ENEMY), ar, cm, bounds)
     return {"rows": rows_, "card": cards, "mask": mask, "slot": torch.where(mask, slot, torch.full_like(slot, -1)),
             "whose": whose, "mem": mem, "mem_mask": was, "map": zm, "cells_ok": cells_ok, "target_ok": target_ok,
@@ -207,9 +233,10 @@ def allowed(me, J, enemy_rows, ar, cell_m, bounds, cells=Z.CELLS):
             t_ok = t_ok & torch.where(shooter[:, None], in_fire, in_area)
         else:
             t_ok = t_ok & in_area
-        # no cell of the area on the map (U2: the area far away): the cells of the map's edge ring within TOWARD_DEG
-        # of the way to the area's centre - the unit walks towards it and still chooses how; none of those either: the
-        # cell nearest the area's centre
+        # no cell centre in the area: an area far away (U2) - the cells of the map's edge ring within TOWARD_DEG of the
+        # way to the area's centre (the unit walks towards it and still chooses how; none of those either: the cell
+        # nearest the area's centre); an area on the map smaller than a cell (a shooter's position on its coarse map,
+        # cell = range / RANGE_CELLS) - the cell its centre lies in
         none = ~ok.flatten(1).any(1)
         if bool(none.any()):
             ring = torch.zeros((cells, cells), dtype=torch.bool, device=dev)
@@ -225,6 +252,8 @@ def allowed(me, J, enemy_rows, ar, cell_m, bounds, cells=Z.CELLS):
             one = torch.zeros_like(ok).flatten(1)
             one[torch.arange(R, device=dev), best] = True
             one = one.view(R, cells, cells)
-            pick = torch.where(toward.flatten(1).any(1).view(R, 1, 1), toward, one)
+            half = cells / 2 * cell_m
+            on_map = ((sa.abs() < half) & (fa.abs() < half)).view(R, 1, 1)
+            pick = torch.where(on_map | ~toward.flatten(1).any(1).view(R, 1, 1), one, toward)
             ok = torch.where(none.view(R, 1, 1), pick, ok)
     return ok, t_ok

@@ -11,7 +11,7 @@ import math
 import torch
 
 from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
-from tools.nn.sim import skirmish, stealth
+from tools.nn.sim import reform, skirmish, stealth
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -130,6 +130,15 @@ def step(st, orders, params=None, dt=None):
         face_new = take & (face >= 0) & (face != u["oface"]) & (kind != O.ATTACK)
         u["oface_s"] = torch.where(face != u["oface"], torch.zeros_like(u["oface_s"]), u["oface_s"])
         u["oface"] = face
+    rf = cal["formation"].get("reform") or {}
+    if rf.get("on") and "wnew" in u:
+        # A new width (Orders.width; reform.py; config/nn/sim.json formation.reform): a width order given now starts the
+        # re-form from the width in force over the game's time; the box changes evenly over it, a held unit keeps its
+        # front rank in place. In melee it is the facing's move order: it opens the melee exit's window below
+        # (contact.face_breakoff), the unit stays in contact.
+        width_new = reform.order(u, orders.width, take, kind, run, point, rf, spacing)
+        face_new = face_new | width_new
+        reform.advance(u, dt, spacing, standing & (kind == O.HOLD) & ~u["mv"], mdepth)
     if "order_s" in u:
         # the order's clock (contact.fresh_incidental, melee.py): a new order given in melee starts it at 0, out of
         # melee at the window (an order given before the fight is not a fresh order in melee)
