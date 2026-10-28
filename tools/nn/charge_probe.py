@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -967,6 +967,15 @@ def battles(plan):
         out.append([lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=8, max_s=25,
                          entity_fields=names, entity_at_s=3, kind="fields"),
                     lane("spear", "slave", "attack_walk", "both", gap_m=3, fight_s=8, max_s=25, kind="pair")])
+    elif plan == "ranks":
+        # do a unit's own ranks block the direct fire of the ranks behind (build/diag_g49/ranks)? handgunners (direct),
+        # archers and crossbowmen, each 2 ranks wide and 8 ranks deep (90 men: 45 / 12 files), shooting held clanrats
+        # 100 m off (front to front) for 60 s
+        def rk(u, w, kind):
+            return lane(u, "clanrat", "shoot", "hold", gap_m=100, fight_s=60, max_s=60, answer=False, a_w=w, lane_dx=190, men_all_s=4,
+                        kind=kind)
+        out.append([rk("hgun", 63, "hgun_r2"), rk("hgun", 17, "hgun_r8"), rk("archer", 90, "archer_r2"),
+                    rk("archer", 24, "archer_r8"), rk("xbow", 63, "xbow_r2"), rk("xbow", 17, "xbow_r8")])
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
