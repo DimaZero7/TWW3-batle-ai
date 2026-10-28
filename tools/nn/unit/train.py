@@ -307,6 +307,18 @@ def width_setup(cfg, P, device, gen=None, sp=None):
     return {"st": st, "own": own, "area": area, "ender": DM.Ender(st.B, device, DW.LIMIT_S), "specs": sp}
 
 
+def shootw_setup(cfg, P, device, gen=None, sp=None):
+    """Drill U5c (drill_shootw.py): the shooter's width - into a gap between our infantry, at a slant, or in the open;
+    1-2 enemies (infantry coming, shooters standing)."""
+    from tools.nn.unit import drill_multi as DM
+    from tools.nn.unit import drill_shootw as DW5
+    sp = sp if sp is not None else DW5.specs(cfg["battles"], gen or torch.Generator())
+    st, own, area, goal = DW5.build(sp, P, device)
+    stand = DW5.shooter_slots(sp, st)
+    return {"st": st, "own": own, "area": area, "ender": DM.Ender(st.B, device, DW5.LIMIT_S), "specs": sp,
+            "script": lambda s_: DW5.script(s_, goal, stand)}
+
+
 def _on_map(fn):
     """A drill's setup laid on the active real map (realmap.apply: each skirmish at a random place and turn of it, its
     own coordinates kept; the exams' fixed places); as it is without --map."""
@@ -319,13 +331,13 @@ def _on_map(fn):
 
 smoke_setup, hold_setup, go_setup, multi_setup, pair_setup = (_on_map(f) for f in (
     smoke_setup, hold_setup, go_setup, multi_setup, pair_setup))
-shoot_setup, withdraw_setup, shoot2_setup, rout_setup, prio_setup, width_setup = (_on_map(f) for f in (
-    shoot_setup, withdraw_setup, shoot2_setup, rout_setup, prio_setup, width_setup))
+shoot_setup, withdraw_setup, shoot2_setup, rout_setup, prio_setup, width_setup, shootw_setup = (
+    _on_map(f) for f in (shoot_setup, withdraw_setup, shoot2_setup, rout_setup, prio_setup, width_setup, shootw_setup))
 
 SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup, "multi": multi_setup, "hold2": pair_setup,
           "shoot1": shoot_setup, "withdraw": withdraw_setup, "shoot2": shoot2_setup, "rout": rout_setup,
-          "prio": prio_setup, "width": width_setup}
-MIX = ("hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2", "rout", "prio", "width")   # --drill mix: one a batch, in turn
+          "prio": prio_setup, "width": width_setup, "shootw": shootw_setup}
+MIX = ("hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2", "rout", "prio", "width", "shootw")   # --drill mix: one a batch, in turn
 # per second the named main target is allowed and the network's target is not it (drill U8). The reference network
 # (u7/run2) disobeys ~32 of ~83 allowed seconds a skirmish: 0.02 costs it ~0.6 against the reward's |sum| ~0.9 a
 # skirmish (the advantages' spread 0.17 a decision); on the CPU, 6 updates of 128 skirmishes from it: 0.005 moved the
@@ -692,7 +704,7 @@ def restore(path, device="cpu"):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--drill", default="smoke", choices=sorted(SETUPS) + ["mix"],
-                    help="mix: U1-U9 (hold / go / multi / hold2 / shoot1 / withdraw / shoot2 / rout / prio / width) in turn, one drill a batch - equal shares of the "
+                    help="mix: U1-U9 (hold / go / multi / hold2 / shoot1 / withdraw / shoot2 / rout / prio / width / shootw) in turn, one drill a batch - equal shares of the "
                          "skirmishes; a batch of mixed drills would wait for its longest skirmish (go's up to 700 s)")
     ap.add_argument("--battles", type=int, default=256)
     ap.add_argument("--seconds", type=float, default=None, help="decisions a batch at most (smoke 120, hold 180)")
@@ -743,7 +755,7 @@ def main(argv=None):
         return {"battles": a.battles,
                 "seconds": a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0, "hold2": 180.0,
                                          "shoot1": 180.0, "withdraw": 400.0, "shoot2": 180.0,
-                                         "rout": 125.0, "prio": 180.0, "width": 180.0}.get(drill, 120.0),
+                                         "rout": 125.0, "prio": 180.0, "width": 180.0, "shootw": 180.0}.get(drill, 120.0),
                 "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0, "bounds": None, "gamma": 0.9994,
                 "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": drill, "area_reward": area,
                 "order_change": a.order_change_cost, "prio_cost": a.prio_cost}
@@ -806,10 +818,10 @@ def main(argv=None):
     (out / "log.json").write_text(json.dumps(log, indent=1), encoding="utf-8")
     if a.exam:
         from tools.nn.unit import (exam_go, exam_hold, exam_multi, exam_pair, exam_prio, exam_rout, exam_shoot,
-                                   exam_shoot2, exam_width, exam_withdraw)
+                                   exam_shoot2, exam_shootw, exam_width, exam_withdraw)
         exams = {"hold": exam_hold, "go": exam_go, "multi": exam_multi, "hold2": exam_pair, "shoot1": exam_shoot,
                  "withdraw": exam_withdraw, "shoot2": exam_shoot2, "rout": exam_rout, "prio": exam_prio,
-                 "width": exam_width}
+                 "width": exam_width, "shootw": exam_shootw}
         assert set(MIX) <= set(exams), "every drill of the mix has its exam"
         if a.map:
             realmap.activate(a.map, exam=True)          # (the exams' fixed places)
