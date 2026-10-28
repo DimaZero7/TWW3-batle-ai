@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -641,6 +641,20 @@ DEFENDER = ("attack_same", "halt", "attack_t2", "move_near")
 DEFENDER_LANE_DX = 320  # (its second target stands 180 m aside, inward: 140 m from the next lane; |x| <= 480 as in
 #                         the other probes)
 VV = "wh2_main_character_abilities_verminous_valour"
+# the terrain plan (build/diag_g49/terrain): Kislev plains (rolling ground, 190-270 m), its sites found on the 1 m height
+# grid of research/evidence/map-data/kislev-scales-evidence (build/diag_g49/terrain/probe/find*.py). Shuttles (x0, z0,
+# bearing uphill, leg m, mean slope): a spearmen unit at a run between the foot and the top; shooting (shooter x, z, the
+# target x, z, the shooter's height above it m); melee (x0, z0, bearing uphill, mean slope over 25 m)
+TERRAIN = {
+    "map": "terrain\\battles\\wh3_main_macro_ksl_plains_01\\", "catchment": "catchment_04",
+    "shuttle": {"flat": (210, -80, 45, 50, -0.011), "g07": (370, 80, 285, 40, 0.070), "g15": (270, -350, 330, 50, 0.16),
+                "g25": (-410, -40, 195, 50, 0.243)},
+    "shoot": {"above": (-280, -90, -230, -3, 27.0), "below": (174, -377, 200, -280, -25.7), "level": (-90, -100, -90, 0, 1.5),
+              "range": (200, 100, 80, 31, 38.9)},
+    "melee": [(130, -290, 45, 0.448), (120, 100, 75, 0.425), (-280, -30, 210, 0.415), (-220, 230, 315, 0.417),
+              (-400, -210, 240, 0.418), (10, 0, 270, 0.383)],
+    "park_z": 470.0,
+}
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
 
@@ -811,6 +825,42 @@ def battles(plan):
         free = [fw(80, False), fw(10, False), fw(80, True), fw(10, True)]
         places = [(190.0 * (i - 2.5), -200.0) for i in range(6)] + [(190.0 * (i - 1.5), 50.0) for i in range(4)]
         out.append([dict(l, place=pl) for l, pl in zip(melee + free, places)])
+    elif plan == "terrain":
+        g = TERRAIN
+
+        def along(x0, z0, b, d):
+            return x0 + d * math.sin(math.radians(b)), z0 + d * math.cos(math.radians(b))
+        # battle 1: shuttles (fatigue, speed up / down) and shooting from above / below / level, and the range from above
+        b1, k = [], 0
+        for kind, (x0, z0, b, leg, slope) in g["shuttle"].items():
+            x1, z1 = along(x0, z0, b, leg)
+            b1.append(lane("spear", "clanrat", "shuttle", "hold", gap_m=250, fight_s=170, max_s=170, answer=False,
+                           kind=f"shuttle_{kind}", slope=slope, map=g["map"], catchment=g["catchment"],
+                           a_at={"x": float(x0), "z": float(z0), "b": float(b)}, p2={"x": round(x1, 1), "z": round(z1, 1)},
+                           t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(float(x0), float(z0))))
+            k += 1
+        for kind, (sx, sz, tx, tz, dh) in g["shoot"].items():
+            b = math.degrees(math.atan2(tx - sx, tz - sz)) % 360
+            b1.append(lane("archer", "clanrat", "shoot", "hold", gap_m=round(math.hypot(tx - sx, tz - sz)), fight_s=75,
+                           max_s=75, answer=False, kind=f"shoot_{kind}", dh=dh, map=g["map"], catchment=g["catchment"],
+                           a_at={"x": float(sx), "z": float(sz), "b": round(b, 1)},
+                           t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)}, place=(float(sx), float(sz))))
+        # battle 2: swordsmen <-> clanrats on a slope (~0.4), both attacking from 3 m; the Empire unit above (even sites)
+        # or below (odd); the contact line halfway up the 25 m
+        b2 = []
+        da, dt = depth(UNITS["swords"][0], UNITS["swords"][1]), depth(UNITS["clanrat"][0], UNITS["clanrat"][1])
+        for i, (x0, z0, b, slope) in enumerate(g["melee"]):
+            up = i % 2 == 0
+            d_up, d_dn = 12.5 + 1.5 + (da if up else dt) / 2, 12.5 - 1.5 - (dt if up else da) / 2
+            ux, uz = along(x0, z0, b, d_up)
+            lx, lz = along(x0, z0, b, d_dn)
+            hi = {"x": round(ux, 1), "z": round(uz, 1), "b": float((b + 180) % 360)}
+            lo = {"x": round(lx, 1), "z": round(lz, 1), "b": float(b)}
+            b2.append(lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=60, max_s=75,
+                           kind=f"melee_{'emp_up' if up else 'emp_down'}_{i + 1}", slope=slope, map=g["map"],
+                           catchment=g["catchment"], a_at=hi if up else lo, t_at=lo if up else hi,
+                           place=(float(x0), float(z0))))
+        out += [b1, b2]
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1281,6 +1331,12 @@ def layout(specs):
             for f, lord in LORDS.items() if lord not in used_lords]
     arena = {k: v for k, v in base.items() if k not in ("faction", "units", "description")}
     arena.update(name="charge_probe", gap_m=400, defend_radius_m=150, sides=armies)
+    maps = {s["map"] for s in specs if s.get("map")}
+    if maps:                                 # (the terrain plan) another map; the lords parked inside its 1 km square
+        assert len(maps) == 1, maps
+        arena.update(map=maps.pop(), catchment=next(s["catchment"] for s in specs if s.get("catchment")))
+        for p in park:
+            p.update(x=-480.0 if p["x"] < 0 else 480.0, z=-480.0)
     return lanes, park, arena
 
 
@@ -1311,6 +1367,13 @@ def run_config(plan, index):
         config.update(tick_ms=SWING_MS, men_ms=500)
     if plan == "fatrun":
         config.update(men_after_s=0, men_near_m=0)
+    if plan == "terrain":
+        # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
+        config.update(men_ms=500, men_after_s=75, men_near_m=60)
+        if index == 1:
+            config["heights"] = {"half": 256, "step": 2.0, "lines": [
+                {"x": 100.0, "z": 100.3, "dx": 0.25, "n": 81}, {"x": 100.3, "z": 100.0, "dz": 0.25, "n": 81},
+                {"x": -200.0, "z": -199.7, "dx": 0.25, "n": 81}, {"x": -199.7, "z": -200.0, "dz": 0.25, "n": 81}]}
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         config.update(magic_probe.config_extra(index))

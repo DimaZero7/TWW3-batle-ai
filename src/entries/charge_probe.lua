@@ -133,7 +133,7 @@ local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_me
 local WINDS_TIMER = 'tww3_bai_charge_probe_winds'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true,
-    cast = true, laps = true}
+    cast = true, laps = true, shuttle = true}
 -- A unit's CCO fields tried for its fatigue as a number (the fatrun plan; none is documented: the ones that answer are
 -- logged once, probe_fat_cco, and carried in the laps lanes' rows as fc).
 M.FAT_CCO = {'Fatigue', 'FatigueValue', 'FatiguePercent', 'FatigueLevel', 'FatigueState', 'Vigour', 'VigourPercent',
@@ -168,6 +168,10 @@ end
 -- front line is at z = lane.z; the target faces +z (bearing 0; 'rear': 180), the attacker stands
 -- gap_m beyond that front (a_dx m to the side, +x), facing back. Depths are the blocks' (0 for a lone man). Pure.
 function M.layout(lane)
+    if lane.a_at and lane.t_at then
+        -- (the terrain plan) both units' places given in world coordinates
+        return {ax = lane.a_at.x, az = lane.a_at.z, ab = lane.a_at.b, tx = lane.t_at.x, tz = lane.t_at.z, tb = lane.t_at.b}
+    end
     local td, ad = lane.t_depth or 0, lane.a_depth or 0
     local tb = lane.target_mode == 'rear' and 180 or 0
     if lane.a_side == 90 then
@@ -226,6 +230,12 @@ end
 function M.lap_point(x, z, bearing, k, r)
     local a = math.rad((bearing or 0) + 45 * ((k - 1) % 8))
     return x + r * math.sin(a), z + r * math.cos(a)
+end
+
+-- The terrain plan's shuttle: odd legs to lane.p2, even legs back to the attacker's place. Pure. Returns x, z.
+function M.shuttle_end(L, lane, leg)
+    if leg % 2 == 1 then return lane.p2.x, lane.p2.z end
+    return L.ax, L.az
 end
 
 -- The tire shuttle's point for a unit placed at (x, z) facing bearing: odd legs tire_leg_m straight back, even legs
@@ -346,6 +356,7 @@ function M.main(bm, config, globals)
         return {men = read(function() return u:number_of_men_alive() end),
             hp = round(read(cco, u, 'HealthValue'), 0), hpu = round(read(function() return u:unary_hitpoints() end), 4),
             m = read(function() return u:is_in_melee() end), x = p and round(p:get_x()), z = p and round(p:get_z()),
+            y = p and round(p:get_y(), 2),
             b = round(read(function() return u:bearing() end), 0),
             ow = round(read(function() return u:ordered_width() end), 1),
             mv = read(function() return u:is_moving() end), fast = read(function() return u:is_moving_fast() end),
@@ -652,6 +663,22 @@ function M.main(bm, config, globals)
                         end
                     end
                 end
+                if lane.mode == 'shuttle' then
+                    -- (the terrain plan) at a run between its place and lane.p2 {x, z} until the lane ends: the next leg
+                    -- once within 6 m of its point, or once stopped 4 s into the leg
+                    local L = lane.layout
+                    local p = read(function() return lane.a.unit:position() end)
+                    local tx, tz = M.shuttle_end(L, lane, lane.leg)
+                    local off = p and math.sqrt((p:get_x() - tx) ^ 2 + (p:get_z() - tz) ^ 2) or math.huge
+                    local moving = read(function() return lane.a.unit:is_moving() end)
+                    if off <= 6 or (not moving and now - lane.leg_ms >= 4000) then
+                        lane.leg, lane.leg_ms = lane.leg + 1, now
+                        tx, tz = M.shuttle_end(L, lane, lane.leg)
+                        orders.move(lane.a.uc, vec(tx, tz), lane.shuttle_walk ~= true)
+                        emit('probe_phase', {lane = lane.name, phase = 'leg', n = lane.leg, t = now - lane.t0,
+                            off = round(off, 1)})
+                    end
+                end
                 if lane.mode == 'laps' then
                     local L = lane.layout
                     local p = read(function() return lane.a.unit:position() end)
@@ -953,6 +980,10 @@ function M.main(bm, config, globals)
                 orders.move(lane.a.uc, vec(L.ax, lane.z - (lane.pass_beyond_m or 100)), lane.pass_walk ~= true)
             elseif m == 'attack_t2' then
                 attack(lane, lane.a, lane.t2, false)
+            elseif m == 'shuttle' then
+                lane.leg, lane.leg_ms = 1, lane.t0
+                local x, z = M.shuttle_end(lane.layout, lane, 1)
+                orders.move(lane.a.uc, vec(x, z), lane.shuttle_walk ~= true)
             elseif m == 'laps' then
                 lane.phase, lane.wp, lane.wp_ms = 'laps', 1, lane.t0
                 local L = lane.layout
@@ -1087,6 +1118,34 @@ function M.main(bm, config, globals)
                 lane.fat_found = found
                 emit('probe_fat_cco', {lane = lane.name, values = values})
             end
+        end
+        if config.heights then
+            -- (the terrain plan) the bridge's height grid: the time of a full grid of get_terrain_height calls (step m over
+            -- the square half m), and fine lines (0.25 m steps) to find the engine's own grid (its kinks)
+            local hc = config.heights
+            local n, t0c, sum = 0, os.clock(), 0
+            local x = -hc.half
+            while x <= hc.half do
+                local z = -hc.half
+                while z <= hc.half do
+                    sum = sum + (bm:get_terrain_height(x, z) or 0)
+                    n = n + 1
+                    z = z + hc.step
+                end
+                x = x + hc.step
+            end
+            local el = os.clock() - t0c
+            local lines = {}
+            for _, ln in ipairs(hc.lines or {}) do
+                local vals = {}
+                for k = 0, ln.n - 1 do
+                    local px, pz = ln.x + k * (ln.dx or 0), ln.z + k * (ln.dz or 0)
+                    vals[#vals + 1] = round(bm:get_terrain_height(px, pz), 4)
+                end
+                lines[#lines + 1] = {x = ln.x, z = ln.z, dx = ln.dx, dz = ln.dz, h = vals}
+            end
+            emit('probe_heights', {n = n, s = round(el, 3), step = hc.step, half = hc.half, mean = round(sum / math.max(1, n), 2),
+                lines = lines})
         end
         emit('start', {speed = config.speed, lanes = config.lanes})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()

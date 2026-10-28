@@ -69,7 +69,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
             # (ratlord: one General a battle - the army has one)
-            assert (1 if plan == "ratlord" else 2) <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "walkpass2": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6, "busycharge": 6, "ratcover": 7, "ratlone": 8, "ratform": 7, "ratshape": 6, "hitchance": 6, "brace": 6, "meleeturn": 6, "meleeturn2": 12, "meleewidth": 10}.get(plan, 5)
+            assert (1 if plan == "ratlord" else 2) <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "walkpass2": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6, "busycharge": 6, "ratcover": 7, "ratlone": 8, "ratform": 7, "ratshape": 6, "hitchance": 6, "brace": 6, "meleeturn": 6, "meleeturn2": 12, "meleewidth": 10, "terrain": 8}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -82,7 +82,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"} - used
             places = [(l["x"], l["z"]) for l in config["lanes"]]
             # (skirmish2: 150 m - its 12 lanes and the long lanes' runway; the mode starts within ~40 m)
-            apart = 150 if plan in ("skirmish2", "walkpass", "walkpass2", "meleeturn", "meleeturn2", "meleewidth") else 200
+            apart = 0 if plan == "terrain" else 150 if plan in ("skirmish2", "walkpass", "walkpass2", "meleeturn", "meleeturn2", "meleewidth") else 200
             assert all(math.dist(p, q) >= apart for k, p in enumerate(places) for q in places[k + 1:])
 
 
