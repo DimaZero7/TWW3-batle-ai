@@ -123,7 +123,8 @@ class TestSpacing:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         st.u["contact_s"] = torch.full_like(st.u["men"], 1e4)     # long in melee: past the opening wave (melee.wave)
-        _, _, _, F = melee.strikes(st.u, pw, contact, P, torch.zeros_like(st.u["men"]))
+        P0 = P.with_cal("melee", wrap={"on": 0})      # (the overlap only: unequal fronts wrap - test_sim_wrap_torch)
+        _, _, _, F = melee.strikes(st.u, pw, contact, P0, torch.zeros_like(st.u["men"]))
         length = min(float(front[0, 0]), float(front[0, H]))
         ff = P.sim["melee"]["fighting_files"]
         assert float(F[0, 0, H]) == pytest.approx(ff * length / 1.48, rel=1e-4)
@@ -190,11 +191,12 @@ class TestCharge:
         st, H = run_in(SWORD, CLANRATS)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
-        now = melee.strikes(st.u, pw, contact, P, st.u["charge"])[0][0, 0, H]
+        P0 = P.with_cal("melee", wrap={"on": 0})      # (the wrap grows with the contact too - test_sim_wrap_torch)
+        now = melee.strikes(st.u, pw, contact, P0, st.u["charge"])[0][0, 0, H]
         wave = P.sim["melee"]["wave"]
         t0 = min(float(st.u["contact_s"][0, 0]), float(st.u["contact_s"][0, H]))
         st.u["contact_s"] = torch.full_like(st.u["men"], 60.0)
-        later = melee.strikes(st.u, pw, contact, P, st.u["charge"])[0][0, 0, H]
+        later = melee.strikes(st.u, pw, contact, P0, st.u["charge"])[0][0, 0, H]
         # no ramp up from less; the only change is the opening wave's men striking x (1 + amp exp(-t / tau_s))
         w = lambda t: 1 + wave["amp"] * math.exp(-t / wave["tau_s"])
         assert float(now) > 0 and float(now) >= float(later)

@@ -61,8 +61,9 @@ def charge_into(b_target, params):
 
 
 def test_the_held_unit_strikes_at_once_within_the_bracing_angle():
-    old = P.with_cal("contact", stand_first_angle=None)
-    new = P.with_cal("contact", stand_first_angle="bracing")
+    P0 = P.with_cal("melee", wrap={"on": 0})  # (melee.wrap off: unequal fronts would wrap - tests/tools/test_sim_wrap_torch.py)
+    old = P0.with_cal("contact", stand_first_angle=None)
+    new = P0.with_cal("contact", stand_first_angle="bracing")
     front = charge_into(90.0, new)
     at60_new, at60_old = charge_into(30.0, new), charge_into(30.0, old)
     at120 = charge_into(330.0, new)          # the charger 120 deg off the facing: beyond 80

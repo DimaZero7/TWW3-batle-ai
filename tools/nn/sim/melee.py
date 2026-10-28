@@ -227,6 +227,26 @@ def contact_spacing(u, h, v, on):
     return (h - cut).clamp(min=0.3), (v - cut).clamp(min=0.3)
 
 
+def front_overlap(u, pw, through_front, face_i):
+    """(overlap, excess_lo, excess_hi) [B, i, j], m: i's side towards j (its front of face_i, or its flank: the depth)
+    against j's box seen along that side (j's front and depth at j's bearing); the overlap, and how far i's side runs
+    past j's box at its low and its high end (0 where it does not)."""
+    b = u["b"] * geometry.DEG
+    sb, cb = torch.sin(b), torch.cos(b)
+    lx = torch.where(through_front, cb[:, :, None], sb[:, :, None])
+    lz = torch.where(through_front, -sb[:, :, None], cb[:, :, None])
+    half = torch.where(through_front, face_i, pw["depth"][:, :, None].expand_as(face_i)) / 2
+    rx = u["x"][:, None, :] - u["x"][:, :, None]
+    rz = u["z"][:, None, :] - u["z"][:, :, None]
+    off = rx * lx + rz * lz                                    # j's centre along i's side
+    ext = (pw["front"][:, None, :] / 2 * (cb[:, None, :] * lx - sb[:, None, :] * lz).abs()
+           + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
+    ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
+    lo = (off - ext + half).clamp(min=0)
+    hi = (half - off - ext).clamp(min=0)
+    return ov, torch.minimum(lo, 2 * half), torch.minimum(hi, 2 * half)
+
+
 def target_face_cap(F, used, side_j, pw, single_i, single_j, w=None):
     """F [B, N, N] (i strikes j) with melee.target_face_cap: the formations coming at j through the same side of j
     (side_j: 0 front, 1 / 2 flanks, 3 back - seen from j) share its length - each takes used [B, N, N] metres of it
@@ -343,6 +363,36 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             # way there is our own men
             wrap = wrap & ~behind
         length = torch.where(wrap, face_i, length)
+    wcal = cal.get("wrap") or {}
+    F_ans = q_wrap = None
+    if wcal.get("on") and edge is None:
+        # The wrap of a wider line (melee.wrap; config/nn/sim.json melee.wrap_why): the game has no 'only the overlap
+        # fights' rule - every man with an enemy within reach strikes and the free men seek free enemies, so the ends of
+        # a wider line close on the narrower one's flanks. i's front on j's front or back: the contact's length is the
+        # fronts' overlap O plus, at each end where i's front runs past j, the wrap min(that excess, j's depth,
+        # max_m), grown from 0 to whole over grow_s of the pair's contact; the wrap's blows land on j's flank (its
+        # defence x the flank's coefficient, below); j answers with the men of its flanks the wrap meets (wrap / v).
+        # Replaces frontage_edge_m (the ends' men: a special case - the wrap gives the ends and the flanks).
+        sj, cj = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
+        met_flank = sj * pw["depth"][:, None, :] > cj * pw["front"][:, None, :] if sat_j is None else ~sat_j
+        head = through_front & ~met_flank & ~single_i & ~single_j
+        if behind is not None:
+            head = head & ~behind                        # a formation on the back of one of ours does not wrap
+        ov, e_lo, e_hi = front_overlap(u, pw, through_front, face_i)
+        D = float(wcal["max_m"])
+        depth_j = pw["depth"][:, None, :]
+        W = torch.minimum(torch.minimum(e_lo, depth_j), torch.full_like(e_lo, D)) + \
+            torch.minimum(torch.minimum(e_hi, depth_j), torch.full_like(e_hi, D))
+        clock = u["contact_s"] if "contact_s" in u else torch.zeros_like(u["men"])
+        t_pair = torch.minimum(clock[:, :, None], clock[:, None, :])
+        grow_s = float(wcal.get("grow_s") or 0.0)
+        grow = (t_pair / grow_s).clamp(0, 1) if grow_s > 0 else torch.ones_like(t_pair)
+        Wt = torch.where(head, W * grow, torch.zeros_like(W))         # i's wrap on j's flanks, m
+        length = torch.where(head, ov + Wt, length)
+        q_wrap = torch.where(head, Wt / length.clamp(min=1e-6), torch.zeros_like(Wt))
+        # i's flank men answering j's wrap on i (j's front on i's front: the transposed pair)
+        W_on_i = torch.where(head, Wt.transpose(1, 2), torch.zeros_like(Wt))
+        F_ans = cal["fighting_files"] * W_on_i / vc_u[:, :, None]
     if edge is not None:
         # The contact's frontage (melee.frontage_edge_m; absent: off): a formation's men strike the enemies within their
         # reach, whichever unit those belong to - so i brings to j the men of the part of its side that j covers, not its
@@ -365,6 +415,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
         length = torch.where(single_i | single_j | wrap, length, torch.minimum(length, ov + float(edge)))
     F = cal["fighting_files"] * length / along
+    if F_ans is not None:
+        F = F + F_ans                    # (melee.wrap: the flank men answering a wrap, above)
     F = torch.minimum(F, men_i)
     if fill is not None:
         F = torch.where(single_i, F, F * fill)
@@ -389,6 +441,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     for g in range(4):
         in_g = side_of == g
         hold = cal["fighting_files"] * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
+        if F_ans is not None:
+            # (melee.wrap: the flank men answering a wrap stand on the flanks, not on this side)
+            hold = hold + torch.where(in_g & contact, F_ans, torch.zeros_like(F_ans)).sum(dim=2, keepdim=True)
         tot = torch.where(in_g, F, torch.zeros_like(F)).sum(dim=2, keepdim=True)
         F = torch.where(in_g & ~single_i & (tot > hold), F * hold / tot.clamp(min=1e-6), F)
     face_cap = None
@@ -585,6 +640,18 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).
     interval = u["interval"][:, :, None].clamp(min=1e-6)
     per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
+    if q_wrap is not None:
+        # (melee.wrap) the wrap's share of i's blows on a target it meets front to front lands on the target's flank:
+        # the man struck faces his own enemy, so the wrapping man strikes him from the side (the game's side of a blow
+        # is the defender's facing, each blow: defence x the flank's coefficient)
+        q = torch.where((sector == 0) & ~routing_j, q_wrap, torch.zeros_like(q_wrap))
+        d_fl = directional_defence(u["defence"][:, None, :].expand_as(coef),
+                                   torch.full_like(coef, float(B["melee_defence_direction_penalty_coefficient_flank"])))
+        p_fl = hit_chance(attack, d_fl, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
+                          B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+        per_fl = p_fl / (p_fl * interval + float(cal["miss_s"]))
+        per_s = per_s * (1 - q) + per_fl * q
+        p = p * (1 - q) + p_fl * q
     if cal.get("swing_interval") and "ran_in" in u and "contact_s" in u:
         # The first strike starts the men's intervals (melee.swing_interval; CA Feature Focus #2: a man's attack
         # interval runs after his blow): a unit that came into its fight moving or charging (ran_in) struck once with

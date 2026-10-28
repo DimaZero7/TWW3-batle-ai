@@ -61,8 +61,9 @@ OFF = dict(rect_gap=False, square_front=0, push_keep_facing=0, engage=0)     # t
 def fight(a_dx, bystander=True, seconds=40, on=True, a_b=180.0, b_attacks=False, from_s=0.0):
     """The swordsmen attack B (B held, or attacking them); -> (health share lost by B, by C from from_s on, the
     swordsmen's last bearing, B's last bearing)."""
-    params = (P.with_cal("contact", **ON).with_cal("melee", frontage_edge_m=0.0) if on
-              else P.with_cal("contact", **OFF).with_cal("melee", frontage_edge_m=None))
+    # (melee.wrap off in both: frontage_edge_m against the old overlap rule; the wrap replaces both - test_sim_wrap_torch)
+    params = (P.with_cal("contact", **ON).with_cal("melee", frontage_edge_m=0.0, wrap={"on": 0}) if on
+              else P.with_cal("contact", **OFF).with_cal("melee", frontage_edge_m=None, wrap={"on": 0}))
     st, H = lane(a_dx, bystander, a_b)
     o = replay.hold(st)
     o.kind[0, 0], o.target[0, 0], o.run[0, 0] = O.ATTACK, H, False

@@ -1780,6 +1780,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     for b, ln in enumerate(meta):
         if ln["spec"].get("t_morale") and int(slot["tg"][b]) >= 0:
             keep[b, int(slot["tg"][b])] = True
+        if ln["spec"].get("morale_both"):
+            # (the wrap plan: both sides with their morale, as the entry left them)
+            for r_ in ("a", "tg"):
+                if int(slot[r_][b]) >= 0:
+                    keep[b, int(slot[r_][b])] = True
     # the new units' plans (UNIT_PLANS): the entry turns every unit's fire at will off and only the 'shoot' attacker and
     # a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
     for b, ln in enumerate(meta):

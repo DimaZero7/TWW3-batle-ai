@@ -325,13 +325,14 @@ class TestMelee:
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
         wave = P.sim["melee"]["wave"]
-        def F(t_own, t_enemy, params=P):
+        P0 = P.with_cal("melee", wrap={"on": 0})  # (melee.wrap off: unequal fronts would wrap - tests/tools/test_sim_wrap_torch.py)
+        def F(t_own, t_enemy, params=P0):
             st.u["contact_s"][0, 0], st.u["contact_s"][0, H] = t_own, t_enemy
             return float(melee.strikes(st.u, pw, contact, params, z)[3][0, 0, H])
         late = F(300.0, 300.0)
         assert F(0.0, 300.0) == pytest.approx(late * (1 + wave["amp"]), rel=1e-4)        # the younger clock
         assert F(wave["tau_s"], 300.0) == pytest.approx(late * (1 + wave["amp"] / math.e), rel=1e-4)
-        assert F(0.0, 0.0, P.with_cal("melee", wave=None)) == pytest.approx(late, rel=1e-3)
+        assert F(0.0, 0.0, P0.with_cal("melee", wave=None)) == pytest.approx(late, rel=1e-3)
 
     def test_the_men_striking_a_missile_unit_under_an_attack_order_keep_a_floor_of_the_wave(self):
         """melee.wave missile_attack_floor (the wavemiss probes): the enemy's men striking a missile unit that fights
@@ -2619,8 +2620,9 @@ class TestTargetFace:
 
 
 def _no_stack(params):
-    """params without the stacked formations' rules (melee.stack_block / stack_side / stack_no_wrap, face_cap_wave)."""
-    return params.with_cal("melee", stack_block=0, stack_side=0, stack_no_wrap=0, face_cap_wave=0)
+    """params without the stacked formations' rules (melee.stack_block / stack_side / stack_no_wrap, face_cap_wave) and
+    without the single line's wrap (melee.wrap: the old rules, where two stacked units over-added)."""
+    return params.with_cal("melee", stack_block=0, stack_side=0, stack_no_wrap=0, face_cap_wave=0, wrap={"on": 0})
 
 
 def _stack_state(params, lateral=0.0, back=0.0, bearing=90.0, clock=(0.0, 0.0), n_own=2, z0=0.0):
