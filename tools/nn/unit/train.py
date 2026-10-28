@@ -136,6 +136,7 @@ def multi_setup(cfg, P, device, gen=None, sp=None):
 
 
 SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup, "multi": multi_setup}
+MIX = ("hold", "go", "multi")          # --drill mix: one drill a batch, in turn
 
 
 def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, branch=None):
@@ -400,7 +401,9 @@ def restore(path, device="cpu"):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--drill", default="smoke", choices=sorted(SETUPS))
+    ap.add_argument("--drill", default="smoke", choices=sorted(SETUPS) + ["mix"],
+                    help="mix: U1 / U2 / U3 (hold / go / multi) in turn, one drill a batch - equal shares of the "
+                         "skirmishes; a batch of mixed drills would wait for its longest skirmish (go's up to 700 s)")
     ap.add_argument("--battles", type=int, default=256)
     ap.add_argument("--seconds", type=float, default=None, help="decisions a batch at most (smoke 120, hold 180)")
     ap.add_argument("--updates", type=int, default=5, help="at most this many updates")
@@ -426,10 +429,15 @@ def main(argv=None):
     a = ap.parse_args(argv)
     torch.manual_seed(a.seed)
     P = load()
-    seconds = a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0}.get(a.drill, 120.0)
-    cfg = {"battles": a.battles, "seconds": seconds, "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0,
-           "bounds": None, "gamma": 0.9994, "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": a.drill,
-           "area_reward": a.area_reward if a.area_reward is not None else (AREA_REWARD if a.drill == "go" else 0.0)}
+    drills = list(MIX) if a.drill == "mix" else [a.drill]
+
+    def cfg_of(drill):
+        """The batch's settings for one drill (mix: the area's signal off unless --area-reward says)."""
+        area = a.area_reward if a.area_reward is not None else (AREA_REWARD if a.drill == "go" else 0.0)
+        return {"battles": a.battles, "seconds": a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0}.get(drill, 120.0),
+                "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0, "bounds": None, "gamma": 0.9994,
+                "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": drill, "area_reward": area}
+    cfg = cfg_of(drills[0])
     dev = a.device
     net, critic = Nt.UnitNet().to(dev), Nt.Critic().to(dev)
     opt = torch.optim.Adam(list(net.parameters()) + list(critic.parameters()), lr=a.lr)
@@ -449,19 +457,21 @@ def main(argv=None):
         if a.minutes > 0 and time.time() - start > a.minutes * 60:
             break
         t0 = time.time()
+        drill = drills[k % len(drills)]
+        cfg = cfg_of(drill)
         br = None
-        if a.branch_share > 0 and a.drill in ("hold", "multi"):
+        if a.branch_share > 0 and drill in ("hold", "multi"):
             from tools.nn.unit import branch as Br
             # (the decay counts this run's updates: a run going on from a checkpoint starts the bonus afresh)
             br = {"share": a.branch_share, "weight": Br.weight_at(a.branch_bonus, k, a.branch_decay),
                   "lead_s": a.branch_lead_s, "horizon_s": a.branch_horizon_s}
-        batch, rs = rollout(net, critic, cfg, P, dev, duty, SETUPS[a.drill](cfg, P, dev, gen), branch=br)
+        batch, rs = rollout(net, critic, cfg, P, dev, duty, SETUPS[drill](cfg, P, dev, gen), branch=br)
         rs.pop("_branch", None)
         t1 = time.time()
         us = update(net, critic, opt, batch, cfg, dev, duty)
         t2 = time.time()
         done_updates += 1
-        row = {"update": done_updates, **rs, **us, "rollout_s": round(t1 - t0, 1), "update_s": round(t2 - t1, 1),
+        row = {"update": done_updates, "drill": drill, **rs, **us, "rollout_s": round(t1 - t0, 1), "update_s": round(t2 - t1, 1),
                "battle_s_per_s": round(float(batch["valid"].sum()) / max(t1 - t0, 1e-9), 1),
                "slept_s": round(duty.slept, 1)}
         log.append(row)
@@ -483,15 +493,13 @@ def main(argv=None):
                       "minutes": round((time.time() - start) / 60, 1)}), flush=True)
     (out / "log.json").write_text(json.dumps(log, indent=1), encoding="utf-8")
     if a.exam:
-        if a.drill == "go":
-            from tools.nn.unit import exam_go
-            exam_go.run(net, P, dev, duty, out / "exam.json")
-        elif a.drill == "multi":
-            from tools.nn.unit import exam_multi
-            exam_multi.run(net, P, dev, duty, out / "exam.json")
+        from tools.nn.unit import exam_go, exam_hold, exam_multi
+        exams = {"hold": exam_hold, "go": exam_go, "multi": exam_multi}
+        if a.drill == "mix":                       # all three, one after another
+            for d_ in MIX:
+                exams[d_].run(net, P, dev, duty, out / f"exam_{d_}.json")
         else:
-            from tools.nn.unit import exam_hold
-            exam_hold.run(net, P, dev, duty, out / "exam.json")
+            exams.get(a.drill, exam_hold).run(net, P, dev, duty, out / "exam.json")
     return log, same
 
 

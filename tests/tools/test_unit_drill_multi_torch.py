@@ -144,3 +144,26 @@ def test_the_switch_variant_and_its_tracking():
     area = {"x": f(0), "z": f(0), "b": f(0), "front": f(200), "depth": f(200)}
     t = k.play(st2, area, P, Bt.step, horizon_s=30.0, cap_s=60.0, rows=1)
     assert float(t[0, 4]) != float(t[0, 0])                            # the switch played out differently
+
+
+def test_the_exam_kit_adds_attack_a_then_face_b():
+    k = Br.KIT_MULTI_EXAM
+    assert k.names()[-2:] == ["attack_A_then_B", "attack_A_then_face_B"]
+    st = battle([(SPEAR, 0, 0, 0)], [(CLANRAT, 0, 40, 180), (SLAVE, 40, 0, 270)])
+    H = st.N // 2
+    o = replay.hold(st)
+    o.face[0, 0] = 90.0                                                # a hold facing B (east)
+    Bt.step(st, o, P)
+    assert int(k.track(st, torch.tensor([0]), SP)[0]) == 5
+    st2 = battle([(SPEAR, 0, 0, 0)], [(CLANRAT, 0, 45, 180), (SLAVE, 110, 0, 270)])
+    f = lambda v: torch.full((1, st2.N), float(v))       # noqa: E731
+    area = {"x": f(0), "z": f(0), "b": f(0), "front": f(200), "depth": f(200)}
+    t = k.play(st2, area, P, Bt.step, horizon_s=30.0, cap_s=60.0, rows=1)
+    assert t.shape == (1, 6) and float(t[0, 5]) != float(t[0, 4])
+
+
+def test_mix_trains_the_three_drills_in_turn(tmp_path):
+    log, same = T.main(["--drill", "mix", "--battles", "3", "--seconds", "15", "--updates", "3", "--minibatch", "64",
+                        "--out", str(tmp_path)])
+    assert [r["drill"] for r in log] == ["hold", "go", "multi"] and same
+    assert all(r["bans_broken"] == 0 and r["nan"] == 0 for r in log)

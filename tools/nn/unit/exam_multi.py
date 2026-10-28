@@ -1,6 +1,7 @@
 """The exam of drill U3 'several enemies' (drill_multi.py): the fixed set drill_multi.exam_specs() (360: 40 ordinary per
 layout x timing and 120 hard - a weak enemy first, a dangerous one later), the network sampling with a fixed seed, the
-branches (branch.KIT_MULTI: 5 variants with 'attack A, then B') in every skirmish.
+branches (branch.KIT_MULTI_EXAM: 6 variants with 'attack A, then B' and 'attack A, then face B') in every
+skirmish.
 
     bash tools/nn/dock.sh tools.nn.unit.exam_multi [--ckpt build/.../latest.pt] [--device cuda]
 
@@ -84,6 +85,7 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
     cfg = {"battles": len(sp), "seconds": DM.LIMIT_S, "cell_m": 8.0, "bounds": None}
     torch.manual_seed(seed)
     setup = T.multi_setup(cfg, P, device, sp=sp)
+    setup["kit"] = Br.KIT_MULTI_EXAM
     st = setup["st"]
     w = Watch(st.B, st.N, P, device)
     m0 = reward.measure(st)
@@ -108,8 +110,8 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
         return {"n": int(m.sum()), "chose_best": _mean(beh == best, m & ok),
                 "best": {nm: _mean(best == v, m & brd) for v, nm in enumerate(names)},
                 "behaviour": {nm: _mean(beh == v, m & ok) for v, nm in enumerate(names)},
-                "best_attack": _mean((best <= 1) | (best == 4), m & brd),
-                "best_on_A": _mean((best == 0) | (best == 2) | (best == 4), m & brd),
+                "best_attack": _mean((best <= 1) | (best >= 4), m & brd),
+                "best_on_A": _mean((best == 0) | (best == 2) | (best >= 4), m & brd),
                 # the yardstick: a network that always attacks the first enemy - how often that is the best, and what it
                 # loses against the best variant (budget, the branches' trades from the moment)
                 "always_first_best": _mean(best == 0, m & brd), "always_first_loss": _mean(tr.max(1).values - tr[:, 0], m & brd),

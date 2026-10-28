@@ -37,6 +37,7 @@ LEAD_S = 4.0
 HORIZON_S = 60.0
 CAP_S = 120.0
 STAND, ATTACK, OTHER = 0, 1, -1
+BRACE_DEG = 80.0     # the database's bracing_attack_angle (track()'s 'faces B'; Kit.behaviour takes it from params)
 
 
 def take(st, idx):
@@ -101,7 +102,8 @@ class Kit:
     def names(self):
         if len(self.variants) <= 2:
             return [k for k, _ in self.variants]
-        return ["attack_A_then_B" if k == "switch" else f"{k}_{'AB'[j]}" for k, j in self.variants]
+        special = {"switch": "attack_A_then_B", "switch_face": "attack_A_then_face_B"}
+        return [special.get(k, f"{k}_{'AB'[j]}") for k, j in self.variants]
 
     def switch_moment(self, st, spacing, lead_s=LEAD_S):
         """[B] B (slot H + 1) within its charge distance + lead_s of its run of our unit - the 'switch' variant's moment
@@ -117,13 +119,24 @@ class Kit:
         network decides once a second, its order lands 0.36 s later, so the window is open from B's moment on (until the
         branch's end), not one exact step. Without a switch variant: beh unchanged."""
         names = [k for k, _ in self.variants]
-        if "switch" not in names:
+        if "switch" not in names and "switch_face" not in names:
             return beh
         u = st.u
         H = st.N // 2
         a_idx = self.variants.index(("attack", 0))
-        to_b = (u["order_kind"][:, 0] == O.ATTACK) & (u["order_target"][:, 0] == H + 1)
-        return torch.where((beh == a_idx) & to_b & self.switch_moment(st, spacing), names.index("switch"), beh)
+        moment = (beh == a_idx) & self.switch_moment(st, spacing)
+        if "switch" in names:
+            to_b = (u["order_kind"][:, 0] == O.ATTACK) & (u["order_target"][:, 0] == H + 1)
+            beh = torch.where(moment & to_b, names.index("switch"), beh)
+        if "switch_face" in names and "oface" in u:
+            # ... or 'attack A, then face B': its order no attack any more and its facing (in force) within the
+            # bracing angle of the way to B
+            way_b = torch.remainder(torch.rad2deg(torch.atan2(u["x"][:, H + 1] - u["x"][:, 0],
+                                                               u["z"][:, H + 1] - u["z"][:, 0])), 360.0)
+            off = (torch.remainder(u["oface"][:, 0] - way_b + 180, 360) - 180).abs()
+            face_b = (u["order_kind"][:, 0] != O.ATTACK) & (u["oface"][:, 0] >= 0) & (off <= BRACE_DEG)
+            beh = torch.where(moment & face_b, names.index("switch_face"), beh)
+        return beh
 
     def behaviour(self, st, bracing_deg):
         """[B] the index of the variant our unit's behaviour now is, OTHER none."""
@@ -140,7 +153,7 @@ class Kit:
         axis = torch.where(alive, rels.abs(), torch.full_like(rels, 1e9))
         still = (kind == O.HOLD) & (speed <= 0.3)
         for v, (k, j) in enumerate(self.variants):
-            if k == "switch":
+            if k in ("switch", "switch_face"):
                 continue                        # (known later: track())
             if k == "attack":
                 hit = (kind == O.ATTACK) & (tgt == H + j)
@@ -176,14 +189,17 @@ class Kit:
             rows_v = var == v
             face = torch.remainder(torch.rad2deg(torch.atan2(u["x"][:, H + j] - u["x"][:, 0],
                                                              u["z"][:, H + j] - u["z"][:, 0])), 360.0)
-            if k in ("attack", "switch"):
+            if k in ("attack", "switch", "switch_face"):
                 mine.kind[rows_v, 0], mine.target[rows_v, 0], mine.run[rows_v, 0] = O.ATTACK, H + j, True
             else:
                 mine.face[rows_v, 0] = face[rows_v]
-        sw_v = [v for v, (k, _) in enumerate(self.variants) if k == "switch"]
+        sw_v = [v for v, (k, _) in enumerate(self.variants) if k in ("switch", "switch_face")]
         sw_rows = torch.zeros(st.B, dtype=torch.bool, device=dev)
+        sf_rows = torch.zeros(st.B, dtype=torch.bool, device=dev)
         for v in sw_v:
             sw_rows = sw_rows | (var == v)
+            if self.variants[v][0] == "switch_face":
+                sf_rows = sf_rows | (var == v)
         spacing = P.sim["formation"]["spacing_m"]
         leash = Dc.Leash(st.B, st.N, dev)
         m0 = reward.measure(st)
@@ -196,8 +212,18 @@ class Kit:
             if sw_v:
                 # 'attack A, then B': after our first contact, at B's moment the attack turns to B (a leave from A's
                 # melee by the simulator's rule: an attack on a target out of contact)
-                now = sw_rows & (tc >= 0) & (mine.target[:, 0] == H) & self.switch_moment(st, spacing) & ~st.done
-                mine.target[:, 0] = torch.where(now, H + 1, mine.target[:, 0])
+                # ('attack A, then face B': a hold facing B - in melee a facing order is a melee exit, 24 s without
+                # blows at A, the turn after turn.face_melee_delay_s: contact.face_breakoff)
+                now = sw_rows & (tc >= 0) & (mine.kind[:, 0] == O.ATTACK) & (mine.target[:, 0] == H) \
+                    & self.switch_moment(st, spacing) & ~st.done
+                uu = st.u
+                way_b = torch.remainder(torch.rad2deg(torch.atan2(uu["x"][:, H + 1] - uu["x"][:, 0],
+                                                                   uu["z"][:, H + 1] - uu["z"][:, 0])), 360.0)
+                fnow = now & sf_rows
+                mine.target[:, 0] = torch.where(now & ~sf_rows, H + 1, torch.where(fnow, -1, mine.target[:, 0]))
+                mine.kind[:, 0] = torch.where(fnow, O.HOLD, mine.kind[:, 0])
+                mine.run[:, 0] = mine.run[:, 0] & ~fnow
+                mine.face[:, 0] = torch.where(fnow, way_b, mine.face[:, 0])
             o = O.merge(opponents.nearest(st), leash.apply(st, mine, ar, own), own)
             was = st.done.clone()
             step(st, o, P)
@@ -220,6 +246,8 @@ class Kit:
 
 KIT1 = Kit([("stand", 0), ("attack", 0)])                                   # STAND 0, ATTACK 1
 KIT_MULTI = Kit([("attack", 0), ("attack", 1), ("stand", 0), ("stand", 1), ("switch", 0)])
+# the exam's: with 'attack A, then face B' (possible since the facing in melee: contact.face_breakoff)
+KIT_MULTI_EXAM = Kit([("attack", 0), ("attack", 1), ("stand", 0), ("stand", 1), ("switch", 0), ("switch_face", 0)])
 
 
 def behaviour(st, bracing_deg):
