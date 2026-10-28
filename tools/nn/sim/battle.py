@@ -689,6 +689,10 @@ def step(st, orders, params=None, dt=None):
     if ground.on(u):
         # the trunks on the way (ground.trunk_keep: a projectile meeting a trunk past its first ~42 m stops, no damage)
         hp_missile = hp_missile * ground.trunk_keep(u, pw, volley_target, los.get("lob"), params)[:, :, None]
+        # the cover of a target's men on forest ground (ground.missile_cover: the hits on it x forest_cover by the share
+        # of its men on forest cells; the probe cover's measure)
+        hp_missile = hp_missile * ground.missile_cover(u, ground.shares(u, pw["front"], pw["depth"], params),
+                                                       params)[:, None, :]
     hp_bomb = kills_bomb = None
     if magic.on(params) and "bm0_s" in u:
         # the bombardments landing this step (magic.py): the HP and the men each caster's strike takes from each unit,

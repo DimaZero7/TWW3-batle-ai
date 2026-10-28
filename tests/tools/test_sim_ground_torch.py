@@ -83,6 +83,36 @@ def test_a_map_without_layers_steps_bit_for_bit_as_before():
         assert torch.equal(a[k], b[k]), k
 
 
+def test_the_forest_covers_its_men_from_projectiles():
+    # ground.missile_cover: each man on a forest cell is hit at forest_cover (0.75, the probe cover) of his chance
+    share = torch.zeros((1, 3, ground.NCLASS))
+    share[0, 0, 1], share[0, 1, 1] = 1.0, 0.5
+    u = {"x": torch.zeros((1, 3))}
+    c = ground.missile_cover(u, share, P)
+    assert P.sim["terrain"]["ground"]["forest_cover"] == 0.75
+    assert c[0].tolist() == pytest.approx([0.75, 0.875, 1.0])
+    off = P.with_cal("terrain", ground={k: v for k, v in P.sim["terrain"]["ground"].items() if k != "forest_cover"})
+    assert ground.missile_cover(u, share, off)[0].tolist() == [1.0, 1.0, 1.0]
+
+    # in a battle: archers on clanrats in the woods take 0.75 of the HP they take on grass (no trees here; nobody hides)
+    Q = P.with_cal("stealth", on=0)
+    def lost(code_fill):
+        code = np.full((N, N), code_fill, np.uint8)
+        mid = flat_map(code)
+        st = scenario.build([army([(ARCHER, 0, -60, 0)], [(CLANRAT, 0, 30, 180)])], Q)
+        terrain.set_map(st, mid)
+        st.u["hid_d"][:] = False
+        o = O.hold(st.B, st.N)
+        hp0 = float(st.u["hp_abs"][0, st.N // 2])
+        for _ in range(40):
+            battle.step(st, o, Q)
+        ground._LAYERS.clear()
+        ground._DEV.clear()
+        return hp0 - float(st.u["hp_abs"][0, st.N // 2])
+    grass, wood = lost(1), lost(0)
+    assert grass > 0 and wood / grass == pytest.approx(0.75, rel=0.08)
+
+
 def test_large_units_in_forest_and_small_in_shallow_water():
     code = np.full((N, N), 1, np.uint8)
     code[:, : node(0)] = 0                                     # x < 0: forest

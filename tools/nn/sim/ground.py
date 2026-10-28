@@ -203,6 +203,19 @@ def shares(u, front, depth, params):
     return torch.stack([(c == k).float().mean(-1) for k in range(NCLASS)], -1)
 
 
+def missile_cover(u, share, params):
+    """[B, N] the share of the projectile hits a unit still takes for its men on forest ground: 1 - forest share x (1 -
+    terrain.ground.forest_cover) - each man on a forest cell is hit at forest_cover of his chance (MEASURED, the probe
+    cover: archers from ~40 m, a lone Warlock Engineer hit 36 % of the shots in the woods against 46 % on grass, x0.77,
+    clanrats' damage a shot x0.74, the damage a hit the same; the program's reading - the database's
+    missile_target_in_cover_penalty, -0.2 off the chance - would give ~26 %: config/nn/sim.json terrain.ground
+    forest_cover_why). 1 without a ground layer or the key."""
+    k = (params.sim["terrain"].get("ground") or {}).get("forest_cover")
+    if k is None:
+        return torch.ones_like(u["x"])
+    return 1 - share[..., 1] * (1 - float(k))
+
+
 def factors(u, share, params):
     """(speed, attack) [B, N]: the database's ground_type_to_stat_effects by the unit's men (each man his own cell: the
     mean of the multipliers over its men). A penalty (x < 1) does not touch a strider; ignore_trees is spared the forest's;
