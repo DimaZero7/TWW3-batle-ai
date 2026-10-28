@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -910,6 +910,14 @@ def battles(plan):
                                t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)},
                                place=(float(sx), float(sz))))
         out.append(lanes_)
+    elif plan == "wrap":
+        # a wide line on a narrow one head-on (build/diag_g49/wrap): both attack each other from 3 m, centres on one line,
+        # both with their morale (they can rout), the soldiers' places all fight; widths a_w / t_w
+        def wr(a, t, aw, tw, k):
+            return lane(a, t, "attack_walk", "both", gap_m=3, fight_s=120, max_s=140, a_w=aw, t_w=tw, lane_dx=190,
+                        morale_both=True, morale_rows=True, kind=f"a{aw}_t{tw}_{k}")
+        out.append([wr("swords", "clanrat", 70, 20, 1), wr("swords", "clanrat", 20, 70, 1), wr("swords", "clanrat", 40, 40, 1),
+                    wr("gs", "cspear", 20, 70, 1), wr("swords", "clanrat", 70, 20, 2), wr("swords", "clanrat", 20, 70, 2)])
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1416,6 +1424,8 @@ def run_config(plan, index):
         config.update(tick_ms=SWING_MS, men_ms=500)
     if plan == "fatrun":
         config.update(men_after_s=0, men_near_m=0)
+    if plan == "wrap":
+        config.update(men_ms=1000, men_after_s=130, men_near_m=80)
     if plan in ("terrain", "terrain2"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)

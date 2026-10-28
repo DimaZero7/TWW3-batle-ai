@@ -1184,6 +1184,7 @@ function M.main(bm, config, globals)
         local keep_morale = {}
         for _, l in ipairs(config.lanes) do
             if l.t_morale then keep_morale[l.target] = true end
+            if l.morale_both then keep_morale[l.target], keep_morale[l.attacker] = true, true end
         end
         for side = 1, 2 do
             for _, u in ipairs(sides[side].units) do
