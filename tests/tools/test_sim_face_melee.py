@@ -145,3 +145,17 @@ class TestTurnInMelee:
         b0 = float(st.u["b"][0, 0])
         run(st, keep(st), 5.0)
         assert abs((float(st.u["b"][0, 0]) - b0 + 180) % 360 - 180) <= P.sim["contact"]["melee_turn_deg_s"] * 5 + 1e-4
+
+
+def test_a_move_away_with_a_facing_given_in_melee_turns_and_walks_out():
+    """(the facing waits for the arrival: a far move in melee is a leave, the unit about-faces and walks as any leaver)"""
+    st, H = fight()
+    b0 = float(st.u["b"][0, 0])
+    x0 = float(st.u["x"][0, 0])
+    o = replay.hold(st)
+    o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0], o.face[0, 0] = O.MOVE, x0 - 80.0, 0.0, True, b0
+    o.kind[0, 1:H] = O.KEEP
+    o = enemy_attacks(st, o)
+    for k in range(60):
+        battle.step(st, o if k == 0 else keep(st), P)
+    assert float(st.u["x"][0, 0]) < x0 - 40.0                         # it got away westwards

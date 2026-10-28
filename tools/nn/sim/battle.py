@@ -1302,11 +1302,13 @@ def step(st, orders, params=None, dt=None):
         face_ready = (standing & (u["oface"] >= 0) & (kind != O.ATTACK) & arrived & ~mv & ~engaged & ~steer & ~has_opp
                  & ~shooting & (off > 1e-3))
         # In melee (turn.face_melee_delay_s; config/nn/sim.json turn.face_melee_why: the meleeturn / meleeturn2 probes):
-        # a formation holding a facing order while engaged keeps its bearing (no 2 deg/s drift to its opponent) for
+        # a formation at its point holding a facing order while engaged keeps its bearing (no 2 deg/s drift to its opponent) for
         # face_melee_delay_s, then turns to the facing at formation_deg_s.
         fm_delay = t_cal.get("face_melee_delay_s")
-        melee_face = ((standing & (u["oface"] >= 0) & (kind != O.ATTACK) & engaged & (u["men0"] > 1) & (off > 1e-3))
-                      if fm_delay is not None else torch.zeros_like(face_ready))
+        # (at its point: a move to a farther point given in melee is a leave - it turns and walks as any leaver, the
+        # facing waits for the arrival)
+        melee_face = ((standing & (u["oface"] >= 0) & (kind != O.ATTACK) & engaged & (u["men0"] > 1) & (off > 1e-3)
+                       & arrived) if fm_delay is not None else torch.zeros_like(face_ready))
         u["oface_s"] = torch.where(face_ready | melee_face, u["oface_s"] + dt, torch.zeros_like(u["oface_s"]))
         if fm_delay is not None:
             turned = old["b"].clone()
