@@ -249,7 +249,7 @@ def fire_layers(rng, arc, cell_m, cells=CELLS):
     return reach, reach * inarc
 
 
-def ground_layers(cx, cz, heading, cell_m, terr, h0, cells=CELLS):
+def ground_layers(cx, cz, heading, cell_m, terr, h0, cells=CELLS, place=None):
     """([R, C, C] x 3) the height, slope_fwd and slope_right layers: the ground (tools/nn/sim/terrain.py, the map terr [R]
     of each frame's battle, -1 flat) at each cell's centre less h0 [R] (the ground under the frame's unit) / HEIGHT_M
     within +-2, and its rise per metre there along the frame's heading and to its right (central differences over 2 m),
@@ -261,6 +261,9 @@ def ground_layers(cx, cz, heading, cell_m, terr, h0, cells=CELLS):
     sh = (-1, 1, 1)
     x, z = world(s, f, cx.view(sh), cz.view(sh), heading.view(sh))
     u = {"terr": terr.long()[:, None]}
+    if place is not None:
+        # (place [3 x R]: each frame's battle laid on its map, terrain.set_map)
+        u.update({k: v.float()[:, None] for k, v in zip(terrain.PLACE, place)})
     h = terrain.height(u, x, z)
     hd = heading.view(sh) * DEG
     fx, fz = torch.sin(hd), torch.cos(hd)
@@ -335,5 +338,5 @@ def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CEL
         out[:, L["reach"]], out[:, L["fire_arc"]] = fire_layers(fire["range"], fire["arc"], cell_m, cells)
     if ground is not None:
         out[:, L["height"]], out[:, L["slope_fwd"]], out[:, L["slope_right"]] = ground_layers(
-            cx, cz, heading, cell_m, ground["terr"], ground["h0"], cells)
+            cx, cz, heading, cell_m, ground["terr"], ground["h0"], cells, place=ground.get("place"))
     return out

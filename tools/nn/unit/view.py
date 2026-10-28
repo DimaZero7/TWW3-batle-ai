@@ -33,7 +33,7 @@ REACH_S = 15.0         # s: the zone's time (the order's span) - a parameter
 TOWARD_DEG = 30.0      # the area beyond the map: the edge cells within this of the way to it are allowed
 RANGE_CELLS = 14.0     # a shooter's map: cell = its range / this (its range circle fits the 30 x 30 map: 15 cells a side)
 RAW = ("x", "z", "b", "vx", "vz", "front", "depth", "fill", "men", "hp", "mp", "ms", "r", "s", "w", "m", "mv", "f",
-       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash", "arc", "gh", "terr")
+       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash", "arc", "gh", "terr", "tpx", "tpz", "tpr")
 I = {k: i for i, k in enumerate(RAW)}
 ROW = ("right", "forward", "front_cos", "front_sin", "v_right", "v_forward", "front", "depth", "men", "hp", "mp",
        "ms", "r", "s", "w", "m", "mv", "f", "fire", "fat", "ammo", "self", "own", "enemy", "my_target", "leashed",
@@ -85,6 +85,9 @@ def raw(st, spacing, melee_depth=0.0, leash=None, missile=None):
     from tools.nn.sim import terrain
     cols["gh"] = terrain.ground(u)
     cols["terr"] = u["terr"] if terrain.on(u) else torch.full_like(u["x"], -1.0)
+    # (the battle's frame on its map: terrain.set_map place - the zone map reads the ground through it)
+    for k in terrain.PLACE:
+        cols[k] = u[k] if k in u else torch.zeros_like(u["x"])
     return torch.stack([cols[k].float() for k in RAW], -1)
 
 
@@ -199,7 +202,8 @@ def build(now, hist, card, who, order_target=None, area=None, cell_m=8.0, bounds
     fire = {"range": me[:, I["range"]], "arc": me[:, I["arc"]]}
     # the ground's layers (height, slope_fwd, slope_right) only where a battle has a height map: else zeros
     terr = me[:, I["terr"]]
-    ground = {"terr": terr, "h0": me[:, I["gh"]]} if bool((terr >= 0).any()) else None
+    ground = {"terr": terr, "h0": me[:, I["gh"]], "place": [me[:, I[k]] for k in ("tpx", "tpz", "tpr")]} \
+        if bool((terr >= 0).any()) else None
     zm = Z.build(me[:, I["x"]], me[:, I["z"]], me[:, I["b"]], cm, units, area=ar, bounds=bounds, fire=fire,
                  ground=ground)
     cells_ok, target_ok = allowed(me, J, mask & (whose == ENEMY), ar, cm, bounds)

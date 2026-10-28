@@ -99,6 +99,7 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
              "out_pushed": round(float(c["out_pushed"].sum() / c["alive_s"].sum().clamp(min=1e-6)), 4),
              "end": rs.get("end"), "entropy": rs["entropy"], "bans_broken": rs["bans_broken"],
              "order_changes_per_skirmish": round(rs["order_changes"] / len(sp), 1), "seconds": round(time.time() - t0, 1)}
+    table["terrain"] = rs.get("terrain")         # (realmap.Meter: on a map only)
     if out_path:
         Path(out_path).write_text(json.dumps(table, indent=1), encoding="utf-8")
     print(json.dumps({"exam_rout": table}), flush=True)
@@ -111,7 +112,11 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--map", default=None, help="lay the skirmishes on this map (build/maps/<name>, tools/nn/unit/realmap.py): the exam's fixed places")
     a = ap.parse_args(argv)
+    if a.map:
+        from tools.nn.unit import realmap
+        realmap.activate(a.map, exam=True)
     from tools.nn.unit import train as T
     if a.ckpt:
         net, _, _ = T.restore(a.ckpt, a.device)

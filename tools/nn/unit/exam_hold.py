@@ -151,6 +151,7 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
                    "pairs_stand_mostly_better": round(sum(v > 0.5 for v in stand_pairs.values()) / max(len(stand_pairs), 1), 3),
                    "stand_branch_braced": stand_braced, "diff_mean": round(float((bi["t_stand"] - bi["t_attack"])[br].abs().mean()), 4) if bool(br.any()) else None},
         "seconds": round(time.time() - t0, 1), "pairs": pairs, "pairs_stand_better": stand_pairs})
+    table["terrain"] = rs.get("terrain")         # (realmap.Meter: on a map only)
     if out_path:
         Path(out_path).write_text(json.dumps(table, indent=1), encoding="utf-8")
     short = {k: v for k, v in table.items() if k not in ("pairs", "pairs_stand_better")}
@@ -164,7 +165,11 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--map", default=None, help="lay the skirmishes on this map (build/maps/<name>, tools/nn/unit/realmap.py): the exam's fixed places")
     a = ap.parse_args(argv)
+    if a.map:
+        from tools.nn.unit import realmap
+        realmap.activate(a.map, exam=True)
     from tools.nn.unit import train as T
     if a.ckpt:
         net, _, _ = T.restore(a.ckpt, a.device)

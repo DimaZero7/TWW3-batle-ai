@@ -158,6 +158,7 @@ def _at(u, name, x, z):
     layer's empty value on a flat battle."""
     out, Rm, Cm = _device(x.device)
     G, R, C, X0, Z0, S, _, _ = terrain._device(x.device)
+    x, z = terrain.to_map(u, x, z)                  # (a battle laid on the map in its own frame: terrain.set_map place)
     mid = u["terr"][:, 0]
     flat = mid < 0
     m = mid.clamp(min=0)

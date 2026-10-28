@@ -47,8 +47,11 @@ def load_npz(path, layers=True):
     return mid
 
 
-def set_map(st, map_id, battles=None):
-    """Give battles (a list / bool mask; None: all) the map map_id (None or -1: flat)."""
+def set_map(st, map_id, battles=None, place=None):
+    """Give battles (a list / bool mask; None: all) the map map_id (None or -1: flat). place (px, pz, deg) [B] each
+    (tensors or numbers; None: none): the battle's own frame laid on the map - a point (x, z) of the battle stands on
+    the map at (x cos a + z sin a + px, -x sin a + z cos a + pz), a = deg (a bearing b on the map: b + deg); the battle
+    itself keeps its coordinates (to_map: only the map's layers are read through it)."""
     u = st.u
     mid = -1 if map_id is None else int(map_id)
     if "terr" not in u:
@@ -60,6 +63,25 @@ def set_map(st, map_id, battles=None):
     if sel.dtype != torch.bool:
         sel = torch.zeros(st.B, dtype=torch.bool, device=st.device).index_fill_(0, sel.long(), True)
     u["terr"] = torch.where(sel[:, None], torch.full_like(u["terr"], mid), u["terr"])
+    if place is not None:
+        for k, v in zip(PLACE, place):
+            if k not in u:
+                u[k] = torch.zeros_like(u["x"])
+            v = torch.as_tensor(v, dtype=u["x"].dtype, device=st.device).expand(st.B)
+            u[k] = torch.where(sel[:, None], v[:, None].expand_as(u[k]), u[k])
+
+
+PLACE = ("tpx", "tpz", "tpr")          # a battle's frame on its map (set_map place; the same on every slot)
+
+
+def to_map(u, x, z):
+    """(x, z) on the map of points x, z [B, ...] of each battle (set_map place; without one: as they are)."""
+    if "tpx" not in u:
+        return x, z
+    sh = (-1,) + (1,) * (x.dim() - 1)
+    a = u["tpr"][:, 0].view(sh) * (math.pi / 180)
+    c, s = torch.cos(a), torch.sin(a)
+    return x * c + z * s + u["tpx"][:, 0].view(sh), -x * s + z * c + u["tpz"][:, 0].view(sh)
 
 
 def on(u):
@@ -87,6 +109,7 @@ def height(u, x, z):
     edge); 0 on a flat battle and without maps."""
     if "terr" not in u or not _MAPS:
         return torch.zeros_like(x)
+    x, z = to_map(u, x, z)
     G, R, C, X0, Z0, S, Rm, Cm = _device(x.device)
     mid = u["terr"][:, 0]
     flat = mid < 0

@@ -307,6 +307,21 @@ def width_setup(cfg, P, device, gen=None, sp=None):
     return {"st": st, "own": own, "area": area, "ender": DM.Ender(st.B, device, DW.LIMIT_S), "specs": sp}
 
 
+def _on_map(fn):
+    """A drill's setup laid on the active real map (realmap.apply: each skirmish at a random place and turn of it, its
+    own coordinates kept; the exams' fixed places); as it is without --map."""
+    def setup(cfg, P, device, gen=None, **kw):
+        from tools.nn.unit import realmap
+        return realmap.apply(fn(cfg, P, device, gen, **kw), gen)
+    setup.__name__, setup.__doc__ = fn.__name__, fn.__doc__
+    return setup
+
+
+smoke_setup, hold_setup, go_setup, multi_setup, pair_setup = (_on_map(f) for f in (
+    smoke_setup, hold_setup, go_setup, multi_setup, pair_setup))
+shoot_setup, withdraw_setup, shoot2_setup, rout_setup, prio_setup, width_setup = (_on_map(f) for f in (
+    shoot_setup, withdraw_setup, shoot2_setup, rout_setup, prio_setup, width_setup))
+
 SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup, "multi": multi_setup, "hold2": pair_setup,
           "shoot1": shoot_setup, "withdraw": withdraw_setup, "shoot2": shoot2_setup, "rout": rout_setup,
           "prio": prio_setup, "width": width_setup}
@@ -358,6 +373,8 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     t_sim = 0.0
     sim_step = battle.stepper(device)          # compiled on CUDA (~10x), plain on the CPU
     in_force = O.hold(B, st.N, device)        # the orders in force until the new ones land
+    from tools.nn.unit import realmap
+    meter = realmap.Meter(B, device) if realmap.active() else None     # (on a real map: the exams' terrain readings)
     if branch is not None:
         from tools.nn.unit import branch as Br
         assert R == B and bool((ii == 0).all()), "branches: one network unit (slot 0) a battle"
@@ -460,6 +477,8 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
                     beh = torch.where(branched & ~was_done, nb, beh)
             if watch is not None:
                 watch(st, hp0, was_done, area, d * steps + j + 1)
+            if meter is not None:
+                meter.step(st, bi, ii, P, was_done)
             u = st.u
             out = Dc.signed_dist(u["x"], u["z"], {k: a for k, a in area.items() if k != "on"}) < -0.5
             alive = own & ~was_done[:, None] & (u["men"] > 0)
@@ -557,6 +576,8 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
     stats.update({"decisions": D, "battles": B, "win1": float((st.winner == 1).float().mean()),
                   "ended": float(st.done.float().mean()), "reward_mean": float(rew[:D][valid[:D]].sum() / R),
                   "sim_s": round(t_sim, 2)})
+    if meter is not None:
+        stats["terrain"] = meter.result()
     if ender is not None:
         stats["end"] = {w: float((ender.why == k).float().mean()) for k, w in ((1, "we_routed"), (2, "enemy_left"),
                                                                               (3, "limit"), (0, "open"))}
@@ -705,7 +726,13 @@ def main(argv=None):
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default="build/diag_g49/smoke")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--map", default=None, help="lay every skirmish at a random place and turn of this real map "
+                    "(build/maps/<name>: heights, ground, trunks; tools/nn/unit/realmap.py); the --exam at the end on "
+                    "its fixed places of the map")
     a = ap.parse_args(argv)
+    if a.map:
+        from tools.nn.unit import realmap
+        realmap.activate(a.map)
     torch.manual_seed(a.seed)
     P = load()
     drills = list(MIX) if a.drill == "mix" else [a.drill]
@@ -784,6 +811,8 @@ def main(argv=None):
                  "withdraw": exam_withdraw, "shoot2": exam_shoot2, "rout": exam_rout, "prio": exam_prio,
                  "width": exam_width}
         assert set(MIX) <= set(exams), "every drill of the mix has its exam"
+        if a.map:
+            realmap.activate(a.map, exam=True)          # (the exams' fixed places)
         if a.drill == "mix":                       # every drill's, one after another
             for d_ in MIX:
                 exams[d_].run(net, P, dev, duty, out / f"exam_{d_}.json")
