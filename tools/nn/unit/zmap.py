@@ -25,6 +25,12 @@ Layers (numbers fixed, new ones go last):
                  one cell); zeros without a missile weapon
    12 fire_arc   the part of that circle it fires in now without turning: within its fire arc now each side of the
                  frame's heading (view.fire_arc: standing 45 deg, on the move 90 or 0; the edge smoothed over a cell)
+   13 height     the ground at the cell's centre less the ground under the frame's unit, / HEIGHT_M, within +-2
+                 (tools/nn/sim/terrain.py; build/diag_g49/terrain/mechanic.md 6.2: the rules weigh only the difference,
+                 a map's own level is not the network's business); zeros on a flat battle
+   14 slope_fwd  the ground's rise per metre at the cell's centre along the frame's heading (forward), within +-1 (the
+                 speed on a slope by the way's rise: the two components give it for any way)
+   15 slope_right  the same to the frame's right
 
 A formation is a turned rectangle (front x depth, its bearing); every cell it covers is painted by the exact share of
 the cell's area inside it (Green's theorem: the integral of x dy over the parts of the rectangle's edges inside the
@@ -39,8 +45,10 @@ import torch
 
 CELLS = 30
 LAYERS = ("field", "off_map", "obstacle", "enemy", "enemy_cos", "enemy_sin", "own", "own_cos", "own_sin", "self",
-          "area", "reach", "fire_arc")
+          "area", "reach", "fire_arc", "height", "slope_fwd", "slope_right")
 LAYERS_BEFORE_FIRE = 11      # the layers before the shooter's (checkpoints made before them: train.restore pads them)
+LAYERS_BEFORE_HEIGHT = 13    # the layers before the ground's (the same padding)
+HEIGHT_M = 20.0              # the height layer's unit (m): +-2 = +-40 m, the missile rule's whole span
 L = {name: i for i, name in enumerate(LAYERS)}
 NONE, ENEMY, OWN, SELF = 0, 1, 2, 3          # a unit's role on the map
 DIRECTION = (L["enemy_cos"], L["enemy_sin"], L["own_cos"], L["own_sin"])
@@ -241,7 +249,29 @@ def fire_layers(rng, arc, cell_m, cells=CELLS):
     return reach, reach * inarc
 
 
-def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CELLS, chunk=None, fire=None):
+def ground_layers(cx, cz, heading, cell_m, terr, h0, cells=CELLS):
+    """([R, C, C] x 3) the height, slope_fwd and slope_right layers: the ground (tools/nn/sim/terrain.py, the map terr [R]
+    of each frame's battle, -1 flat) at each cell's centre less h0 [R] (the ground under the frame's unit) / HEIGHT_M
+    within +-2, and its rise per metre there along the frame's heading and to its right (central differences over 2 m),
+    within +-1."""
+    from tools.nn.sim import terrain
+    k = torch.arange(cells, device=cx.device, dtype=torch.float32)
+    s, f = cell_centre(k[:, None], k[None, :], cell_m.view(-1, 1, 1), cells)
+    s, f = s.expand(-1, cells, cells), f.expand(-1, cells, cells)
+    sh = (-1, 1, 1)
+    x, z = world(s, f, cx.view(sh), cz.view(sh), heading.view(sh))
+    u = {"terr": terr.long()[:, None]}
+    h = terrain.height(u, x, z)
+    hd = heading.view(sh) * DEG
+    fx, fz = torch.sin(hd), torch.cos(hd)
+    rx, rz = torch.cos(hd), -torch.sin(hd)
+    fwd = (terrain.height(u, x + fx, z + fz) - terrain.height(u, x - fx, z - fz)) / 2
+    right = (terrain.height(u, x + rx, z + rz) - terrain.height(u, x - rx, z - rz)) / 2
+    return ((h - h0.view(sh)) / HEIGHT_M).clamp(-2, 2), fwd.clamp(-1, 1), right.clamp(-1, 1)
+
+
+def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CELLS, chunk=None, fire=None,
+          ground=None):
     """[R, len(LAYERS), cells, cells] float maps.
 
     cx, cz, heading (degrees), cell_m: [R] the frames. units: {x, z, b, front, depth, fill, role} [R, K] (role NONE:
@@ -249,7 +279,9 @@ def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CEL
     optionally on [R] bool, or None. bounds: the square map's half-size (a number or [R]; the map is centred on 0, as
     State.bounds), None: no edge. chunk: maps per pass. A rectangle is painted only on the cells of its bounding
     box, an empty slot (role NONE) not at all (_paint). fire: {range, arc} [R] the frame's unit's missile range (m)
-    and fire arc now (degrees each side) for the reach / fire_arc layers (fire_layers), None: zeros."""
+    and fire arc now (degrees each side) for the reach / fire_arc layers (fire_layers), None: zeros. ground: {terr, h0}
+    [R] the frame's battle's height map (tools/nn/sim/terrain.py; -1 flat) and the ground under its unit for the
+    height / slope layers (ground_layers), None: zeros."""
     R = cx.shape[0]
     dev = cx.device
     K = 0 if units is None else units["x"].shape[1]
@@ -261,7 +293,8 @@ def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CEL
                                 None if units is None else {k: part(v, i) for k, v in units.items()},
                                 None if area is None else {k: part(v, i) for k, v in area.items()},
                                 part(bounds, i), cells, chunk,
-                                None if fire is None else {k: part(v, i) for k, v in fire.items()})
+                                None if fire is None else {k: part(v, i) for k, v in fire.items()},
+                                None if ground is None else {k: part(v, i) for k, v in ground.items()})
                           for i in range(0, R, chunk)])
     out = torch.zeros((R, len(LAYERS), cells, cells), device=dev)
     if bounds is None:
@@ -300,4 +333,7 @@ def build(cx, cz, heading, cell_m, units=None, area=None, bounds=None, cells=CEL
         out[:, L["area"]] = cov
     if fire is not None:
         out[:, L["reach"]], out[:, L["fire_arc"]] = fire_layers(fire["range"], fire["arc"], cell_m, cells)
+    if ground is not None:
+        out[:, L["height"]], out[:, L["slope_fwd"]], out[:, L["slope_right"]] = ground_layers(
+            cx, cz, heading, cell_m, ground["terr"], ground["h0"], cells)
     return out

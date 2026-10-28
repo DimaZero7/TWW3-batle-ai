@@ -15,8 +15,9 @@ own units (each by the gap). A row always describes the whole formation, however
 A row (ROW, raw numbers in the viewer's frame): j's centre right / forward of i's (/ 100 m), j's front against i's
 (cos, sin), j's velocity in i's frame (/ 5 m/s), front and depth (/ 50 m), men left (share of its start), health,
 MoralePercent, MoraleState / 7, the flags (routing, shattered, wavering, in melee, moving, running, firing), fatigue
-state / 5, projectiles left (share), whose (self / own / enemy), 'the target of my order' and (its own row only)
-'my order is now replaced by the leash' (decode.py). The card (the unit's
+state / 5, projectiles left (share), whose (self / own / enemy), 'the target of my order', (its own row only)
+'my order is now replaced by the leash' (decode.py) and the ground under its centre less mine / DH_M (dh: the
+melee's height rule saturates at 1 m - exact here, not on the map's 8 m cells; tools/nn/sim/terrain.py). The card (the unit's
 passport, tools/nn/model/passport.py) is a separate input. Memory: the same row of the same unit from each of the T
 past snapshots, put into i's frame of NOW (so the network sees how it moved); a snapshot where it was dead, gone or
 (an enemy) unseen is empty. Rows not in the zone are zeros under a false mask - nothing of an enemy outside the zone
@@ -32,10 +33,12 @@ REACH_S = 15.0         # s: the zone's time (the order's span) - a parameter
 TOWARD_DEG = 30.0      # the area beyond the map: the edge cells within this of the way to it are allowed
 RANGE_CELLS = 14.0     # a shooter's map: cell = its range / this (its range circle fits the 30 x 30 map: 15 cells a side)
 RAW = ("x", "z", "b", "vx", "vz", "front", "depth", "fill", "men", "hp", "mp", "ms", "r", "s", "w", "m", "mv", "f",
-       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash", "arc")
+       "fire", "fat", "ammo", "alive", "vis", "side", "range", "run", "leash", "arc", "gh", "terr")
 I = {k: i for i, k in enumerate(RAW)}
 ROW = ("right", "forward", "front_cos", "front_sin", "v_right", "v_forward", "front", "depth", "men", "hp", "mp",
-       "ms", "r", "s", "w", "m", "mv", "f", "fire", "fat", "ammo", "self", "own", "enemy", "my_target", "leashed")
+       "ms", "r", "s", "w", "m", "mv", "f", "fire", "fat", "ammo", "self", "own", "enemy", "my_target", "leashed",
+       "dh")
+DH_M = 20.0            # the row's dh: the ground under its centre less mine / DH_M (within +-4)
 DEG = torch.pi / 180
 SELF, OWN, ENEMY = 0, 1, 2
 
@@ -78,6 +81,10 @@ def raw(st, spacing, melee_depth=0.0, leash=None, missile=None):
             "fat": u["fat"], "ammo": ammo, "alive": alive, "vis": u["vis"], "side": u["side"], "range": u["range"],
             "run": u["run"], "leash": leash if leash is not None else torch.zeros_like(alive),
             "arc": fire_arc(u, missile)}
+    # the ground (tools/nn/sim/terrain.py): under the unit's centre, and its battle's height map (-1: flat)
+    from tools.nn.sim import terrain
+    cols["gh"] = terrain.ground(u)
+    cols["terr"] = u["terr"] if terrain.on(u) else torch.full_like(u["x"], -1.0)
     return torch.stack([cols[k].float() for k in RAW], -1)
 
 
@@ -110,7 +117,8 @@ def _row(j, me, whose, target):
             j[..., I["ms"]] / 7] + [j[..., I[k]] for k in ("r", "s", "w", "m", "mv", "f", "fire")] + [
             j[..., I["fat"]] / 5, j[..., I["ammo"]],
             (whose == SELF).float(), (whose == OWN).float(), (whose == ENEMY).float(), target.float(),
-            j[..., I["leash"]] * (whose == SELF).float()]
+            j[..., I["leash"]] * (whose == SELF).float(),
+            ((j[..., I["gh"]] - me[..., I["gh"]]) / DH_M).clamp(-4, 4)]
     return torch.stack(cols, -1)
 
 
@@ -189,7 +197,11 @@ def build(now, hist, card, who, order_target=None, area=None, cell_m=8.0, bounds
     ar = None if area is None else {k: v[bi, ii] for k, v in area.items()}
     # the shooter's range circle and its fire arc now (the user's decision 28.10: layers of the map)
     fire = {"range": me[:, I["range"]], "arc": me[:, I["arc"]]}
-    zm = Z.build(me[:, I["x"]], me[:, I["z"]], me[:, I["b"]], cm, units, area=ar, bounds=bounds, fire=fire)
+    # the ground's layers (height, slope_fwd, slope_right) only where a battle has a height map: else zeros
+    terr = me[:, I["terr"]]
+    ground = {"terr": terr, "h0": me[:, I["gh"]]} if bool((terr >= 0).any()) else None
+    zm = Z.build(me[:, I["x"]], me[:, I["z"]], me[:, I["b"]], cm, units, area=ar, bounds=bounds, fire=fire,
+                 ground=ground)
     cells_ok, target_ok = allowed(me, J, mask & (whose == ENEMY), ar, cm, bounds)
     return {"rows": rows_, "card": cards, "mask": mask, "slot": torch.where(mask, slot, torch.full_like(slot, -1)),
             "whose": whose, "mem": mem, "mem_mask": was, "map": zm, "cells_ok": cells_ok, "target_ok": target_ok,

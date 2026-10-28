@@ -268,6 +268,10 @@ def terms(u, ctx, params):
     out["lord"] = ctx["lord_dead_points"] + zero
     # Flanks secure (+5): battle.py ctx secure (no enemy near, or friends at both sides; morale.secure).
     out["secure"] = torch.where(ctx.get("secure", no), R["ume_encouraged_flanks_secure"], 0.0)
+    if ctx.get("hill") is not None:
+        # On the hill (+10, the database's ume_encouraged_on_the_hill): battle.py ctx hill (terrain.hill; a battle with a
+        # height map only - flat battles have no such term)
+        out["hill"] = torch.where(ctx["hill"], R["ume_encouraged_on_the_hill"], 0.0)
     lost = 1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6)
     out["casualties"] = steps(lost, table(R, "total_casualties_penalty_", (10, 20, 30, 40, 50, 60, 70, 80, 90)))
     base = (u["hp_abs"] + u["recent"]) if cal["recent_of_current"] else u["hp0"]

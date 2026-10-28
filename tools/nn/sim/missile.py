@@ -324,6 +324,17 @@ def square_side(u, d, theta):
     return torch.sqrt(u["cal_area"].clamp(min=0)[:, :, None] / p).clamp(min=1e-3)
 
 
+def acc_theta(theta, v, d, dh):
+    """The launch angle the accuracy's (1 - angle / 180 deg) takes (square_side): on the flat theta (the low arc's, as
+    given); with the ground's height (terrain.py, pw["dh"]: the target's ground less the shooter's) the low arc's that
+    puts the shot dh higher at d (_arc_tan; mechanic.md 3: the game solves its ballistics with the real height - a
+    target below is shot flatter, more accurately). The fall's geometry (the shadow, the spread along the ground) keeps
+    the flat arc's angle."""
+    if dh is None:
+        return theta
+    return torch.atan(_arc_tan(v, d, dh)).clamp(min=1e-3)
+
+
 def _share(lo, hi, m, w):
     """The share of a uniform [m - w, m + w] within [lo, hi]."""
     return ((torch.minimum(hi, m + w) - torch.maximum(lo, m - w)) / (2 * w)).clamp(0, 1)
@@ -440,7 +451,7 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     d = pw["dist"].clamp(min=5.0)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
-    sig, half = _spread(u, d, theta, params)
+    sig, half = _spread(u, d, acc_theta(theta, v, d, pw.get("dh")), params)
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)                      # the spread along the line, on the ground
     c = aim_frac(params) * L                         # the aim point (a man's middle) beyond his feet
@@ -491,7 +502,7 @@ def front_share(u, pw, params):
     d = pw["dist"].clamp(min=5.0)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
-    sig, half = _spread(u, d, theta, params)
+    sig, half = _spread(u, d, acc_theta(theta, v, d, pw.get("dh")), params)
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)
     c = aim_frac(params) * L
@@ -600,7 +611,8 @@ def spill_geometry(u, pw, target, params):
     th_ij = pw["theta"].gather(2, tj)                                       # bearing i -> j
     v0 = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     theta = (0.5 * torch.asin((d_ij * 9.81 / (v0 * v0)).clamp(max=1.0))).clamp(min=1e-3)
-    sig, _ = _spread(u, d_ij, theta, params)        # (the square spread: its equal-variance Gaussian here)
+    dh_ij = pw["dh"].gather(2, tj) if "dh" in pw else None
+    sig, _ = _spread(u, d_ij, acc_theta(theta, v0, d_ij, dh_ij), params)   # (the square: its equal-variance Gaussian)
     sa = sig / torch.sin(theta)
     r = u["radius"][:, None, :]                                             # [B, 1, k]
     Lk = u["height"][:, None, :] / torch.tan(theta)                         # [B, i, k]
@@ -935,6 +947,11 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
     ri = rad[:, :, None]
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     dh = ha - hm
+    if "dh" in pw:
+        # the ground's height (terrain.py): the aim point and the friends' heads over the shooter's ground - a shooter on a
+        # hill shoots over its own infantry below, one below a rise shoots into the friends on it
+        dh = dh + pw["dh"].gather(2, t)
+        q = q + pw["dh"]
 
     # the bodies' collision: a man of another unit stands no nearer than the two men's radii (the database's entity
     # radius, its shape a circle; the probe 'stacked': none nearer than 0.6 m, the least ~1.1 m once settled)
@@ -1058,6 +1075,11 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, wit
             """(lob, bad) [B, N]: the unit's line at tg is closed (friend_rays) - arcing fire beyond lob_min_m lobs,
             the rest may not shoot at it."""
             closed = friend_rays(u, pw, tg, params)
+            if "dh" in pw:
+                # the ground in the way (terrain.ground_closed: a hill between - direct fire does not shoot at that
+                # target, arcing fire lobs at 45 deg, as past friends)
+                from tools.nn.sim import terrain
+                closed = closed | terrain.ground_closed(u, pw, tg, params)
             d = pw["dist"].gather(2, tg.clamp(min=0)[:, :, None]).squeeze(2)
             lob = ~direct & closed & (d > lob_min)
             return lob, closed & ~lob
@@ -1326,7 +1348,14 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     if ms.get("physical_resist"):
         resist = (resist + u["resist_physical"]).clamp(max=0.9)
     # the same damage rule as a blow (melee.per_hit: armour roll, overkill; a lone man loses the mean)
-    hit = melee.per_hit(u["m_damage"][:, :, None], u["m_ap"][:, :, None], u["armour"][:, None, :],
+    md, ma = u["m_damage"][:, :, None], u["m_ap"][:, :, None]
+    if "dh" in pw:
+        # the height between shooter and target (terrain.missile_factor: x (1 + clamp(0.3 x (shooter's ground - the
+        # target's) / 40 m, +-0.3)) on the projectile's damage before the armour; a battle without a height map: none)
+        from tools.nn.sim import terrain
+        hf = terrain.missile_factor(pw["dh"], params)
+        md, ma = md * hf, ma * hf
+    hit = melee.per_hit(md, ma, u["armour"][:, None, :],
                         u["hp_man"][:, None, :], resist[:, None, :], single=(u["men0"] <= 1)[:, None, :])
     hp = landed * hit * (1 - shield)
     if (ms.get("penetration") or {}).get("on") and "pen_max" in u:

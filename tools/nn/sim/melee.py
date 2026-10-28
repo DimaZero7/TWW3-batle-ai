@@ -633,6 +633,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     struck = torch.where(single_j, torch.ones_like(struck), struck)
     div = n_max.clamp(min=1) if cal.get("splash_divides") else torch.ones_like(n_max)
     div = torch.where(single_j, torch.ones_like(div), div)
+    if "dh" in pw:
+        # the height between the fighting men (terrain.melee_factor: the game's x (1 - clamp(0.3 dh / 1 m, +-0.3)) per pair
+        # of men, on the base and the armour-piercing damage before the armour; a battle without a height map: none)
+        from tools.nn.sim import terrain
+        hf = terrain.melee_factor(u, pw, params)
+        dmg, ap, extra = dmg * hf, ap * hf, extra * hf
     hit = per_hit((dmg + extra * share) * reflect / div, (ap + extra * (1 - share)) * reflect / div,
                   u["armour"][:, None, :], u["hp_man"][:, None, :], u["resist_physical"][:, None, :],
                   single=single_j)

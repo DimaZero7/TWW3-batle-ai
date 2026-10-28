@@ -1704,9 +1704,10 @@ def runs(root=RUNS):
 
 # ---------------------------------------------------------------- the simulator on the same lanes
 
-def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
+def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, terrain_map=None):
     """The simulator on recorded lanes: each lane its own battle (its units at their places at the
-    probe's go), the same scripted orders as the entry's modes, everyone fearless. Returns lanes in
+    probe's go), the same scripted orders as the entry's modes, everyone fearless; terrain_map: a height map's id
+    (tools/nn/sim/terrain.register) for every lane, None flat. Returns lanes in
     the game's shape (samples every 0.5 s, contacts, phases), `copies` per recorded lane."""
     import torch
     from tools.nn.sim import abilities as sim_abilities, battle, orders as O, scenario as sim_scenario
@@ -1772,6 +1773,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     gen = torch.Generator().manual_seed(seed)
     for k in ("x", "z"):
         st.u[k] = st.u[k] + ((torch.rand(st.u[k].shape, generator=gen) * 2 - 1) * jitter_m).to(device)
+    if terrain_map is not None:
+        # the lanes' ground (the terrain plans: placed in the map's world coordinates; tools/nn/sim/terrain.py)
+        from tools.nn.sim import terrain as sim_terrain
+        sim_terrain.set_map(st, terrain_map)
     B, N = st.B, st.N
     slot = {r: torch.tensor([sim_scenario.slots(a, per_side).get(r, -1) for a in armies], device=device)
             for r in ("a", "tg", "l", "t2", "e1", "e2", "e3")}

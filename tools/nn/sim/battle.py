@@ -11,7 +11,7 @@ import math
 import torch
 
 from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
-from tools.nn.sim import reform, skirmish, stealth
+from tools.nn.sim import reform, skirmish, stealth, terrain
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -148,6 +148,10 @@ def step(st, orders, params=None, dt=None):
 
     # --- contacts ---
     pw = geometry.pairwise(u, spacing, rect=rect, melee_depth=mdepth)
+    if terrain.on(u):
+        # the ground's height (terrain.py; a battle without a height map: none of it, bit for bit): the ground under j's
+        # centre less i's - melee and missile damage, the launch angle, the line of fire past friends and the ground
+        pw["dh"] = terrain.pair_dh(u)
     both = alive[:, :, None] & alive[:, None, :]
     # Formations touch when their edges overlap by -reach_m (the game's formations step into each other at the
     # contact); a lone man (a lord) stops at a formation's edge (contact.lord_reach_m). Units already fighting stay in
@@ -1002,11 +1006,15 @@ def step(st, orders, params=None, dt=None):
         # at 0.17-0.33 of the router - rallies 0.087 a second, none within 95 m 0.136, 0.33-0.5 - 0.006)
         sv = morale.strategic_value(u, params)
         blocks = sv[:, None, :] >= float(rw["ratio"]) * sv[:, :, None]
+    if terrain.on(u):
+        # on the hill (+10, the database's ume_encouraged_on_the_hill; terrain.hill)
+        ctx_hill = terrain.hill(u, pw, alive, params)
     ctx = {
         "aura": aura * standing.float(),
         "collapse": collapse,
         "lord_dead_points": lord_pts,
         "secure": secure,
+        "hill": ctx_hill if terrain.on(u) else None,
         "in_melee": engaged,
         "in_combat": engaged | firing | shot_now,
         "foe_lost": foe_lost,
@@ -1202,6 +1210,14 @@ def step(st, orders, params=None, dt=None):
         movement.limit_turn(u, before_b, steer, u["turn"] * dt)
         off = torch.remainder(torch.rad2deg(torch.atan2(dxg, dzg)) - u["b"] + 180, 360) - 180
         want = torch.where(steer, want * torch.cos(torch.deg2rad(off)).clamp(min=0), want)
+    if terrain.on(u):
+        # the slope along the way (terrain.speed_factor: up x 1 / (1 + g), down x (1 + |g|) at most x1.5; the probe
+        # terrain's shuttles; config/nn/sim.json terrain.why)
+        dxw, dzw = gx - u["x"], gz - u["z"]
+        dw = torch.sqrt(dxw * dxw + dzw * dzw).clamp(min=1e-6)
+        tcal = params.sim["terrain"]
+        g = terrain.slope(u, u["x"], u["z"], dxw / dw, dzw / dw, float(tcal["slope_L_m"]))
+        want = want * terrain.speed_factor(g, float(tcal["speed_down_max"]))
     vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
     stop = locked | ~alive
     vx = torch.where(stop, torch.zeros_like(vx), vx)

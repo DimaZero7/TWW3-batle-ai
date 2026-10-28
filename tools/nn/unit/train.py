@@ -645,6 +645,20 @@ def restore(path, device="cpu"):
             new[:, :w.shape[1]] = w
             sd["trunk.map.c1.weight"] = new
             ck["padded"] = True
+        for name, col in (("trunk.rows.state.weight", None), ("trunk.memory.gru.weight_ih_l0", -1)):
+            # a checkpoint from before the row's later columns (view.ROW: dh, the ground's height - the last): their
+            # input columns zero; the memory's GRU takes the row and the snapshot's mask last, so its new columns go
+            # before that one
+            if name in sd and sd[name].shape[1] < own[name].shape[1]:
+                w = sd[name]
+                new = torch.zeros(own[name].shape, dtype=w.dtype, device=w.device)
+                if col is None:
+                    new[:, :w.shape[1]] = w
+                else:
+                    new[:, :w.shape[1] - 1] = w[:, :-1]
+                    new[:, -1] = w[:, -1]
+                sd[name] = new
+                ck["padded"] = True
         for name, p in own.items():
             if name not in sd and name.startswith("width."):
                 # a checkpoint from before the width head: its start (net.init_width: zero weights, 'keep' first)
