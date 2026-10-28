@@ -165,7 +165,7 @@ class TestAfterAMove:
 
 
 class TestWhereTheFacingDoesNothing:
-    def test_in_melee_the_facing_changes_nothing(self):
+    def test_in_melee_the_facing_waits(self):
         def fight():
             st = scenario.build([army([(SPEAR, -50, 0, 90)], [(CLANRAT, 50, 0, 270)])], P)
             front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
@@ -181,11 +181,16 @@ class TestWhereTheFacingDoesNothing:
             o.kind[0, H], o.target[0, H] = O.ATTACK, 0
             o.face[0, 0] = face
             return o
-        for k in range(30):
+        # (in melee the facing waits turn.face_melee_delay_s, test_sim_face_melee.py; until then nothing changes the
+        # bearing of the unit told to face, the control's drifts at contact.melee_turn_deg_s at most)
+        delay = P.sim["turn"]["face_melee_delay_s"]
+        b0 = float(b.u["b"][0, 0])
+        for k in range(int(delay / P.dt) - 1):
             battle.step(a, attack(a, -1.0), P)
             battle.step(b, attack(b, 0.0), P)                 # spearmen in melee told to face north
             assert bool(b.u["m"][0, 0])
-            assert torch.equal(a.u["b"], b.u["b"])
+            assert float(b.u["b"][0, 0]) == b0
+            assert abs(float(a.u["b"][0, 0]) - b0) <= P.sim["contact"]["melee_turn_deg_s"] * P.dt * (k + 1) + 1e-4
 
     def test_an_attack_ignores_the_facing(self):
         a, b = lone(SPEAR), lone(SPEAR)

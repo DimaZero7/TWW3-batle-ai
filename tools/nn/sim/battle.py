@@ -120,10 +120,14 @@ def step(st, orders, params=None, dt=None):
             # (missile.burst_cut_reload; the ratlingrt / ratlingrt2 probes)
             missile.burst_cut(u, changed, float(cal["missile"].get("burst_cut_spread_s") or 0.0))
     u["order_kind"], u["order_target"], u["order_run"] = kind, tgt, run
+    face_new = torch.zeros_like(take)
     if "oface" in u:
         # the facing to stand at (Orders.face snapped to the game's 64 sectors, orders.snap_face; -1 none): a new order
         # (not KEEP) replaces it; another facing restarts the re-form's clock (the same one re-issued does not)
         face = torch.where(take, O.snap_face(orders.face), u["oface"])
+        # a facing order given now (another facing than the one in force; the same one re-given is no new order, as a
+        # move point within 1 m): in melee it opens the melee exit's window below (contact.face_breakoff)
+        face_new = take & (face >= 0) & (face != u["oface"]) & (kind != O.ATTACK)
         u["oface_s"] = torch.where(face != u["oface"], torch.zeros_like(u["oface_s"]), u["oface_s"])
         u["oface"] = face
     if "order_s" in u:
@@ -297,6 +301,29 @@ def step(st, orders, params=None, dt=None):
         striker = striker & ~((kind == O.HOLD) & (u["brk_s"] > 0) & form)
     # (blows do not fall on a hidden enemy - in contact it is revealed at the step's end: stealth.py)
     strike = touch & striker[:, :, None] & seen[:, None, :]
+    if cal["contact"].get("face_breakoff") and "fbk_s" in u:
+        # A facing order in melee is a move order (the game's goto_location_angle_width): it opens the melee exit's window
+        # (contact.face_breakoff; config/nn/sim.json contact.face_breakoff_why; build/diag_g49/turn_melee/mechanic.md).
+        # A formation given a new facing while it touches a standing enemy starts no blow on every enemy it touches then
+        # for the database's melee_breakoff_secs (24 s; per enemy unit - fbk_s [B, N * N], row i the unit, column j the
+        # enemy - kept while that enemy is within enemy_melee_neighbour_radius, 100 m: parted and met again, still none),
+        # and for the first melee_breakoff_total_immunity_secs (10 s; fim_s) strikes nobody but its order's target (a
+        # facing has none). An attack order on that enemy ends its window at once; another facing restarts both; a hold
+        # neither opens nor ends them. The enemy strikes it as before; its defence, attack and morale are untouched.
+        win = float(R.get("melee_breakoff_secs", 0.0))
+        imm = float(R.get("melee_breakoff_total_immunity_secs", 0.0))
+        near_m = float(R.get("enemy_melee_neighbour_radius", 1e9))
+        fbk = u["fbk_s"].view(st.B, N, N)
+        engaged_now = standing & (touch & standing[:, None, :]).any(2)
+        begin_f = face_new & engaged_now & (u["men0"] > 1)
+        pair_new = begin_f[:, :, None] & touch & pw["enemy"] & standing[:, None, :]
+        ar_n = torch.arange(N, device=st.device)
+        attacked = (kind == O.ATTACK)[:, :, None] & (tgt[:, :, None] == ar_n[None, None, :])
+        fbk = torch.where(pair_new, torch.full_like(fbk, win),
+                          torch.where(attacked | (pw["dist"] > near_m), torch.zeros_like(fbk), (fbk - dt).clamp(min=0)))
+        u["fbk_s"] = fbk.reshape(st.B, N * N)
+        u["fim_s"] = torch.where(begin_f, torch.full_like(u["fim_s"], imm), (u["fim_s"] - dt).clamp(min=0))
+        strike = strike & ~(fbk > 0) & ~((u["fim_s"] > 0)[:, :, None] & ~attacked)
     # A lone man chasing a lone router (the enemy lord after our lord) strikes him only within his own reach - the
     # regular contact -, not across the pursuit's box gap (the routing mob strings out beyond its box, a lone man does
     # not); the router's melee flag keeps the chase (lone_rout.strike_cut, config/nn/sim.json contact.lone_rout own_reach)
@@ -1274,7 +1301,19 @@ def step(st, orders, params=None, dt=None):
         off = (torch.remainder(u["oface"] - u["b"] + 180, 360) - 180).abs()
         face_ready = (standing & (u["oface"] >= 0) & (kind != O.ATTACK) & arrived & ~mv & ~engaged & ~steer & ~has_opp
                  & ~shooting & (off > 1e-3))
-        u["oface_s"] = torch.where(face_ready, u["oface_s"] + dt, torch.zeros_like(u["oface_s"]))
+        # In melee (turn.face_melee_delay_s; config/nn/sim.json turn.face_melee_why: the meleeturn / meleeturn2 probes):
+        # a formation holding a facing order while engaged keeps its bearing (no 2 deg/s drift to its opponent) for
+        # face_melee_delay_s, then turns to the facing at formation_deg_s.
+        fm_delay = t_cal.get("face_melee_delay_s")
+        melee_face = ((standing & (u["oface"] >= 0) & (kind != O.ATTACK) & engaged & (u["men0"] > 1) & (off > 1e-3))
+                      if fm_delay is not None else torch.zeros_like(face_ready))
+        u["oface_s"] = torch.where(face_ready | melee_face, u["oface_s"] + dt, torch.zeros_like(u["oface_s"]))
+        if fm_delay is not None:
+            turned = old["b"].clone()
+            tmp = {"b": u["oface"].clone()}
+            movement.limit_turn(tmp, old["b"], torch.ones_like(melee_face), float(t_cal.get("formation_deg_s", 360.0)) * dt)
+            turned = torch.where(u["oface_s"] >= float(fm_delay) - 1e-6, tmp["b"], turned)
+            u["b"] = torch.where(melee_face, turned, u["b"])
         delay = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal.get("face_delay_s", 0.0))),
                             torch.full_like(u["b"], float(t_cal.get("face_delay_single_s", 0.0))))
         u["b"] = torch.where(face_ready & (u["oface_s"] >= delay - 1e-6), u["oface"], u["b"])

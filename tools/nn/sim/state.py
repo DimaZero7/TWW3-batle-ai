@@ -303,6 +303,8 @@ INTERNAL = {
     "oface": ("f", "its facing to stand at (Orders.face snapped to the game's 64 sectors), degrees; -1 none"),
     "oface_s": ("f", "seconds the unit has stood ready to take that facing (the re-form's clock: it turns from "
                      "turn.face_delay_s on; battle.py)"),
+    "fim_s": ("f", "seconds left of the 10 s after a facing order given in melee in which it strikes nobody but its "
+                   "order's target (melee_breakoff_total_immunity_secs; battle.py contact.face_breakoff)"),
     "ab0_on": ("f", "seconds ability 0 stays active"),
     "ab0_cd": ("f", "seconds until ability 0 is ready"),
     "ab1_on": ("f", "seconds ability 1 stays active"),
@@ -375,6 +377,8 @@ HISTORY = {
 }
 # Per pair of units, [B, N * N] (row: the attacker j, column: the unit i it strikes; 2-D for the same reason):
 PAIRS = {
+    "fbk_s": "seconds left of the melee exit's window a facing order given in melee opened on enemy j for unit i "
+             "(melee_breakoff_secs from the order; no blow of i starts on j while > 0; battle.py contact.face_breakoff)",
     "hit_sec": "the side of i that j's contact began on, + 1 (1 front, 2 flank, 3 rear; 0: no contact): held while the "
                "pair stays in contact (morale.attacked_first: the database's 'attacked in the flank / rear' is the "
                "first contact's side)",
