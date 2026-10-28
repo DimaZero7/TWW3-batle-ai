@@ -763,6 +763,30 @@ function M.main(bm, config, globals)
                             t = now - lane.t0})
                     end
                 end
+                -- lane.entity_fields (the manfields plan): entity_at_s after the first contact, once, what the game's CCO
+                -- answers for the first men of both units under each name of lane.entity_fields (up to 4 values each)
+                if lane.entity_fields and lane.contact and not lane.entity_done
+                    and now - lane.contact >= (lane.entity_at_s or 3) * 1000 then
+                    lane.entity_done = true
+                    local found = {}
+                    for _, who in ipairs({'a', 't'}) do
+                        local u = lane[who].unit
+                        for i = 0, 2 do
+                            for _, f in ipairs(lane.entity_fields) do
+                                local res = {pcall(cco, u, 'ManList.At(' .. i .. ').' .. f)}
+                                if res[1] and res[2] ~= nil then
+                                    local vals = {}
+                                    for k = 2, math.min(#res, 5) do
+                                        local v = res[k]
+                                        vals[#vals + 1] = type(v) == 'number' and round(v, 4) or tostring(v)
+                                    end
+                                    found[#found + 1] = {who = who, i = i, field = f, values = vals}
+                                end
+                            end
+                        end
+                    end
+                    emit('probe_entity_fields', {lane = lane.name, t = now - lane.t0, found = found})
+                end
                 -- lane.after, then lane.after2 (a second order later: the holdmelee plan's halt after a move or an
                 -- attack given in melee); each at its at_s after the first contact
                 for n, key in ipairs({'after', 'after2'}) do

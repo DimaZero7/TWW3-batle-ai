@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -956,6 +956,17 @@ def battles(plan):
                            p2={"x": round(x1, 1), "z": round(z1, 1)},
                            t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(float(x0), float(z0))))
         out += [b1, b2]
+    elif plan == "manfields":
+        # what the game answers for one soldier (CCO ManList.At(i).<name>; the documentation lists only Position, Key,
+        # IsAlive, IsMan, IsEngine, reload, EntityRecordContext, UnitContext): a facing, a target? - 1 short fight
+        names = ["Position", "Orientation", "Direction", "Heading", "Facing", "Bearing", "Rotation", "Forward",
+                 "ForwardVector", "Angle", "Yaw", "Velocity", "Speed", "TargetEntity", "TargetContext",
+                 "CombatTargetContext", "MeleeTargetContext", "TargetEntityContext", "IsInMelee", "IsFighting",
+                 "IsAttacking", "AnimationState", "Key", "IsAlive", "IsMan", "EntityRecordContext.Key",
+                 "UnitContext.Bearing", "Position.x", "Position.X", "Position.w", "Position.W", "Orientation.y"]
+        out.append([lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=8, max_s=25,
+                         entity_fields=names, entity_at_s=3, kind="fields"),
+                    lane("spear", "slave", "attack_walk", "both", gap_m=3, fight_s=8, max_s=25, kind="pair")])
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
