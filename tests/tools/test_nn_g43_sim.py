@@ -118,13 +118,51 @@ def test_firing_reveals_running_does_not_and_it_hides_again_after_5_s():
     assert bool(st.u["hid"][0, 0])                           # 5 s
 
 
-def test_the_fresh_bonus_widens_the_reach_for_5_s_after_hiding():
+def test_the_fresh_bonus_widens_the_reach_while_the_unit_is_not_yet_hidden():
+    # stealth.fresh_before (the program, build/diag_g49/terrain/stealth.md 1): +20 m while its hide clock runs, not
+    # after it hid. 72 m: beyond 64, within (80 + 20) x 0.8 = 80
     st = scenario.build([duel(GR, SPEAR, 100)], P)
     g = gap_of(st)
-    st = scenario.build([duel(GR, SPEAR, 100 - (g - 72.0))], P)    # 72 m: beyond 64, within (80 + 20) x 0.8 = 80
-    st.u["hid_t"][0, 0] = 0.0                                      # it has just hidden
+    st = scenario.build([duel(GR, SPEAR, 100 - (g - 72.0))], P)
+    st.u["hid_t"][0, 0] = 0.0                                      # it has just hidden: no bonus now
     run(st, 1)
-    assert bool(st.u["vis"][0, 0])
+    assert bool(st.u["hid"][0, 0]) and not bool(st.u["vis"][0, 0])
+    st = scenario.build([duel(GR, SPEAR, 100 - (g - 72.0))], P)
+    st.u["hid"][0, 0], st.u["hid_s"][0, 0], st.u["hid_r"][0, 0] = False, 1.0, 0.0     # its clock running
+    run(st, 1)
+    assert not bool(st.u["hid"][0, 0]) and float(st.u["hid_s"][0, 0]) == 0.0      # seen: the clock starts over
+    old = with_sim(stealth={"fresh_before": 0})
+    st = scenario.build([duel(GR, SPEAR, 100 - (g - 72.0))], old)
+    st.u["hid_t"][0, 0] = 0.0
+    run(st, 1, params=old)
+    assert bool(st.u["vis"][0, 0])                                 # the old reading: seen just after it hid
+
+
+def test_revealed_for_less_than_1_5_s_it_hides_again_at_once():
+    st = scenario.build([duel(GR, SPEAR, 400)], P)
+    st.u["hid"][0, 0], st.u["hid_s"][0, 0], st.u["hid_r"][0, 0] = False, 0.0, 1.0      # revealed 0.5 s ago
+    run(st, 1)
+    assert bool(st.u["hid"][0, 0])
+    st = scenario.build([duel(GR, SPEAR, 400)], P)
+    st.u["hid"][0, 0], st.u["hid_s"][0, 0], st.u["hid_r"][0, 0] = False, 0.0, 0.0      # revealed long ago
+    run(st, 1)
+    assert not bool(st.u["hid"][0, 0])
+
+
+def test_a_routing_enemy_sees_nobody():
+    st = scenario.build([duel(GR, SPEAR, 100)], P)
+    g = gap_of(st)
+    st = scenario.build([duel(GR, SPEAR, 100 - (g - 50.0))], P)    # 50 m: within 64
+    st.u["r"][0, st.N // 2] = True
+    stealth.update(st.u, geometry.pairwise(st.u, P.sim["formation"]["spacing_m"],
+                                           rect=bool(P.sim["contact"].get("rect_gap"))), P, 0.5,
+                   torch.zeros_like(st.u["hid"]), torch.zeros_like(st.u["hid"]), torch.zeros_like(st.u["hid"]))
+    assert bool(st.u["hid"][0, 0])
+    st.u["r"][0, st.N // 2] = False
+    stealth.update(st.u, geometry.pairwise(st.u, P.sim["formation"]["spacing_m"],
+                                           rect=bool(P.sim["contact"].get("rect_gap"))), P, 0.5,
+                   torch.zeros_like(st.u["hid"]), torch.zeros_like(st.u["hid"]), torch.zeros_like(st.u["hid"]))
+    assert not bool(st.u["hid"][0, 0])
 
 
 def test_a_hidden_enemy_is_not_shot_not_attacked_and_not_counted_by_morale():
@@ -353,4 +391,9 @@ def test_the_penetration_limit_and_hiding_are_worked_out_once():
     old = {k: u for k, u in P.units.items() if "gutter" not in k and "jezzail" not in k and "long_rifles" not in k
            and "huntsmen" not in k}
     q = Params(old, P.rules, P.sim, P.abilities, P.effects, P.spells)
-    assert q.pen_men == 1 and not q.can_hide and not stealth.on(q)
+    # (hide_forest units hide in woods: stealth is on while any unit can hide - ground.py's forest)
+    assert q.pen_men == 1 and q.can_hide and stealth.on(q)
+    bare = {k: {**u, "attributes": [a for a in u.get("attributes") or () if a not in ("stalk", "hide_forest")]}
+            for k, u in old.items()}
+    q2 = Params(bare, P.rules, P.sim, P.abilities, P.effects, P.spells)
+    assert not q2.can_hide and not stealth.on(q2)

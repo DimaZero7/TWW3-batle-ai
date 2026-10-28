@@ -2039,6 +2039,18 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                         x[b, i], z[b, i] = re_[who]
                 else:
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
+            elif mode[b] == "shuttle" and sp.get("p2"):
+                # (the terrain / ground plans' shuttles: the attacker runs between its start and p2, turning within 5 m;
+                # the target holds - its own orders below)
+                leg = st_.setdefault("shuttle", {}).get(b, 1)
+                home = st_["start"][b]
+                goal = (float(sp["p2"]["x"]), float(sp["p2"]["z"])) if leg % 2 else home
+                if math.dist((float(ax[b]), float(az[b])), goal) <= 5:
+                    leg += 1
+                    goal = (float(sp["p2"]["x"]), float(sp["p2"]["z"])) if leg % 2 else home
+                st_["shuttle"][b] = leg
+                kind[b, A], target[b, A], run_[b, A] = O.MOVE, -1, True
+                x[b, A], z[b, A] = goal
             elif mode[b] == "tire":
                 ti = st_["tire"][b]
                 if ti is None:

@@ -44,3 +44,19 @@ def test_zones_corners_from_centre_size_and_facing():
     assert xs[0] == pytest.approx(-40) and xs[-1] == pytest.approx(60)      # facing +x: the depth along x
     assert zs[0] == pytest.approx(-120) and zs[-1] == pytest.approx(80)
     assert map_grid.map_of(xml) == ("terrain\\battles\\x\\", "c1")
+
+
+def test_tree_bodies_by_the_game_s_rule():
+    # a tree is a cylinder: radius min((CollRadius or 0.85) x scale, 2.25), height CollHeight x scale; no metadata row,
+    # no body (build/diag_g49/terrain/trees.md 3)
+    meta = [{"Filename": "A.rigid_model_v2", "CollHeight": "10", "CollRadius": "0.4"},
+            {"Filename": "Big.rigid_model_v2", "CollHeight": "20", "CollRadius": "2.0"},
+            {"Filename": "zero.rigid_model_v2", "CollHeight": "5", "CollRadius": "0"}]
+    pts = [{"model": "a.RIGID_MODEL_V2", "x": "1", "y": "200", "z": "2", "scale": "1.5"},
+           {"model": "Big.rigid_model_v2", "x": "3", "y": "201", "z": "4", "scale": "1.5"},
+           {"model": "zero.rigid_model_v2", "x": "5", "y": "202", "z": "6", "scale": "0.5"},
+           {"model": "unknown.rigid_model_v2", "x": "7", "y": "203", "z": "8", "scale": "1"}]
+    b = map_grid.tree_bodies(pts, meta)
+    assert b["x"].tolist() == [1, 3, 5] and b["z"].tolist() == [2, 4, 6] and b["y"].tolist() == [200, 201, 202]
+    assert b["r"].tolist() == pytest.approx([0.6, 2.25, 0.425])
+    assert b["h"].tolist() == pytest.approx([15.0, 30.0, 2.5])

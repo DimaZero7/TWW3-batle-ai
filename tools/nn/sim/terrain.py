@@ -34,10 +34,17 @@ def register(grid, x0, z0, step):
     return len(_MAPS) - 1
 
 
-def load_npz(path):
-    """Register a map_grid heights.npz (height [rows, columns], x0, z0, step: tools/nn/map_grid.py); returns its id."""
+def load_npz(path, layers=True):
+    """Register a map_grid heights.npz (height [rows, columns], x0, z0, step: tools/nn/map_grid.py); returns its id.
+    layers: with the map folder's ground types (heights.npz ground + meta.json names) and trunks (trees.npz) - ground.py;
+    False: the heights alone."""
+    from pathlib import Path
     d = np.load(path)
-    return register(d["height"], float(d["x0"]), float(d["z0"]), float(d["step"]))
+    mid = register(d["height"], float(d["x0"]), float(d["z0"]), float(d["step"]))
+    if layers:
+        from tools.nn.sim import ground
+        ground.load_layers(mid, Path(path).parent)
+    return mid
 
 
 def set_map(st, map_id, battles=None):

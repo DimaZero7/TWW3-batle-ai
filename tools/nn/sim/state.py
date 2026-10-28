@@ -184,6 +184,14 @@ STATIC = {
                     "stealth.py)"),
     "hide_k": ("f", "its hiding_scalar: an enemy sees it hidden within its spotting distance x this (0.8 the Gutter "
                     "Runners)"),
+    # (28.10.2026: the map's ground and trees, tools/nn/sim/ground.py)
+    "spot_tree": ("f", "how far it sees a hidden enemy standing mostly on forest ground, m (the database's land_units "
+                       "spot_dist_tree: 60; stealth.py)"),
+    "hidef": ("b", "attribute hide_forest: it hides in woods (stealth.py: its men on forest ground)"),
+    "strider": ("b", "attribute strider: no ground penalty, passes through the trees (ground.py)"),
+    "ign_trees": ("b", "attribute ignore_trees: passes through the trees, no forest penalty (ground.py)"),
+    "veg_m": ("f", "its projectile's first metres of flight no tree stops (the database's vegetation_ignore_time x "
+                   "muzzle_velocity, ~42 m; ground.trunk_keep); 0 no missile"),
     "reload_db": ("f", "the database's reload_s of its projectile, s (the reload skill's base: max(4 s, base x (100 - "
                        "skill) %); `reload` is the measured cycle, scaled by it; 0 no missile)"),
     "pen_max": ("f", "its projectile's penetration counter (the database's projectile_penetration_junctions "
@@ -374,6 +382,9 @@ INTERNAL = {
     "hid_s": ("f", "the hide clock: seconds it has met the hiding conditions unseen (it hides at stealth.hide_s)"),
     "hid_t": ("f", "seconds since it hid (the enemies' spotting + stealth.fresh_bonus_m for stealth.fresh_s)"),
     "hid_g": ("f", "seconds of the grace used out of cover while hidden (stealth.grace_s)"),
+    "hid_r": ("f", "seconds left of the window after it was revealed in which it hides again at once (stealth.quick_s)"),
+    "hid_d": ("b", "deployed, not stepped yet: a hide_forest unit in the woods at the first step starts hidden "
+                   "(stealth.start_hidden)"),
 }
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}

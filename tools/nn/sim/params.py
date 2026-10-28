@@ -95,7 +95,10 @@ class Params:
 
     def __post_init__(self):
         self.pen_men = pen_limit_of(self.units or {}, self.sim or {})
-        self.can_hide = any("stalk" in (u.get("attributes") or ()) for u in (self.units or {}).values())
+        # (hide_forest too: on a map with forest ground such a unit hides there - stealth.cover; without one it never
+        # meets the conditions, so stealth's step changes nothing)
+        self.can_hide = any({"stalk", "hide_forest"} & set(u.get("attributes") or ())
+                            for u in (self.units or {}).values())
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -245,7 +248,17 @@ class Params:
             "cost": u.get("multiplayer_cost", 0),
             # stealth (stealth.py): its spotting distance (open ground: spot_dist_scrub) and hiding_scalar
             "spot_m": float((u.get("spotting") or {}).get("scrub", 80.0)),
+            # ... and of a target mostly on forest ground (spot_dist_tree: 60 m; stealth.py)
+            "spot_tree": float((u.get("spotting") or {}).get("tree", 60.0)),
             "hide_k": float(u.get("hiding_scalar") or 1.0),
+            # the map's ground and trees (ground.py): hides in woods (hide_forest), no ground penalty and through the
+            # trees (strider), through the trees (ignore_trees); its projectile's first metres no tree stops
+            # (the database's vegetation_ignore_time x muzzle_velocity: terrain.trees.ignore_s by projectile)
+            "hidef": "hide_forest" in (u.get("attributes") or ()),
+            "strider": "strider" in (u.get("attributes") or ()),
+            "ign_trees": "ignore_trees" in (u.get("attributes") or ()),
+            "veg_m": (float(((self.sim.get("terrain") or {}).get("trees") or {}).get("ignore_s", {}).get(
+                missile.get("projectile"), 0.0)) * float(missile.get("muzzle_velocity") or 0.0)) if missile else 0.0,
             # the penetrating projectile (missile.py penetration): its counter and size cap, a man's resistance and size
             "pen_max": float(missile.get("penetration_max") or 0) if missile else 0.0,
             "pen_cap": float(SIZE_RANK.get(missile.get("penetration_cap"), 99) if missile.get("penetration_cap")

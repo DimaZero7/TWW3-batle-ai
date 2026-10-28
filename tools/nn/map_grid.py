@@ -6,6 +6,11 @@ timing) and preview.png (dark lows, light hills, the zones outlined).
 
     python -m tools.nn.map_grid capture --name ksl_plains_01 [--step 1]   # build, launch, convert (needs the game free)
     python -m tools.nn.map_grid convert build/map-capture/runs/<run> --name ksl_plains_01
+    python -m tools.nn.map_grid trees --name ksl_plains_01 --points <tree-points.csv.gz> --meta <tree_metadata.txt>
+
+trees.npz (the trunks: x, z, base y, radius r, height h - float32; tree_bodies) comes from the map's tree list (the map
+file's *.tree_list.bin, read once: research/evidence/map/forest-trees-20260925/tree-points.csv.gz for Kislev) and
+vegetation.pack's tree_metadata.txt; the game gives no tree to scripts (build/diag_g49/terrain/trees.md 3).
 
 The scenario (scenarios/map_capture.xml) decides the map; the zones are that scenario's deployment areas, not the map's
 own (the game gives a map's zones to a battle only through the battle's XML)."""
@@ -185,9 +190,62 @@ def capture(name, step=1, python=sys.executable):
     return convert(RUNS / new[-1], name)
 
 
+TRUNK_MAX_M = 2.25          # the game's cap on a tree body's radius (build/diag_g49/terrain/trees.md 3)
+TRUNK_ZERO_M = 0.85         # a model whose CollRadius is 0 gets this radius before the scale
+
+
+def tree_bodies(points, meta_rows):
+    """The trunks of a map: points - the map's tree list rows (model, x, y, z, scale: the tree_list.bin read, world
+    metres), meta_rows - vegetation.pack tree_metadata.txt rows (Filename, CollHeight, CollRadius). Each tree is a
+    vertical cylinder from its base y: radius min((CollRadius or 0.85) x scale, 2.25), height CollHeight x scale; a
+    model without a metadata row has no body (the game builds none). -> dict of float32 arrays x, z, y, r, h."""
+    meta = {}
+    for row in meta_rows:
+        name = (row.get("Filename") or "").strip().lower()
+        try:
+            meta[name] = (float(row["CollHeight"]), float(row["CollRadius"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    out = {k: [] for k in ("x", "z", "y", "r", "h")}
+    for p in points:
+        m = meta.get(str(p["model"]).strip().lower())
+        if m is None:
+            continue
+        s = float(p["scale"])
+        out["x"].append(float(p["x"]))
+        out["z"].append(float(p["z"]))
+        out["y"].append(float(p["y"]))
+        out["r"].append(min((m[1] or TRUNK_ZERO_M) * s, TRUNK_MAX_M))
+        out["h"].append(m[0] * s)
+    return {k: np.asarray(v, np.float32) for k, v in out.items()}
+
+
+def trees(points_csv, meta_txt, name, out_root=MAPS):
+    """trees.npz next to the map's heights.npz: the trunks (tree_bodies) of the map's tree list (a csv[.gz] with model,
+    x, y, z, scale - research/evidence/map/forest-trees-20260925/tree-points.csv.gz for Kislev) and tree_metadata.txt
+    (vegetation.pack battleterrain/vegetation/trees/tree_metadata.txt, tab separated)."""
+    import gzip
+    opener = gzip.open if str(points_csv).endswith(".gz") else open
+    with opener(points_csv, "rt", encoding="utf-8") as f:
+        points = list(csv.DictReader(f))
+    with open(meta_txt, encoding="utf-8", errors="replace") as f:
+        meta_rows = list(csv.DictReader(f, delimiter="\t"))
+    body = tree_bodies(points, meta_rows)
+    dst = Path(out_root) / name
+    dst.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(dst / "trees.npz", **body)
+    return dst / "trees.npz", {"points": len(points), "trunks": int(len(body["x"])),
+                               "r_median": round(float(np.median(body["r"])), 3) if len(body["r"]) else None,
+                               "h_median": round(float(np.median(body["h"])), 2) if len(body["h"]) else None}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    tr = sub.add_parser("trees")
+    tr.add_argument("--name", required=True)
+    tr.add_argument("--points", type=Path, required=True)
+    tr.add_argument("--meta", type=Path, required=True)
     c = sub.add_parser("capture")
     c.add_argument("--name", required=True)
     c.add_argument("--step", type=int, choices=(1, 2), default=1)
@@ -195,6 +253,11 @@ def main(argv=None):
     v.add_argument("run", type=Path)
     v.add_argument("--name", required=True)
     args = ap.parse_args(argv)
+    if args.cmd == "trees":
+        path, info = trees(args.points, args.meta, args.name)
+        print(path)
+        print(json.dumps(info))
+        return 0
     dst, meta = capture(args.name, args.step) if args.cmd == "capture" else convert(args.run, args.name)
     print(dst)
     print(json.dumps({k: meta[k] for k in ("map", "grid", "height_m", "source")}, indent=1))

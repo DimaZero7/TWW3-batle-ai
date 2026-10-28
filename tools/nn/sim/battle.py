@@ -11,7 +11,7 @@ import math
 import torch
 
 from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
-from tools.nn.sim import reform, skirmish, stealth, terrain
+from tools.nn.sim import ground, reform, skirmish, stealth, terrain
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -384,6 +384,13 @@ def step(st, orders, params=None, dt=None):
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
     # stats and rule flags hold for this step ---
     innate = effects.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
+    if ground.on(u):
+        # the ground under the men (ground.py; a map without a ground layer: none): the database's multipliers of the
+        # walk / run and the melee attack by each man's cell, laid with the step's effects (effects.restore puts them back)
+        g_share = ground.shares(u, pw["front"], pw["depth"], params)
+        g_speed, g_attack = ground.factors(u, g_share, params)
+        u["walk"], u["run"] = u["walk"] * g_speed, u["run"] * g_speed
+        u["attack"] = u["attack"] * g_attack
     # The melee clock: seconds since the contact began; it goes on through gaps out of contact shorter than
     # contact.reset_s (the game: pull-outs of 4-7 s do not restart a fight, build/cyclecharge).
     reset_s = float(cal["contact"].get("reset_s", 0.0))
@@ -679,6 +686,9 @@ def step(st, orders, params=None, dt=None):
         pen_info["front"] = missile.front_share(u, pw, params)
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch_geo, clear=clear,
                                              loaded=share, catch=catch, info=pen_info)
+    if ground.on(u):
+        # the trunks on the way (ground.trunk_keep: a projectile meeting a trunk past its first ~42 m stops, no damage)
+        hp_missile = hp_missile * ground.trunk_keep(u, pw, volley_target, los.get("lob"), params)[:, :, None]
     hp_bomb = kills_bomb = None
     if magic.on(params) and "bm0_s" in u:
         # the bombardments landing this step (magic.py): the HP and the men each caster's strike takes from each unit,
@@ -1218,6 +1228,10 @@ def step(st, orders, params=None, dt=None):
         tcal = params.sim["terrain"]
         g = terrain.slope(u, u["x"], u["z"], dxw / dw, dzw / dw, float(tcal["slope_L_m"]))
         want = want * terrain.speed_factor(g, float(tcal["speed_down_max"]))
+        if ground.on(u):
+            # the trunks in the way (ground.trunk_speed: each man's detour round the trunks he meets; strider and
+            # ignore_trees pass through)
+            want = want * ground.trunk_speed(u, pw["front"], pw["depth"], params)
     vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
     stop = locked | ~alive
     vx = torch.where(stop, torch.zeros_like(vx), vx)
