@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -976,6 +976,25 @@ def battles(plan):
                         kind=kind)
         out.append([rk("hgun", 63, "hgun_r2"), rk("hgun", 17, "hgun_r8"), rk("archer", 90, "archer_r2"),
                     rk("archer", 24, "archer_r8"), rk("xbow", 63, "xbow_r2"), rk("xbow", 17, "xbow_r8")])
+    elif plan == "cover":
+        # cover in forest (build/diag_g49/ground/ground.md: -0.2 to the hit chance of a man standing on forest) from ~40 m,
+        # inside the clanrats' detection range (48 m): archers on grass shooting a lone Warlock Engineer / clanrats in
+        # forest or on grass (sites: build/diag_g49/ground/find_near.py; 4-5 m of forest on the way to a lone target in
+        # forest, 11 m to the clanrats); the shooter is re-ordered every 3 s while not firing (hidden at the go)
+        g = TERRAIN
+        sites = {"lone_forest_1": ("warlock", 270.0, 236.0, 270, 276), "lone_forest_2": ("warlock", 314.0, 432.0, 354, 432),
+                 "lone_forest_3": ("warlock", -116.0, 277.4, -96, 312), "lone_forest_4": ("warlock", -337.4, 310.0, -372, 330),
+                 "lone_grass_1": ("warlock", -468.0, -212.0, -468, -252), "lone_grass_2": ("warlock", -302.0, 36.0, -342, 36),
+                 "lone_grass_3": ("warlock", -364.0, -172.6, -384, -138),
+                 "unit_forest": ("clanrat", -90.0, -108.0, -90, -156), "unit_grass": ("clanrat", -108.4, -30.0, -150, -54)}
+        lanes_ = []
+        for kind, (t, sx, sz, tx, tz) in sites.items():
+            b = math.degrees(math.atan2(tx - sx, tz - sz)) % 360
+            lanes_.append(lane("archer", t, "shoot", "hold", gap_m=round(math.hypot(tx - sx, tz - sz)), fight_s=60, max_s=60,
+                               answer=False, kind=kind, reorder_s=3, map=g["map"], catchment=g["catchment"],
+                               a_at={"x": sx, "z": sz, "b": round(b, 1)},
+                               t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)}, place=(sx, sz)))
+        out.append(lanes_)
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1484,7 +1503,7 @@ def run_config(plan, index):
         config.update(men_after_s=0, men_near_m=0)
     if plan == "wrap":
         config.update(men_ms=1000, men_after_s=130, men_near_m=80)
-    if plan in ("terrain", "terrain2", "ground"):
+    if plan in ("terrain", "terrain2", "ground", "cover"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)
         if index == 1 and plan == "terrain":

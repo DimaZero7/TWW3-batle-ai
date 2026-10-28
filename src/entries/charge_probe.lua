@@ -754,6 +754,15 @@ function M.main(bm, config, globals)
                     attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
                     emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0})
                 end
+                if lane.mode == 'shoot' and lane.reorder_s and now - (lane.reorder_ms or lane.t0) >= lane.reorder_s * 1000 then
+                    -- (the cover plan) a shooter not firing gets its ranged attack again every reorder_s: a target hidden
+                    -- in forest at the go drops the order until it is spotted
+                    lane.reorder_ms = now
+                    if read(cco, lane.a.unit, 'IsFiringMissiles') ~= true then
+                        orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+                        emit('probe_phase', {lane = lane.name, phase = 'reorder', t = now - lane.t0})
+                    end
+                end
                 if lane.mode == 'retarget' then
                     local want = M.retarget_aim(now - lane.t0, lane.switch_s)
                     if want ~= lane.aim then
