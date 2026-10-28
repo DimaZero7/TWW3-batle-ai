@@ -271,6 +271,37 @@ def target_face_cap(F, used, side_j, pw, single_i, single_j, w=None):
     return F
 
 
+def cycle_on(cal):
+    """melee.cycle on (config/nn/sim.json melee.cycle_why): the blow cycle by the game's program - every swing an interval
+    from its start, a miss costs no time; men striking = cycle.reach_files of the files in contact (the men within reach)."""
+    return bool((cal.get("cycle") or {}).get("on"))
+
+
+def files_share(cal):
+    """The share of the striker's files in contact that strike: melee.cycle.reach_files (the men within reach a file,
+    measured) with the cycle on, else the fitted melee.fighting_files."""
+    return float(cal["cycle"]["reach_files"]) if cycle_on(cal) else float(cal["fighting_files"])
+
+
+def cycle_rate(p, interval, hit, hp_man, single_j, recv, cyc):
+    """Hits a second a fighting man under melee.cycle [B, N, N]: p / interval (a swing every interval from its start, hit
+    or miss: the program) x busy x unbroken.
+      unbroken  exp(-recv x tick_s): the share of swings no hit received cuts before its blow lands (a hit breaks the
+                struck man's swing; recv [B, N, 1] hits a second a man of the striker takes, tick_s the swing's start to
+                its blow, measured)
+      busy      1 / (1 + kills a man a second x search): his target dead, a man waits the next retarget (retarget_s, half
+                the program's 0.8 s) and walks walk_m (measured) at walk_mps to the new one; kills a man a second = the
+                hits x hit / hp_man (the per_hit model's kills a hit) - solved with busy itself in the hits
+                (x (1 + a x) = 1); a lone target (a lord) is one pool: no search."""
+    base = p / interval.clamp(min=1e-6)
+    unbroken = torch.exp(-recv.clamp(min=0) * float(cyc.get("tick_s", 0.0)))
+    search = float(cyc.get("retarget_s", 0.0)) + float(cyc.get("walk_m", 0.0)) / max(float(cyc.get("walk_mps", 1.5)), 0.1)
+    a = base * unbroken * (hit / hp_man.clamp(min=1e-6)).clamp(max=1.0) * search
+    busy = torch.where(a > 1e-9, 2.0 / (1.0 + torch.sqrt(1.0 + 4.0 * a)), torch.ones_like(a))
+    busy = torch.where(single_j, torch.ones_like(busy), busy)
+    return base * busy * unbroken
+
+
 def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
@@ -281,6 +312,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     B = params.battle
     cal = params.sim["melee"]
     cc = params.sim["contact"]
+    ff = files_share(cal)                # (melee.cycle: the men within reach a file; else the fitted fighting_files)
     h_u, v_u = spacing_of(u, params.sim["formation"]["spacing_m"])
     # a man's place along a contact (melee.body_across): the formation's h, v for circles, the body's width for an ellipse
     hc_u, vc_u = contact_spacing(u, h_u, v_u, cal.get("body_across"))
@@ -392,7 +424,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         q_wrap = torch.where(head, Wt / length.clamp(min=1e-6), torch.zeros_like(Wt))
         # i's flank men answering j's wrap on i (j's front on i's front: the transposed pair)
         W_on_i = torch.where(head, Wt.transpose(1, 2), torch.zeros_like(Wt))
-        F_ans = cal["fighting_files"] * W_on_i / vc_u[:, :, None]
+        F_ans = ff * W_on_i / vc_u[:, :, None]
     if edge is not None:
         # The contact's frontage (melee.frontage_edge_m; absent: off): a formation's men strike the enemies within their
         # reach, whichever unit those belong to - so i brings to j the men of the part of its side that j covers, not its
@@ -414,7 +446,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
                + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
         ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
         length = torch.where(single_i | single_j | wrap, length, torch.minimum(length, ov + float(edge)))
-    F = cal["fighting_files"] * length / along
+    F = ff * length / along
     if F_ans is not None:
         F = F + F_ans                    # (melee.wrap: the flank men answering a wrap, above)
     F = torch.minimum(F, men_i)
@@ -440,7 +472,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     side_of = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
     for g in range(4):
         in_g = side_of == g
-        hold = cal["fighting_files"] * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
+        hold = ff * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
         if F_ans is not None:
             # (melee.wrap: the flank men answering a wrap stand on the flanks, not on this side)
             hold = hold + torch.where(in_g & contact, F_ans, torch.zeros_like(F_ans)).sum(dim=2, keepdim=True)
@@ -459,7 +491,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         side_j = stack.side_of_target(pw)
         if behind is not None and cal.get("stack_side"):
             side_j = torch.where(behind, side_k, side_j)
-        used = F * along / cal["fighting_files"]                 # metres of j's side each striker's men take
+        used = F * along / ff                # metres of j's side each striker's men take
         face_cap = (side_j, used, F)                             # (the cap again after the wave: melee.face_cap_wave)
         F = target_face_cap(F, used, side_j, pw, single_i, single_j)
     # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
@@ -475,7 +507,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         # a charge (a move order, a blocked way, a walk-in under the run-up) and a standing one keep the steady front's
         # swing (the probes: swordsmen running in under a move order 96 HP/s at 0-1 s, the steady swing 89). Formations
         # only.
-        F_rank = F / float(cal["fighting_files"])
+        F_rank = F / ff
         F_rank = torch.where(flank_j, F_rank * (length_meet / length.clamp(min=1e-6)).clamp(max=1.0), F_rank)
         F_rank = torch.minimum(F_rank, men_i)
         rank_on = ran[:, :, None] & ~single_i & ~single_j
@@ -645,7 +677,20 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # Blows a second a fighting man: the interval runs after a hit, a miss costs melee.miss_s (build/hitchance);
     # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).
     interval = u["interval"][:, :, None].clamp(min=1e-6)
-    per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
+    cyc = cal.get("cycle") or {}
+    if cycle_on(cal):
+        # (melee.cycle) a swing every interval from its start, hit or miss; less the swings broken by hits taken and the
+        # time a man spends finding a new target after a kill (cycle_rate). recv: hits a second on a man of each unit in
+        # contact (every striker's p / interval on it, over its men striking)
+        hp_j = u["hp_man"][:, None, :].expand_as(p)
+        on_k = (F * struck * p / interval).sum(dim=1)                       # [B, N]: hits a second on unit k
+        recv = (on_k / F.sum(dim=2).clamp(min=1.0))[:, :, None]
+        recv = torch.where(single_i, torch.zeros_like(recv), recv)
+        per_s = cycle_rate(p, interval, hit, hp_j, single_j, recv, cyc)
+        per_s = torch.where(single_i & single_j, p / interval, per_s)
+    else:
+        recv = hp_j = None
+        per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
     if q_wrap is not None:
         # (melee.wrap) the wrap's share of i's blows on a target it meets front to front lands on the target's flank:
         # the man struck faces his own enemy, so the wrapping man strikes him from the side (the game's side of a blow
@@ -655,7 +700,11 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
                                    torch.full_like(coef, float(B["melee_defence_direction_penalty_coefficient_flank"])))
         p_fl = hit_chance(attack, d_fl, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
                           B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
-        per_fl = p_fl / (p_fl * interval + float(cal["miss_s"]))
+        if recv is not None:
+            # (melee.cycle) the wrapping man strikes free: the same cycle with the flank's chance
+            per_fl = cycle_rate(p_fl, interval, hit, hp_j, single_j, recv, cyc)
+        else:
+            per_fl = p_fl / (p_fl * interval + float(cal["miss_s"]))
         per_s = per_s * (1 - q) + per_fl * q
         p = p * (1 - q) + p_fl * q
     if cal.get("swing_interval") and "ran_in" in u and "contact_s" in u:
@@ -673,8 +722,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         swung = u["ran_in"][:, :, None] & ~single_i
         if "melee_s" in u:
             swung = swung & (u["melee_s"] - u["contact_s"] < 0.5 * float(params.dt))[:, :, None]
-        back = torch.where(t >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
-                                                                                               torch.zeros_like(p))
+        if recv is not None:
+            # (melee.cycle) every man who swung, hit or miss, swings again an interval after the swing's start
+            back = (t >= interval).to(p.dtype)
+        else:
+            back = torch.where(t >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
+                                                                                                   torch.zeros_like(p))
         back = torch.where(swung, back, torch.ones_like(back))
     else:
         back = None
