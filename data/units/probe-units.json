@@ -43,19 +43,19 @@
    "checked": null
   },
   "spacing.h": {
-   "source": "unit_spacings.close_h (inferred): a man's place across the front in close formation, m",
+   "source": "unit_spacings.close_formation_spacing_horizontal: a man's place across the front in close formation, m",
    "checked": "data/roster widths: front = (files - 1) h, files = floor(width / h)"
   },
   "spacing.v": {
-   "source": "unit_spacings.close_v (inferred): between ranks, m",
+   "source": "unit_spacings.close_formation_spacing_vertical: between ranks, m",
    "checked": "data/roster: depth = (ranks - 1) v"
   },
   "spacing.scatter": {
-   "source": "unit_spacings.close_scatter (inferred), m",
+   "source": "unit_spacings.close_formation_spacing_variation, m",
    "checked": null
   },
   "spacing.chaotic": {
-   "source": "unit_spacings.chaotic (inferred): a chaotic (loose, irregular) formation",
+   "source": "unit_spacings.is_chaotic_formation: a chaotic (loose, irregular) formation",
    "checked": null
   },
   "entity": {
@@ -71,19 +71,23 @@
    "checked": "card HealthMax"
   },
   "mass": {
-   "source": "battle_entities.mass",
+   "source": "battle_entities.mass (a mounted unit: its mount's, mounts.entity - as radius_m, radii_ratio, speed.*)",
    "checked": "card Mass"
   },
   "size": {
-   "source": "battle_entities.size (inferred)",
+   "source": "battle_entities.size",
    "checked": null
   },
   "height_m": {
-   "source": "battle_entities.height (inferred)",
+   "source": "battle_entities.height",
    "checked": null
   },
   "radius_m": {
-   "source": "battle_entities.radius (inferred)",
+   "source": "battle_entities.radius",
+   "checked": null
+  },
+  "radii_ratio": {
+   "source": "battle_entities.radii_ratio: an ellipse body (shape 'ellipse') is radius long and radius x this across; 1 a circle (every man)",
    "checked": null
   },
   "speed.walk": {
@@ -95,27 +99,27 @@
    "checked": "card fast_speed; scalar_speed = run x 10"
   },
   "speed.charge": {
-   "source": "battle_entities.charge_speed (inferred), m/s",
+   "source": "battle_entities.charge_speed, m/s",
    "checked": null
   },
   "speed.charge_distance": {
-   "source": "battle_entities.charge_distance_commence_run (inferred), m: an attacking unit closes the last this many metres to its target at its charge speed (30 infantry, 35 lords; the melee probe: the last 30 m at 3.65-3.88 m/s, run 3.0)",
+   "source": "battle_entities.charge_distance_commence_run, m: an attacking unit closes the last this many metres to its target at its charge speed (30 infantry, 35 lords; the melee probe: the last 30 m at 3.65-3.88 m/s, run 3.0)",
    "checked": null
   },
   "speed.charge_pose_distance": {
-   "source": "battle_entities.charge_distance_adopt_charge_pose (inferred), m: an attacking unit takes its charge pose this far from its target (25 infantry, 30 lords; the morale probe: the charge's +15 morale starts at a gap of 24.6-27.5 m)",
+   "source": "battle_entities.charge_distance_adopt_charge_pose, m: an attacking unit takes its charge pose this far from its target (25 infantry, 30 lords; the morale probe: the charge's +15 morale starts at a gap of 24.6-27.5 m)",
    "checked": null
   },
   "speed.acceleration": {
-   "source": "battle_entities.acceleration (inferred)",
+   "source": "battle_entities.acceleration",
    "checked": null
   },
   "speed.turn_deg_s": {
-   "source": "battle_entities.turn_rate, deg/s: how fast a man (a model) turns (named by patch 6.1: horse cavalry 100 -> 120 deg/s, and 120 in the DB)",
+   "source": "battle_entities.turn_speed, deg/s: how fast a man (a model) turns (patch 6.1: horse cavalry 100 -> 120 deg/s, and 120 in the DB)",
    "checked": null
   },
   "speed.deceleration": {
-   "source": "battle_entities.deceleration (inferred)",
+   "source": "battle_entities.deceleration",
    "checked": null
   },
   "melee.attack": {
@@ -143,27 +147,35 @@
    "checked": "damage + ap_damage = card stat_weapon_damage"
   },
   "melee.bonus_v_large": {
-   "source": "melee_weapons.bonus_v_large (inferred)",
+   "source": "melee_weapons.bonus_v_large",
    "checked": null
   },
   "melee.bonus_v_infantry": {
-   "source": "melee_weapons.bonus_v_infantry (inferred)",
+   "source": "melee_weapons.bonus_v_infantry",
    "checked": null
   },
   "melee.attack_interval_s": {
-   "source": "melee_weapons.melee_attack_interval (inferred)",
+   "source": "melee_weapons.melee_attack_interval",
    "checked": null
   },
   "melee.splash_target_size": {
-   "source": "melee_weapons.splash_attack_target_size (inferred)",
+   "source": "melee_weapons.splash_attack_target_size",
    "checked": null
   },
   "melee.splash_max_attacks": {
-   "source": "melee_weapons.splash_attack_max_attacks (inferred)",
+   "source": "melee_weapons.splash_attack_max_attacks",
    "checked": null
   },
   "melee.splash_power_multiplier": {
-   "source": "melee_weapons.splash_attack_power_multiplier (inferred)",
+   "source": "melee_weapons.splash_attack_power_multiplier",
+   "checked": null
+  },
+  "melee.magic": {
+   "source": "melee_weapons.is_magical: magical attacks - the censer, the plain Giant Rats' claws",
+   "checked": null
+  },
+  "melee.contact_phase": {
+   "source": "melee_weapons.contact_phase: the contact effect a blow lays on its target (its numbers in the document's contact_phases)",
    "checked": null
   },
   "armour": {
@@ -171,7 +183,7 @@
    "checked": "card stat_armour"
   },
   "armour_material": {
-   "source": "unit_armour_types.material (inferred)",
+   "source": "unit_armour_types.audio_type: the armour's sound type (body, leather, chainmail, ...)",
    "checked": null
   },
   "shield.key": {
@@ -179,7 +191,7 @@
    "checked": null
   },
   "shield.missile_block_chance": {
-   "source": "unit_shield_types.missile_block_chance (inferred), %",
+   "source": "unit_shield_types.missile_block_chance, %",
    "checked": null
   },
   "leadership": {
@@ -199,7 +211,23 @@
    "checked": null
   },
   "hiding_scalar": {
-   "source": "land_units.hiding_scalar",
+   "source": "land_units.hiding_scalar: the unit's own share of an enemy's spotting distance (stealth: a Gutter Runner is seen within 0.8 of it)",
+   "checked": null
+  },
+  "spotting.scrub": {
+   "source": "land_units.spot_dist_scrub, m: how far the unit sees a hidden enemy out of woods (80; the Jezzails 160) - the simulator's open ground (tools/nn/sim/stealth.py)",
+   "checked": null
+  },
+  "spotting.tree": {
+   "source": "land_units.spot_dist_tree, m: the same into woods (60; the Jezzails 160); no woods in the simulator",
+   "checked": null
+  },
+  "projectile_resistance": {
+   "source": "battle_entities.projectile_penetration_resistance: what a man adds to a penetrating projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number means this entity can stop projectiles more easily')",
+   "checked": null
+  },
+  "projectile_speed_keep": {
+   "source": "battle_entities.projectile_penetration_speed_change: the share of its speed a projectile keeps passing through the man (0.9 men, 0.95 Skaven)",
    "checked": null
   },
   "attributes": {
@@ -209,6 +237,10 @@
   "abilities": {
    "source": "land_units_to_unit_abilites_junctions.ability",
    "checked": "card owned abilities"
+  },
+  "spells": {
+   "source": "ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md 1); only on casters",
+   "checked": null
   },
   "multiplayer_cost": {
    "source": "main_units.multiplayer_cost",
@@ -247,7 +279,7 @@
    "checked": "card scalar_missile_range"
   },
   "missile.min_range_m": {
-   "source": "projectiles.minimum_range (inferred)",
+   "source": "projectiles.minimum_range",
    "checked": null
   },
   "missile.reload_s": {
@@ -263,69 +295,137 @@
    "checked": "see reload_s"
   },
   "missile.projectile_number": {
-   "source": "projectiles.projectile_number (inferred)",
+   "source": "projectiles.projectile_number",
    "checked": null
   },
   "missile.shots_per_volley": {
-   "source": "projectiles.shots_per_volley (inferred)",
+   "source": "projectiles.shots_per_volley",
    "checked": null
   },
   "missile.trajectory": {
-   "source": "projectiles.trajectory (inferred)",
+   "source": "projectiles.trajectory_sight",
    "checked": null
   },
   "missile.direct": {
-   "source": "projectiles.trajectory == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` switches to an arc when blocked, `fixed` arcs)",
+   "source": "projectiles.trajectory_sight == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` switches to an arc when blocked, `fixed` arcs)",
    "checked": null
   },
   "missile.muzzle_velocity": {
-   "source": "projectiles.muzzle_velocity (inferred), m/s",
+   "source": "projectiles.muzzle_velocity, m/s",
    "checked": null
   },
   "missile.max_elevation": {
-   "source": "projectiles.max_elevation (inferred), degrees",
+   "source": "projectiles.max_elevation, degrees",
    "checked": null
   },
   "missile.calibration_distance_m": {
-   "source": "projectiles.calibration_distance (inferred)",
+   "source": "projectiles.calibration_distance",
    "checked": null
   },
   "missile.calibration_area_m": {
-   "source": "projectiles.calibration_area (inferred)",
+   "source": "projectiles.calibration_area",
    "checked": null
   },
   "missile.marksmanship": {
-   "source": "projectiles.marksmanship (inferred: the column after muzzle_velocity, 10 for our arrows, slings and pistol, 15 for the Night Runners' sling; added to land_units.accuracy in the spread, tools/nn/sim/missile.py)",
+   "source": "projectiles.marksmanship_bonus: 10 for our arrows, slings and pistol, 15 for the Night Runners' sling; added to land_units.accuracy in the spread (ours, tools/nn/sim/missile.py)",
    "checked": null
   },
   "missile.fire_arc_deg": {
-   "source": "battle_entities.fire_arc_close / 2 (inferred: the full angle, 60 / 70 for our shooters, 360 for throwing stars; mods name the column 'Fire Arc'), degrees each side",
+   "source": "battle_entities.fire_arc_close / 2 (ours: the column is the full angle, 60 / 70 for our shooters, 360 for throwing stars), degrees each side",
    "checked": null
   },
   "missile.explosion": {
-   "source": "projectiles.explosion_type (inferred)",
+   "source": "projectiles.explosion_type",
    "checked": null
   },
   "missile.penetration": {
-   "source": "projectiles.penetration (inferred)",
+   "source": "projectiles.projectile_penetration",
+   "checked": null
+  },
+  "missile.penetration_max": {
+   "source": "projectile_penetration_junctions.max_penetration of missile.penetration: the counter a projectile goes on through (each man struck adds his projectile_resistance; -1 no limit, absent 0: it stops in the first)",
+   "checked": null
+  },
+  "missile.penetration_cap": {
+   "source": "projectile_penetration_junctions.entity_size_cap of missile.penetration: it passes only a man of a smaller size (very_small < small < medium < large < very_large)",
    "checked": null
   },
   "missile.shot_type": {
-   "source": "projectiles.shot_type (inferred)",
+   "source": "projectiles.shot_type",
    "checked": null
   },
-  "spells": {
-   "source": "ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md 1); only on casters",
+  "missile.contact_phase": {
+   "source": "projectiles.contact_stat_effect: the contact effect a hit lays on its target (the Ratling Gun's suppressing fire)",
    "checked": null
   }
  },
  "_missing": {
-  "missile.bonus_v_large / bonus_v_infantry": "no such column found: the anti-large arrow row equals the plain arrow",
+  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the pools)",
   "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
   "ability and attribute effects": "only the keys here: the abilities' numbers are their passports (config/nn/abilities.json), the attributes' rules and every innate effect the catalogue config/nn/effects.json (python -m tools.nn.effects)",
   "experience": "per rank, global: config/nn/game_rules.json (experience_bonus, experience_levels)"
+ },
+ "_contact_phases": {
+  "duration_s": "special_ability_phases.duration, s (10 for poison, the censer's contagion and suppressing fire - fandom: contact effects last 10 s)",
+  "effect": "special_ability_phases.effect_type (positive / negative)",
+  "stats": "special_ability_phase_stat_effects rows of the phase: stat, how (add / mult), value"
+ },
+ "contact_phases": {
+  "wh2_dlc12_unit_contact_suppressive_fire": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.7
+    }
+   ]
+  },
+  "wh2_main_unit_contact_plague_monk_censer_morale": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": -10.0
+    }
+   ]
+  },
+  "wh_main_unit_contact_poison": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "scalar_missile_damage_ap",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "scalar_missile_damage_base",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 0.85
+    }
+   ]
+  }
  },
  "units": {
   "wh2_dlc12_skv_inf_ratling_gun_0": {
@@ -352,6 +452,7 @@
    "size": "small",
    "height_m": 1.6,
    "radius_m": 1.3,
+   "radii_ratio": 0.6,
    "speed": {
     "walk": 1.4,
     "run": 3.8,
@@ -374,7 +475,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 70,
    "armour_material": "heavy_metal",
@@ -393,6 +496,12 @@
    "can_skirmish": true,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -428,7 +537,10 @@
     "fire_arc_deg": 25.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "penetration_max": 0,
+    "penetration_cap": "very_small",
+    "contact_phase": "wh2_dlc12_unit_contact_suppressive_fire"
    },
    "card_check": "no card"
   },
@@ -456,6 +568,7 @@
    "size": "small",
    "height_m": 1.6,
    "radius_m": 0.7,
+   "radii_ratio": 1.0,
    "speed": {
     "walk": 1.5,
     "run": 4.2,
@@ -478,7 +591,9 @@
     "attack_interval_s": 4.5,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 10,
    "armour_material": "body",
@@ -497,6 +612,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -537,6 +658,7 @@
    "size": "small",
    "height_m": 1.6,
    "radius_m": 0.72,
+   "radii_ratio": 1.0,
    "speed": {
     "walk": 1.5,
     "run": 4.2,
@@ -559,7 +681,9 @@
     "attack_interval_s": 4.4,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": true,
+    "contact_phase": "wh2_main_unit_contact_plague_monk_censer_morale"
    },
    "armour": 10,
    "armour_material": "body",
@@ -578,6 +702,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "hide_forest"
    ],
@@ -618,6 +748,7 @@
    "size": "small",
    "height_m": 1.2,
    "radius_m": 0.9,
+   "radii_ratio": 0.4,
    "speed": {
     "walk": 1.9,
     "run": 9.5,
@@ -640,7 +771,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": true,
+    "contact_phase": null
    },
    "armour": 15,
    "armour_material": "body",
@@ -659,6 +792,12 @@
    "can_skirmish": false,
    "can_brace": false,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest",
@@ -700,6 +839,7 @@
    "size": "small",
    "height_m": 1.2,
    "radius_m": 0.9,
+   "radii_ratio": 0.4,
    "speed": {
     "walk": 1.9,
     "run": 9.5,
@@ -722,7 +862,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": "wh_main_unit_contact_poison"
    },
    "armour": 15,
    "armour_material": "body",
@@ -741,6 +883,12 @@
    "can_skirmish": false,
    "can_brace": false,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "guerrilla_deploy",
     "hide_forest",
@@ -826,6 +974,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
    "attributes": [
     "encourages",
     "hide_forest"
@@ -839,10 +993,10 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card",
    "spells": [
     "wh_main_spell_metal_searing_doom"
-   ]
+   ],
+   "card_check": "no card"
   },
   "wh2_main_skv_cha_warlock_engineer": {
    "land_unit": "wh2_main_skv_cha_warlock_engineer",
@@ -912,6 +1066,12 @@
    "can_skirmish": false,
    "can_brace": true,
    "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
    "attributes": [
     "encourages",
     "hide_forest"
@@ -928,10 +1088,10 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card",
    "spells": [
     "wh2_main_spell_ruin_warp_lightning"
-   ]
+   ],
+   "card_check": "no card"
   },
   "wh_main_emp_cav_empire_knights": {
    "land_unit": "wh_main_emp_cav_empire_knights",
@@ -953,20 +1113,20 @@
    },
    "hp_per_man": 100,
    "hp_total": 6000,
-   "mass": 100.0,
+   "mass": 1000.0,
    "size": "medium",
    "height_m": 1.8,
-   "radius_m": 0.6,
-   "radii_ratio": 1.0,
+   "radius_m": 1.4,
+   "radii_ratio": 0.5,
    "speed": {
-    "walk": 1.5,
-    "run": 3.3,
-    "charge": 4.5,
-    "charge_distance": 35.0,
-    "charge_pose_distance": 30.0,
-    "acceleration": 2.0,
-    "deceleration": 4.0,
-    "turn_deg_s": 90.0
+    "walk": 2.0,
+    "run": 7.8,
+    "charge": 10.8,
+    "charge_distance": 40.0,
+    "charge_pose_distance": 35.0,
+    "acceleration": 7.0,
+    "deceleration": 7.0,
+    "turn_deg_s": 120.0
    },
    "melee": {
     "attack": 26,

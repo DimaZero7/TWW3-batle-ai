@@ -261,3 +261,29 @@ def test_contact_phases_take_the_phases_duration_effect_type_and_stats():
                                                  "value": 0.7}]}
     assert units.contact_phases(u, t) == {"a_contact": {"duration_s": 10.0, "effect": "negative", "stats": [
         {"stat": "scalar_speed", "how": "mult", "value": 0.7}]}}
+
+
+KNIGHTS = "wh_main_emp_cav_empire_knights"
+
+
+def test_a_mounted_unit_moves_and_collides_as_its_mount():
+    # the probe passports (data/units/probe-units.json, written by tools.nn.units): the Empire Knights' speeds, charge
+    # distances, body and mass are the barded warhorse's battle entity (mounts.entity wh_main_cavalry_slow_blood), the
+    # rider's are hit points, height and size (before: the rider's 3.3 m/s run - the game's knights 5.7-6.5 on grass)
+    p = json.loads((project.ROOT / "data/units/probe-units.json").read_text(encoding="utf-8"))["units"][KNIGHTS]
+    assert p["mount"] == "wh_main_emp_mnt_warhorse_barded"
+    assert p["speed"] == {"walk": 2.0, "run": 7.8, "charge": 10.8, "charge_distance": 40.0, "charge_pose_distance": 35.0,
+                          "acceleration": 7.0, "deceleration": 7.0, "turn_deg_s": 120.0}
+    assert (p["radius_m"], p["radii_ratio"], p["mass"]) == (1.4, 0.5, 1000.0)
+    assert (p["height_m"], p["size"], p["hp_per_man"]) == (1.8, "medium", 100)
+    # no unit of the training roster has a mount (config/nn/units.json: their passports unchanged by the rule)
+    assert not any(u.get("mount") for u in saved()["units"].values())
+
+
+@pytest.mark.skipif(game_db() is None, reason="needs the installed game and Python 3.14+ (compression.zstd)")
+def test_the_knights_run_is_their_warhorse_s_in_the_game_s_database():
+    tables = dbtables.read_tables(game_db(), units.TABLES)
+    mount = {r["key"]: r for r in tables["mounts"]}["wh_main_emp_mnt_warhorse_barded"]
+    horse = {r["key"]: r for r in tables["battle_entities"]}[mount["entity"]]
+    p = units.build(tables, (KNIGHTS,))[KNIGHTS]
+    assert p["speed"]["run"] == horse["run_speed"] == 7.8 and p["radius_m"] == horse["radius"]

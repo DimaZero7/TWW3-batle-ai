@@ -209,6 +209,16 @@
     ["stop_before_turn", "Boolean"]
    ]
   },
+  "mounts": {
+   "10": [
+    ["key", "StringU8"],
+    ["animation", "StringU8"],
+    ["entity", "StringU8"],
+    ["audio_armour_type", "OptionalStringU8"],
+    ["variant", "StringU8"],
+    ["voiceover", "StringU8"]
+   ]
+  },
   "melee_weapons": {
    "25": [
     ["bonus_v_large", "I32"],

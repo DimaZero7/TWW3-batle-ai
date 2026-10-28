@@ -67,7 +67,7 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
 # their passports (config/nn/abilities.json "spells", python -m tools.nn.abilities).
 SPELLS = {"wh3_dlc25_emp_cha_wizard_metal": ("wh_main_spell_metal_searing_doom",),
           "wh2_main_skv_cha_warlock_engineer": ("wh2_main_spell_ruin_warp_lightning",)}
-TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
+TABLES = ("main_units", "land_units", "battle_entities", "mounts", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects",
           "special_ability_phases", "projectile_penetration_junctions")
@@ -95,7 +95,8 @@ FIELDS = {
     "entity": ("land_units.man_entity", None),
     "hp_per_man": ("battle_entities.hit_points + land_units.bonus_hit_points", "card HealthMax / men"),
     "hp_total": ("hp_per_man * men", "card HealthMax"),
-    "mass": ("battle_entities.mass", "card Mass"),
+    "mass": ("battle_entities.mass (a mounted unit: its mount's, mounts.entity - as radius_m, radii_ratio, speed.*)",
+             "card Mass"),
     "size": ("battle_entities.size", None),
     "height_m": ("battle_entities.height", None),
     "radius_m": ("battle_entities.radius", None),
@@ -238,6 +239,12 @@ def passport(key, t):
     sp = _index(t["unit_spacings"], "key")[land["spacing"]]
     pen = _index(t.get("projectile_penetration_junctions") or (), "key")
     hp = entity["hit_points"] + land["bonus_hit_points"]
+    # A mounted unit (land_units.mount: cavalry, chariots' beasts) moves and collides as its mount: the mount's
+    # battle_entities (mounts.entity) give the speeds, the charge distances, the body (radius, ellipse) and the mass;
+    # the rider's - hit points, height and size (the man's). Before: the rider's for all (Empire Knights ran at 3.3 m/s,
+    # the game's 5.7-6.5 on grass, the probe ground; the warhorse 7.8).
+    mount_row = _index(t.get("mounts") or (), "key").get(land["mount"]) if land["mount"] else None
+    body = _index(t["battle_entities"], "key")[mount_row["entity"]] if mount_row else entity
     out = {
         "land_unit": land["key"], "caste": main["caste"], "category": land["category"], "class": land["class"],
         "men": main["num_men"], "mount": land["mount"], "num_mounts": land["num_mounts"], "engine": land["engine"],
@@ -245,14 +252,14 @@ def passport(key, t):
         "spacing": {"template": land["spacing"], "h": sp["close_formation_spacing_horizontal"],
                     "v": sp["close_formation_spacing_vertical"], "scatter": sp["close_formation_spacing_variation"],
                     "chaotic": sp["is_chaotic_formation"]},
-        "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": entity["mass"], "size": entity["size"],
-        "height_m": entity["height"], "radius_m": entity["radius"],
-        "radii_ratio": entity["radii_ratio"] if entity["shape"] == "ellipse" else 1.0,
-        "speed": {"walk": entity["walk_speed"], "run": entity["run_speed"], "charge": entity["charge_speed"],
-                  "charge_distance": entity["charge_distance_commence_run"],
-                  "charge_pose_distance": entity["charge_distance_adopt_charge_pose"],
-                  "acceleration": entity["acceleration"], "deceleration": entity["deceleration"],
-                  "turn_deg_s": entity["turn_speed"]},
+        "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": body["mass"], "size": entity["size"],
+        "height_m": entity["height"], "radius_m": body["radius"],
+        "radii_ratio": body["radii_ratio"] if body["shape"] == "ellipse" else 1.0,
+        "speed": {"walk": body["walk_speed"], "run": body["run_speed"], "charge": body["charge_speed"],
+                  "charge_distance": body["charge_distance_commence_run"],
+                  "charge_pose_distance": body["charge_distance_adopt_charge_pose"],
+                  "acceleration": body["acceleration"], "deceleration": body["deceleration"],
+                  "turn_deg_s": body["turn_speed"]},
         "melee": {"attack": land["melee_attack"], "defence": land["melee_defence"],
                   "charge_bonus": land["charge_bonus"], "weapon": weapon["key"], "damage": weapon["damage"],
                   "ap_damage": weapon["ap_damage"], "bonus_v_large": weapon["bonus_v_large"],

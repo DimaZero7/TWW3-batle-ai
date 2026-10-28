@@ -33,7 +33,7 @@ URL = "https://raw.githubusercontent.com/Frodo45127/rpfm-schemas/master/schema_w
 # The tables the project reads (tools/nn/gamedb.py, units.py, abilities.py, armies/templates.py), without "_tables".
 TABLES = (
     "_kv_morale", "_kv_fatigue", "_kv_rules", "unit_experience_bonuses", "unit_experience_thresholds",
-    "land_units", "main_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
+    "land_units", "main_units", "battle_entities", "mounts", "melee_weapons", "missile_weapons", "projectiles",
     "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
     "land_units_to_unit_abilites_junctions", "unit_spacings", "unit_special_abilities", "special_ability_phases",
     "special_ability_to_special_ability_phase_junctions", "special_ability_phase_stat_effects",
