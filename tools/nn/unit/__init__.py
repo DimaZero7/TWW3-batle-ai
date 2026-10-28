@@ -25,6 +25,9 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
     drill_multi.py drill U3 'several enemies': as U1 with two enemies A and B (front + flank / front + rear / both ahead
               at an angle; together or B 5-20 s later), both under `nearest`
     exam_multi.py  its fixed exam (240): chose the best of 4 variants, which is best, damage front / flank-rear, head-on
+    drill_pair.py  drill U4 'friends beside': two of our units (both the network's) with areas side by side or in
+              echelon, 1-2 enemies under `nearest`; the side's reward shared
+    exam_pair.py   its fixed exam (240): jostling, damage front / flank-rear, head-on, the pair's trade, out of the area
     branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
               of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
               bonus x the best's margin over the second when the network did the best
