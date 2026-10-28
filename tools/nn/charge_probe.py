@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -791,6 +791,26 @@ def battles(plan):
                          kind=f"turn{turn}_{k // 4 + 1}",
                          after={"at_s": 10, "kind": "face", "turn_deg": turn, "dx": 0, "dz": 0, "walk": False})
                     for k, ((a, turn), pl) in enumerate(zip(cases, places))])
+    elif plan == "meleewidth":
+        # a new width (build/diag_g49/formation_width): (a) in melee - spearmen / greatswords <-> clanrats attacking each
+        # other from 3 m, 10 s after contact a width order where the unit stands, facing as now (30 -> 15 / 60 m), or
+        # nothing (the control), a row at z -200; (b) no enemy near (the target 250 m off, never ordered), a row at z 50:
+        # at 1 s a width order in place at a run (30 -> 80 / 10 m) or a move at a run 80 m ahead with the width
+        def mw(a, width):
+            af = {"at_s": 10, "kind": "face" if width else "none", "turn_deg": 0, "width": width, "dx": 0, "dz": 0,
+                  "walk": False}
+            return lane(a, "clanrat", "attack_walk", "both", gap_m=3, fight_s=50, max_s=70,
+                        kind=f"w{width}" if width else "control", after=af)
+        far = dict(target_mode="hold", gap_m=250, answer=False, men_all_s=60, max_s=60)
+
+        def fw(width, move):
+            step = ({"at_s": 1, "kind": "move", "dx": 0, "dz": -80, "bearing": 180, "width": width, "run": True} if move
+                    else {"at_s": 1, "kind": "face", "bearing": 180, "width": width, "run": True})
+            return lane("spear", "clanrat", "script", steps=[step], kind=f"{'move' if move else 'run'}{width}", **far)
+        melee = [mw("spear", 15), mw("spear", 60), mw("spear", 0), mw("gs", 15), mw("gs", 60), mw("gs", 0)]
+        free = [fw(80, False), fw(10, False), fw(80, True), fw(10, True)]
+        places = [(190.0 * (i - 2.5), -200.0) for i in range(6)] + [(190.0 * (i - 1.5), 50.0) for i in range(4)]
+        out.append([dict(l, place=pl) for l, pl in zip(melee + free, places)])
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1268,7 +1288,7 @@ def run_config(plan, index):
     """(entry config, model seconds, arena) of battle `index` (1-based) of a plan."""
     specs = battles(plan)[index - 1]
     lanes, park, arena = layout(specs)
-    turn = (plan == "move" and any(l["mode"] == "script" for l in lanes)) or plan in ("meleeturn", "meleeturn2")
+    turn = (plan == "move" and any(l["mode"] == "script" for l in lanes)) or plan in ("meleeturn", "meleeturn2", "meleewidth")
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
               "men_ms": 500 if turn or plan == "ratcharge" else MEN_MS,
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
@@ -1279,7 +1299,7 @@ def run_config(plan, index):
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
               "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "armour", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2",
                                                                                                   "shootcontact", "recontact")
-                              else 90 if plan in ("hit", "move", "vv", "meleeturn", "meleeturn2") else 30),
+                              else 90 if plan in ("hit", "move", "vv", "meleeturn", "meleeturn2", "meleewidth") else 30),
               "lanes": lanes, "park": park}
     if plan in ("swing", "crowd", "hitchance"):
         config.update(tick_ms=SWING_MS, men_ms=SWING_MS, men_after_s=200)

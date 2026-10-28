@@ -347,6 +347,7 @@ function M.main(bm, config, globals)
             hp = round(read(cco, u, 'HealthValue'), 0), hpu = round(read(function() return u:unary_hitpoints() end), 4),
             m = read(function() return u:is_in_melee() end), x = p and round(p:get_x()), z = p and round(p:get_z()),
             b = round(read(function() return u:bearing() end), 0),
+            ow = round(read(function() return u:ordered_width() end), 1),
             mv = read(function() return u:is_moving() end), fast = read(function() return u:is_moving_fast() end),
             k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u),
             uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack'),
@@ -689,6 +690,12 @@ function M.main(bm, config, globals)
                             if step.kind == 'face' and p then
                                 orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), step.bearing,
                                     step.width or lane.a_width, step.run == true)
+                            elseif step.kind == 'move' and step.width then
+                                -- (the meleewidth plan) a move with a width, arriving facing step.bearing (or as now)
+                                local L = lane.layout
+                                local b = step.bearing or read(function() return lane.a.unit:bearing() end) or L.ab
+                                orders.move_formation(lane.a.uc, vec(L.ax + (step.dx or 0), L.az + (step.dz or 0)), b,
+                                    step.width, step.run == true)
                             elseif step.kind == 'move' then
                                 local L = lane.layout
                                 orders.move(lane.a.uc, vec(L.ax + (step.dx or 0), L.az + (step.dz or 0)), step.run == true)
@@ -738,8 +745,8 @@ function M.main(bm, config, globals)
                             local b = read(function() return lane.a.unit:bearing() end)
                             if p and b then
                                 af.goal = (b + (af.turn_deg or 90)) % 360
-                                orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), af.goal, lane.a_width,
-                                    af.run == true)
+                                orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), af.goal,
+                                    af.width or lane.a_width, af.run == true)
                             end
                         end
                         emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, n = n, t = now - lane.t0,
