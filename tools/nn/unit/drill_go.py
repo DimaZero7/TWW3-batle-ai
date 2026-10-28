@@ -143,17 +143,18 @@ def build(sp, P, device):
     return st, own, area, pace
 
 
-def to_area(st, area):
+def to_area(st, area, grab_m=None):
     """The enemy's script (its slots: side 2): run to the area's centre; there (its centre within GRAB_M of the area) or in
     melee attack the nearest of ours if that one is within GRAB_M of the area or fighting it, else hold."""
     u = st.u
     a0 = {k: v[:, 0] for k, v in area.items()}
     o = opponents.nearest(st)                                    # (ATTACK of the nearest, every unit)
     near, _ = opponents._nearest(st)
-    sd = lambda x, z: Dc.signed_dist(x, z, {k: v[:, None] for k, v in a0.items()})     # noqa: E731
-    me_in = sd(u["x"], u["z"]) >= -GRAB_M
+    grab = GRAB_M if grab_m is None else grab_m
+    sd = lambda x, z: Dc.signed_dist(x, z, {k: v[:, None] for k, v in a0.items() if k in ("x", "z", "b", "front", "depth")})     # noqa: E731
+    me_in = sd(u["x"], u["z"]) >= -grab
     tx, tz = u["x"].gather(1, near), u["z"].gather(1, near)
-    t_in = sd(tx, tz) >= -GRAB_M
+    t_in = sd(tx, tz) >= -grab
     fight = (me_in & t_in) | u["m"]
     run = ~me_in & ~u["m"]
     go = O.hold(st.B, st.N, st.device)

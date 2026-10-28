@@ -92,10 +92,22 @@ class Leash:
         ahead = signed_dist(u["x"] + u["vx"] * LOOK_S, u["z"] + u["vz"] * LOOK_S, area)
         leaving = (signed_dist(u["x"], u["z"], area) < INSET_M) | (ahead < INSET_M)
         self.on = free & target_out & (self.on | leaving)
+        shoot_hold = torch.zeros_like(self.on)
+        if "sw" in area:
+            # a shooter with a fire sector (U5): it fires, it does not walk to its target - an attack on an enemy beyond
+            # its range (the simulator would close in) is a hold facing it until the enemy comes within range; the
+            # pursuit's leash above is not its (its targets lie beyond its position by design)
+            shooter = (area["sw"] > 0) & attack
+            far = torch.sqrt((tx - u["x"]) ** 2 + (tz - u["z"]) ** 2) > u["range"]
+            shoot_hold = shooter & far & ~u["r"]
+            self.on = (self.on & ~shooter) | shoot_hold
         out = orders.clone()
         px, pz = clamp_in(u["x"], u["z"], area)
         face = torch.remainder(torch.rad2deg(torch.atan2(tx - u["x"], tz - u["z"])), 360.0)
-        on = self.on
+        on = self.on & ~shoot_hold
+        out.kind = torch.where(shoot_hold, O.HOLD, out.kind)
+        out.target = torch.where(shoot_hold, torch.full_like(out.target, -1), out.target)
+        out.face = torch.where(shoot_hold, face, out.face)
         out.kind = torch.where(on, O.MOVE, out.kind)
         out.target = torch.where(on, torch.full_like(out.target, -1), out.target)
         out.x = torch.where(on, px, out.x)

@@ -180,7 +180,8 @@ def _inside(x, z, ar):
 def allowed(me, J, enemy_rows, ar, cell_m, bounds, cells=Z.CELLS):
     """The hard bans' masks: cells_ok [R, C, C] (the cell's centre in the area and on the map; no area: on the map; if
     no cell of the area is on the map, the edge ring's cells towards it, see below) and target_ok [R, K] (an enemy row
-    whose centre is in the area)."""
+    whose centre is in the area; a shooter with a fire sector - ar sb, sw: its middle's bearing and width, degrees - an
+    enemy in the sector and within its range, wherever)."""
     R = me.shape[0]
     dev = me.device
     k = torch.arange(cells, device=dev, dtype=torch.float32)
@@ -194,7 +195,18 @@ def allowed(me, J, enemy_rows, ar, cell_m, bounds, cells=Z.CELLS):
     if ar is not None:
         on = ar.get("on", torch.ones(R, dtype=torch.bool, device=dev))
         ok = ok & (_inside(x, z, ar) | ~on.view(R, 1, 1))
-        t_ok = t_ok & (_inside(J[..., I["x"]], J[..., I["z"]], ar) | ~on[:, None])
+        in_area = _inside(J[..., I["x"]], J[..., I["z"]], ar) | ~on[:, None]
+        if "sw" in ar:
+            # a shooter with a fire sector (U5): any enemy whose centre lies in the sector and within its range, even far
+            # beyond its position; the others (infantry) keep 'in the area'
+            shooter = ar["sw"] > 0
+            dx, dz = J[..., I["x"]] - me[:, None, I["x"]], J[..., I["z"]] - me[:, None, I["z"]]
+            way = torch.rad2deg(torch.atan2(dx, dz))
+            off = (torch.remainder(way - ar["sb"][:, None] + 180, 360) - 180).abs()
+            in_fire = (off <= ar["sw"][:, None] / 2) & (torch.sqrt(dx * dx + dz * dz) <= me[:, None, I["range"]])
+            t_ok = t_ok & torch.where(shooter[:, None], in_fire, in_area)
+        else:
+            t_ok = t_ok & in_area
         # no cell of the area on the map (U2: the area far away): the cells of the map's edge ring within TOWARD_DEG
         # of the way to the area's centre - the unit walks towards it and still chooses how; none of those either: the
         # cell nearest the area's centre

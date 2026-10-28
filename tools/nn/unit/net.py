@@ -18,7 +18,8 @@ with its own weights over the view of the whole skirmish (view.build everyone=Tr
 
 The order (ORDER): pace any / slow / fast (one-hot), stage going / in place, a target given, an area given, and the
 area as raw numbers in the unit's frame (U2: it may lie far beyond the map): its centre right / forward of the unit
-(/ 100 m), its front and depth (/ 100 m), its bearing against the unit's front (cos, sin).
+(/ 100 m), its front and depth (/ 100 m), its bearing against the unit's front (cos, sin); a shooter's fire sector
+(U5): given, its middle against the unit's front (cos, sin), its width / 180 (the area is then its position).
 """
 import math
 
@@ -34,7 +35,9 @@ D = 96          # a row's width
 CORE = 128
 FACES = 64
 ORDER = ("pace_any", "pace_slow", "pace_fast", "going", "in_place", "has_target", "has_area",
-         "area_right", "area_forward", "area_front", "area_depth", "area_cos", "area_sin")
+         "area_right", "area_forward", "area_front", "area_depth", "area_cos", "area_sin",
+         "has_sector", "sector_cos", "sector_sin", "sector_width")
+ORDER_BEFORE_SECTOR = 13   # the fields before the fire sector's (checkpoints made before it: train.restore pads them)
 PACE_ANY, PACE_SLOW, PACE_FAST = 0, 1, 2
 WALK, RUN = 0, 1
 NEG = -1e9      # a banned choice: exp(NEG - max) is exactly 0 in fp32 (never drawn); -inf would give NaN gradients
@@ -223,6 +226,14 @@ def order_of(me, area, pace, arrived, device=None):
     o[:, ORDER.index("area_depth")] = area["depth"] / 100
     o[:, ORDER.index("area_cos")] = torch.cos(rel)
     o[:, ORDER.index("area_sin")] = torch.sin(rel)
+    if "sw" in area:
+        # the fire sector (shooters, drill U5): its middle's bearing against the unit's front (cos, sin), its width / 180
+        on = area["sw"] > 0
+        rs = (area["sb"] - me[:, V.I["b"]]) * math.pi / 180
+        o[:, ORDER.index("has_sector")] = on.float()
+        o[:, ORDER.index("sector_cos")] = torch.where(on, torch.cos(rs), torch.zeros_like(rs))
+        o[:, ORDER.index("sector_sin")] = torch.where(on, torch.sin(rs), torch.zeros_like(rs))
+        o[:, ORDER.index("sector_width")] = area["sw"] / 180
     return o
 
 

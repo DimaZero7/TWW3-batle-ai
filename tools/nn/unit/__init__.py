@@ -28,6 +28,10 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
     drill_pair.py  drill U4 'friends beside': two of our units (both the network's) with areas side by side or in
               echelon, 1-2 enemies under `nearest`; the side's reward shared
     exam_pair.py   its fixed exam (240): jostling, damage front / flank-rear, head-on, the pair's trade, out of the area
+    drill_shoot.py drill U5 'shooters - fire at one target': a shooter in a small position with a fire sector (any target
+              in the sector and in range, wherever; it never walks to a target - decode.Leash), one infantry enemy
+              going at it or past
+    exam_shoot.py  its fixed exam (240): fire time while in range, damage by fire (before contact), melee losses, trade
     branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
               of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
               bonus x the best's margin over the second when the network did the best
