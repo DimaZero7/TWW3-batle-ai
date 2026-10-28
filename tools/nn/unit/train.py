@@ -200,9 +200,17 @@ def shoot2_setup(cfg, P, device, gen=None, sp=None):
             "script": lambda s_: DG.to_area(s_, goal, grab_m=D2.GRAB_M)}
 
 
+def rout_setup(cfg, P, device, gen=None, sp=None):
+    """Drill U7 (drill_rout.py): hold the area against an enemy breaking in melee or fleeing across our area."""
+    from tools.nn.unit import drill_rout as DR
+    sp = sp if sp is not None else DR.specs(cfg["battles"], gen or torch.Generator())
+    st, own, area = DR.build(sp, P, device)
+    return {"st": st, "own": own, "area": area, "ender": DR.Ender(st), "specs": sp, "script": DR.script}
+
+
 SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup, "multi": multi_setup, "hold2": pair_setup,
-          "shoot1": shoot_setup, "withdraw": withdraw_setup, "shoot2": shoot2_setup}
-MIX = ("hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2")    # --drill mix: one drill a batch, in turn
+          "shoot1": shoot_setup, "withdraw": withdraw_setup, "shoot2": shoot2_setup, "rout": rout_setup}
+MIX = ("hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2", "rout")    # --drill mix: one a batch, in turn
 
 
 def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, branch=None):
@@ -495,7 +503,7 @@ def restore(path, device="cpu"):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--drill", default="smoke", choices=sorted(SETUPS) + ["mix"],
-                    help="mix: U1 / U2 / U3 / U4 / U5 / U6 / U5b (hold / go / multi / hold2 / shoot1 / withdraw / shoot2) in turn, one drill a batch - equal shares of the "
+                    help="mix: U1-U7 (hold / go / multi / hold2 / shoot1 / withdraw / shoot2 / rout) in turn, one drill a batch - equal shares of the "
                          "skirmishes; a batch of mixed drills would wait for its longest skirmish (go's up to 700 s)")
     ap.add_argument("--battles", type=int, default=256)
     ap.add_argument("--seconds", type=float, default=None, help="decisions a batch at most (smoke 120, hold 180)")
@@ -533,7 +541,8 @@ def main(argv=None):
         area = a.area_reward if a.area_reward is not None else (AREA_REWARD if a.drill == "go" else 0.0)
         return {"battles": a.battles,
                 "seconds": a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0, "hold2": 180.0,
-                                         "shoot1": 180.0, "withdraw": 400.0, "shoot2": 180.0}.get(drill, 120.0),
+                                         "shoot1": 180.0, "withdraw": 400.0, "shoot2": 180.0,
+                                         "rout": 125.0}.get(drill, 120.0),
                 "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0, "bounds": None, "gamma": 0.9994,
                 "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": drill, "area_reward": area,
                 "order_change": a.order_change_cost}
@@ -594,9 +603,10 @@ def main(argv=None):
                       "minutes": round((time.time() - start) / 60, 1)}), flush=True)
     (out / "log.json").write_text(json.dumps(log, indent=1), encoding="utf-8")
     if a.exam:
-        from tools.nn.unit import exam_go, exam_hold, exam_multi, exam_pair, exam_shoot, exam_shoot2, exam_withdraw
+        from tools.nn.unit import (exam_go, exam_hold, exam_multi, exam_pair, exam_rout, exam_shoot, exam_shoot2,
+                                   exam_withdraw)
         exams = {"hold": exam_hold, "go": exam_go, "multi": exam_multi, "hold2": exam_pair, "shoot1": exam_shoot,
-                 "withdraw": exam_withdraw, "shoot2": exam_shoot2}
+                 "withdraw": exam_withdraw, "shoot2": exam_shoot2, "rout": exam_rout}
         assert set(MIX) <= set(exams), "every drill of the mix has its exam"
         if a.drill == "mix":                       # all three, one after another
             for d_ in MIX:

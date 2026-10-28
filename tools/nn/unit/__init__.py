@@ -38,6 +38,9 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
     drill_shoot2.py    drill U5b 'a clean line of fire': two shooters side by side / in file, or a shooter behind our
               infantry; the simulator's line of fire past friends (missile.friend_los)
     exam_shoot2.py     its fixed exam (240): fire time, fire lost to friends, damage by fire, trade, out of the position
+    drill_rout.py      drill U7 'a routing enemy': hold the area against an enemy breaking in melee (worn: losses, low
+              morale - the simulator's rules rout it) or fleeing near our front; cut routers down in the area, the leash
+    exam_rout.py       its fixed exam (240): routers' health cut in the area, routed, leash seconds, out of the area, trade
     branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
               of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
               bonus x the best's margin over the second when the network did the best
