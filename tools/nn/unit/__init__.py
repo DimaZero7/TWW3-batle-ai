@@ -48,6 +48,11 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
               B); not a mask: a cost a second while it is allowed and the network's target is another (--prio-cost)
     exam_prio.py       its fixed exam (240): obedience (goal >= 0.9), hits at the priority, its time down, the trade; the
               same with no priority (the network's own choice)
+    drill_width.py     drill U9 'the width for the task': infantry holds an area 20-80 m wide against one enemy or a line
+              of two side by side, of random widths; our line starts at a random width (the simulator's width order)
+    exam_width.py      its fixed exam (240): damage to the flank / rear, our men striking, the trade, out of the area,
+              the line beyond the area, width orders, the front at the contact; the scripts keep / match / area /
+              match_area in the network's place (--script) as yardsticks
     branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
               of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
               bonus x the best's margin over the second when the network did the best

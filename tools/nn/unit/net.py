@@ -14,7 +14,8 @@ frozen and handed to the levels above):
                 + 'nobody' (enemies outside the area banned), pace: walk / run (slow bans the run, fast the walk),
                 width: keep the width in force, or one of WIDTHS - 1 steps evenly from the unit's narrowest to its
                 widest (within WIDTH_MAX_M) frontage (decode.py; the simulator re-forms over the game's time,
-                tools/nn/sim/reform.py). Its weights start at zero and its bias at WIDTH_KEEP_BIAS on 'keep': a new
+                tools/nn/sim/reform.py; a step wider than the area's front banned: decode.width_ok, v["width_ok"]).
+                Its weights start at zero and its bias at WIDTH_KEEP_BIAS on 'keep': a new
                 or an older network re-forms rarely until it learns when it pays
 
 A ban is a logit of NEG (-1e9): its probability is exactly 0 in fp32 and it is never sampled (-inf would make
@@ -170,7 +171,11 @@ class UnitNet(nn.Module):
         fast = order[:, ORDER.index("pace_fast")] > 0
         ban = torch.stack([fast, slow], 1)                                # fast bans the walk, slow the run
         pace = pace.masked_fill(ban, NEG)
-        return {"where": where, "face": self.face(core), "target": target, "pace": pace, "width": self.width(core)}
+        width = self.width(core)
+        if "width_ok" in v:
+            # a line wider than the area's front: a hard ban (decode.width_ok), as a cell outside the area
+            width = width.masked_fill(~v["width_ok"], NEG)
+        return {"where": where, "face": self.face(core), "target": target, "pace": pace, "width": width}
 
 
 def init_width(layer):

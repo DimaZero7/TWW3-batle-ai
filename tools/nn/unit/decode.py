@@ -5,8 +5,8 @@ to_orders: a target chosen -> ATTACK it (run by the pace); else the cell chosen:
 -> MOVE to its centre; both with the facing chosen (64 sectors from my front: tools/nn/sim/orders.py Orders.face) and
 the width chosen (width_of: 'keep' -> none, else a step between the unit's narrowest and widest frontage; Orders.width,
 the simulator re-forms: tools/nn/sim/reform.py). An attack carries neither.
-The bans (cells and targets outside the area, the pace) are in the network's logits (net.py); the decoder never
-widens them.
+The bans (cells and targets outside the area, the pace, a line wider than the area's front: width_ok) are in the
+network's logits (net.py); the decoder never widens them.
 
 Leash: while a unit attacks, its target may run out of its area and the pursuit would carry it out. Each simulator
 step, a unit under an ATTACK order of its own choice whose target is beyond the area's edge (more than EDGE_M out) and
@@ -44,6 +44,22 @@ def width_of(k, lo, hi, widths=None):
     W = widths or Nt.WIDTHS
     frac = (k.float() - 1) / max(W - 2, 1)
     return torch.where(k == Nt.WIDTH_KEEP, torch.full_like(lo, -1.0), lo + frac.clamp(0, 1) * (hi - lo))
+
+
+def width_ok(lo, hi, front, widths=None):
+    """[R, W] bool: the width head's allowed choices (a hard ban, as a cell outside the area): 'keep' always; a width
+    whose ordered frontage (width_of, before the simulator snaps it down to whole files) is no wider than the area's
+    front [R] (m); if none is, the narrowest. lo, hi [R]: width_limits of the viewers; front None: all."""
+    from tools.nn.unit import net as Nt
+    W = widths or Nt.WIDTHS
+    R = lo.shape[0]
+    k = torch.arange(W, device=lo.device)[None].expand(R, W)
+    if front is None:
+        return torch.ones((R, W), dtype=torch.bool, device=lo.device)
+    w = width_of(k.reshape(-1), lo[:, None].expand(R, W).reshape(-1), hi[:, None].expand(R, W).reshape(-1), W).view(R, W)
+    ok = (w <= front[:, None] + 1e-3) | (k == Nt.WIDTH_KEEP)
+    ok[:, 1] = ok[:, 1] | ~ok[:, 1:].any(1)
+    return ok
 
 
 def to_orders(act, v, now, cell_m, B, N, face_sectors=64, cells=Z.CELLS, wlim=None):

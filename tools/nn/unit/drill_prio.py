@@ -1,7 +1,8 @@
 """Drill U8 'a priority target' (build/diag_g49/unit_base.md, the user's decision 28.10): the levels above may name the
 unit's main target (the order's 'has_target' and the 'my_target' flag of that enemy's row - the same main target of the
 order, not a second notion); while it is allowed (its row's target_ok: infantry - its centre in the area; a shooter -
-in its fire sector and within its range) the unit attacks it and does not change it; none named - the unit chooses
+in its fire sector and within its range, not while the shooter itself is in melee - it cannot fire - or the target
+routs - the order is met: train.obedience_parts) the unit attacks it and does not change it; none named - the unit chooses
 itself. Not a hard mask: a small cost a second while the named target is allowed and the network's target is another
 one (or nobody) - train.py --prio-cost.
 

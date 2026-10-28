@@ -120,6 +120,34 @@ def test_obedience_only_while_the_target_is_allowed_and_no_mask():
     assert torch.equal(v0["target_ok"], v["target_ok"])
 
 
+def test_a_shooter_in_melee_or_at_a_router_is_not_held_to_its_target_and_the_contested_reading():
+    sp = DQ.specs(2, torch.Generator().manual_seed(4), fixed=[("duel", "shooter")])
+    sp[0]["start"] = 340.0                                                     # battle 0: the infantry far away
+    sp[1]["start"] = 0.5 * DQ._range(sp[1]["me"])                              # battle 1: within our range
+    setup = T.prio_setup(CFG, P, "cpu", sp=sp)
+    st, prio = setup["st"], setup["prio"]
+    H = st.N // 2
+    _, v = _views(setup, prio)
+    row = lambda b, j: int((v["slot"][b] == j).nonzero()[0, 0])               # noqa: E731
+    assert v["shooter"].tolist() == [True, True]
+    act = {"target": torch.tensor([row(0, H), row(1, H)])}
+    o = T.obedience_parts(v, act)
+    assert o["allowed"].tolist() == [True, True] and o["obeyed"].tolist() == [True, True]
+    # a real choice only where their infantry is allowed too
+    assert o["contested"].tolist() == [False, True] and o["obeyed_contested"].tolist() == [False, True]
+    # battle 0 our shooter in melee, battle 1 their shooter routing: not allowed; the old rule still counts them
+    st.u["m"][0, 0] = True
+    st.u["r"][1, H] = True
+    _, v = _views(setup, prio)
+    o = T.obedience_parts(v, act)
+    assert o["allowed"].tolist() == [False, False] and o["contested"].tolist() == [False, False]
+    assert o["allowed_old"].tolist() == [True, True] and o["obeyed_old"].tolist() == [True, True]
+    assert T.obedience(v, act)[0].tolist() == [False, False]
+    # infantry (no missile weapon) is held to its target in melee as before
+    v["shooter"] = torch.tensor([False, False])
+    assert T.obedience_parts(v, act)["allowed"].tolist() == [True, True]
+
+
 def test_the_cost_lands_on_the_reward():
     sp = DQ.specs(4, torch.Generator().manual_seed(5), fixed=[("duel", "shooter")])
     out = {}

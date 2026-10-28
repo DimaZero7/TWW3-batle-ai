@@ -3,9 +3,12 @@ priority - duel: the enemy shooter / the infantry / none; two: A / B / none), th
 
     bash tools/nn/dock.sh tools.nn.unit.exam_prio [--ckpt build/.../latest.pt] [--device cuda]
 
-Metrics: obedience (the main one, goal >= 0.9) - the share of the decisions (one a second) while the named target is
-allowed (its row's target_ok: infantry - its centre in our area; a shooter - in our sector and range) that the
-network's target is it (train.obedience), also split by our unit in melee / out of it; hits at the priority - the
+Metrics: obedience - the share of the decisions (one a second) while the named target is allowed (its row's
+target_ok: infantry - its centre in our area; a shooter - in our sector and range, the shooter itself not in melee and
+the target not routing: train.obedience_parts) that the network's target is it, also split by our unit in melee / out
+of it; the main one (goal >= 0.9) obedience_contested - the same over the decisions with another enemy allowed too (a
+real choice; with the named one the only target allowed it is taken ~always: 0.99 in the duel); obedience_old - the
+rule before (no melee and rout exceptions), for the comparison; hits at the priority - the
 share of the seconds our unit fights or fires (in melee or firing) that its current target (the simulator's `target`)
 is the priority; the priority down (dead, gone or routing) - the share and the time (s, of those down); its health
 lost; each enemy's time down (the slots H, H + 1: the duel's shooter / infantry, U3's A / B) - against the cells with
@@ -107,7 +110,10 @@ def run(net, P=None, device="cpu", duty=None, out_path=None, seed=SEED):
         g = m & given
         dn = g & (p_down_t >= 0)
         out = {"n": int(m.sum()),
+               "obedience_contested": _share(pr["obeyed_contested_s"], pr["contested_s"], g),
                "obedience": _share(pr["obeyed_s"], pr["allowed_s"], g),
+               "obedience_old": _share(pr["obeyed_old_s"], pr["allowed_old_s"], g),
+               "contested_s": _mean(pr["contested_s"], g),
                "obedience_melee": _share(pr["obeyed_melee_s"], pr["allowed_melee_s"], g),
                "obedience_free": _share(pr["obeyed_s"] - pr["obeyed_melee_s"], pr["allowed_s"] - pr["allowed_melee_s"], g),
                "allowed_s": _mean(pr["allowed_s"], g),
