@@ -50,6 +50,20 @@ class TestGrid:
         """)
 
 
+class TestNodes:
+    def test_node_grid_samples_the_multiples_of_the_step(self, lua):
+        lua.execute("""
+            local grid = map.new_grid(map.build_frame(radar), 2, nil, true)
+            assert(grid.nodes and grid.columns == 501 and grid.rows == 401, grid.columns .. 'x' .. grid.rows)
+            local x, z = map.cell_center(grid, 0, 0)
+            assert(math.abs(x + 500) < 1e-9 and math.abs(z + 400) < 1e-9)
+            x, z = map.cell_center(grid, grid.columns - 1, grid.rows - 1)
+            assert(math.abs(x - 500) < 1e-9 and math.abs(z - 400) < 1e-9)
+            local g2 = map.new_grid(map.build_frame(radar), 2, {min_x = -11, max_x = 11, min_z = -3, max_z = 4}, true)
+            assert(g2.min_x == -10 and g2.columns == 11 and g2.min_z == -2 and g2.rows == 4, g2.min_x .. ' ' .. g2.columns)
+        """)
+
+
 class TestWindow:
     def test_window_grid_is_clipped_and_offset(self, lua):
         lua.execute("""

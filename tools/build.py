@@ -556,6 +556,8 @@ def main(argv=None):
                         help="lord-ai: the other lord under the game's battle AI, or under one attack order (the control)")
     parser.add_argument("--duel-variant", choices=("solo", "escort"), default="solo",
                         help="lord-duel: the lords alone, or each with 2 infantry units of his faction (escort)")
+    parser.add_argument("--nodes", action="store_true",
+                        help="map-capture: sample the multiples of the step (the engine's height nodes), not cell centres")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -628,7 +630,7 @@ def main(argv=None):
             parser.error(str(e))
 
     if args.target == "map-capture":
-        run_config = {"step": args.step, "features": args.features}
+        run_config = {"step": args.step, "features": args.features, "nodes": args.nodes}
         if args.window:
             run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
