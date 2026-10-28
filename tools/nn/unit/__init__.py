@@ -41,6 +41,11 @@ Design: build/diag_g49/unit_base.md (the user's decisions), build/diag_g49/plan_
     drill_rout.py      drill U7 'a routing enemy': hold the area against an enemy breaking in melee (worn: losses, low
               morale - the simulator's rules rout it) or fleeing near our front; cut routers down in the area, the leash
     exam_rout.py       its fixed exam (240): routers' health cut in the area, routed, leash seconds, out of the area, trade
+    drill_prio.py      drill U8 'a priority target': the order names a main target (has_target + the row's my_target) in
+              70 % of the skirmishes - a shooters' duel (their shooter or their infantry) or infantry against two (A or
+              B); not a mask: a cost a second while it is allowed and the network's target is another (--prio-cost)
+    exam_prio.py       its fixed exam (240): obedience (goal >= 0.9), hits at the priority, its time down, the trade; the
+              same with no priority (the network's own choice)
     branch.py the approach's branches (U1, U3): the skirmish copied when an enemy is within its charge distance + 4 s
               of its run, played on per variant (U1 stand / attack; U3 attack A / B, stand facing A / B); a decaying
               bonus x the best's margin over the second when the network did the best

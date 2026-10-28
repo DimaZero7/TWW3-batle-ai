@@ -101,9 +101,20 @@ def order_changes(new, old, bi, ii, move_m=reward.Weights.order_move_m, face_deg
     return (k != O.KEEP) & (new_kind | new_target | moved | turned)
 
 
-def views(raws, d_idx, b_idx, i_idx, card, area, cfg, everyone=False):
+def prio_now(raw_d, prio, bi, ii):
+    """[R] the main target named by each unit's order (drill U8: prio [B, N] the slot, -1 none) while it is still there
+    (alive, not gone: view.raw 'alive'), else -1; raw_d [B, N, RAW] the raw state now, prio None: none anywhere."""
+    if prio is None:
+        return torch.full_like(ii, -1)
+    p = prio[bi, ii]
+    alive = raw_d[bi, p.clamp(min=0), V.I["alive"]] > 0
+    return torch.where((p >= 0) & alive, p, torch.full_like(p, -1))
+
+
+def views(raws, d_idx, b_idx, i_idx, card, area, cfg, everyone=False, prio=None):
     """The views of the samples (d_idx, b_idx, i_idx: decision, battle, the network's unit's slot) rebuilt from the stored
-    raw states - one viewer a sample; v["bi"] is set to the battles (to_orders writes the orders there)."""
+    raw states - one viewer a sample; v["bi"] is set to the battles (to_orders writes the orders there). prio [B, N]
+    (drill U8): the order's main target - its row's 'my_target' flag; v["prio"] [M] its slot now (prio_now)."""
     now = raws[d_idx, b_idx]                                              # [M, N, RAW]
     T = V.T
     hist = torch.zeros((T,) + now.shape, device=now.device)
@@ -112,10 +123,17 @@ def views(raws, d_idx, b_idx, i_idx, card, area, cfg, everyone=False):
         ok = d >= 0
         hist[k] = torch.where(ok[:, None, None], raws[d.clamp(min=0), b_idx], torch.zeros((), device=now.device))
     ar = {k: a[b_idx] for k, a in area.items()}
+    M = now.shape[0]
+    m_idx = torch.arange(M, device=now.device)
     who = torch.zeros(now.shape[:2], dtype=torch.bool, device=now.device)
-    who[torch.arange(now.shape[0], device=now.device), i_idx] = True
-    v = V.build(now, hist, card[b_idx], who, area=ar, cell_m=cfg["cell_m"], bounds=cfg["bounds"], everyone=everyone)
+    who[m_idx, i_idx] = True
+    p = prio_now(now, None if prio is None else prio[b_idx], m_idx, i_idx)
+    tgt = torch.full(now.shape[:2], -1, dtype=torch.long, device=now.device)
+    tgt[m_idx, i_idx] = p
+    v = V.build(now, hist, card[b_idx], who, order_target=tgt, area=ar, cell_m=cfg["cell_m"], bounds=cfg["bounds"],
+                everyone=everyone)
     v["bi"] = b_idx
+    v["prio"] = p
     return v
 
 
@@ -147,9 +165,22 @@ def go_setup(cfg, P, device, gen=None, sp=None):
             "script": lambda s_: DG.to_area(s_, area)}
 
 
-def orders_now(raw_d, area, pace, arrived, bi, ii):
-    """[R] orders (net.order_of) of the network's units (battle bi, slot ii) from the raw state raw_d [B, N, RAW]."""
-    return Nt.order_of(raw_d[bi, ii], {k: v[bi, ii] for k, v in area.items() if k != "on"}, pace[bi], arrived[bi])
+def orders_now(raw_d, area, pace, arrived, bi, ii, prio=None):
+    """[R] orders (net.order_of) of the network's units (battle bi, slot ii) from the raw state raw_d [B, N, RAW]; prio
+    [B, N] the main target named (drill U8: has_target while it is there, prio_now)."""
+    return Nt.order_of(raw_d[bi, ii], {k: v[bi, ii] for k, v in area.items() if k != "on"}, pace[bi], arrived[bi],
+                       has_target=None if prio is None else prio_now(raw_d, prio, bi, ii) >= 0)
+
+
+def obedience(v, act):
+    """Drill U8: (allowed [R], obeyed [R]) - the order's main target (v["prio"]) is now among the allowed targets
+    (v["target_ok"]: infantry - in its area, a shooter - in its sector and range), and the network's target is it."""
+    p = v["prio"]
+    allowed = ((v["slot"] == p[:, None]) & (p[:, None] >= 0) & v["target_ok"]).any(1)
+    K = v["slot"].shape[1]
+    t = act["target"]
+    chosen = torch.where(t < K, v["slot"].gather(1, t.clamp(max=K - 1)[:, None])[:, 0], torch.full_like(t, -1))
+    return allowed, allowed & (chosen == p)
 
 
 def multi_setup(cfg, P, device, gen=None, sp=None):
@@ -208,9 +239,26 @@ def rout_setup(cfg, P, device, gen=None, sp=None):
     return {"st": st, "own": own, "area": area, "ender": DR.Ender(st), "specs": sp, "script": DR.script}
 
 
+def prio_setup(cfg, P, device, gen=None, sp=None):
+    """Drill U8 (drill_prio.py): a shooters' duel or infantry against two; the order names a main target in 70 % of the
+    skirmishes (prio [B, N])."""
+    from tools.nn.unit import drill_multi as DM
+    from tools.nn.unit import drill_prio as DQ
+    sp = sp if sp is not None else DQ.specs(cfg["battles"], gen or torch.Generator())
+    st, own, area, goal, prio, duel = DQ.build(sp, P, device)
+    return {"st": st, "own": own, "area": area, "ender": DM.Ender(st.B, device), "specs": sp, "prio": prio,
+            "script": lambda s_: DQ.script(s_, goal, duel)}
+
+
 SETUPS = {"smoke": smoke_setup, "hold": hold_setup, "go": go_setup, "multi": multi_setup, "hold2": pair_setup,
-          "shoot1": shoot_setup, "withdraw": withdraw_setup, "shoot2": shoot2_setup, "rout": rout_setup}
-MIX = ("hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2", "rout")    # --drill mix: one a batch, in turn
+          "shoot1": shoot_setup, "withdraw": withdraw_setup, "shoot2": shoot2_setup, "rout": rout_setup,
+          "prio": prio_setup}
+MIX = ("hold", "go", "multi", "hold2", "shoot1", "withdraw", "shoot2", "rout", "prio")   # --drill mix: one a batch, in turn
+# per second the named main target is allowed and the network's target is not it (drill U8). The reference network
+# (u7/run2) disobeys ~32 of ~83 allowed seconds a skirmish: 0.02 costs it ~0.6 against the reward's |sum| ~0.9 a
+# skirmish (the advantages' spread 0.17 a decision); on the CPU, 6 updates of 128 skirmishes from it: 0.005 moved the
+# exam's obedience 0.615 -> 0.629, 0.02 -> 0.713 (build/diag_g49/u8_cpu)
+PRIO_COST = 0.02
 
 
 def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, branch=None):
@@ -241,6 +289,10 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
              "entropy": {k: 0.0 for k in Nt.HEADS}, "n_dec": 0}
     pace = setup.get("pace", torch.full((B,), Nt.PACE_ANY, dtype=torch.long, device=device))
     script = setup.get("script", opponents.nearest)
+    prio = setup.get("prio")                  # drill U8: [B, N] the main target each unit's order names, -1 none
+    if prio is not None:
+        zb = lambda: torch.zeros(B, device=device)       # noqa: E731
+        pr = {"allowed_s": zb(), "obeyed_s": zb(), "allowed_melee_s": zb(), "obeyed_melee_s": zb()}
     arrived_d = torch.ones((D, B), dtype=torch.bool, device=device)
     cm = torch.full((R,), cfg["cell_m"], device=device)
     d_all = torch.arange(D, device=device)
@@ -265,18 +317,27 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         raws[d] = V.raw(st, spacing, leash=leash.on)
         with torch.no_grad():
             dd = d_all[d].expand(R)
-            v = views(raws, dd, bi, ii, card, area, cfg)
+            v = views(raws, dd, bi, ii, card, area, cfg, prio=prio)
             arrived = getattr(ender, "arrived", None)
             arrived = torch.ones(B, dtype=torch.bool, device=device) if arrived is None else arrived.clone()
             arrived_d[d] = arrived
-            order = orders_now(raws[d], area, pace, arrived, bi, ii)
+            order = orders_now(raws[d], area, pace, arrived, bi, ii, prio=prio)
             lg = net(v, order, cm)
             act = Nt.sample(lg, greedy=greedy)
             lp, ent = Nt.log_prob(lg, act)
             if critic is not None:
-                vc = views(raws, dd, bi, ii, card, area, cfg, everyone=True)
+                vc = views(raws, dd, bi, ii, card, area, cfg, everyone=True, prio=prio)
                 val[d] = critic(vc, order, cm)
         live = valid[d]
+        if prio is not None:
+            # obedience (drill U8): the named target allowed now and the network's target another one (or nobody)
+            allow, obey = obedience(v, act)
+            allow, obey = allow & live, obey & live
+            melee = st.u["m"][bi, ii]
+            for k_, m_ in (("allowed_s", allow), ("obeyed_s", obey), ("allowed_melee_s", allow & melee),
+                           ("obeyed_melee_s", obey & melee)):
+                pr[k_].index_add_(0, bi, m_.float())
+            disobey = (allow & ~obey).float()
         stats["n_dec"] += int(live.sum())
         for k in Nt.HEADS:
             dk = torch.distributions.Categorical(logits=lg[k])
@@ -351,6 +412,10 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         n_units = torch.zeros(B, device=device).index_add_(0, bi, torch.ones(R, device=device))
         side_ch = torch.zeros(B, device=device).index_add_(0, bi, ch.float())
         r = r - float(cfg.get("order_change", 0.0)) * side_ch / n_units.clamp(min=1)
+        if prio is not None:
+            # the cost of disobeying (drill U8): per second of the decision, divided by the side's network units as above
+            side_dis = torch.zeros(B, device=device).index_add_(0, bi, disobey)
+            r = r - float(cfg.get("prio_cost", 0.0)) * steps * P.dt * side_dis / n_units.clamp(min=1)
         in_force = intended
         t_sim += time.time() - t0
         rew[d] = r[bi]                      # the side's reward, shared by its network units
@@ -403,16 +468,23 @@ def rollout(net, critic, cfg, P, device, duty, setup, watch=None, greedy=False, 
         with torch.no_grad():
             nxt = V.raw(st, spacing, leash=leash.on)
             last = torch.cat([raws[:D], nxt[None]])
-            vc = views(last, torch.full((R,), D, device=device), bi, ii, card, area, cfg, everyone=True)
+            vc = views(last, torch.full((R,), D, device=device), bi, ii, card, area, cfg, everyone=True, prio=prio)
             cut = (ender.why == 3) if ender is not None else torch.zeros_like(st.done)
             arr = getattr(ender, "arrived", None)
             order = orders_now(nxt, area, pace, torch.ones(B, dtype=torch.bool, device=device) if arr is None else arr,
-                               bi, ii)
+                               bi, ii, prio=prio)
             going = (~st.done[bi] & viewer_ok(st, bi, ii)) | (st.done[bi] & cut[bi])
             last_value = torch.where(going, critic(vc, order, cm), torch.zeros(R, device=device))
     batch = {"raws": raws[:D], "act": {k: v_[:D] for k, v_ in store.items()}, "lp": lp_old[:D], "value": val[:D],
              "reward": rew[:D], "done": done[:D], "valid": valid[:D], "last_value": last_value, "card": card, "own": own,
-             "area": area, "pace": pace, "arrived": arrived_d[:D], "bi": bi, "ii": ii}
+             "area": area, "pace": pace, "arrived": arrived_d[:D], "bi": bi, "ii": ii, "prio": prio}
+    if prio is not None:
+        a_s, o_s = float(pr["allowed_s"].sum()), float(pr["obeyed_s"].sum())
+        am_s, om_s = float(pr["allowed_melee_s"].sum()), float(pr["obeyed_melee_s"].sum())
+        stats["prio"] = {"allowed_s": round(a_s / B, 1), "obedience": round(o_s / a_s, 3) if a_s else None,
+                         "obedience_melee": round(om_s / am_s, 3) if am_s else None,
+                         "obedience_free": round((o_s - om_s) / (a_s - am_s), 3) if a_s - am_s else None}
+        stats["_prio"] = pr
     n = max(stats.pop("n_dec"), 1)
     stats["entropy"] = {k: round(v_ / n, 4) for k, v_ in stats["entropy"].items()}
     stats.update({"decisions": D, "battles": B, "win1": float((st.winner == 1).float().mean()),
@@ -439,10 +511,12 @@ def update(net, critic, opt, batch, cfg, device, duty):
             j = perm[i:i + cfg["minibatch"]]
             di, ri = d_idx[j], r_idx[j]
             bi, si = batch["bi"][ri], batch["ii"][ri]
-            v = views(batch["raws"], di, bi, si, batch["card"], batch["area"], cfg)
-            vc = views(batch["raws"], di, bi, si, batch["card"], batch["area"], cfg, everyone=True)
+            pq = batch.get("prio")
+            v = views(batch["raws"], di, bi, si, batch["card"], batch["area"], cfg, prio=pq)
+            vc = views(batch["raws"], di, bi, si, batch["card"], batch["area"], cfg, everyone=True, prio=pq)
             order = Nt.order_of(batch["raws"][di, bi, si], {k: v[bi, si] for k, v in batch["area"].items() if k != "on"},
-                                batch["pace"][bi], batch["arrived"][di, bi])
+                                batch["pace"][bi], batch["arrived"][di, bi],
+                                has_target=None if pq is None else v["prio"] >= 0)
             cm = torch.full((len(j),), cfg["cell_m"], device=device)
             lg = net(v, order, cm)
             act = {k: batch["act"][k][di, ri] for k in Nt.HEADS}
@@ -503,7 +577,7 @@ def restore(path, device="cpu"):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--drill", default="smoke", choices=sorted(SETUPS) + ["mix"],
-                    help="mix: U1-U7 (hold / go / multi / hold2 / shoot1 / withdraw / shoot2 / rout) in turn, one drill a batch - equal shares of the "
+                    help="mix: U1-U8 (hold / go / multi / hold2 / shoot1 / withdraw / shoot2 / rout / prio) in turn, one drill a batch - equal shares of the "
                          "skirmishes; a batch of mixed drills would wait for its longest skirmish (go's up to 700 s)")
     ap.add_argument("--battles", type=int, default=256)
     ap.add_argument("--seconds", type=float, default=None, help="decisions a batch at most (smoke 120, hold 180)")
@@ -525,6 +599,10 @@ def main(argv=None):
                     help="the cost of a real order change of the network (kind, target, a point 10 m or more away, a "
                          "facing 22.5 deg or more away; divided by the side's network units; the leash's are free), as "
                          "the main training's reward.order_change (0.001)")
+    ap.add_argument("--prio-cost", type=float, default=PRIO_COST,
+                    help="drill U8 (prio, in the mix too): the cost a second while the main target the order names is "
+                         "allowed (infantry: in the area; a shooter: in its sector and range) and the network's target is "
+                         "another one or nobody (divided by the side's network units)")
     ap.add_argument("--area-reward", type=float, default=None, help="per second the area is ours +W, the enemy's -W (after our arrival) "
                     "(drill_go.whose_area); default 0.001 for --drill go (~0.15 of the budget over 150 s), else 0")
     ap.add_argument("--device", default="cpu")
@@ -542,10 +620,10 @@ def main(argv=None):
         return {"battles": a.battles,
                 "seconds": a.seconds or {"hold": 180.0, "go": 700.0, "multi": 180.0, "hold2": 180.0,
                                          "shoot1": 180.0, "withdraw": 400.0, "shoot2": 180.0,
-                                         "rout": 125.0}.get(drill, 120.0),
+                                         "rout": 125.0, "prio": 180.0}.get(drill, 120.0),
                 "epochs": a.epochs, "minibatch": a.minibatch, "cell_m": 8.0, "bounds": None, "gamma": 0.9994,
                 "lam": 0.9025, "clip": 0.2, "vf": 0.5, "entropy": 0.01, "drill": drill, "area_reward": area,
-                "order_change": a.order_change_cost}
+                "order_change": a.order_change_cost, "prio_cost": a.prio_cost}
     cfg = cfg_of(drills[0])
     dev = a.device
     net, critic = Nt.UnitNet().to(dev), Nt.Critic().to(dev)
@@ -577,6 +655,7 @@ def main(argv=None):
                   "lead_s": a.branch_lead_s, "horizon_s": a.branch_horizon_s}
         batch, rs = rollout(net, critic, cfg, P, dev, duty, SETUPS[drill](cfg, P, dev, gen), branch=br)
         rs.pop("_branch", None)
+        rs.pop("_prio", None)
         t1 = time.time()
         us = update(net, critic, opt, batch, cfg, dev, duty)
         t2 = time.time()
@@ -603,10 +682,10 @@ def main(argv=None):
                       "minutes": round((time.time() - start) / 60, 1)}), flush=True)
     (out / "log.json").write_text(json.dumps(log, indent=1), encoding="utf-8")
     if a.exam:
-        from tools.nn.unit import (exam_go, exam_hold, exam_multi, exam_pair, exam_rout, exam_shoot, exam_shoot2,
-                                   exam_withdraw)
+        from tools.nn.unit import (exam_go, exam_hold, exam_multi, exam_pair, exam_prio, exam_rout, exam_shoot,
+                                   exam_shoot2, exam_withdraw)
         exams = {"hold": exam_hold, "go": exam_go, "multi": exam_multi, "hold2": exam_pair, "shoot1": exam_shoot,
-                 "withdraw": exam_withdraw, "shoot2": exam_shoot2, "rout": exam_rout}
+                 "withdraw": exam_withdraw, "shoot2": exam_shoot2, "rout": exam_rout, "prio": exam_prio}
         assert set(MIX) <= set(exams), "every drill of the mix has its exam"
         if a.drill == "mix":                       # all three, one after another
             for d_ in MIX:

@@ -102,29 +102,36 @@ def exam_specs(seed=4905, per=40, hard=120):
     return specs(per * len(cells), gen, fixed=cells, hard_share=0.0) + specs(hard, gen, hard_share=1.0)
 
 
+def army(s):
+    """One skirmish's army (scenario.build): ours, then A and B."""
+    foes = []
+    for key, rel, gap in ((s["foe"], s["rel"], s["gap"]), (s["foe_b"], s["rel_b"], s["gap_b"])):
+        a = math.radians(s["b"] + rel)
+        ex, ez = gap * math.sin(a), gap * math.cos(a)
+        foes.append({"key": key, "x": ex, "z": ez, "b": math.degrees(math.atan2(-ex, -ez)) % 360})
+    mine = {"key": s["me"], "x": 0.0, "z": 0.0, "b": s["b"], "width": s["front"]}
+    f_me = DH.FACTIONS[s["ours"]]
+    f_foe = DH.FACTIONS[s.get("theirs") or ("skv" if s["ours"] == "emp" else "emp")]
+    return {"attacker": 2, "sides": {1: {"faction": f_me, "units": [mine]}, 2: {"faction": f_foe, "units": foes}}}
+
+
+def area_centre(s):
+    """(x, z) of a skirmish's area centre (our unit at the origin, its cell corner kx, kz)."""
+    x, z = Z.world(torch.tensor((s["w"] / 2 - s["kx"]) * DH.CELL), torch.tensor((s["h"] / 2 - s["kz"]) * DH.CELL),
+                   0.0, 0.0, s["b"])
+    return float(x), float(z)
+
+
 def build(sp, P, device):
     """The state (ours slot 0; A slot H, B slot H + 1), own [B, N], the areas {x, z, b, front, depth, on} [B, N]."""
-    armies = []
-    for s in sp:
-        foes = []
-        for key, rel, gap in ((s["foe"], s["rel"], s["gap"]), (s["foe_b"], s["rel_b"], s["gap_b"])):
-            a = math.radians(s["b"] + rel)
-            ex, ez = gap * math.sin(a), gap * math.cos(a)
-            foes.append({"key": key, "x": ex, "z": ez, "b": math.degrees(math.atan2(-ex, -ez)) % 360})
-        mine = {"key": s["me"], "x": 0.0, "z": 0.0, "b": s["b"], "width": s["front"]}
-        f_me = DH.FACTIONS[s["ours"]]
-        f_foe = DH.FACTIONS[s.get("theirs") or ("skv" if s["ours"] == "emp" else "emp")]
-        armies.append({"attacker": 2, "sides": {1: {"faction": f_me, "units": [mine]},
-                                                2: {"faction": f_foe, "units": foes}}})
-    st = scenario.build(armies, P, device=device)
+    st = scenario.build([army(s) for s in sp], P, device=device)
     B, N = st.B, st.N
     own = torch.zeros((B, N), dtype=torch.bool, device=device)
     own[:, 0] = True
     cx, cz = [], []
     for s in sp:
-        x, z = Z.world(torch.tensor((s["w"] / 2 - s["kx"]) * DH.CELL), torch.tensor((s["h"] / 2 - s["kz"]) * DH.CELL),
-                       0.0, 0.0, s["b"])
-        cx.append(float(x)), cz.append(float(z))
+        x, z = area_centre(s)
+        cx.append(x), cz.append(z)
     f = lambda v: torch.tensor(v, device=device, dtype=torch.float32)[:, None].expand(B, N).clone()   # noqa: E731
     area = {"x": f(cx), "z": f(cz), "b": f([s["b"] for s in sp]), "front": f([s["w"] * DH.CELL for s in sp]),
             "depth": f([s["h"] * DH.CELL for s in sp]), "on": own.clone()}

@@ -84,28 +84,35 @@ def exam_specs(seed=4909, n=240):
     return specs(n, torch.Generator().manual_seed(seed), fixed=list(MODES))
 
 
+def army(s):
+    """One skirmish's army (scenario.build), our position (x, z, b, front, depth, sb, sw) and the enemy's goal (x, z)."""
+    C = DH.CELL
+    # the position: the unit at the cell corner nearest its middle
+    kx, kz = round(s["w"] / 2), round(s["h"] / 2)
+    px, pz = Z.world(torch.tensor((s["w"] / 2 - kx) * C), torch.tensor((s["h"] / 2 - kz) * C), 0.0, 0.0, s["b"])
+    a = math.radians(s["sb"] + s["start_rel"])
+    ex, ez = s["start"] * math.sin(a), s["start"] * math.cos(a)
+    if s["mode"] == "at":
+        gx, gz = float(px), float(pz)
+    else:
+        g = math.radians(s["sb"] + s["past_rel"])
+        gx, gz = s["past"] * math.sin(g), s["past"] * math.cos(g)
+    mine = {"key": s["me"], "x": 0.0, "z": 0.0, "b": s["b"], "width": s["front"]}
+    theirs = {"key": s["foe"], "x": ex, "z": ez, "b": math.degrees(math.atan2(gx - ex, gz - ez)) % 360}
+    arm = {"attacker": 2, "sides": {1: {"faction": DH.FACTIONS[s["ours"]], "units": [mine]},
+                                    2: {"faction": DH.FACTIONS[s["theirs"]], "units": [theirs]}}}
+    return arm, (float(px), float(pz), s["b"], s["w"] * C, s["h"] * C, s["sb"], s["sw"]), (gx, gz)
+
+
 def build(sp, P, device):
     """The state (ours slot 0, the enemy slot H), own [B, N], our position {x, z, b, front, depth, on, sb, sw} [B, N] and
     the enemy's goal {x, z, b, front, depth} [B, N] (drill_go.to_area reads slot 0's)."""
     armies, pos, goal = [], [], []
-    C = DH.CELL
     for s in sp:
-        # the position: the unit at the cell corner nearest its middle
-        kx, kz = round(s["w"] / 2), round(s["h"] / 2)
-        px, pz = Z.world(torch.tensor((s["w"] / 2 - kx) * C), torch.tensor((s["h"] / 2 - kz) * C), 0.0, 0.0, s["b"])
-        a = math.radians(s["sb"] + s["start_rel"])
-        ex, ez = s["start"] * math.sin(a), s["start"] * math.cos(a)
-        if s["mode"] == "at":
-            gx, gz = float(px), float(pz)
-        else:
-            g = math.radians(s["sb"] + s["past_rel"])
-            gx, gz = s["past"] * math.sin(g), s["past"] * math.cos(g)
-        mine = {"key": s["me"], "x": 0.0, "z": 0.0, "b": s["b"], "width": s["front"]}
-        theirs = {"key": s["foe"], "x": ex, "z": ez, "b": math.degrees(math.atan2(gx - ex, gz - ez)) % 360}
-        armies.append({"attacker": 2, "sides": {1: {"faction": DH.FACTIONS[s["ours"]], "units": [mine]},
-                                                2: {"faction": DH.FACTIONS[s["theirs"]], "units": [theirs]}}})
-        pos.append((float(px), float(pz), s["b"], s["w"] * C, s["h"] * C, s["sb"], s["sw"]))
-        goal.append((gx, gz))
+        arm, p_, g_ = army(s)
+        armies.append(arm)
+        pos.append(p_)
+        goal.append(g_)
     st = scenario.build(armies, P, device=device)
     B, N = st.B, st.N
     own = torch.zeros((B, N), dtype=torch.bool, device=device)

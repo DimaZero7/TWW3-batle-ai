@@ -208,15 +208,18 @@ def order_vec(R, pace=PACE_ANY, going=False, has_target=False, has_area=False, d
     return o
 
 
-def order_of(me, area, pace, arrived, device=None):
+def order_of(me, area, pace, arrived, device=None, has_target=None):
     """[R, len(ORDER)] the orders of R units from their raw state me [R, view.RAW], their areas {x, z, b, front, depth} [R],
-    pace [R] long (PACE_*) and arrived [R] bool (in place; else going)."""
+    pace [R] long (PACE_*), arrived [R] bool (in place; else going) and has_target [R] bool (the order names a main
+    target - drill U8; its enemy's row carries the view's 'my_target' flag; None: no target)."""
     from tools.nn.unit import view as V
     R = me.shape[0]
     o = torch.zeros((R, len(ORDER)), device=me.device)
     o[torch.arange(R, device=me.device), pace] = 1.0
     o[:, ORDER.index("going")] = (~arrived).float()
     o[:, ORDER.index("in_place")] = arrived.float()
+    if has_target is not None:
+        o[:, ORDER.index("has_target")] = has_target.float()
     o[:, ORDER.index("has_area")] = 1.0
     s, f = Z.local(area["x"], area["z"], me[:, V.I["x"]], me[:, V.I["z"]], me[:, V.I["b"]])
     rel = (area["b"] - me[:, V.I["b"]]) * math.pi / 180
