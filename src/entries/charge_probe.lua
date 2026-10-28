@@ -663,6 +663,19 @@ function M.main(bm, config, globals)
                         end
                     end
                 end
+                if lane.mode == 'shuttle' and lane.main and not lane.main_done and now - lane.t0 >= lane.main.at_s * 1000 then
+                    -- (the terrain2 plan) after the flat pre-run: teleported to the slope (main {at_s, x, z, b, p2}), the
+                    -- shuttle goes on from there, its first leg to main.p2
+                    lane.main_done = true
+                    local fat = read(function() return lane.a.unit:fatigue_state() end)
+                    place(lane.a, lane.main.x, lane.main.z, lane.main.b, lane.a_width)
+                    lane.layout.ax, lane.layout.az, lane.layout.ab = lane.main.x, lane.main.z, lane.main.b
+                    lane.p2 = lane.main.p2
+                    lane.leg, lane.leg_ms = 1, now
+                    orders.move(lane.a.uc, vec(lane.p2.x, lane.p2.z), lane.shuttle_walk ~= true)
+                    emit('probe_phase', {lane = lane.name, phase = 'main', t = now - lane.t0, fat = fat,
+                        fat_after = read(function() return lane.a.unit:fatigue_state() end)})
+                end
                 if lane.mode == 'shuttle' then
                     -- (the terrain plan) at a run between its place and lane.p2 {x, z} until the lane ends: the next leg
                     -- once within 6 m of its point, or once stopped 4 s into the leg

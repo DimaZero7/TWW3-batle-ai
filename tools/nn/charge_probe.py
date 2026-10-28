@@ -461,7 +461,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -654,6 +654,22 @@ TERRAIN = {
     "melee": [(130, -290, 45, 0.448), (120, 100, 75, 0.425), (-280, -30, 210, 0.415), (-220, 230, 315, 0.417),
               (-400, -210, 240, 0.418), (10, 0, 270, 0.383)],
     "park_z": 470.0,
+}
+# the terrain2 plan: fatigue one way (a flat pre-run at a run to pre_s, then teleported to the foot of a slope, or its
+# top, and up / down it: (pre x, z, b), (main x, z, b uphill, leg m, slope), down), and the hits apart from the damage a hit:
+# archers on a lone Warlock Engineer from ~27 m above / level / ~25 m below (shooter x, z, target x, z, metres above)
+TERRAIN2 = {
+    "pre_s": 62, "pre_leg": 45,
+    "fatigue": {"up1": ((-300, -150, 45), (-410, -40, 195, 80, 0.243), False),
+                "up2": ((30, -410, 0), (170, -370, 30, 80, 0.261), False),
+                "down1": ((260, 30, 285), (100, 10, 60, 80, 0.29), True),
+                "flat_tp": ((210, -220, 135), (440, 200, 255, 45, 0.006), False)},
+    "control": (210, -80, 45, 45),
+    "shoot": {"above_a": (-280, -90, -230, -3, 27.0), "above_g": (-250, 270, -150, 270, 22.4),
+              "above_f": (-30, -20, 67, -46, 22.9), "below_b": (174, -377, 200, -280, -25.7),
+              "below_e": (304, -407, 330, -310, -22.9), "below_d": (-404, -13, -430, -110, -23.6),
+              "level_1": (-140, -240, -211, -311, 1.5), "level_2": (50, 330, 76, 427, 1.4),
+              "level_3": (440, 240, 353, 290, 1.5)},
 }
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
@@ -861,6 +877,39 @@ def battles(plan):
                            catchment=g["catchment"], a_at=hi if up else lo, t_at=lo if up else hi,
                            place=(float(x0), float(z0))))
         out += [b1, b2]
+    elif plan == "terrain2":
+        g, g2 = TERRAIN, TERRAIN2
+
+        def along(x0, z0, b, d):
+            return x0 + d * math.sin(math.radians(b)), z0 + d * math.cos(math.radians(b))
+        common = dict(map=g["map"], catchment=g["catchment"])
+        lanes_, k = [], 0
+        for kind, ((px, pz, pb), (mx, mz, mb, leg, slope), down) in g2["fatigue"].items():
+            p1 = along(px, pz, pb, g2["pre_leg"])
+            top = along(mx, mz, mb, leg)
+            start, end, b = (top, (mx, mz), (mb + 180) % 360) if down else ((mx, mz), top, mb)
+            lanes_.append(lane("spear", "clanrat", "shuttle", "hold", gap_m=250, fight_s=120, max_s=120, answer=False,
+                               kind=f"fat_{kind}", slope=-slope if down else slope, **common,
+                               a_at={"x": float(px), "z": float(pz), "b": float(pb)},
+                               p2={"x": round(p1[0], 1), "z": round(p1[1], 1)},
+                               main={"at_s": g2["pre_s"], "x": round(start[0], 1), "z": round(start[1], 1), "b": float(b),
+                                     "p2": {"x": round(end[0], 1), "z": round(end[1], 1)}},
+                               t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(float(px), float(pz))))
+            k += 1
+        cx, cz, cb, cl = g2["control"]
+        c1 = along(cx, cz, cb, cl)
+        lanes_.append(lane("spear", "clanrat", "shuttle", "hold", gap_m=250, fight_s=120, max_s=120, answer=False,
+                           kind="fat_control", slope=0.0, **common, a_at={"x": float(cx), "z": float(cz), "b": float(cb)},
+                           p2={"x": round(c1[0], 1), "z": round(c1[1], 1)},
+                           t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(float(cx), float(cz))))
+        for kind, (sx, sz, tx, tz, dh) in g2["shoot"].items():
+            b = math.degrees(math.atan2(tx - sx, tz - sz)) % 360
+            lanes_.append(lane("archer", "warlock", "shoot", "hold", gap_m=round(math.hypot(tx - sx, tz - sz)), fight_s=60,
+                               max_s=60, answer=False, kind=f"hit_{kind}", dh=dh, **common,
+                               a_at={"x": float(sx), "z": float(sz), "b": round(b, 1)},
+                               t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)},
+                               place=(float(sx), float(sz))))
+        out.append(lanes_)
     elif plan == "meleeorders":
         # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
         # network's move orders: 951 of 1054 at a run in the it1 battles)
@@ -1367,10 +1416,10 @@ def run_config(plan, index):
         config.update(tick_ms=SWING_MS, men_ms=500)
     if plan == "fatrun":
         config.update(men_after_s=0, men_near_m=0)
-    if plan == "terrain":
+    if plan in ("terrain", "terrain2"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)
-        if index == 1:
+        if index == 1 and plan == "terrain":
             config["heights"] = {"half": 256, "step": 2.0, "lines": [
                 {"x": 100.0, "z": 100.3, "dx": 0.25, "n": 81}, {"x": 100.3, "z": 100.0, "dz": 0.25, "n": 81},
                 {"x": -200.0, "z": -199.7, "dx": 0.25, "n": 81}, {"x": -199.7, "z": -200.0, "dz": 0.25, "n": 81}]}
