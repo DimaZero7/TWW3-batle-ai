@@ -59,7 +59,13 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          "wh2_dlc13_emp_inf_huntsmen_0", "wh3_dlc25_emp_inf_nuln_ironsides", "wh3_dlc25_emp_inf_hochland_long_rifles",
          "wh2_main_skv_inf_gutter_runners_0", "wh2_main_skv_inf_gutter_runners_1",
          "wh2_main_skv_inf_gutter_runner_slingers_0", "wh2_main_skv_inf_gutter_runner_slingers_1",
-         "wh2_dlc12_skv_inf_warplock_jezzails_0")
+         "wh2_dlc12_skv_inf_warplock_jezzails_0",
+         # 29.10.2026, the Empire's cavalry (build/diag_cav/units.md; the simulator's large bodies: tools/nn/sim/impact.py):
+         # Empire Knights, Reiksguard, Knights of the Blazing Sun, Knights of the Black Rose, Demigryph Knights (lances,
+         # halberds). No army scheme fields them yet (config/nn/pools.json): units.md "Cavalry"
+         "wh_main_emp_cav_empire_knights", "wh_main_emp_cav_reiksguard", "wh_dlc04_emp_cav_knights_blazing_sun_0",
+         "wh3_dlc25_emp_cav_knights_of_the_black_rose", "wh_main_emp_cav_demigryph_knights_0",
+         "wh_main_emp_cav_demigryph_knights_1")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in

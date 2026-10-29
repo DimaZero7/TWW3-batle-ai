@@ -15,7 +15,7 @@ flank / rear -6 / -14 while struck from that side; flanks exposed (an enemy thre
 lf / rf / bf) -3, several -6; routing friends within 100 m -3 each (at most 4; a routing expendable unit scares only
 expendable units); routing enemies within 100 m +2.5 each (at most 5); under fire -5 until 15 s after the last
 projectile hit; very tired -2, exhausted -6; an enemy worth 3x as much within 70 m -3; the charge +15 in blocks
-of 6 s from the charge sprint (morale.charge); the army beaten as a whole -120 (army destruction).
+of 6 s from the charge sprint (morale.charge); fear -8 (an enemy causing fear within 20 m, morale.fear); the army beaten as a whole -120 (army destruction).
 Switches measured on the step replay's recordings (config/nn/sim.json, off by default; battle.py): attacked_first (the side
 a pair's contact began on, held while in contact), combat_shooter (a shooter's balance only against the enemy it shoots),
 routing_enemies_reach (routing enemies counted to 200 m), charge.moving (another 6 s block while the unit still moves
@@ -324,6 +324,10 @@ def terms(u, ctx, params):
         out["strong_enemy"] = torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
     # The charge (+15, the database's charge_bonus) in blocks of morale.charge.block_s (battle.py u chm_s).
     out["charge"] = torch.where(u["chm_s"] > 0, R["charge_bonus"], 0.0)
+    if ctx.get("fear") is not None:
+        # Fear (-8, the database's ume_concerned_unit_frightened): battle.py ctx fear (an enemy causing fear within
+        # fear_effect_range 20 m; morale.fear)
+        out["fear"] = torch.where(ctx["fear"], R["ume_concerned_unit_frightened"], 0.0)
     # The army is beaten as a whole (army_collapse: the database's 2.6x / 0.22 thresholds).
     out["collapse"] = torch.where(ctx.get("collapse", no), R["ume_concerned_army_destruction"], 0.0)
     for k in FIGHT_TERMS:

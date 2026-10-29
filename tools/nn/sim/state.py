@@ -114,6 +114,13 @@ STATIC = {
     "cdl": ("b", "attribute charge_defense_vs_large: braced, it cancels the charge bonus of a large charger in front of "
                  "it (contact.charge_defence)"),
     "cd": ("b", "attribute charge_defense: braced, it cancels the charge bonus of any charger in front of it"),
+    "fear": ("b", "attribute causes_fear: -8 morale points (ume_concerned_unit_frightened) to the enemies within "
+                  "fear_effect_range 20 m of it (morale.py fear; morale.fear)"),
+    "itp": ("b", "immune to psychology (the attribute, or an ability's phase - frenzy): no fear (morale.py)"),
+    "brace_ok": ("b", "the database's can_brace: standing in its formation, its men brace - their mass x the bracing "
+                      "multiplier in a large charger's impact (impact.py)"),
+    "fat_run": ("f", "fatigue points a tick it runs (the database's _kv_fatigue: running 4, running_cavalry 6 for the "
+                     "category cavalry; fatigue.py)"),
     "unbreakable": ("b", "attribute unbreakable: never loses leadership, never wavers or routs"),
     "fire_move": ("b", "attribute mounted_fire_move: shoots while moving (fire whilst moving)"),
     "fatigue_immune": ("b", "attribute fatigue_immune (Perfect Vigour): gains no fatigue"),
@@ -309,6 +316,11 @@ INTERNAL = {
                       "cost, summed; bookkeeping only: the network's 'eyes' learn from it, tools/nn/model/eyes.py)"),
     "chm_s": ("f", "seconds left of the charge's morale block (+15; morale.charge, battle.py)"),
     "chm_n": ("f", "the charge's morale blocks so far in this charge (0 when not charging)"),
+    "kd_q": ("f", "the share of its front men a large charger's impact knocked down at its last landing (impact.py; "
+                  "they lie U(1.0, 2.7) s from kd_t)"),
+    "kd_t": ("f", "seconds since a large charger's impact last landed on it (impact.py)"),
+    "kd_p": ("f", "the share of its front men lying from a large striker's blows (impact.knock: a pool, 1.85 s a man)"),
+    "kd_n": ("f", "bookkeeping: its men knocked down so far by large bodies and blows (impact.py)"),
     "gone": ("b", "left the map (routed off it)"),
     "dead_s": ("f", "seconds since the unit was killed (health 0; a lord whose faction's routed lord crumbles: "
                     "since rout_death_s into his rout); 0 while not (battle.py, the lord-fall morale)"),

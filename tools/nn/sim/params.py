@@ -208,6 +208,11 @@ class Params:
             # spell resistance and the ward cut a magical projectile (magic.py; docs/en/game/mechanics/magic.md)
             "resist_magic": min(0.9, (resist.get("magic", 0) + resist.get("all", 0)) / 100),
             "large": u.get("size", "small") != "small",
+            # its men brace (the database's can_brace; impact.py) and its run's fatigue (_kv_fatigue: running_cavalry for
+            # the category cavalry, else running; fatigue.py)
+            "brace_ok": bool(u.get("can_brace")),
+            "fat_run": float(self.fatigue.get("running_cavalry", self.fatigue["running"])
+                             if u.get("category") == "cavalry" else self.fatigue["running"]),
             # rule flags (expendable, encourages, reflect, unbreakable, fire_move, fatigue_immune), the
             # effects bitmask and the timed effects: from the unit's innate effects (config/nn/effects.json)
             **innate.static(self, key),

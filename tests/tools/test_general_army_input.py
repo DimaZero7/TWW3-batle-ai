@@ -121,8 +121,8 @@ def test_numbers_span(passports):
     lo, hi = ai.SPAN
     assert np.isfinite(rows).all() and rows.min() >= lo and rows.max() <= hi
     const = {ai.NAMES[i] for i in range(ai.SIZE) if np.ptp(rows[:, i]) == 0}
-    assert const == {"side", "men_come", "hp_come", "resist_all", "resist_magic", "resist_flame", "morale", "wavering",
-                     "fatigue"}
+    # (resist_magic: the Knights of the Blazing Sun's 25 % since the cavalry joined the pool, 29.10.2026)
+    assert const == {"side", "men_come", "hp_come", "resist_all", "resist_flame", "morale", "wavering", "fatigue"}
 
 
 def test_the_scales_are_the_passports(passports):

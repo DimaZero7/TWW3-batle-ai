@@ -1023,3 +1023,17 @@ def test_cavcharge_measure_hp_by_second_the_shoved_men_and_the_depth():
     assert out["tg_hp_by_s"][3] == pytest.approx(100.0) and out["tg_hp_0_13"] == pytest.approx(1300.0)
     assert out["tg_shoved_1m_1s"] == 10 and out["tg_shoved_3m_1s"] == 0
     assert out["a_depth_1s"][0] == pytest.approx(1.5, abs=0.01)
+
+
+def test_build_takes_the_probe_plans_from_the_probe(capsys):
+    """tools/build.py --probe-plan offers every plan of tools/nn/charge_probe.py PLANS (29.10.2026: a hand list there
+    lacked cavrun and cavcharge, the probes did not start)."""
+    from tools import build
+    assert build.charge_plans() == tuple(cp.PLANS)
+    for plan in ("cavrun", "cavcharge", "cover"):
+        with pytest.raises(SystemExit) as e:            # the plan passes the parser, --help ends it
+            build.main(["charge-probe", "--probe-plan", plan, "--help"])
+        assert e.value.code == 0
+    with pytest.raises(SystemExit) as e:
+        build.main(["charge-probe", "--probe-plan", "no_such_plan", "--help"])
+    assert e.value.code == 2

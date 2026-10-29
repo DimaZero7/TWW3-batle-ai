@@ -86,6 +86,9 @@ SIM_RULES = {
                                "within 45 deg of its front (melee.py; config/nn/sim.json contact.charge_defence)",
     "charge_defence": "braced, cancels the charge bonus of any charger within 45 deg of its front (melee.py; "
                       "config/nn/sim.json contact.charge_defence)",
+    "causes_fear": "-8 morale points (ume_concerned_unit_frightened) to the enemies within fear_effect_range 20 m of its "
+                   "formation's edge, not stacking (morale.py; config/nn/sim.json morale.fear)",
+    "immune_to_psychology": "no fear (morale.py; config/nn/sim.json morale.fear); terror is not modelled",
 }
 # Unit attributes: the database gives the key only (unit_attributes_tables); the engine's rule, its
 # numbers and where they come from. `rules`: the flags the attribute sets; `schema_why`: why the
@@ -125,11 +128,9 @@ ATTRIBUTES = {
                       "distance x the unit's hiding_scalar, revealed by firing and melee, not by running",
               "kb": KB + "abilities.md#attributes-selection"},
     "immune_to_psychology": {"name": "Immune to Psychology", "rules": ["immune_to_psychology"],
-                             "does": "immune to fear and terror", "kb": KB + "abilities.md#attributes-selection",
-                             "schema_why": "no fear or terror in the simulator: nothing to act on"},
+                             "does": "immune to fear and terror", "kb": KB + "abilities.md#attributes-selection"},
     "causes_fear": {"name": "Causes Fear", "rules": ["causes_fear"],
-                    "does": "-8 leadership to enemies within 20 m (fear_effect_range)",
-                    "kb": KB + "morale.md", "schema_why": "fear is not modelled"},
+                    "does": "-8 leadership to enemies within 20 m (fear_effect_range)", "kb": KB + "morale.md"},
     "causes_terror": {"name": "Causes Terror", "rules": ["causes_terror"],
                       "does": "a melee hit routs an enemy within 5 m at 13 morale points or less for 14 s",
                       "kb": KB + "morale.md", "schema_why": "terror is not modelled"},

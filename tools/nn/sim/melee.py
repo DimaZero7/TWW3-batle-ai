@@ -48,7 +48,8 @@ contact.charge_defence front_deg (45) of its front, one with charge_defense of a
 A splash blow strikes several men only of a target no larger than the weapon's splash_attack_target_size
 (melee.splash_by_size); the charge's front rank counts the formation template's files (contact.first_strike_rank_template).
 Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate of the
-rule and no charge (measured; the game's rules give every pursuit blow the whole charge - a known gap); a lone
+rule and no charge (measured; the game's rules give every pursuit blow the whole charge - a known gap); a large striker
+(the cavalry) on a smaller router with the whole charge, no decay (contact.pursuit_large_charge, the game's rule); a lone
 striker on a router at the rule in full, on his routing attack target with the whole charge (the game's rules:
 lone_rout, config/nn/sim.json contact.lone_rout); a chaser that keeps up engulfs it (contact.pursue_envelop), its men running in
 from their ranks since the rout (contact.pursue_envelop_run).
@@ -641,6 +642,16 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             # (the stat without the fatigue: effects() has laid its multiplier on u["charge_bonus"])
             full = k_chase / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
             ch = torch.where(chase, full.expand_as(ch), ch)
+        if cc.get("pursuit_large_charge") and "size_k" in u:
+            # A large striker (size above small: the cavalry) on a smaller router strikes with its whole charge bonus x
+            # the database's pursuit_charge_bonus_modifier, no decay (contact.pursuit_large_charge; the game gives every
+            # chaser man a new charge on a router within max(4 m, 5 s x (its charge speed - the router's run)) - ~35 m
+            # for a horse, so always in contact: R-work charge_module.md 2.4); at the pursuit's rate as the formations'
+            # (contact.pursuit_rate, measured on infantry chasers - for horses not measured)
+            k_big = float(B.get("pursuit_charge_bonus_modifier", 1.0))
+            full_big = k_big / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
+            big_chase = routing_j & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+            ch = torch.where(big_chase, full_big.expand_as(ch), ch)
     cdef = cc.get("charge_defence") or {}
     if cdef.get("on") and "cdl" in u and "cd" in u:
         # Charge defence (the database's attributes charge_defense_vs_large / charge_defense; build/diag_cav/sim_gap.md 1,

@@ -69,7 +69,8 @@ PREDICATES =("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "n
 # The catalogue's rules the simulator acts on -> the unit field that carries the flag for the step.
 RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
          "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
-         "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd"}
+         "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd", "causes_fear": "fear",
+         "immune_to_psychology": "itp"}
 TIMERS = 2          # timed effects a unit can carry (fxt0, fxt1)
 MAX_EFFECTS = 62    # the bitmask is an int64
 # self: the owner; friends: an aura's (range_m); enemies (25.10.2026, the Snare Net): the enemies whose centre is within

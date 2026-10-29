@@ -11,7 +11,7 @@ import math
 import torch
 
 from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
-from tools.nn.sim import ground, reform, skirmish, stealth, terrain
+from tools.nn.sim import ground, impact, reform, skirmish, stealth, terrain
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -472,8 +472,17 @@ def step(st, orders, params=None, dt=None):
     # --- fatigue's stat multipliers (the database's unit_fatigue_effects_tables), for this step ---
     tired = fatigue.effects(u, params)
 
+    # --- a large body's impact (impact.py; config/nn/sim.json contact.impact): a large charger whose charge lands now
+    # (fire; a new charge lands again) knocks down the smaller men it meets rank by rank and deals collision damage; the
+    # men lying strike nobody (up_share below) ---
+    big_on = impact.on(params)
+    hp_imp = impact.land(u, pw, strike, fire, params, dt, speed, charge_now) if big_on else None
+
     # --- melee ---
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire)
+    if big_on:
+        # (impact.up_share) the front men of a unit knocked down by a large enemy do not strike it while they lie
+        rate, swing = impact.up_share(u, params, rate), impact.up_share(u, params, swing)
     if stuck_cal.get("on") and "stk_n" in u:
         # A router running into a standing enemy formation (its boxes touching by their own edges - not the rout's exit
         # contact - with the router moving towards it, not a formation chasing it by order) leaves among its men as many
@@ -505,6 +514,12 @@ def step(st, orders, params=None, dt=None):
         facing = pw["rel_i"].abs() <= deg * geometry.DEG
         first_pair = first_pair | (stand[:, :, None] & facing)
     hp_melee = rate * dt + torch.where(first_pair, swing, torch.zeros_like(swing))
+    if big_on:
+        # the impact's collision damage, and the knock of a large striker's hits on smaller men (impact.knock: the front
+        # share lying from blows, by the game's mass ratio rule)
+        hp_melee = hp_melee + hp_imp
+        impact.knock(u, params, dt, rate, torch.where(first_pair, swing, torch.zeros_like(swing)), mhit, F_men,
+                     charge_now)
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
     # units more (they turn their backs, config/nn/sim.json contact.pin_why), missile units in full (the shootcontact
     # probe, contact.shootcontact_why).
@@ -1061,6 +1076,13 @@ def step(st, orders, params=None, dt=None):
         "foe_d": torch.where(foes & standing[:, None, :] & blocks, d, torch.full_like(d, 1e9)).amin(2),
         "t": st.t,
     }
+    if (mcal.get("fear") or {}).get("on") and "fear" in u:
+        # Fear (morale.fear; the database's causes_fear: ume_concerned_unit_frightened -8 within fear_effect_range 20 m):
+        # an enemy that causes fear with its formation's edge within that range of the unit's (pw gap: the men nearest,
+        # the box of a 51 m wide demigryph line - not its centre); not to a unit immune to psychology (itp) or that causes
+        # fear itself (docs/ru/game/mechanics/monsters.md); several do not stack
+        ctx["fear"] = ((foes & u["fear"][:, None, :] & (pw["gap"] <= float(M["fear_effect_range"]))).any(2)
+                       & ~u["itp"] & ~u["fear"])
     began = morale.step(u, ctx, params, dt)
     standing = alive & ~u["r"]
     pin_s = float(cal["contact"].get("rout_pin_s") or 0.0)
@@ -1090,7 +1112,11 @@ def step(st, orders, params=None, dt=None):
     if not cal["contact"].get("pursuit_sprint", True):
         # (contact.pursuit_sprint false: no sprint after a routing target - the pursuit has no charge, pursuit_why; a
         # pursuer runs at its run speed and falls behind a faster router: the routmob probe, contact.pursuit_sprint_why)
-        sprint = sprint & ~u["r"].gather(1, ti)
+        # A large chaser (size above small: the cavalry) takes it (contact.pursuit_large_charge): the game gives every
+        # chaser man a new charge on the nearest router within max(4 m, pursue_max_charge_time 5 s x (its charge speed -
+        # the router's run)) - ~35 m for a horse: always (R-work charge_module.md 2.4)
+        big_chase = u["large"] & bool(cal["contact"].get("pursuit_large_charge")) if "large" in u else False
+        sprint = sprint & (~u["r"].gather(1, ti) | big_chase)
     fcal = cal["fatigue"].get("calibration", {})
     if fcal.get("charging") == "sprint":
         # The charge's fatigue (the database's charging +34 a tick) while the unit sprints at its target under the

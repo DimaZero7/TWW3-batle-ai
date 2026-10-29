@@ -47,7 +47,9 @@
   "stalk",
   "wh2_dlc09_unit_contact_shieldbreaker",
   "wh2_main_unit_passive_snare_net",
-  "wh3_dlc25_unit_passive_blackpowder_discipline"
+  "wh3_dlc25_unit_passive_blackpowder_discipline",
+  "causes_fear",
+  "immune_to_psychology"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -463,8 +465,8 @@
    "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
    "does": null,
    "modelled": true,
-   "sim": "stat_charge_bonus mult 1.1; stat_melee_attack add 10; stat_melee_damage_ap mult 1.1; stat_melee_damage_base mult 1.1 (off while morale below half of leadership)",
-   "why": "rules with nothing to act on: immune_to_psychology"
+   "sim": "stat_charge_bonus mult 1.1; stat_melee_attack add 10; stat_melee_damage_ap mult 1.1; stat_melee_damage_base mult 1.1; rule immune_to_psychology (off while morale below half of leadership)",
+   "why": null
   },
   "moulder_monster": {
    "kind": "attribute",
@@ -786,6 +788,44 @@
    "modelled": true,
    "sim": "stat_accuracy add 40; stat_reloading add 10 (always, once that has held 10 s, off while climbing or manning equipment on a platform (never on our maps) or moving)",
    "why": null
+  },
+  "causes_fear": {
+   "kind": "attribute",
+   "name": "Causes Fear",
+   "rules": [
+    "causes_fear"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (causes_fear)",
+   "kb": "docs/en/game/mechanics/morale.md",
+   "does": "-8 leadership to enemies within 20 m (fear_effect_range)",
+   "modelled": true,
+   "sim": "-8 morale points (ume_concerned_unit_frightened) to the enemies within fear_effect_range 20 m of its formation's edge, not stacking (morale.py; config/nn/sim.json morale.fear)",
+   "why": null
+  },
+  "immune_to_psychology": {
+   "kind": "attribute",
+   "name": "Immune to Psychology",
+   "rules": [
+    "immune_to_psychology"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (immune_to_psychology)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "immune to fear and terror",
+   "modelled": true,
+   "sim": "no fear (morale.py; config/nn/sim.json morale.fear); terror is not modelled",
+   "why": null
   }
  },
  "units": {
@@ -937,6 +977,10 @@
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
+  "wh3_dlc25_emp_cav_knights_of_the_black_rose": [
+   "hide_forest",
+   "immune_to_psychology"
+  ],
   "wh3_dlc25_emp_inf_hochland_long_rifles": [
    "hide_forest",
    "snipe"
@@ -944,6 +988,9 @@
   "wh3_dlc25_emp_inf_nuln_ironsides": [
    "hide_forest",
    "wh3_dlc25_unit_passive_blackpowder_discipline"
+  ],
+  "wh_dlc04_emp_cav_knights_blazing_sun_0": [
+   "hide_forest"
   ],
   "wh_dlc04_emp_inf_flagellants_0": [
    "hide_forest",
@@ -955,6 +1002,20 @@
    "guerrilla_deploy",
    "hide_forest",
    "mounted_fire_move"
+  ],
+  "wh_main_emp_cav_demigryph_knights_0": [
+   "causes_fear",
+   "hide_forest"
+  ],
+  "wh_main_emp_cav_demigryph_knights_1": [
+   "causes_fear",
+   "hide_forest"
+  ],
+  "wh_main_emp_cav_empire_knights": [
+   "hide_forest"
+  ],
+  "wh_main_emp_cav_reiksguard": [
+   "hide_forest"
   ],
   "wh_main_emp_cha_general_0": [
    "encourages",

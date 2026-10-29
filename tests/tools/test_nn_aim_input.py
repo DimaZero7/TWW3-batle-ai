@@ -12,7 +12,7 @@ GUN, ARCHERS, HANDGUNS = "wh2_dlc12_skv_inf_ratling_gun_0", "wh2_dlc13_emp_inf_a
 SLINGS, SWORD = "wh2_main_skv_inf_skavenslave_slingers_0", "wh_main_emp_inf_swordsmen"
 KEYS = [GUN, ARCHERS, HANDGUNS, SLINGS, SWORD]
 OLD = (ob.TOKEN - len(ob.AIM) - len(ob.RECEIVED) - len(ob.MAGIC) - len(ob.SHAPE) - len(ob.FX_STATS) - len(ob.FIGHT)
-       - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT))   # the token before AIM
+       - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT) - len(ob.FX_CAV))   # the token before AIM
 
 
 def test_the_aim_columns_by_unit():
@@ -20,7 +20,7 @@ def test_the_aim_columns_by_unit():
     assert a[:, 0].tolist() == pytest.approx([0.45, 0.33, 0.2, 0.43, 0, 0])       # aim_s / 10
     assert a[:, 1].tolist() == pytest.approx([0.45, 0.85, 0, 0.85, 0, 0])         # silence after a new target / 10
     T = (len(ob.RECEIVED) + len(ob.MAGIC) + len(ob.SHAPE) + len(ob.FX_STATS) + len(ob.FIGHT) + len(ob.FX_NEW)
-         + len(ob.FX_STATS2) + len(ob.SIGHT))
+         + len(ob.FX_STATS2) + len(ob.SIGHT) + len(ob.FX_CAV))
     assert ob.NAMES[-len(ob.AIM) - T:-T] == ob.AIM
 
 
@@ -105,9 +105,13 @@ def test_a_network_saved_before_aim_acts_the_same():
             ln, h_new = new(o, h_new)
             vo = old_crit(cut({k: c[k] for k in keys}))
             vn = new_crit({k: c[k] for k in keys})
+        # (to the last digits: since the cavalry's columns, 29.10.2026, the token is 260 > 256 wide and the CPU's sgemm
+        # sums K in blocks of 256 - the zero-weight columns add a second block, the sum's order and its last bit move)
+        same = (lambda x, y: torch.equal(x, y)) if ob.TOKEN <= 256 else (
+            lambda x, y: torch.allclose(x, y, rtol=1e-5, atol=1e-5))
         for k in lo:
-            assert torch.equal(lo[k], ln[k]), k
-        assert torch.equal(h_old, h_new) and torch.equal(vo, vn)
+            assert same(lo[k], ln[k]), k
+        assert same(h_old, h_new) and same(vo, vn)
         a, b = heads.sample(lo, greedy=True, abilities=True), heads.sample(ln, greedy=True, abilities=True)
         assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target) and torch.equal(a.point, b.point)
 

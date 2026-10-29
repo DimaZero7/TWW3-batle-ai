@@ -88,9 +88,11 @@ def test_the_effects_catalogue():
     assert br["kind"] == "contact" and br["modelled"] and br["duration_s"] == 10.0
     assert [(s["stat"], s["how"], s["value"], s["sim"]) for s in br["stats"]] == [
         ("stat_missile_block_chance", "add", -24.0, "shield")]
-    # the order is append-only: the 19 effects before line g43 keep their places
-    assert len(doc["order"]) == ob.FX_MID + len(ob.FX_NEW) // 2 and set(doc["order"][ob.FX_MID:]) == {
+    # the order is append-only: the 19 effects before line g43 keep their places, the cavalry's (29.10.2026) after g43's
+    assert len(doc["order"]) == ob.FX_MID + (len(ob.FX_NEW) + len(ob.FX_CAV)) // 2
+    assert set(doc["order"][ob.FX_MID:ob.FX_MID + ob.FX_G43]) == {
         "ignore_trees", "snipe", "stalk", BREAKER, SNARE, BLACKPOWDER}
+    assert doc["order"][ob.FX_MID + ob.FX_G43:] == ["causes_fear", "immune_to_psychology"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():
@@ -140,9 +142,11 @@ def test_the_sight_columns():
 
 
 def test_the_new_effect_pairs_and_stats_are_the_tokens_tail():
-    g = len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT)
-    assert ob.NAMES[-g:] == ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT and ob.TAIL[-3:] == (ob.FX_NEW, ob.FX_STATS2, ob.SIGHT)
-    assert ob.FX_NEW == mfx.NAMES[2 * ob.FX_MID:] and ob.NAMES[:ob.INDEX["volley_ready"]][-2 * ob.FX_MID:] == mfx.NAMES[
+    c = len(ob.FX_CAV)                              # (the cavalry's pairs after them, 29.10.2026)
+    g = len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT) + c
+    assert ob.NAMES[-g:] == ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT + ob.FX_CAV and ob.TAIL[-4:] == (
+        ob.FX_NEW, ob.FX_STATS2, ob.SIGHT, ob.FX_CAV)
+    assert ob.FX_NEW + ob.FX_CAV == mfx.NAMES[2 * ob.FX_MID:] and ob.NAMES[:ob.INDEX["volley_ready"]][-2 * ob.FX_MID:] == mfx.NAMES[
         :2 * ob.FX_MID]
     # the token before line g43: today's first columns; recorded tokens of that width widen with zeros
     old = ob.TOKEN - g

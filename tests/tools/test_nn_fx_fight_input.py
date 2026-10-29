@@ -50,8 +50,8 @@ def bits(*names):
 
 def test_the_columns_are_the_tokens_last():
     n = len(ob.FX_STATS) + len(ob.FIGHT)
-    g43 = len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT)       # (25.10.2026, line g43: after them)
-    assert ob.NAMES[-n - g43:-g43] == ob.FX_STATS + ob.FIGHT and ob.TAIL[-5:-3] == (ob.FX_STATS, ob.FIGHT)
+    g43 = len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT) + len(ob.FX_CAV)   # (25.10.2026, line g43; 29.10: after them)
+    assert ob.NAMES[-n - g43:-g43] == ob.FX_STATS + ob.FIGHT and ob.TAIL[-6:-4] == (ob.FX_STATS, ob.FIGHT)
     assert len(ob.FX_STATS) == 10 and ob.FIGHT == ("under_fire", "melee_s")
 
 

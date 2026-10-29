@@ -2,7 +2,7 @@
 
 Points per activity from the game's database (_kv_fatigue_tables): charging +34, melee +19 (a single entity: the
 database's +19, measured 186-200/s in the probes; a formation calibration.multi_combat),
-shooting +18, running +4, walking -1, standing ready -7, idle -18; thresholds fresh 0, active 2800,
+shooting +18, running +4 (the cavalry +6: running_cavalry, u fat_run), walking -1, standing ready -7, idle -18; thresholds fresh 0, active 2800,
 winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). The calibration
 (config/nn/sim.json fatigue.calibration, ON) runs 10 ticks/s, freezes dead and departed slots and
 charges melee only to a unit with an attack order: the database's +19 a tick for a single entity, 13.7 for a
@@ -49,17 +49,19 @@ def step(u, activity, params, dt):
     if enabled and trial.get("move") == "order" and "run_order" in activity:
         # A move costs by its order, whatever the speed: run +4, walk recovers (database -1).
         running = moving & activity["run_order"]
-    move_rate = torch.where(running, F["running"], torch.full_like(u["fatigue"], walking))
+    # the run's points a tick: the unit's own (u fat_run: _kv_fatigue running_cavalry 6 for the cavalry, running 4 else)
+    run_rate = u["fat_run"] if "fat_run" in u else F["running"]
+    move_rate = torch.where(running, run_rate, torch.full_like(u["fatigue"], walking))
     rate = torch.full_like(u["fatigue"], F["ready"])
     if enabled and "idle" in activity:
         # Idle rest needs no standing enemy near; near one the unit stands ready.
         idle = activity["idle"] & ~activity.get("enemy_near", torch.zeros_like(activity["idle"]))
         rate = torch.where(idle, F["idle"], rate)
     rate = torch.where(moving, move_rate, rate)
-    rate = torch.where(running, F["running"], rate)
+    rate = torch.where(running, run_rate, rate)
     if enabled and trial.get("routing") == "running" and "routing" in activity:
         # A routing unit flees at a run: it keeps tiring at the running rate, never rests.
-        rate = torch.where(activity["routing"], F["running"], rate)
+        rate = torch.where(activity["routing"], run_rate, rate)
     rate = torch.where(activity["shooting"], float(rated.get("shooting", F["shooting"])), rate)
     melee, charging = activity["melee"], activity["charging"]
     if enabled and trial.get("melee") == "attack_order":

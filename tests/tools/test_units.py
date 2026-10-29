@@ -97,7 +97,8 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
     # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026), nor the
     # third wave (07.10.2026).
-    assert checked >= 9 and len(units.UNITS) == 36           # + the 5 new units of 11.10.2026, the 8 of 25.10 (no cards)
+    # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10 (no cards)
+    assert checked >= 9 and len(units.UNITS) == 42
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -280,8 +281,9 @@ def test_a_mounted_unit_moves_and_collides_as_its_mount():
     assert (p["height_m"], p["size"], p["hp_per_man"], p["hp_total"]) == (2.0, "medium", 108, 6480)
     assert (p["projectile_resistance"], p["projectile_speed_keep"]) == (2, 0.85)
     assert not p["melee"]["flaming"]
-    # no unit of the training roster has a mount (config/nn/units.json: their passports unchanged by the rule)
-    assert not any(u.get("mount") for u in saved()["units"].values())
+    # the training roster's mounted units are the six cavalry of 29.10.2026 (config/nn/units.json: the other passports
+    # unchanged by the rule)
+    assert {k for k, u in saved()["units"].items() if u.get("mount")} == set(CAVALRY)
 
 
 def probe():
@@ -294,11 +296,13 @@ CAVALRY = {"wh_main_emp_cav_empire_knights": 108, "wh_main_emp_cav_reiksguard": 
 
 
 def test_the_empire_cavalry_in_the_probe_passports():
-    # build/diag_cav/units.md: the six Empire cavalry units (the probes' only: config/nn/units.json keeps its 36)
+    # build/diag_cav/units.md: the six Empire cavalry units, in the probes' passports and (29.10.2026) the pool's, the same
     u = probe()
     assert {k: u[k]["hp_per_man"] for k in CAVALRY} == CAVALRY
     assert all(u[k]["size"] == "medium" and u[k]["mount"] for k in CAVALRY)
-    assert not any(k in saved()["units"] for k in CAVALRY)
+    assert all(saved()["units"][k] == u[k] for k in CAVALRY)
+    # their cost from the database (main_units multiplayer_cost)
+    assert [saved()["units"][k]["multiplayer_cost"] for k in CAVALRY] == [850, 1100, 1200, 1250, 1400, 1450]
     # the Blazing Sun's lance is flaming (melee_weapons.ignition_amount 1.0), no other's
     assert [k for k in CAVALRY if u[k]["melee"]["flaming"]] == ["wh_dlc04_emp_cav_knights_blazing_sun_0"]
     # the demigryph's body: 32 men of 233 HP, the beast's height 2.3 m and resistance 3 to a penetrating projectile,

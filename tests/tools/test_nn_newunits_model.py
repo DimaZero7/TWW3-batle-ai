@@ -27,7 +27,7 @@ def test_the_weapon_columns():
     assert w[:, 0].tolist() == pytest.approx([0.9, 0, 0, 0, 0.05, 0])
     assert w[:, 1].tolist() == [0, 1, 0, 0, 0, 0]
     T = (len(ob.AIM) + len(ob.RECEIVED) + len(ob.MAGIC) + len(ob.SHAPE) + len(ob.FX_STATS) + len(ob.FIGHT)
-         + len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT))  # after WEAPON
+         + len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT) + len(ob.FX_CAV))  # after WEAPON
     assert ob.NAMES[-len(ob.WEAPON) - T:-T] == ob.WEAPON
 
 
@@ -61,7 +61,7 @@ def test_the_companion_reads_contact_effects_from_the_card():
 def test_a_token_from_before_the_new_units_maps_to_its_columns():
     E = ob.FX_MID                 # (the effects of 25.10.2026 are the tail group FX_NEW)
     width = (ob.TOKEN - 2 * (E - 14) - len(ob.WEAPON) - len(ob.AIM) - len(ob.RECEIVED) - len(ob.MAGIC) - len(ob.SHAPE)
-             - len(ob.FX_STATS) - len(ob.FIGHT) - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT))
+             - len(ob.FX_STATS) - len(ob.FIGHT) - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT) - len(ob.FX_CAV))
     cols = ob.old_columns(width)
     assert cols is not None and len(cols) == width and len(set(cols)) == width
     names = [ob.NAMES[c] for c in cols]
@@ -75,7 +75,7 @@ def test_an_old_checkpoint_computes_what_it_did():
     from tools.nn.model.encoder import TokenEncoder
     E = ob.FX_MID                 # (the effects of 25.10.2026 are the tail group FX_NEW)
     width = (ob.TOKEN - 2 * (E - 14) - len(ob.WEAPON) - len(ob.AIM) - len(ob.RECEIVED) - len(ob.MAGIC) - len(ob.SHAPE)
-             - len(ob.FX_STATS) - len(ob.FIGHT) - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT))
+             - len(ob.FX_STATS) - len(ob.FIGHT) - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT) - len(ob.FX_CAV))
     torch.manual_seed(0)
     old = TokenEncoder(16, n_token=width)
     new = TokenEncoder(16)

@@ -427,6 +427,13 @@ def nn_arena_config(args, run_config):
     return path
 
 
+def charge_plans():
+    """The charge probe's plans (tools/nn/charge_probe.py PLANS): --probe-plan takes every plan the probe has, a new plan
+    needs no edit here (29.10.2026: the hand list here lacked cavrun and cavcharge, the probe did not start)."""
+    from tools.nn import charge_probe
+    return tuple(charge_probe.PLANS)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", choices=sorted(TARGETS))
@@ -525,7 +532,7 @@ def main(argv=None):
                              "or a named arena in config/nn/arenas.json")
     parser.add_argument("--repeats", type=int, default=2,
                         help="lord-swarm: how many times each layout runs in the battle")
-    parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform", "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure", "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2", "leave", "skirmish", "skirmish2", "shootcontact", "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2", "sidecontact", "busycharge", "ratcharge", "ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "magic", "swing", "crowd", "hitchance", "pursuitfast", "fatrun", "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover"), default="charge",
+    parser.add_argument("--probe-plan", choices=charge_plans(), default="charge",
                         help="charge-probe: the plan (tools/nn/charge_probe.py)")
     parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
     parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
