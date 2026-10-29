@@ -18,7 +18,12 @@ The impact (land(): a large charger's charge lands this step - battle.py `fire`;
               (a target man landing his own charge now: his dv halved - the program's dv^2 x 0.25)
   damage      each man met takes min(collision_damage_maximum 70, (v M / (m B))^collision_damage_normaliser 0.8 x
               collision_damage_modifier 0.6), collision_damage_armour_penetration_ratio 0.7 of it past the armour, once a
-              landing (the 4 s immunity per attacker); a charger of size above medium only on men it knocks down, x0.5
+              landing (the 4 s immunity per attacker); a charger of size above medium only on men it knocks down, x0.5.
+              With contact.impact damage_brace_any_angle the B here is the man's own brace from whatever side the blow
+              comes (the +-75 deg check stays in the speed change): the game's damage function (142e37f08) multiplies the
+              target's mass by its brace on a flag of its caller - no angle inside -, and the cavcheck probe's flank
+              charge (build/diag_cav/check_results.md) lost the clanrats 271 HP in the first second, 1515 in 13 s, against
+              the twin's 882 / 1908 with the angle in the damage and 403 / 1440 without it (front lanes unchanged)
   lying       the men down lie U(knockdown_getting_up_delay_min 1.0, _max 2.7) s: the target's front share down at t s
               after the landing is down_1 x clamp((2.7 - t) / 1.7, 0, 1) (kd_q, kd_t); a man lying strikes nobody
               (up_share), the blows on him land (M11: the swing strikes him)
@@ -155,8 +160,11 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
     pair = contact & fire[:, :, None] & bigger(u) & (u["men"] > 0)[:, None, :]
     # (no branch on the data: the step is compiled - torch.compile, battle.stepper; the masks do the gating)
     B_j = bracing(u, params, speed, charge_now)[:, None, :]
+    B_own = B_j
     ahead = pw["rel_j"].abs() <= float(cal.get("brace_deg", 75.0)) * geometry.DEG
     B_j = torch.where(ahead, B_j, torch.ones_like(B_j))
+    # (damage_brace_any_angle, module doc) the collision damage divides by the man's own brace from any side
+    mB_dmg = u["mass"][:, None, :] * (B_own if cal.get("damage_brace_any_angle") else B_j)
     M = u["mass"][:, :, None]
     mB = u["mass"][:, None, :] * B_j
     vx = u["vx"][:, :, None] - u["vx"][:, None, :]
@@ -186,7 +194,7 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
         dv = gain * v * half
         down = met & (dv > down_v)
         men_r = torch.minimum(lane, left_men)
-        d = (torch.pow((v * M / mB.clamp(min=1e-6)).clamp(min=0), norm) * mod).clamp(max=nmax)
+        d = (torch.pow((v * M / mB_dmg.clamp(min=1e-6)).clamp(min=0), norm) * mod).clamp(max=nmax)
         d = torch.where(big, torch.where(down, 0.5 * d, torch.zeros_like(d)), d)
         per = melee.per_hit(d * (1 - ap_r), d * ap_r, u["armour"][:, None, :], u["hp_man"][:, None, :],
                             u["resist_physical"][:, None, :])

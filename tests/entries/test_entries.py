@@ -1543,6 +1543,34 @@ class TestChargeProbe:
         x, z = beside(0, 0, 90, 10, 0)
         assert (round(x, 6), round(z, 6)) == (0, -10)                             # right of a unit facing +x is -z
 
+    def test_cavcheck_chase_routs_the_target_at_the_go_before_any_contact(self, lua, tmp_path):
+        """lane.rout_at_go_s (the cavcheck plan's chase): the target is routed by script that long after the go, before
+        the attacker touches it; the attacker keeps its attack (at_rout 'none')."""
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            local l = CONFIG.lanes[1]
+            l.mode, l.target_mode, l.answer, l.fight_s, l.max_s = 'attack_run', 'hold', false, 20, 80
+            l.t_morale, l.at_rout, l.after_rout_s, l.rout_at_go_s = true, 'none', 60, 0
+            l.recharge_after_s, l.back_m, l.recharge_max_s = nil, nil, nil
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(enemy[2].routing == true, 'routed by script at the go')
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].attack_args.run == true, 'the charge')
+            own[2].melee = true
+            for _ = 1, 60 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        ph = [(r["phase"], r["t"]) for r in rows if r["event"] == "probe_phase"]
+        assert [p for p, _ in ph] == ["rout_forced", "rout"] and ph[0][1] <= 1000
+        (c,) = [r["t"] for r in rows if r["event"] == "probe_contact"]
+        assert c > ph[0][1]
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "fight_s"}
+
     def test_routmob2_forces_the_rout_and_places_fire_at_will_extras(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1]}

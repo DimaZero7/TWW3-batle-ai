@@ -984,6 +984,72 @@ def test_the_cavcharge_plan_charges_the_knights_into_three_held_infantry():
     assert config["men_ms"] == 250 and config["men_after_s"] == 15
 
 
+def test_the_cavcheck_plan_recharges_chases_routers_and_charges_a_flank():
+    (b,) = cp.battles("cavcheck")
+    assert [l["kind"] for l in b] == ["recharge", "chase", "flank"]
+    assert all(l["attacker"] == cp.KNIGHTS and cp.UNITS[l["target"]][0] == "wh2_main_skv_inf_clanrats_1" for l in b)
+    assert all(l["target_mode"] == "hold" and not l["answer"] and l["a_w"] == l["t_w"] == 30 for l in b)
+    rc, ch, fl = b
+    # the recharge: 10 s in, 80 m straight back, the attack again at once; the lane runs 20 s past contact 2
+    assert rc["mode"] == "recharge" and (rc["recharge_after_s"], rc["back_m"], rc["pause_s"], rc["after2_s"]) == (10, 80, 0, 20)
+    assert rc["max_s"] >= 10 + 10 + rc["recharge_max_s"] + 10 + 20
+    # the chase: routed by script at the go (before the knights touch it), the knights keep attacking
+    assert ch["mode"] == "attack_run" and ch["t_morale"] and ch["rout_at_go_s"] == 0 and ch["at_rout"] == "none"
+    assert ch["gap_m"] >= 30 and ch["after_rout_s"] > ch["fight_s"] + 20
+    # the flank: from the target's right edge, 80 m off
+    assert fl["mode"] == "attack_run" and fl["a_side"] == 90 and fl["gap_m"] == 80 and "t_morale" not in fl
+    lanes, _, _ = cp.layout(b)
+    assert lanes[2]["x"] + 15 + 80 + lanes[2]["a_depth"] / 2 < 480          # the flanker stands inside the field
+    config, _, _ = cp.run_config("cavcheck", 1)
+    assert config["tick_ms"] == 250 and config["men_ms"] == 250 and config["men_after_s"] == 15
+
+
+def _hp_lane(kind, contacts, phases, tg_rate, a_rate=0.0, spec=None):
+    """A lane whose target loses tg_rate(t) HP a second and the knights a_rate, sampled every 0.25 s for 100 s."""
+    samples, tg, a = [], 10000.0, 6480.0
+    for k in range(400):
+        t = k / 4
+        samples.append((t, {"x": 0.0, "z": 0.0, "hp": a, "men": 60}, {"x": 0.0, "z": -20.0, "hp": tg, "men": 160}, None))
+        tg -= tg_rate(t) / 4
+        a -= a_rate / 4
+    spec = dict({"name": "L1", "kind": kind, "a_key": cp.KNIGHTS, "t_key": "wh2_main_skv_inf_clanrats_1"}, **(spec or {}))
+    return {"run": "sim", "spec": spec, "samples": samples, "contacts": contacts, "men": [],
+            "phases": [{"phase": p, "t": 1000 * v} for p, v in phases]}
+
+
+def test_cavcheck_measure_splits_the_recharge_into_two_passes_and_the_exit():
+    # contact 1 at 10 s (100 HP/s, 300 in its first second), out at 20 s, clear at 23 s (20 HP/s on the way out), arrived
+    # at 31, back at 31, contact 2 at 40 s (200 HP/s, 500 in its first second)
+    def rate(t):
+        if 10 <= t < 20:
+            return 300.0 if t < 11 else 100.0
+        if 20 <= t < 23:
+            return 20.0
+        if t >= 40:
+            return 500.0 if t < 41 else 200.0
+        return 0.0
+    lane = _hp_lane("recharge", {1: 10.0, 2: 40.0},
+                    [("out", 20.0), ("clear", 23.0), ("arrived", 31.0), ("back", 31.0)], rate, a_rate=10.0)
+    out = cp.cavcheck_measure(lane)
+    assert out["p1_tg_hp_0_1"] == pytest.approx(300.0) and out["p1_tg_hp_0_10"] == pytest.approx(1200.0)
+    assert out["p1_a_hp_0_10"] == pytest.approx(100.0) and len(out["p1_tg_hp_by_s"]) == 10
+    assert out["exit_s"] == pytest.approx(3.0) and out["exit_tg_hp"] == pytest.approx(60.0)
+    assert out["arrived_s"] == pytest.approx(11.0) and out["cycle_s"] == pytest.approx(20.0)
+    assert out["p2_tg_hp_0_1"] == pytest.approx(500.0) and out["p2_tg_hp_0_13"] == pytest.approx(500.0 + 12 * 200.0)
+    assert out["p2_a_hp_0_13"] == pytest.approx(130.0)
+
+
+def test_cavcheck_measure_the_chase_from_its_rout_and_the_summary_against_the_game():
+    lane = _hp_lane("chase", {1: 8.0}, [("rout_forced", 0.25), ("rout", 0.5)], lambda t: 50.0 if t >= 8 else 0.0)
+    out = cp.cavcheck_measure(lane)
+    assert out["rout_s"] == pytest.approx(0.5) and out["rout_to_contact_s"] == pytest.approx(7.5)
+    assert out["tg_hp_0_13"] == pytest.approx(650.0)
+    rows = [dict(out, src="game"), dict(out, src="sim", tg_hp_0_13=715.0), dict(out, src="sim", tg_hp_0_13=585.0)]
+    summ = cp.cavcheck_summary(rows)
+    assert summ["chase.tg_hp_0_13"] == {"game": 650.0, "sim": 650.0, "sim_min": 585.0, "sim_max": 715.0, "diff_pct": 0}
+    assert summ["flank.tg_hp_0_13"]["game"] is None
+
+
 def test_cavrun_measure_the_speed_each_second_and_on_60_180_m():
     # from a standstill at 1 s, 7 m/s2 to 7.8 m/s; the men's own places alike (one formation, no catch-up)
     samples, men = [], []

@@ -80,8 +80,9 @@
 -- soldiers' places of both units are sampled every men_ms for that long after the rout wherever the enemy is (the
 -- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too. lane.rout_at_s (optional): a
 -- t_morale target not routed that long after the first contact is routed by script (morale_behavior_rout; emitted as
--- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side (or of the
--- target's: tools/nn/charge_probe.py e.side 't', the ratcover plan; the entry places either alike) placed
+-- probe_phase 'rout_forced'); lane.rout_at_go_s (optional, the cavcheck plan's chase): routed by script that long after
+-- the go, before any contact (the same call and phase). lane.extras (optional) {{name, dx, dz, fire}}: units of the
+-- attacker's side (or of the target's: tools/nn/charge_probe.py e.side 't', the ratcover plan; the entry places either alike) placed
 -- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will;
 -- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
 -- The busycharge plan: lane.a_side (degrees, 0 front / 90 right flank / 180 rear) places the attacker gap_m off the
@@ -841,8 +842,9 @@ function M.main(bm, config, globals)
                     emit('probe_ability', {lane = lane.name, who = 'a', key = lane.a_ability, t = now - lane.t0,
                         status = ok and (used and 'used' or 'not_ready') or 'failed'})
                 end
-                if lane.t_morale and not lane.rout_ms and lane.rout_at_s and lane.contact and not lane.rout_forced
-                        and now - lane.contact >= lane.rout_at_s * 1000 then
+                if lane.t_morale and not lane.rout_ms and not lane.rout_forced and ((lane.rout_at_s and lane.contact
+                        and now - lane.contact >= lane.rout_at_s * 1000)
+                        or (lane.rout_at_go_s and now - lane.t0 >= lane.rout_at_go_s * 1000)) then
                     lane.rout_forced = true
                     local ok = pcall(function() lane.t.uc:morale_behavior_rout() end)
                     emit('probe_phase', {lane = lane.name, phase = 'rout_forced', t = now - lane.t0,

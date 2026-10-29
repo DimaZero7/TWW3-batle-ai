@@ -322,6 +322,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           - 1 battle of 3 lanes; health every 0.25 s, the soldiers' places every 0.25 s to 15 s after the contact.
           Table: cavalry [runs] (HP a second 0-13 s, men lost, the target's men shoved > 1 / 3 m in 1 / 2 s, how deep
           the knights went in). The probe's sides are the Empire and the Skaven: the targets are Skaven.
+  cavcheck  an independent check of the cavalry model on lanes it was not built on (build/diag_cav/check_results.md):
+          the Empire Knights (a_w 30) on clanrats (sword and shield, held, never ordered, t_w 30) - (recharge) a charge
+          at their front from 80 m, 10 s after the contact a move 80 m straight back at a run, at once (pause_s 0) the
+          attack again (phases out / clear / arrived / back, contact 2; the lane ends 20 s after it); (chase) the
+          clanrats routed by script at the go (rout_at_go_s 0: morale_behavior_rout shatters them), the knights attack
+          them at a run from 40 m - the charge on routers; (flank) a charge at their right flank from 80 m (a_side 90) -
+          1 battle of 3 lanes; health every 0.25 s, the soldiers' places every 0.25 s to 15 s after a contact. Table:
+          cavcheck [runs] [--sim] (each pass's HP a second, the exit from melee).
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -346,6 +354,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe recontact --layout --copies 4       # the simulator alone, before the game (torch)
     python -m tools.nn.charge_probe run --plan cavrun --speed 1         # the knights' run (cavcharge: their charge)
     python -m tools.nn.charge_probe cavalry [runs...] [--sim]           # their table (+ the simulator's twin, torch)
+    python -m tools.nn.charge_probe run --plan cavcheck                 # the cavalry check (flank, recharge, chase)
+    python -m tools.nn.charge_probe cavcheck [runs...] [--sim]          # its table (+ the twin, torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -474,7 +484,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -714,6 +724,12 @@ CAVCHARGE = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "m
                          ("wh2_main_skv_inf_stormvermin_0", "halberds_braced")),
              "fields": ["IsKnockedDown", "IsKnockedBack", "IsFalling", "IsInAir", "IsOnGround", "IsStunned",
                         "IsInHitReaction", "IsStaggered", "IsGettingUp", "AnimationState", "IsAlive", "Position"]}
+# the cavalry check (build/diag_cav/check_results.md): the knights on held clanrats - a recharge (back_m straight back
+# recharge_after_s after the contact, the attack again at once, the lane ending after2_s after contact 2), a charge on
+# routers (routed by script at the go, the knights chase_gap_m off) and a charge at the right flank (a_side 90)
+CAVCHECK = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "men_after_s": 15,
+            "recharge": {"recharge_after_s": 10, "back_m": 80, "pause_s": 0, "recharge_max_s": 40, "after2_s": 20},
+            "chase_gap_m": 40, "chase_after_rout_s": 60, "kinds": ("recharge", "chase", "flank")}
 
 
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
@@ -995,6 +1011,23 @@ def battles(plan):
                          a_w=c["a_w"], t_w=c["t_w"], kind=kind,
                          **({"entity_fields": c["fields"], "entity_at_s": 1} if k == 0 else {}))
                     for k, (t, kind) in enumerate(c["targets"])])
+    elif plan == "cavcheck":
+        c = CAVCHECK
+        common = dict(answer=False, a_w=c["a_w"], t_w=c["t_w"])
+
+        def cc(kind):
+            if kind == "recharge":
+                r = c["recharge"]
+                # the end: ~10 s in, recharge_after_s, at most recharge_max_s out, ~12 s back in, after2_s
+                return lane(KNIGHTS, "clanrat", "recharge", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], kind=kind,
+                            max_s=10 + r["recharge_after_s"] + r["recharge_max_s"] + 15 + r["after2_s"], **r, **common)
+            if kind == "chase":
+                return lane(KNIGHTS, "clanrat", "attack_run", "hold", gap_m=c["chase_gap_m"], fight_s=c["fight_s"],
+                            kind=kind, t_morale=True, rout_at_go_s=0, at_rout="none",
+                            after_rout_s=c["chase_after_rout_s"], max_s=c["chase_after_rout_s"] + 15, **common)
+            return lane(KNIGHTS, "clanrat", "attack_run", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], kind=kind,
+                        a_side=90, **common)
+        out.append([cc(k) for k in c["kinds"]])
     elif plan == "manfields":
         # what the game answers for one soldier (CCO ManList.At(i).<name>; the documentation lists only Position, Key,
         # IsAlive, IsMan, IsEngine, reload, EntityRecordContext, UnitContext): a facing, a target? - 1 short fight
@@ -1546,6 +1579,8 @@ def run_config(plan, index):
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=0, men_near_m=0)
     if plan == "cavcharge":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
+    if plan == "cavcheck":
+        config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHECK["men_after_s"], men_near_m=60)
     if plan in ("terrain", "terrain2", "ground", "cover"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)
@@ -1896,6 +1931,15 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
            "t_halt": {}, "after2": [None] * B, "arrive": [None] * B, "clear": [None] * B}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
+    # (the cavcheck plan's recharge) the game's goto point is the formation's front centre - the knights' centre stopped
+    # a_depth / 2 short of back_m (recorded: 68 m for 80; the 'arrived' never came) - and its attack again came when
+    # the recorded 'back' did, after the 'out': the twin moves its centre there and attacks again that long after its
+    # own 'out'
+    front_goto = [ln.get("plan") == "cavcheck" for ln in meta]
+    back_dt = []
+    for ln in meta:
+        ph_ = {p_["phase"]: p_["t"] / 1000 for p_ in ln.get("phases", [])}
+        back_dt.append(ph_["back"] - ph_["out"] if ln.get("plan") == "cavcheck" and {"out", "back"} <= set(ph_) else None)
     rec = {"t": [], "rows": []}
     fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire", "mp", "fx_on", "run",
               "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload")
@@ -1979,6 +2023,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                             st_["arrive"][b] = t
                             st_["phases"][b].append({"phase": "arrived", "t": t * 1000})
                         there = st_["arrive"][b] is not None and t - st_["arrive"][b] >= pause - 1e-6
+                    if back_dt[b] is not None:
+                        there = t - st_["out_t"][b] >= back_dt[b] - 1e-6
                     if mode[b] == "recharge" and (there or t - st_["out_t"][b] >= sp["recharge_max_s"]):
                         st_["phase"][b] = "back"
                         st_["phases"][b].append({"phase": "back", "t": t * 1000})
@@ -1987,8 +2033,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 if st_["phase"][b] == "out":
                     fx, fz = st_["out_from"][b]
                     # (as_withdraw: the network's own withdraw order, as the bridge gives it in the game - a run)
+                    back = sp["back_m"] - (sp.get("a_depth", 0.0) / 2 if front_goto[b] else 0.0)
                     kind[b, A], x[b, A], z[b, A], run_[b, A] = (O.WITHDRAW if sp.get("as_withdraw") else O.MOVE,
-                                                                fx, fz + sp["back_m"], True)
+                                                                fx, fz + back, True)
                 else:
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk") and t + t_first[b] < float(sp.get("a_go_s") or 0) - 1e-6:
@@ -2030,8 +2077,22 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     and t - c >= sp["rout_at_s"] and not r_t[b]):
                 st.u["morale"][b, T] = -10.0                    # below 0: a rout (the broken floor -50 would shatter)
                 st_["phases"][b].append({"phase": "rout_forced", "t": t * 1000})
+            if (sp.get("t_morale") and sp.get("rout_at_go_s") is not None and st_["rout"][b] is None
+                    and t + t_first[b] >= float(sp["rout_at_go_s"]) - 1e-6):
+                # (the cavcheck plan's chase) routed by script that long after the game's go, before any contact: the
+                # game's morale_behavior_rout shatters at once (the rallysecure plan), no waver: below the broken band's
+                # floor (morale.shatter_rules: -50 points) with the waver timer run out, held there until the rout comes
+                if not any(p_["phase"] == "rout_forced" for p_ in st_["phases"][b]):
+                    st_["phases"][b].append({"phase": "rout_forced", "t": t * 1000})
+                st.u["morale"][b, T] = float(params.morale["ums_broken_threshold_lower"]) - 10.0
+                if "waver_s" in st.u:
+                    st.u["w"][b, T] = True
+                    st.u["waver_s"][b, T] = 100.0
             if sp.get("t_morale") and st_["rout"][b] is None and r_t[b]:
                 st_["rout"][b] = t - params.dt
+                if sp.get("rout_at_go_s") is not None:
+                    # the game's morale_behavior_rout shatters at once (the rallysecure plan): no rally
+                    st.u["s"][b, T] = True
                 st_["phases"][b].append({"phase": "rout", "t": (t - params.dt) * 1000})
                 if sp.get("at_rout") == "halt":
                     st_["after"][b] = (float(ax[b]), float(az[b]))
@@ -3234,10 +3295,137 @@ def cavalry_report(run_dirs, sim=False, device="cpu", copies=4, out=None):
     return rows
 
 
+def _pass(t, smp, c, c0, n, run_sim, stop=None):
+    """HP and men each side lost from a contact c (c0: the window's start - the game's sample before it) each second for
+    n seconds (to stop at most) and over 0-1, 0-2, 0-n s: {who_hp_by_s, who_hp_0_1, who_hp_0_2, who_hp_0_n, who_men_0_n}."""
+    out = {}
+    end = min(c + n, stop) if stop is not None else c + n
+    for who in ("tg", "a"):
+        hp, men = series(smp, who, "hp"), series(smp, who, "men")
+        by_s = []
+        for k in range(n):
+            if c + k + 1 > end + 1e-6:
+                break
+            a, b = at(t, hp, c0 if k == 0 else c + k), at(t, hp, c + k + 1)
+            by_s.append(round(a - b, 1) if np.isfinite(a) and np.isfinite(b) else None)
+        out[f"{who}_hp_by_s"] = by_s
+        for hi in (1, 2, n):
+            if c + hi <= end + 1e-6:
+                out[f"{who}_hp_0_{hi}"] = round(at(t, hp, c0) - at(t, hp, c + hi), 1)
+        out[f"{who}_hp_0_end"] = round(at(t, hp, c0) - at(t, hp, end), 1)
+        out[f"{who}_men_0_end"] = round(at(t, men, c0) - at(t, men, end), 1)
+    out["window_s"] = round(end - c, 2)
+    return out
+
+
+def cavcheck_measure(lane):
+    """A cavcheck lane. flank / chase: cavcharge_measure from the first contact (the chase: + the rout's time and the
+    seconds from it to the contact). recharge: pass 1 from contact 1 to the 'out' order (p1_*: HP a second, 0-1 / 0-2 /
+    0-10 s), the exit (exit_s from the order to the first tick out of melee - 'clear' -, what both lost meanwhile:
+    exit_tg_hp / exit_a_hp; arrived_s, back_s from the order; cycle_s from the order to contact 2), pass 2 from contact 2
+    (p2_*: 0-1 / 0-2 / 0-13 s)."""
+    spec, smp = lane["spec"], lane["samples"]
+    kind = spec.get("kind")
+    ph = {}
+    for p_ in lane.get("phases", []):
+        ph.setdefault(p_["phase"], p_["t"] / 1000)
+    if kind != "recharge":
+        out = cavcharge_measure(lane)
+        if kind == "chase":
+            r = ph.get("rout")
+            out["rout_s"] = r
+            if r is not None and out.get("contact_s") is not None:
+                out["rout_to_contact_s"] = round(out["contact_s"] - r, 2)
+        return out
+    t = np.array([x[0] for x in smp])
+    c1, c2 = lane["contacts"].get(1), lane["contacts"].get(2)
+    out = {"run": lane["run"], "lane": spec["name"], "kind": kind, "pair": f"{SHORT[spec['a_key']]}>{SHORT[spec['t_key']]}",
+           "contact_s": c1, "contact2_s": c2}
+    if c1 is None:
+        return out
+    sim_run = lane["run"] == "sim"
+
+    def start(c):
+        before = t[t < c - 1e-6]
+        return float(before[-1]) if not sim_run and len(before) else c
+    o = ph.get("out")
+    out.update({f"p1_{k}": v for k, v in _pass(t, smp, c1, start(c1), 10, sim_run, stop=o).items()})
+    if o is not None:
+        clear = ph.get("clear")
+        for k in ("clear", "arrived", "back"):
+            if ph.get(k) is not None:
+                out[f"{'exit' if k == 'clear' else k}_s"] = round(ph[k] - o, 2)
+        if clear is not None:
+            for who in ("tg", "a"):
+                hp = series(smp, who, "hp")
+                out[f"exit_{who}_hp"] = round(at(t, hp, o) - at(t, hp, clear), 1)
+        # the melee flag lingers after the knights rode off (the game: 10.8 s, 40 m away): the last blow either side took
+        # after the order (a drop of 1 HP or more between samples, before the attack again) is the exit by the blows
+        hit_end = ph.get("back", t[-1])
+        hp_a, hp_t = series(smp, "a", "hp"), series(smp, "tg", "hp")
+        k = np.flatnonzero((t[1:] > o) & (t[1:] <= hit_end) & (((hp_a[:-1] - hp_a[1:]) >= 1) | ((hp_t[:-1] - hp_t[1:]) >= 1)))
+        out["exit_hit_s"] = round(float(t[1:][k[-1]] - o), 2) if len(k) else 0.0
+        if c2 is not None:
+            out["cycle_s"] = round(c2 - o, 2)
+    if c2 is not None:
+        n = CAVCHECK["decay_s"]
+        out.update({f"p2_{k}": v for k, v in _pass(t, smp, c2, start(c2), n, sim_run).items()})
+    return out
+
+
+CAVCHECK_KEYS = {"recharge": ("contact_s", "p1_tg_hp_0_1", "p1_tg_hp_0_2", "p1_tg_hp_0_10", "p1_a_hp_0_10", "p1_tg_men_0_end",
+                              "exit_s", "exit_hit_s", "exit_tg_hp", "exit_a_hp", "back_s", "cycle_s", "p2_tg_hp_0_1", "p2_tg_hp_0_2",
+                              "p2_tg_hp_0_13", "p2_a_hp_0_13", "p2_tg_men_0_end", "p2_a_men_0_end"),
+                 "chase": ("rout_s", "contact_s", "rout_to_contact_s", "tg_hp_0_1", "tg_hp_0_2", "tg_hp_0_13", "a_hp_0_13",
+                           "tg_men_0_13", "a_men_0_13"),
+                 "flank": ("contact_s", "tg_hp_0_1", "tg_hp_0_2", "tg_hp_0_13", "a_hp_0_13", "tg_men_0_13", "a_men_0_13")}
+
+
+def cavcheck_summary(rows):
+    """Per kind and key: the game's value, the twin's mean, min and max over its copies and the twin against the game, %."""
+    out = {}
+    for kind, keys in CAVCHECK_KEYS.items():
+        g = [r for r in rows if r.get("kind") == kind and r["src"] == "game"]
+        s_ = [r for r in rows if r.get("kind") == kind and r["src"] == "sim"]
+        for k in keys:
+            gv = [r[k] for r in g if isinstance(r.get(k), (int, float)) and np.isfinite(r[k])]
+            sv = [r[k] for r in s_ if isinstance(r.get(k), (int, float)) and np.isfinite(r[k])]
+            row = {"game": round(float(np.mean(gv)), 2) if gv else None,
+                   "sim": round(float(np.mean(sv)), 2) if sv else None,
+                   "sim_min": round(float(min(sv)), 2) if sv else None, "sim_max": round(float(max(sv)), 2) if sv else None}
+            if row["game"] and row["sim"] is not None and abs(row["game"]) > 1e-6:
+                row["diff_pct"] = round(100 * (row["sim"] / row["game"] - 1))
+            out[f"{kind}.{k}"] = row
+    return out
+
+
+def cavcheck_report(run_dirs, sim=False, device="cpu", copies=8, out=None):
+    """The cavcheck lanes of the runs (with sim + the simulator's twin on the same lanes, the cavalry's passports from
+    data/units/probe-units.json): prints the summary, writes build/charge-probe/cavcheck.json (rows and summary; not in
+    Git)."""
+    import dataclasses
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln.get("plan") == "cavcheck"]
+    rows = [dict(cavcheck_measure(ln), src="game") for ln in lanes]
+    if sim and lanes:
+        from tools.nn.sim.params import load
+        params = load()
+        params = dataclasses.replace(params, units={**_passports(), **params.units})
+        rows += [dict(cavcheck_measure(ln), src="sim") for ln in sim_lanes(lanes, params=params, device=device, copies=copies)]
+    summ = cavcheck_summary(rows)
+    for k, v in summ.items():
+        print(k, json.dumps(v))
+    path = out or ROOT / "cavcheck.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"rows": rows, "summary": summ}, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("written", path)
+    return rows, summ
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
-                                                     "shootcontact", "recontact", "pursuit", "cavalry"),
+                                                     "shootcontact", "recontact", "pursuit", "cavalry",
+                                                     "cavcheck"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -3287,6 +3475,10 @@ def main(argv=None):
     if args.command == "cavalry":
         cavalry_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),
                        out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "cavcheck":
+        cavcheck_report(args.runs or runs(), sim=args.sim, device=args.device, copies=args.copies,
+                        out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),
