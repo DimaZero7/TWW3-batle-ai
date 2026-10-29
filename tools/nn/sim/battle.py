@@ -479,7 +479,14 @@ def step(st, orders, params=None, dt=None):
     hp_imp = impact.land(u, pw, strike, fire, params, dt, speed, charge_now) if big_on else None
 
     # --- melee ---
-    rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire)
+    late = d_pair = d_share = None
+    if big_on and (cal["contact"].get("impact") or {}).get("ride_in"):
+        # (impact.deferred) a large charger that rode in: its front rank's first blow lands as the men it knocked down
+        # get up, not at the landing
+        d_pair, d_share = impact.deferred(u, params, strike, dt)
+        late = (d_share > 0).any(dim=2)
+    rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire,
+                                                     late=late)
     if big_on:
         # (impact.up_share) the front men of a unit knocked down by a large enemy do not strike it while they lie
         rate, swing = impact.up_share(u, params, rate), impact.up_share(u, params, swing)
@@ -513,12 +520,15 @@ def step(st, orders, params=None, dt=None):
             deg = float(params.battle["bracing_attack_angle"])
         facing = pw["rel_i"].abs() <= deg * geometry.DEG
         first_pair = first_pair | (stand[:, :, None] & facing)
-    hp_melee = rate * dt + torch.where(first_pair, swing, torch.zeros_like(swing))
+    swung = torch.where(first_pair, swing, torch.zeros_like(swing))
+    if d_pair is not None:
+        swung = torch.where(d_pair, swing * d_share, swung)
+    hp_melee = rate * dt + swung
     if big_on:
         # the impact's collision damage, and the knock of a large striker's hits on smaller men (impact.knock: the front
         # share lying from blows, by the game's mass ratio rule)
         hp_melee = hp_melee + hp_imp
-        impact.knock(u, params, dt, rate, torch.where(first_pair, swing, torch.zeros_like(swing)), mhit, F_men,
+        impact.knock(u, params, dt, rate, swung, mhit, F_men,
                      charge_now)
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
     # units more (they turn their backs, config/nn/sim.json contact.pin_why), missile units in full (the shootcontact

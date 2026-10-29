@@ -200,6 +200,42 @@
       "group": "wh3_default_land_ranged_infantry_main_light_backline",
       "quality": "tier_2_step_5_units"
      }
+    ],
+    "wh_main_emp_cav_empire_knights": [
+     {
+      "group": "wh3_default_land_melee_cavalry_main_mounted_medium",
+      "quality": "tier_2_step_4_units"
+     }
+    ],
+    "wh_main_emp_cav_reiksguard": [
+     {
+      "group": "wh3_default_land_melee_cavalry_main_mounted_medium",
+      "quality": "tier_3_step_2_units"
+     }
+    ],
+    "wh_dlc04_emp_cav_knights_blazing_sun_0": [
+     {
+      "group": "wh3_default_land_melee_cavalry_main_mounted_heavy",
+      "quality": "tier_3_step_3_units"
+     }
+    ],
+    "wh3_dlc25_emp_cav_knights_of_the_black_rose": [
+     {
+      "group": "wh3_default_land_melee_cavalry_main_mounted_medium",
+      "quality": "tier_3_step_3_units"
+     }
+    ],
+    "wh_main_emp_cav_demigryph_knights_0": [
+     {
+      "group": "wh3_default_land_melee_cavalry_main_mounted_heavy",
+      "quality": "tier_3_step_5_units"
+     }
+    ],
+    "wh_main_emp_cav_demigryph_knights_1": [
+     {
+      "group": "wh3_default_land_melee_cavalry_main_mounted_heavy",
+      "quality": "tier_4_step_1_units"
+     }
     ]
    }
   },

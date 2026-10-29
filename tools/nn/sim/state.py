@@ -320,6 +320,9 @@ INTERNAL = {
                   "they lie U(1.0, 2.7) s from kd_t)"),
     "kd_t": ("f", "seconds since a large charger's impact last landed on it (impact.py)"),
     "kd_p": ("f", "the share of its front men lying from a large striker's blows (impact.knock: a pool, 1.85 s a man)"),
+    "ride": ("f", "1 while a large charger has ridden into its formation - its impact knocked the first rank down (impact.py, "
+                  "contact.impact ride_in): those men get up off their places and walk, out of the brace; 0 when no larger "
+                  "enemy touches it"),
     "kd_n": ("f", "bookkeeping: its men knocked down so far by large bodies and blows (impact.py)"),
     "gone": ("b", "left the map (routed off it)"),
     "dead_s": ("f", "seconds since the unit was killed (health 0; a lord whose faction's routed lord crumbles: "

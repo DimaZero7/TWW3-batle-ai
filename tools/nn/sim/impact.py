@@ -24,6 +24,22 @@ The impact (land(): a large charger's charge lands this step - battle.py `fire`;
               (up_share), the blows on him land (M11: the swing strikes him)
   the chain   a man knocked down hits the man behind at his flight speed, at most 3.3 m/s (M8): (1 + e) m / (m B + m)
               x 3.3 <= 2.2 m/s, below the step back (3) - no chain in numbers; the horse riding on is the ranks above
+The ride-in (contact.impact ride_in; build/diag_cav/mechanic.md M25-M27): the brace is each man's own, recomputed every
+              tick - a man standing within his radius + 10 m of his place is braced, a man who steps is not (that same
+              tick), a man in a reaction keeps the flag he had. Where the charger knocks the first rank down and rides
+              on (ride = 1: kd_q of the landing), those men get up off their places and walk back and into the fight -
+              out of the brace - while the horses stand among them: the charge defence and the charge reflection, which
+              look at the struck / striking man's own brace, are off for that unit, and so is the bracing of a new
+              landing (bracing()). A held unit's men strike such a charger in full (melee.strikes, ride_full: the
+              horses stand in reach of the men round them, who need not step in - contact.hold_rate, the fitted half of
+              a held unit's rate, was measured on enemies at its front). A charger the first rank stops (the target's
+              m B above the horse's M: its dv < 0.65 v, below 7 m/s at a horse's charge 10.8 - M28) stays in front: no
+              ride. ride goes back to 0 when no larger enemy touches the unit (the men re-form). MEASURED check: the
+              cavcharge probe (build/charge-probe/runs/20261029-114229): braced clanrat spearmen, knocked down (dv 8.6),
+              lost 1169 HP in 13 s - between the twin's 731 with the defence held all the fight and 1290 without it -,
+              braced stormvermin, knocked back only (6.4), 378 (the twin with the defence 407); the knights lost 248 to
+              held clanrats they rode into (the full rule 257, x hold_rate 129) and 1190 to the stormvermin that stopped
+              them (x hold_rate 1221).
 The knock of a blow (knock(): a large striker's hits on a smaller man, the 'decided' blow, charge_module 5.1):
   P(down) = melee_on_damage_effect_knockdown_chance 0.05 x r x (1 + knock_chance_charging_bonus 2 x f) for r above
   interrupt_mass_ratio_clamp_knockdown 0.5 (r: the striker's mass / the struck man's, f: the striker's charge left), of
@@ -44,6 +60,17 @@ def on(params):
 
 def _cal(params):
     return params.sim["contact"].get("impact") or {}
+
+
+def ridden(u, params):
+    """[B, N] the front men a large charger rode in among are up and out of the brace (module doc, ride_in; False with it
+    off): from the mean getting-up time after the landing (knockdown_getting_up_delay_min / _max: 1.85 s) - lying, a man
+    keeps the brace he had (M26: a reaction freezes it)."""
+    if not _cal(params).get("ride_in"):
+        return torch.zeros_like(u["r"])
+    R = params.battle
+    up = (float(R["knockdown_getting_up_delay_min"]) + float(R["knockdown_getting_up_delay_max"])) / 2
+    return (u["ride"] >= 0.5) & (u["kd_t"] >= up)
 
 
 def bigger(u):
@@ -79,7 +106,21 @@ def bracing(u, params, speed, charge_now):
     mult = mult.clamp(1.0, float(R["bracing_max_multiplier_clamp"]))
     can = u["brace_ok"] | defence | u["reflect"]
     braced = can & (speed < float(params.sim["melee"]["braced_speed"])) & ~u["r"] & (charge_now <= 0) & (u["men0"] > 1)
+    braced = braced & ~ridden(u, params)                               # (ride_in: the front men up and walking)
     return torch.where(braced, mult, torch.ones_like(mult))
+
+
+def deferred(u, params, contact, dt):
+    """(pairs [B, N, N], share [B, N, N]) of the ride-in's delayed first blow (module doc): i large and bigger than j, in
+    contact, j ridden into (ride) - the front rank's first blow of i does not land at the landing (the men it met lie: a
+    lying man is no target for a new blow, M11) but as they get up, U(knockdown_getting_up_delay_min, _max) s after it:
+    the share of that blow landing over this step [kd_t - dt, kd_t) (kd_t: since the landing, after this step's)."""
+    R = params.battle
+    lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
+    pair = contact & bigger(u) & (u["ride"] >= 0.5)[:, None, :]
+    t1 = u["kd_t"][:, None, :]
+    share = ((t1.clamp(max=hi) - (t1 - dt).clamp(min=lo)).clamp(min=0) / max(hi - lo, 1e-6)).expand_as(pair.float())
+    return pair, torch.where(pair, share, torch.zeros_like(share))
 
 
 def lying(u, params):
@@ -160,6 +201,10 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
     # the target's front share down: its first rank in the chargers' lanes (the lanes cover the contact's length: 1)
     q = first_down.to(v.dtype).amax(dim=1)
     hit = pair.any(dim=1)
+    if cal.get("ride_in"):
+        # (module doc, the ride-in) the first rank down: the horses ride in among the men; no larger enemy touching: 0
+        touched = (contact & bigger(u)).any(dim=1)
+        u["ride"] = torch.where(touched, torch.where(hit, torch.maximum(u["ride"], q), u["ride"]), torch.zeros_like(q))
     u["kd_q"] = torch.where(hit, torch.maximum(q, lying(u, params)), u["kd_q"])
     u["kd_t"] = torch.where(hit, torch.zeros_like(u["kd_t"]), u["kd_t"])
     u["kd_n"] = u["kd_n"] + down_men.sum(1)

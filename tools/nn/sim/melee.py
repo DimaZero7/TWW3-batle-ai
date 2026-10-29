@@ -307,13 +307,14 @@ def cycle_rate(p, interval, hit, hp_man, single_j, recv, cyc):
     return base * busy * unbroken
 
 
-def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
+def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
     HP of one blow of every man in contact at once (the first strike, battle.py). charge_now [B, N]: the striker's
     charge left (0-1, battle.py: its own clock from the charge's first blow). ran [B, N] (with first): the strikers
     whose charge lands now (battle.py: the first strike of a charge), whose swing is their front rank
-    (contact.first_strike_rank)."""
+    (contact.first_strike_rank); late [B, N] (with first): large chargers whose front rank's first blow comes later, when
+    the men they knocked down get up (impact.deferred, contact.impact ride_in) - their swing is their front rank too."""
     B = params.battle
     cal = params.sim["melee"]
     cc = params.sim["contact"]
@@ -502,6 +503,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
     F0 = F if (first and cc.get("first_strike_steady")) else None
     F_rank = None
+    F_pre = F                            # (before the wave: the front rank's share of F, contact.impact ride_in below)
     if first and ran is not None and cc.get("first_strike_rank"):
         # The charge's front rank (contact.first_strike_rank; config/nn/sim.json contact.first_strike_rank_why): a
         # formation whose charge lands meets the enemy with its whole front rank at once - a man of every file in
@@ -528,7 +530,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             F_rank = F_rank * fix
         F_rank = torch.where(flank_j, F_rank * (length_meet / length.clamp(min=1e-6)).clamp(max=1.0), F_rank)
         F_rank = torch.minimum(F_rank, men_i)
-        rank_on = ran[:, :, None] & ~single_i & ~single_j
+        rank_on = (ran if late is None else ran | late)[:, :, None] & ~single_i & ~single_j
         F_rank = torch.where(rank_on, F_rank, torch.zeros_like(F_rank))
     wave = cal.get("wave")
     if wave and "contact_s" in u:
@@ -652,6 +654,14 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             full_big = k_big / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
             big_chase = routing_j & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
             ch = torch.where(big_chase, full_big.expand_as(ch), ch)
+    # (contact.impact ride_in, impact.py: a large charger that knocked the first rank down rides in among the men - they
+    # walk off their places, out of the brace: no charge defence, no reflection; held, they strike it in full)
+    ride = unbraced = None
+    if (cc.get("impact") or {}).get("ride_in") and "ride" in u:
+        ride = u["ride"] >= 0.5
+        # (lying, a man keeps the brace he had - a reaction freezes it, M26: out of it from the mean getting-up time)
+        up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2
+        unbraced = ride & (u["kd_t"] >= up)
     cdef = cc.get("charge_defence") or {}
     if cdef.get("on") and "cdl" in u and "cd" in u:
         # Charge defence (the database's attributes charge_defense_vs_large / charge_defense; build/diag_cav/sim_gap.md 1,
@@ -661,6 +671,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         # Without a large unit in the battle and with no charge_defense (no unit of the pools has it) it changes nothing.
         speed_j = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)[:, None, :]
         braced_j = (speed_j < float(cal["braced_speed"])) & ~routing_j
+        if unbraced is not None:
+            braced_j = braced_j & ~unbraced[:, None, :]
         vs = u["cd"][:, None, :] | (u["cdl"][:, None, :] & u["large"][:, :, None])
         ahead = pw["rel_j"].abs() <= float(cdef.get("front_deg", 45.0)) * geometry.DEG
         ch = torch.where(braced_j & vs & ahead, torch.zeros_like(ch), ch)
@@ -686,6 +698,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # do double damage within 3.9 s of the charge); it gets no charge of its own.
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     braced = (u["reflect"] & (speed < cal["braced_speed"]))[:, :, None]
+    if unbraced is not None:
+        braced = braced & ~unbraced[:, :, None]
     facing = pw["rel_i"].abs() <= B["bracing_attack_angle"] * geometry.DEG
     if cal.get("reflect_any_angle"):
         # (melee.reflect_any_angle) the reflection asks only that the striker is braced and the charger's charge is on,
@@ -774,6 +788,26 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             back = torch.where(t >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
                                                                                                    torch.zeros_like(p))
         back = torch.where(swung, back, torch.ones_like(back))
+        if ride is not None and "size_k" in u:
+            # (contact.impact ride_in, impact.deferred) a large charger that rode in swung its front rank's first blow when
+            # the men it knocked down got up - the mean getting-up time after the landing -, its intervals run from then
+            up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2
+            rp = (ride[:, None, :] & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+                  & swung)
+            t2 = t - up
+            # only the front rank swung (its files: F before the wave / fighting_files, the template's files - as the first
+            # strike's rank above); the ranks behind ride in through the men down after it (M29: a rank 4.1 m behind,
+            # >= 0.4 s later) and strike at once, their intervals ready
+            h_t, v_t = spacing_of(u, params.sim["formation"]["spacing_m"])
+            along_t = torch.where(through_front, h_t[:, :, None], v_t[:, :, None])
+            front = F_pre / ff * (along / along_t.clamp(min=1e-6)).clamp(max=1.0)
+            s_f = (front / F.clamp(min=1e-6)).clamp(0, 1)
+            if recv is not None:
+                back2 = (t2 >= interval).to(p.dtype)
+            else:
+                back2 = (torch.where(t2 >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p))
+                         + torch.where(t2 >= interval, p, torch.zeros_like(p)))
+            back = torch.where(rp, s_f * back2 + (1 - s_f), back)
     else:
         back = None
     rate = F * struck * per_s * hit
@@ -849,6 +883,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # A braced unit's blows while it reflects a charge are not cut (contact.hold_reflect_full; R2: braced spearmen
     # struck 52 HP/s in 1-5 s after a charge = the full rule x2, held swordsmen 12 HP/s = hold_rate).
     cut = held[:, :, None]
+    if ride is not None and (cc.get("impact") or {}).get("ride_full") and "size_k" in u:
+        # (contact.impact ride_full, impact.py) a held unit a larger charger rode into strikes it in full
+        cut = cut & ~(ride[:, :, None] & u["large"][:, None, :] & (u["size_k"][:, None, :] > u["size_k"][:, :, None]))
     if cc.get("hold_reflect_full"):
         cut = cut & (reflect <= 1.0)
     full = rate

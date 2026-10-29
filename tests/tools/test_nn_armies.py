@@ -507,6 +507,30 @@ class TestArmiesV3:
         assert c.max() > 19000 and abs(np.mean(c > 15000) - 5 / 18) < 0.05
         assert cost.max() > 13000 and cost.max() <= 20000 / (1 - G.TOLERANCE)
 
+    def test_the_cavalry_only_in_v3(self, battles_v3):
+        # the Empire's six mounted units (29.10.2026, cavalry step 3): in the v3 pools only (v1 / v2 bit for bit, the test
+        # above), each in its generator group (the database's cdir_military_generator_unit_qualities), which every Empire
+        # template asks; their width the game's default formation (men / rank_depth files x the template's h)
+        cav = {"wh_main_emp_cav_empire_knights": ("medium", 45.0), "wh_main_emp_cav_reiksguard": ("medium", 45.0),
+               "wh3_dlc25_emp_cav_knights_of_the_black_rose": ("medium", 45.0),
+               "wh_dlc04_emp_cav_knights_blazing_sun_0": ("heavy", 45.0),
+               "wh_main_emp_cav_demigryph_knights_0": ("heavy", 51.2), "wh_main_emp_cav_demigryph_knights_1": ("heavy", 51.2)}
+        for scheme in ("v1", "v2"):
+            assert not set(cav) & {u.key for u in P.load(scheme=scheme)[EMP].units}
+        pool = P.load(scheme="v3")[EMP]
+        units = {u.key: u for u in pool.units}
+        assert set(cav) <= set(units)
+        doc = json.loads(P.TEMPLATES.read_text(encoding="utf-8"))["factions"][EMP]["units"]
+        for key, (weight, width) in cav.items():
+            assert doc[key][0]["group"] == f"wh3_default_land_melee_cavalry_main_mounted_{weight}"
+            assert units[key].width == width and units[key].category == "cavalry" and not units[key].missile
+        idx = [i for i, u in enumerate(pool.units) if u.key in cav]
+        assert pool.templates and all(sum(t.shares[i] for i in idx) > 0.09 for t in pool.templates)
+        sides = [a["sides"][s] for a in battles_v3 for s in ("own", "enemy")
+                 if any("_emp_" in u["key"] for u in a["sides"][s]["units"])]
+        with_cav = np.mean([any(u["key"] in cav for u in side["units"]) for side in sides])
+        assert 0.3 < with_cav < 0.7                                  # 0.49 on 600 seeds (build/diag_cav/step3)
+
     def test_full_battles_both_sides_full(self):
         gen = G.Generator()
         gen.v3 = dict(gen.v3, full=1.0)
