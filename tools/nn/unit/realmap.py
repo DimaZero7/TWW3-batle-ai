@@ -40,7 +40,7 @@ def activate(name, exam=False, root=MAPS):
     x0, z0, step = float(d["x0"]), float(d["z0"]), float(d["step"])
     clear = d["clear"] if "clear" in d.files else np.ones(H.shape, np.uint8)
     _ACTIVE.clear()
-    _ACTIVE.update(name=name, mid=mid, clear=clear, x0=x0, z0=z0, step=step, exam=exam,
+    _ACTIVE.update(name=name, mid=mid, clear=clear, height=H, x0=x0, z0=z0, step=step, exam=exam,
                    lo_x=x0, hi_x=x0 + (H.shape[1] - 1) * step, lo_z=z0, hi_z=z0 + (H.shape[0] - 1) * step)
     return mid
 
@@ -51,6 +51,22 @@ def deactivate():
 
 def active():
     return bool(_ACTIVE)
+
+
+def height_at(x, z):
+    """The active map's ground (its nearest node) at world points x, z (numpy)."""
+    a = _ACTIVE
+    i = np.clip(np.round((np.asarray(x) - a["x0"]) / a["step"]).astype(int), 0, a["height"].shape[1] - 1)
+    j = np.clip(np.round((np.asarray(z) - a["z0"]) / a["step"]).astype(int), 0, a["height"].shape[0] - 1)
+    return a["height"][j, i]
+
+
+def to_world(x, z, px, pz, deg):
+    """A battle's local points onto the map (terrain.set_map place's rule), numpy."""
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    x, z = np.asarray(x, float), np.asarray(z, float)
+    return x * c + z * s + px, -x * s + z * c + pz
 
 
 def _clear_at(x, z):
@@ -130,7 +146,7 @@ def places(setup, gen):
 
 def apply(setup, gen=None):
     """Lay the setup's skirmishes on the active map (in place; nothing when none is active). Returns the setup."""
-    if not _ACTIVE:
+    if not _ACTIVE or setup.get("map_place") is not None:      # (a drill that chose its own places: drill_height)
         return setup
     if _ACTIVE["exam"] or gen is None:
         gen = torch.Generator().manual_seed(EXAM_SEED)
