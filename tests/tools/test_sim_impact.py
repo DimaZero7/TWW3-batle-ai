@@ -142,32 +142,35 @@ class TestLanding:
         _, st, H = landing(KNIGHTS, SVHALB, t_bearing=0.0)                       # the target faces north
         assert float(st.u["kd_q"][0, H]) == 1.0                                   # B 1: dv 11.8, down
 
-    def test_from_the_flank_the_damage_keeps_the_man_s_own_brace(self):
-        """damage_brace_any_angle (the cavcheck probe's flank charge): the speed change takes B 1 from the flank (the men go
-        down rank after rank) while each man met takes the collision damage divided by his own brace (stormvermin 150 x 8);
-        with the switch off by 150."""
+    @pytest.mark.parametrize("t_bearing, deg, braced", [(0.0, 120, True), (350.0, 120, True), (0.0, 75, False),
+                                                         (120.0, 120, False)])
+    def test_the_damage_keeps_the_brace_within_120_deg(self, t_bearing, deg, braced):
+        """damage_brace_deg (build/diag_cav/mechanic.md M30): the speed change takes B only within brace_deg 75 - from the
+        flank B 1, the men go down rank after rank - while each man met takes the collision damage divided by his brace B
+        (stormvermin 150 x 8) within damage_brace_deg 120 of his facing: the charger (from the west) 90 deg off a target
+        facing north, 80 deg off one facing 350; from the rear cone (facing 120: 150 deg off) by 150."""
         imp = P.sim["contact"]["impact"]
-        assert imp.get("damage_brace_any_angle")
-        for on in (1, 0):
-            p = P.with_cal("contact", impact=dict(imp, damage_brace_any_angle=on))
-            hp, st, H = landing(KNIGHTS, SVHALB, t_bearing=0.0, params=p)
-            _, ranks = lane_of(st, H)
-            h, _ = melee.spacing_of(st.u, SP)
-            c = float(h[0, 0] / h[0, H])
-            # the horses along the flank the knights meet (its length: the target's depth), their lanes' men a rank
-            pw = geometry.pairwise(st.u, SP)
-            files, _ = impact.ranks_of(st.u, SP)
-            face = min(float(pw["face_i"][0, 0, H]), float(pw["face_j"][0, 0, H]))
-            lane = min(min(face / float(h[0, 0]), float(files[0, 0])) * c, float(files[0, H]))
-            mB = 1200.0 if on else 150.0
-            v, total = 10.8, 0.0
-            for _ in range(int(ranks)):
-                total += lane * collision(v, 1000, mB, st, H)
-                if 1.3 * 1000 / 1150 * v <= 7.0:
-                    break
-                v *= (1 - 1.3 * 150 / 1150 * 0.8) ** c
-            assert float(st.u["kd_q"][0, H]) == 1.0                                # B 1 in the speed change: down
-            assert hp == pytest.approx(total, rel=1e-4)
+        assert imp.get("damage_brace_deg") == 120
+        p = P.with_cal("contact", impact=dict(imp, damage_brace_deg=deg))
+        hp, st, H = landing(KNIGHTS, SVHALB, t_bearing=t_bearing, params=p)
+        _, ranks = lane_of(st, H)
+        h, _ = melee.spacing_of(st.u, SP)
+        c = float(h[0, 0] / h[0, H])
+        # the horses along the side the knights meet, their lanes' men a rank
+        pw = geometry.pairwise(st.u, SP)
+        assert abs(float(pw["rel_j"][0, 0, H])) / geometry.DEG > 75.0
+        files, _ = impact.ranks_of(st.u, SP)
+        face = min(float(pw["face_i"][0, 0, H]), float(pw["face_j"][0, 0, H]))
+        lane = min(min(face / float(h[0, 0]), float(files[0, 0])) * c, float(files[0, H]))
+        mB = 1200.0 if braced else 150.0
+        v, total = 10.8, 0.0
+        for _ in range(int(ranks)):
+            total += lane * collision(v, 1000, mB, st, H)
+            if 1.3 * 1000 / 1150 * v <= 7.0:
+                break
+            v *= (1 - 1.3 * 150 / 1150 * 0.8) ** c
+        assert float(st.u["kd_q"][0, H]) == 1.0                                    # B 1 in the speed change: down
+        assert hp == pytest.approx(total, rel=1e-4)
 
     def test_no_landing_no_impact_and_infantry_never(self):
         hp, st, H = landing(SWORD, CLANRATS)                                     # a small charger: nothing

@@ -19,11 +19,12 @@ The impact (land(): a large charger's charge lands this step - battle.py `fire`;
   damage      each man met takes min(collision_damage_maximum 70, (v M / (m B))^collision_damage_normaliser 0.8 x
               collision_damage_modifier 0.6), collision_damage_armour_penetration_ratio 0.7 of it past the armour, once a
               landing (the 4 s immunity per attacker); a charger of size above medium only on men it knocks down, x0.5.
-              With contact.impact damage_brace_any_angle the B here is the man's own brace from whatever side the blow
-              comes (the +-75 deg check stays in the speed change): the game's damage function (142e37f08) multiplies the
-              target's mass by its brace on a flag of its caller - no angle inside -, and the cavcheck probe's flank
-              charge (build/diag_cav/check_results.md) lost the clanrats 271 HP in the first second, 1515 in 13 s, against
-              the twin's 882 / 1908 with the angle in the damage and 403 / 1440 without it (front lanes unchanged)
+              The B here has its own angle (contact.impact damage_brace_deg 120; build/diag_cav/mechanic.md M30): the
+              same brace B as the speed change's, taken while the charger is within 120 deg of the man's facing (the
+              caller of the damage function tests f.d > 0 or cos^2 <= 0.25) - the speed change keeps brace_deg 75; from
+              the rear cone (beyond 120 deg) no brace. The cavcheck probe's flank charge (90 deg; build/diag_cav/
+              check_results.md) lost the clanrats 271 HP in the first second, 1515 in 13 s, against the twin's 882 / 1908
+              with the 75 deg in the damage and 403 / 1440 with 120 (front lanes unchanged)
   lying       the men down lie U(knockdown_getting_up_delay_min 1.0, _max 2.7) s: the target's front share down at t s
               after the landing is down_1 x clamp((2.7 - t) / 1.7, 0, 1) (kd_q, kd_t); a man lying strikes nobody
               (up_share), the blows on him land (M11: the swing strikes him)
@@ -163,8 +164,9 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
     B_own = B_j
     ahead = pw["rel_j"].abs() <= float(cal.get("brace_deg", 75.0)) * geometry.DEG
     B_j = torch.where(ahead, B_j, torch.ones_like(B_j))
-    # (damage_brace_any_angle, module doc) the collision damage divides by the man's own brace from any side
-    mB_dmg = u["mass"][:, None, :] * (B_own if cal.get("damage_brace_any_angle") else B_j)
+    # (damage_brace_deg, module doc: M30) the collision damage divides by the man's brace within its own wider angle
+    within = pw["rel_j"].abs() <= float(cal.get("damage_brace_deg", cal.get("brace_deg", 75.0))) * geometry.DEG
+    mB_dmg = u["mass"][:, None, :] * torch.where(within, B_own, torch.ones_like(B_own))
     M = u["mass"][:, :, None]
     mB = u["mass"][:, None, :] * B_j
     vx = u["vx"][:, :, None] - u["vx"][:, None, :]
