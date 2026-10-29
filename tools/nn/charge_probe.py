@@ -311,6 +311,17 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           wolf rats v swordsmen, 2 each - 1 battle of 4 lanes. A single blow's HP (the drops of the target's health
           between samples) chasing against standing 15-40 s after contact (the charge gone): with the charge bonus on
           every chase blow x1.53 (stormvermin) / x2.9 (wolf rats), without it x1.
+  cavrun  the Empire Knights' speed (build/diag_cav/mechanic.md M14: the warhorse's run 7.8 m/s in the database and in
+          the game's code, the ground plan's shuttles 5.7-6.5): a straight move of 200 m ahead on flat ground, at a run
+          and at a walk, from a standstill, the target parked 300 m off - 1 battle of 2 lanes; the centre every 0.25 s,
+          the soldiers' places every 0.5 s all the way. Table: cavalry [runs] (the speed each second, on 60-180 m, the
+          men's own speeds);
+  cavcharge  the Empire Knights' charge into infantry standing still (build/diag_cav/mechanic.md M6-M9, sim_gap.md 1):
+          an attack at a run from 80 m on clanrats (sword and shield: no charge defence), clanrat spearmen and
+          stormvermin with halberds (both braced, charge defence v large and charge reflection), held (never ordered)
+          - 1 battle of 3 lanes; health every 0.25 s, the soldiers' places every 0.25 s to 15 s after the contact.
+          Table: cavalry [runs] (HP a second 0-13 s, men lost, the target's men shoved > 1 / 3 m in 1 / 2 s, how deep
+          the knights went in). The probe's sides are the Empire and the Skaven: the targets are Skaven.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -333,6 +344,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan recontact --speed 10     # the second contact's opening
     python -m tools.nn.charge_probe recontact [runs...] [--sim]         # its table (+ the simulator on the same lanes)
     python -m tools.nn.charge_probe recontact --layout --copies 4       # the simulator alone, before the game (torch)
+    python -m tools.nn.charge_probe run --plan cavrun --speed 1         # the knights' run (cavcharge: their charge)
+    python -m tools.nn.charge_probe cavalry [runs...] [--sim]           # their table (+ the simulator's twin, torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -461,7 +474,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -690,6 +703,17 @@ TERRAIN2 = {
               "level_3": (440, 240, 353, 290, 1.5)},
 }
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
+# the cavalry plans (build/diag_cav): the Empire Knights' straight run (leg_m ahead at a run / a walk; the target parked
+# gap_m off, never ordered) and their charge from gap_m on three held Skaven infantry units (the probe's sides are the
+# Empire and the Skaven): no charge defence / braced spears / braced halberds; entity_fields: CCO names tried once on the
+# first men 1 s after the contact (does the game tell a man knocked down? the manfields plan found Position only)
+KNIGHTS = "wh_main_emp_cav_empire_knights"
+CAVRUN = {"leg_m": 200, "gap_m": 300, "a_w": 45, "max_s": {True: 60, False: 125}, "band_m": (60, 180)}
+CAVCHARGE = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "men_after_s": 15,
+             "targets": (("clanrat", "no_defence"), ("cspear", "spears_braced"),
+                         ("wh2_main_skv_inf_stormvermin_0", "halberds_braced")),
+             "fields": ["IsKnockedDown", "IsKnockedBack", "IsFalling", "IsInAir", "IsOnGround", "IsStunned",
+                        "IsInHitReaction", "IsStaggered", "IsGettingUp", "AnimationState", "IsAlive", "Position"]}
 
 
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
@@ -956,6 +980,21 @@ def battles(plan):
                            p2={"x": round(x1, 1), "z": round(z1, 1)},
                            t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(float(x0), float(z0))))
         out += [b1, b2]
+    elif plan == "cavrun":
+        # the knights run / walk leg_m straight ahead (towards the parked target: the attacker faces -z) from a standstill;
+        # 4 ranks (a_w 45 m: 15 files of 3.0 m, the game's default)
+        c = CAVRUN
+        out.append([lane(KNIGHTS, "clanrat", "script", "hold", gap_m=c["gap_m"], fight_s=0, answer=False, a_w=c["a_w"],
+                         steps=[{"at_s": 1, "kind": "move", "dx": 0, "dz": -c["leg_m"], "run": run}],
+                         max_s=c["max_s"][run], men_all_s=c["max_s"][run], kind="run" if run else "walk")
+                    for run in (True, False)])
+    elif plan == "cavcharge":
+        # the knights charge (attack at a run from gap_m: the last 40 m at their charge speed) held infantry, 30 m on 30 m
+        c = CAVCHARGE
+        out.append([lane(KNIGHTS, t, "attack_run", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], answer=False,
+                         a_w=c["a_w"], t_w=c["t_w"], kind=kind,
+                         **({"entity_fields": c["fields"], "entity_at_s": 1} if k == 0 else {}))
+                    for k, (t, kind) in enumerate(c["targets"])])
     elif plan == "manfields":
         # what the game answers for one soldier (CCO ManList.At(i).<name>; the documentation lists only Position, Key,
         # IsAlive, IsMan, IsEngine, reload, EntityRecordContext, UnitContext): a facing, a target? - 1 short fight
@@ -1503,6 +1542,10 @@ def run_config(plan, index):
         config.update(men_after_s=0, men_near_m=0)
     if plan == "wrap":
         config.update(men_ms=1000, men_after_s=130, men_near_m=80)
+    if plan == "cavrun":
+        config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=0, men_near_m=0)
+    if plan == "cavcharge":
+        config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
     if plan in ("terrain", "terrain2", "ground", "cover"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)
@@ -1592,6 +1635,8 @@ def load_run(run_dir):
             lanes[r["lane"]]["phases"].append(r)
         elif ev == "probe_skirmish":
             lanes[r["lane"]].setdefault("skirmish", []).append(r)
+        elif ev == "probe_entity_fields" and r.get("lane") in lanes:
+            lanes[r["lane"]]["entity_fields"] = r.get("found")
     return [x for x in lanes.values() if x["samples"]]
 
 
@@ -3061,11 +3106,138 @@ def pursuit_report(run_dirs, sim=False, device="cpu", copies=4, out=None, params
     print("->", out)
     return table
 
+# ---------------------------------------------------------------- the cavalry plans (build/diag_cav/probes.md)
+
+def _crossing(t, d, m):
+    """The time the rising distance d first reaches m (interpolated), or None."""
+    k = np.flatnonzero(d >= m)
+    if not len(k) or k[0] == 0:
+        return None
+    i = k[0]
+    return float(np.interp(m, [d[i - 1], d[i]], [t[i - 1], t[i]]))
+
+
+def cavrun_measure(lane):
+    """A cavrun lane: the centre's distance from where it stood at the order, its speed each second after the order (m/s),
+    the mean speed over CAVRUN band_m (60-180 m: past the start, before the stop), the fastest 2 s, the seconds to 0.9 of
+    that band's speed; from the soldiers' places (game): the men's median and 90th-percentile own speed in the band
+    (each man by his index between samples) - a formation that keeps its pace while men catch up their places."""
+    spec, smp = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in smp])
+    x, z = series(smp, "a", "x"), series(smp, "a", "z")
+    t0 = next((ph["t"] / 1000 for ph in lane.get("phases", []) if str(ph.get("phase", "")).startswith("step1")),
+              spec["steps"][0]["at_s"])
+    sel = (t >= t0 - 1e-6) & np.isfinite(x) & np.isfinite(z)
+    tt, xx, zz = t[sel] - t0, x[sel], z[sel]
+    out = {"run": lane["run"], "lane": spec["name"], "kind": spec.get("kind"), "unit": SHORT[spec["a_key"]]}
+    if len(tt) < 3:
+        return out
+    d = np.hypot(xx - xx[0], zz - zz[0])
+    out["moved_m"] = round(float(d[-1]), 1)
+    out["speed_by_s"] = [None if not np.isfinite(at(tt, d, k + 1.0)) else round(at(tt, d, k + 1.0) - at(tt, d, k), 2)
+                         for k in range(int(tt[-1]))]
+    lo, hi = CAVRUN["band_m"]
+    t_lo, t_hi = _crossing(tt, d, lo), _crossing(tt, d, hi)
+    if t_lo is not None and t_hi is not None and t_hi > t_lo:
+        out["band_speed"] = round((hi - lo) / (t_hi - t_lo), 2)
+        out["band_s"] = (round(t_lo, 1), round(t_hi, 1))
+        fast = [k for k, v in enumerate(out["speed_by_s"]) if v is not None and v >= 0.9 * out["band_speed"]]
+        out["s_to_0.9_band"] = fast[0] + 1 if fast else None
+    w = max(1, int(round(2.0 / max(1e-6, float(np.median(np.diff(tt)))))))
+    if len(tt) > w:
+        out["peak_2s"] = round(float(np.max((d[w:] - d[:-w]) / (tt[w:] - tt[:-w]))), 2)
+    men = [(tm - t0, np.asarray(a, float).reshape(-1, 2) / 10) for tm, a, _ in lane.get("men", []) if len(a) >= 4]
+    if len(men) >= 3 and "band_s" in out:
+        own = []
+        for (ta, pa), (tb, pb) in zip(men, men[1:]):
+            if out["band_s"][0] <= ta and tb <= out["band_s"][1] and tb > ta:
+                n = min(len(pa), len(pb))
+                own.append(np.hypot(*(pb[:n] - pa[:n]).T) / (tb - ta))
+        if own:
+            v = np.concatenate(own)
+            out["men_speed_median"] = round(float(np.median(v)), 2)
+            out["men_speed_p90"] = round(float(np.percentile(v, 90)), 2)
+    return out
+
+
+def cavcharge_measure(lane):
+    """A cavcharge lane, from the contact c: the target's and the knights' HP lost each second 0-13 s (the charge's
+    decay), over 0-1, 0-2, 0-13 s, their men lost 0-13 s; from the soldiers' places (game): the target's men shoved -
+    moved more than 1 / 3 m from where they stood at the contact - 1, 2 and 5 s after it (the game gives no knock-down
+    flag for a man: the manfields plan; the entity_fields tried at 1 s are kept as they came), and how deep the knights
+    went in: their men's median and 90th percentile depth beyond the target's front at the contact, 1 / 2 / 5 s after."""
+    spec, smp = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in smp])
+    c = lane["contacts"].get(1)
+    out = {"run": lane["run"], "lane": spec["name"], "kind": spec.get("kind"),
+           "pair": f"{SHORT[spec['a_key']]}>{SHORT[spec['t_key']]}", "contact_s": c}
+    if c is None:
+        return out
+    before_c = t[t < c - 1e-6]
+    c0 = float(before_c[-1]) if lane["run"] != "sim" and len(before_c) else c
+    n = CAVCHARGE["decay_s"]
+    for who in ("tg", "a"):
+        hp, men = series(smp, who, "hp"), series(smp, who, "men")
+        by_s = []
+        for k in range(n):
+            a, b = at(t, hp, c0 if k == 0 else c + k), at(t, hp, c + k + 1)
+            by_s.append(round(a - b, 1) if np.isfinite(a) and np.isfinite(b) else None)
+        out[f"{who}_hp_by_s"] = by_s
+        for lo, hi in ((0, 1), (0, 2), (0, n)):
+            out[f"{who}_hp_{lo}_{hi}"] = round(at(t, hp, c0) - at(t, hp, c + hi), 1)
+        out[f"{who}_men_0_{n}"] = round(at(t, men, c0) - at(t, men, c + n), 1)
+    men = [(tm - c, np.asarray(a, float).reshape(-1, 2) / 10, np.asarray(b, float).reshape(-1, 2) / 10)
+           for tm, a, b in lane.get("men", []) if len(a) >= 4 and len(b) >= 4]
+    if men:
+        k0 = int(np.argmin([abs(m[0]) for m in men]))
+        _, a0, b0 = men[k0]
+        # the knights' way in: from their centre to the target's at the contact
+        way = b0.mean(0) - a0.mean(0)
+        way = way / max(1e-6, float(np.hypot(*way)))
+        front = float(np.percentile(b0 @ way, 5))           # the target's front line along the way in
+        for sec in (1, 2, 5):
+            k = int(np.argmin([abs(m[0] - sec) for m in men]))
+            if abs(men[k][0] - sec) > 0.3:
+                continue
+            _, a1, b1 = men[k]
+            m_ = min(len(b0), len(b1))
+            moved = np.hypot(*(b1[:m_] - b0[:m_]).T)
+            out[f"tg_shoved_1m_{sec}s"] = int((moved > 1.0).sum())
+            out[f"tg_shoved_3m_{sec}s"] = int((moved > 3.0).sum())
+            depth = a1 @ way - front
+            out[f"a_depth_{sec}s"] = (round(float(np.median(depth)), 1), round(float(np.percentile(depth, 90)), 1))
+    if lane.get("entity_fields") is not None:
+        out["entity_fields"] = lane["entity_fields"]
+    return out
+
+
+def cavalry_report(run_dirs, sim=False, device="cpu", copies=4, out=None):
+    """The cavrun and cavcharge lanes of the runs (and with sim the simulator's twin on the same lanes, the cavalry's
+    passports from data/units/probe-units.json): prints the rows, writes build/charge-probe/cavalry.json (not in Git)."""
+    import dataclasses
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln.get("plan") in ("cavrun", "cavcharge")]
+
+    def measure_(ln):
+        return cavrun_measure(ln) if ln["spec"]["mode"] == "script" else cavcharge_measure(ln)
+    rows = [dict(measure_(ln), src="game") for ln in lanes]
+    if sim and lanes:
+        from tools.nn.sim.params import load
+        params = load()
+        params = dataclasses.replace(params, units={**_passports(), **params.units})
+        rows += [dict(measure_(ln), src="sim") for ln in sim_lanes(lanes, params=params, device=device, copies=copies)]
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    path = out or ROOT / "cavalry.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("written", path)
+    return rows
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
-                                                     "shootcontact", "recontact", "pursuit"),
+                                                     "shootcontact", "recontact", "pursuit", "cavalry"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -3110,6 +3282,10 @@ def main(argv=None):
         return 0
     if args.command == "pursuit":
         pursuit_report(args.runs or runs(), sim=args.sim, device=args.device, copies=args.copies,
+                       out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "cavalry":
+        cavalry_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),
                        out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":

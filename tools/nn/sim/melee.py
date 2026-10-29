@@ -42,7 +42,11 @@ Charge (battle.py): an attack order, a run-up and the charge's own clock, linear
 (13 s); its first blows are the first strike above; nothing beyond the bonus (no impact, no ramp: CA,
 build/charge/spec.md). A braced unit with
 charge_reflection strikes a charger in front of it (within bracing_attack_angle) whose charge is still at least
-charge_reflect_min_charge_factor_threshold at charge_reflect_damage_multiplier of its damage (database).
+charge_reflect_min_charge_factor_threshold at charge_reflect_damage_multiplier of its damage (database). A braced
+unit with charge_defense_vs_large cancels the charge bonus of a large charger (size above small: cavalry) within
+contact.charge_defence front_deg (45) of its front, one with charge_defense of any charger (the game's program).
+A splash blow strikes several men only of a target no larger than the weapon's splash_attack_target_size
+(melee.splash_by_size); the charge's front rank counts the formation template's files (contact.first_strike_rank_template).
 Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate of the
 rule and no charge (measured; the game's rules give every pursuit blow the whole charge - a known gap); a lone
 striker on a router at the rule in full, on his routing attack target with the whole charge (the game's rules:
@@ -508,6 +512,19 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         # swing (the probes: swordsmen running in under a move order 96 HP/s at 0-1 s, the steady swing 89). Formations
         # only.
         F_rank = F / ff
+        scope = cc.get("first_strike_rank_template")
+        if scope:
+            # (contact.first_strike_rank_template; config/nn/sim.json contact.first_strike_rank_template_why) the charge's
+            # front rank is the formation's files - a man every h of the template across its front (v along a flank) -,
+            # not the bodies closed up side to side in melee (melee.body_across): a horse's place there is its width
+            # (h - 2 r (1 - radii_ratio) = 1.6 m for the Empire Knights, 3.0 in the template), so the bodies' rule gave a
+            # cavalry charge 1.9x its files. "large": only units of size above small (the cavalry); "all": every
+            # ellipse body too (the wolf rats, the weapon teams - it changes them: off)
+            along_t = torch.where(through_front, h_u[:, :, None], v_u[:, :, None])
+            fix = (along / along_t.clamp(min=1e-6)).clamp(max=1.0)
+            if scope == "large":
+                fix = torch.where(u["large"][:, :, None], fix, torch.ones_like(fix))
+            F_rank = F_rank * fix
         F_rank = torch.where(flank_j, F_rank * (length_meet / length.clamp(min=1e-6)).clamp(max=1.0), F_rank)
         F_rank = torch.minimum(F_rank, men_i)
         rank_on = ran[:, :, None] & ~single_i & ~single_j
@@ -624,6 +641,18 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
             # (the stat without the fatigue: effects() has laid its multiplier on u["charge_bonus"])
             full = k_chase / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
             ch = torch.where(chase, full.expand_as(ch), ch)
+    cdef = cc.get("charge_defence") or {}
+    if cdef.get("on") and "cdl" in u and "cd" in u:
+        # Charge defence (the database's attributes charge_defense_vs_large / charge_defense; build/diag_cav/sim_gap.md 1,
+        # R-work charge_module.md 7): a braced unit (standing: slower than melee.braced_speed - a standing unit is not in
+        # its own charge) cancels the charge bonus - to the attack and to the damage - of a charger within front_deg of
+        # its front: a large one (size above small: the cavalry) with charge_defense_vs_large, any with charge_defense.
+        # Without a large unit in the battle and with no charge_defense (no unit of the pools has it) it changes nothing.
+        speed_j = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)[:, None, :]
+        braced_j = (speed_j < float(cal["braced_speed"])) & ~routing_j
+        vs = u["cd"][:, None, :] | (u["cdl"][:, None, :] & u["large"][:, :, None])
+        ahead = pw["rel_j"].abs() <= float(cdef.get("front_deg", 45.0)) * geometry.DEG
+        ch = torch.where(braced_j & vs & ahead, torch.zeros_like(ch), ch)
     large_j = u["large"][:, None, :]
     bonus = torch.where(large_j, u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
     extra = u["charge_bonus"][:, :, None] * ch + bonus
@@ -659,6 +688,11 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     # splash_max_attacks and the men left), each taking 1 / splash_max_attacks of it (CA 5.1.0: divided among the
     # targets; measured: single blows of 47-57 HP on stormvermin); a lone man takes the whole blow.
     n_max = u["splash"][:, :, None].expand_as(F)
+    if cal.get("splash_by_size") and "splash_cap" in u and "size_k" in u:
+        # (melee.splash_by_size; build/diag_cav/mechanic.md M18) a blow strikes several men only of a target no larger than
+        # its weapon's splash_attack_target_size (the lords' medium, the demigryphs' small: not the cavalry); a larger one
+        # takes a single blow, whole
+        n_max = torch.where(u["size_k"][:, None, :] <= u["splash_cap"][:, :, None], n_max, torch.ones_like(n_max))
     struck = torch.minimum(n_max, knobs.full_like(n_max, knobs.get(u, "lord_splash_struck",
                                                                    float(cc.get("lord_splash_struck", 4.0)), 3)))
     struck = torch.minimum(struck, u["men"][:, None, :].clamp(min=1))

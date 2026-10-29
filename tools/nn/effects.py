@@ -82,6 +82,10 @@ SIM_RULES = {
     "fire_while_moving": "aims and shoots while moving (battle.py)",
     "fatigue_immune": "gains no fatigue (fatigue.py)",
     "stalk": "hides anywhere: any ground is cover for it (tools/nn/sim/stealth.py; config/nn/sim.json stealth)",
+    "charge_defence_vs_large": "braced (slower than melee.braced_speed), cancels the charge bonus of a large charger "
+                               "within 45 deg of its front (melee.py; config/nn/sim.json contact.charge_defence)",
+    "charge_defence": "braced, cancels the charge bonus of any charger within 45 deg of its front (melee.py; "
+                      "config/nn/sim.json contact.charge_defence)",
 }
 # Unit attributes: the database gives the key only (unit_attributes_tables); the engine's rule, its
 # numbers and where they come from. `rules`: the flags the attribute sets; `schema_why`: why the
@@ -103,12 +107,10 @@ ATTRIBUTES = {
                           "kb": KB + "melee.md#bracing-and-charge-defence"},
     "charge_defense_vs_large": {"name": "Charge Defence vs. Large", "rules": ["charge_defence_vs_large"],
                                 "does": "braced, cancels the charge bonus of large chargers from the front",
-                                "kb": KB + "melee.md#bracing-and-charge-defence",
-                                "schema_why": "no large units in our pools (no cavalry or monsters yet)"},
+                                "kb": KB + "melee.md#bracing-and-charge-defence"},
     "charge_defense": {"name": "Charge Defence", "rules": ["charge_defence"],
                        "does": "braced, cancels the charge bonus of any charger from the front",
-                       "kb": KB + "melee.md#bracing-and-charge-defence",
-                       "schema_why": "the simulator's charge rule has no per-attacker cancel yet"},
+                       "kb": KB + "melee.md#bracing-and-charge-defence"},
     "mounted_fire_move": {"name": "Fire Whilst Moving", "rules": ["fire_while_moving"],
                           "does": "shoots on the move", "kb": KB + "missiles.md"},
     "guerrilla_deploy": {"name": "Vanguard Deployment", "rules": ["vanguard"],

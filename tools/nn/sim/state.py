@@ -99,6 +99,9 @@ STATIC = {
     "bonus_v_inf": ("f", "melee bonus against infantry"),
     "interval": ("f", "time between a man's blows, s"),
     "splash": ("f", "targets per blow (hits several)"),
+    "splash_cap": ("f", "the largest target size (SIZE_RANK) a blow strikes several of: the database's "
+                        "splash_attack_target_size (the lords' medium, the demigryphs' small); none given - smaller than "
+                        "the striker; a larger target takes a single blow (melee.splash_by_size)"),
     "armour": ("f", "armour"),
     "shield": ("f", "shield: chance to block a projectile from the front, 0-1"),
     "leadership": ("f", "leadership"),
@@ -108,6 +111,9 @@ STATIC = {
     "expendable": ("b", "attribute expendable: its rout does not scare others"),
     "encourages": ("b", "attribute encourages (lords)"),
     "reflect": ("b", "attribute charge_reflection: braced, it meets a frontal infantry charge as a charge"),
+    "cdl": ("b", "attribute charge_defense_vs_large: braced, it cancels the charge bonus of a large charger in front of "
+                 "it (contact.charge_defence)"),
+    "cd": ("b", "attribute charge_defense: braced, it cancels the charge bonus of any charger in front of it"),
     "unbreakable": ("b", "attribute unbreakable: never loses leadership, never wavers or routs"),
     "fire_move": ("b", "attribute mounted_fire_move: shoots while moving (fire whilst moving)"),
     "fatigue_immune": ("b", "attribute fatigue_immune (Perfect Vigour): gains no fatigue"),

@@ -959,3 +959,67 @@ def test_lord_swarm_blows():
     assert row["share_26_31"] == 1.0 and row["att_hp_per_lord_blow"] == 120.0
     json.dumps(row)
     assert np.isfinite(row["lord_hp_per_s"])
+
+
+def test_the_cavrun_plan_runs_and_walks_the_knights_200_m_straight_ahead():
+    (b,) = cp.battles("cavrun")
+    assert [l["kind"] for l in b] == ["run", "walk"]
+    for l in b:
+        assert l["attacker"] == cp.KNIGHTS and l["mode"] == "script" and l["target_mode"] == "hold" and not l["answer"]
+        (step,) = l["steps"]
+        assert (step["dx"], step["dz"]) == (0, -200) and step["run"] == (l["kind"] == "run")
+        assert l["gap_m"] - 200 >= 50 and l["men_all_s"] == l["max_s"]      # stops well short of the parked target
+    config, _, _ = cp.run_config("cavrun", 1)
+    assert config["tick_ms"] == 250 and config["men_ms"] == 500
+
+
+def test_the_cavcharge_plan_charges_the_knights_into_three_held_infantry():
+    (b,) = cp.battles("cavcharge")
+    assert [l["kind"] for l in b] == ["no_defence", "spears_braced", "halberds_braced"]
+    assert [cp.UNITS[l["target"]][0] for l in b] == ["wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_clanrat_spearmen_0",
+                                                     "wh2_main_skv_inf_stormvermin_0"]
+    assert all(l["mode"] == "attack_run" and l["target_mode"] == "hold" and l["gap_m"] >= 40 for l in b)
+    assert b[0]["entity_fields"] and "entity_fields" not in b[1]
+    config, _, _ = cp.run_config("cavcharge", 1)
+    assert config["men_ms"] == 250 and config["men_after_s"] == 15
+
+
+def test_cavrun_measure_the_speed_each_second_and_on_60_180_m():
+    # from a standstill at 1 s, 7 m/s2 to 7.8 m/s; the men's own places alike (one formation, no catch-up)
+    samples, men = [], []
+    for k in range(0, 4 * 40):
+        t = k / 4
+        s = max(0.0, t - 1)
+        d = 0.5 * 7 * s * s if s < 7.8 / 7 else 7.8 * s - 7.8 ** 2 / 14
+        samples.append((t, {"x": 0.0, "z": -d}, {"x": 0.0, "z": -300.0}, None))
+        if k % 2 == 0:
+            men.append((t, [0, round(-10 * d), 30, round(-10 * d)], []))
+    lane = {"run": "x", "spec": {"name": "L1", "kind": "run", "a_key": cp.KNIGHTS, "steps": [{"at_s": 1}]},
+            "samples": samples, "phases": [{"phase": "step1:move", "t": 1000}], "men": men}
+    out = cp.cavrun_measure(lane)
+    assert out["band_speed"] == pytest.approx(7.8, abs=0.01) and out["s_to_0.9_band"] == 2
+    assert out["speed_by_s"][5] == pytest.approx(7.8, abs=0.01) and out["peak_2s"] == pytest.approx(7.8, abs=0.01)
+    assert out["men_speed_median"] == pytest.approx(7.8, abs=0.05)
+
+
+def test_cavcharge_measure_hp_by_second_the_shoved_men_and_the_depth():
+    # contact at 10 s; the target loses 100 HP a second; at 1 s after it half its 20 men are shoved 2 m back, the knights'
+    # 4 men 1.5 m beyond its front
+    samples = [(t / 4, {"x": 0.0, "z": 0.0, "hp": 6480.0, "men": 60},
+                {"x": 0.0, "z": -10.0, "hp": 10000.0 - 100 * max(0.0, t / 4 - 10), "men": 160}, None) for t in range(0, 4 * 30)]
+    # the target's two ranks at z -5 (its front) and -7, the knights coming from +z: at the contact 2 m short of its
+    # front, 1 s later 1.5 m beyond it
+    front = [(x, -5.0) for x in range(10)] + [(x, -7.0) for x in range(10)]
+
+    def places(dt):
+        tg = [(x, z - (2.0 if (dt >= 1 and k % 2 == 0) else 0.0)) for k, (x, z) in enumerate(front)]
+        a = [(x + 0.5, -6.5 if dt >= 1 else -3.0) for x in range(0, 10, 2)]
+        return [round(10 * v) for p in a for v in p], [round(10 * v) for p in tg for v in p]
+    men = [(10 + dt, *places(dt)) for dt in (0.0, 1.0, 2.0)]
+    lane = {"run": "x", "spec": {"name": "L1", "kind": "spears_braced", "a_key": cp.KNIGHTS,
+                                 "t_key": "wh2_main_skv_inf_clanrat_spearmen_0"},
+            "samples": samples, "contacts": {1: 10.0}, "men": men, "phases": []}
+    out = cp.cavcharge_measure(lane)
+    assert out["tg_hp_by_s"][3] == pytest.approx(100.0) and out["tg_hp_0_13"] == pytest.approx(1300.0)
+    assert out["tg_shoved_1m_1s"] == 10 and out["tg_shoved_3m_1s"] == 0
+    assert out["a_depth_1s"][0] == pytest.approx(1.5, abs=0.01)

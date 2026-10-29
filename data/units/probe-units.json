@@ -63,7 +63,7 @@
    "checked": null
   },
   "hp_per_man": {
-   "source": "battle_entities.hit_points + land_units.bonus_hit_points",
+   "source": "battle_entities.hit_points + land_units.bonus_hit_points (+ the mount's battle_entities.hit_points of a mounted unit: the charge probe 28.10, Empire Knights 6480 = 60 x (8 + 8 + 92))",
    "checked": "card HealthMax / men"
   },
   "hp_total": {
@@ -75,11 +75,11 @@
    "checked": "card Mass"
   },
   "size": {
-   "source": "battle_entities.size",
+   "source": "battle_entities.size; a mounted unit the larger of the rider's and the mount's (medium and above is 'large': bonus v large, charge defence v large; build/diag_cav/mechanic.md M1)",
    "checked": null
   },
   "height_m": {
-   "source": "battle_entities.height",
+   "source": "battle_entities.height; a mounted unit the taller of the rider and the mount (the warhorse 2.0, the demigryph 2.3; the rider 1.8)",
    "checked": null
   },
   "radius_m": {
@@ -174,6 +174,10 @@
    "source": "melee_weapons.is_magical: magical attacks - the censer, the plain Giant Rats' claws",
    "checked": null
   },
+  "melee.flaming": {
+   "source": "melee_weapons.ignition_amount > 0: flaming attacks (the RPFM schema: 'if set to a value higher than 0, it will deal fire damage'; Knights of the Blazing Sun's lance 1.0)",
+   "checked": null
+  },
   "melee.contact_phase": {
    "source": "melee_weapons.contact_phase: the contact effect a blow lays on its target (its numbers in the document's contact_phases)",
    "checked": null
@@ -223,11 +227,11 @@
    "checked": null
   },
   "projectile_resistance": {
-   "source": "battle_entities.projectile_penetration_resistance: what a man adds to a penetrating projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number means this entity can stop projectiles more easily')",
+   "source": "battle_entities.projectile_penetration_resistance: what a man adds to a penetrating projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number means this entity can stop projectiles more easily'); a mounted unit the mount's (the warhorse 2, the demigryph 3)",
    "checked": null
   },
   "projectile_speed_keep": {
-   "source": "battle_entities.projectile_penetration_speed_change: the share of its speed a projectile keeps passing through the man (0.9 men, 0.95 Skaven)",
+   "source": "battle_entities.projectile_penetration_speed_change: the share of its speed a projectile keeps passing through the man (0.9 men, 0.95 Skaven); a mounted unit the mount's (0.85)",
    "checked": null
   },
   "attributes": {
@@ -360,7 +364,11 @@
   }
  },
  "_missing": {
-  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the pools)",
+  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the training pools - the cavalry is the probes' only, data/units/probe-units.json)",
+  "mount knock resistance": "battle_entities.hit_reactions_ignore_chance / knock_interrupts_ignore_chance of the mount (the demigryph 20 %, the warhorse 0): the simulator has no knock-downs in melee yet (build/diag_cav/units.md 4.5)",
+  "mount turning": "battle_entities.min_turning_speed (the warhorse 1.0 m/s, infantry 0) and strafe_speed (3.0): what they do in numbers is not known (build/diag_cav/units.md 4.6)",
+  "charge target pick": "battle_entities.charge_distance_pick_target (35 m the warhorse, 30 the demigryph): no reader found in the game's program (build/diag_cav/mechanic.md 8)",
+  "melee weapon type": "melee_weapons.melee_weapon_type (lance / sword) and weapon_length (1.0 for all six cavalry): no mechanic known to depend on them for our units",
   "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
@@ -477,6 +485,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 70,
@@ -593,6 +602,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 10,
@@ -683,6 +693,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": true,
+    "flaming": false,
     "contact_phase": "wh2_main_unit_contact_plague_monk_censer_morale"
    },
    "armour": 10,
@@ -773,6 +784,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": true,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 15,
@@ -864,6 +876,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": "wh_main_unit_contact_poison"
    },
    "armour": 15,
@@ -955,6 +968,7 @@
     "splash_max_attacks": 3,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -1047,6 +1061,7 @@
     "splash_max_attacks": 3,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 45,
@@ -1111,11 +1126,11 @@
     "scatter": 0.5,
     "chaotic": false
    },
-   "hp_per_man": 100,
-   "hp_total": 6000,
+   "hp_per_man": 108,
+   "hp_total": 6480,
    "mass": 1000.0,
    "size": "medium",
-   "height_m": 1.8,
+   "height_m": 2.0,
    "radius_m": 1.4,
    "radii_ratio": 0.5,
    "speed": {
@@ -1142,6 +1157,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 110,
@@ -1166,7 +1182,7 @@
     "tree": 60
    },
    "projectile_resistance": 2,
-   "projectile_speed_keep": 0.9,
+   "projectile_speed_keep": 0.85,
    "attributes": [
     "hide_forest"
    ],
@@ -1174,6 +1190,444 @@
    "multiplayer_cost": 850,
    "combat_potential": {
     "melee": 900.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh_main_emp_cav_reiksguard": {
+   "land_unit": "wh_main_emp_cav_reiksguard",
+   "caste": "melee_cavalry",
+   "category": "cavalry",
+   "class": "cav_shk",
+   "men": 60,
+   "mount": "wh_main_emp_mnt_warhorse_reiksguard",
+   "num_mounts": 60,
+   "engine": null,
+   "rank_depth": 4,
+   "entity": "wh_main_cavalry_rider_standard_blood",
+   "spacing": {
+    "template": "wh_main_cavalry_ordered",
+    "h": 3.0,
+    "v": 4.1,
+    "scatter": 0.5,
+    "chaotic": false
+   },
+   "hp_per_man": 116,
+   "hp_total": 6960,
+   "mass": 1000.0,
+   "size": "medium",
+   "height_m": 2.0,
+   "radius_m": 1.4,
+   "radii_ratio": 0.5,
+   "speed": {
+    "walk": 2.0,
+    "run": 7.8,
+    "charge": 10.8,
+    "charge_distance": 40.0,
+    "charge_pose_distance": 35.0,
+    "acceleration": 7.0,
+    "deceleration": 7.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 34,
+    "defence": 31,
+    "charge_bonus": 62,
+    "weapon": "wh_main_emp_lance_reiksguard",
+    "damage": 28,
+    "ap_damage": 12,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 5.1,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 120,
+   "armour_material": "plate",
+   "shield": {
+    "key": "wh_missile_block_30_metal",
+    "missile_block_chance": 30
+   },
+   "leadership": 75,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.85,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1100,
+   "combat_potential": {
+    "melee": 1150.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh_dlc04_emp_cav_knights_blazing_sun_0": {
+   "land_unit": "wh_dlc04_emp_cav_knights_blazing_sun_0",
+   "caste": "melee_cavalry",
+   "category": "cavalry",
+   "class": "cav_mel",
+   "men": 60,
+   "mount": "wh_dlc04_emp_mnt_blazing_sun_warhorse",
+   "num_mounts": 60,
+   "engine": null,
+   "rank_depth": 4,
+   "entity": "wh_main_cavalry_rider_standard_blood",
+   "spacing": {
+    "template": "wh_main_cavalry_ordered",
+    "h": 3.0,
+    "v": 4.1,
+    "scatter": 0.5,
+    "chaotic": false
+   },
+   "hp_per_man": 116,
+   "hp_total": 6960,
+   "mass": 1200.0,
+   "size": "medium",
+   "height_m": 2.0,
+   "radius_m": 1.4,
+   "radii_ratio": 0.5,
+   "speed": {
+    "walk": 2.0,
+    "run": 7.8,
+    "charge": 10.8,
+    "charge_distance": 35.0,
+    "charge_pose_distance": 30.0,
+    "acceleration": 7.0,
+    "deceleration": 7.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 40,
+    "defence": 26,
+    "charge_bonus": 78,
+    "weapon": "wh_dlc04_emp_lance_blazing_sun",
+    "damage": 29,
+    "ap_damage": 13,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 5.1,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": true,
+    "contact_phase": null
+   },
+   "armour": 100,
+   "armour_material": "plate",
+   "shield": {
+    "key": "wh_missile_block_30_metal",
+    "missile_block_chance": 30
+   },
+   "leadership": 70,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 25,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.85,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1200,
+   "combat_potential": {
+    "melee": 1200.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh3_dlc25_emp_cav_knights_of_the_black_rose": {
+   "land_unit": "wh3_dlc25_emp_cav_knights_of_the_black_rose",
+   "caste": "melee_cavalry",
+   "category": "cavalry",
+   "class": "cav_mel",
+   "men": 60,
+   "mount": "wh3_dlc25_emp_mnt_knights_of_the_black_rose",
+   "num_mounts": 60,
+   "engine": null,
+   "rank_depth": 4,
+   "entity": "wh_main_cavalry_rider_standard_blood",
+   "spacing": {
+    "template": "wh_main_cavalry_ordered",
+    "h": 3.0,
+    "v": 4.1,
+    "scatter": 0.5,
+    "chaotic": false
+   },
+   "hp_per_man": 126,
+   "hp_total": 7560,
+   "mass": 1000.0,
+   "size": "medium",
+   "height_m": 2.0,
+   "radius_m": 1.4,
+   "radii_ratio": 0.5,
+   "speed": {
+    "walk": 2.0,
+    "run": 7.8,
+    "charge": 10.8,
+    "charge_distance": 40.0,
+    "charge_pose_distance": 35.0,
+    "acceleration": 7.0,
+    "deceleration": 7.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 36,
+    "defence": 50,
+    "charge_bonus": 34,
+    "weapon": "wh3_dlc25_emp_cav_knights_of_the_black_rose",
+    "damage": 28,
+    "ap_damage": 12,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 8,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 120,
+   "armour_material": "plate",
+   "shield": {
+    "key": "wh_missile_block_30_metal",
+    "missile_block_chance": 30
+   },
+   "leadership": 75,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 2,
+   "projectile_speed_keep": 0.85,
+   "attributes": [
+    "hide_forest",
+    "immune_to_psychology"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1250,
+   "combat_potential": {
+    "melee": 1250.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh_main_emp_cav_demigryph_knights_0": {
+   "land_unit": "wh_main_emp_cav_demigryph_knights_0",
+   "caste": "monstrous_cavalry",
+   "category": "cavalry",
+   "class": "cav_shk",
+   "men": 32,
+   "mount": "wh_main_emp_mnt_demigryph",
+   "num_mounts": 32,
+   "engine": null,
+   "rank_depth": 2,
+   "entity": "wh_main_cavalry_rider_standard_blood",
+   "spacing": {
+    "template": "wh_main_monstrous_cavalry",
+    "h": 3.2,
+    "v": 4.4,
+    "scatter": 1.0,
+    "chaotic": false
+   },
+   "hp_per_man": 233,
+   "hp_total": 7456,
+   "mass": 1500.0,
+   "size": "medium",
+   "height_m": 2.3,
+   "radius_m": 1.2,
+   "radii_ratio": 0.6,
+   "speed": {
+    "walk": 1.8,
+    "run": 7.5,
+    "charge": 11.0,
+    "charge_distance": 35.0,
+    "charge_pose_distance": 30.0,
+    "acceleration": 4.6,
+    "deceleration": 5.8,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 40,
+    "defence": 38,
+    "charge_bonus": 60,
+    "weapon": "wh_main_emp_demigryph_lance",
+    "damage": 20,
+    "ap_damage": 40,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.7,
+    "splash_target_size": "small",
+    "splash_max_attacks": 2,
+    "splash_power_multiplier": 1.2,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 125,
+   "armour_material": "plate",
+   "shield": {
+    "key": "wh_missile_block_30_metal",
+    "missile_block_chance": 30
+   },
+   "leadership": 80,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 3,
+   "projectile_speed_keep": 0.85,
+   "attributes": [
+    "causes_fear",
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1400,
+   "combat_potential": {
+    "melee": 1400.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh_main_emp_cav_demigryph_knights_1": {
+   "land_unit": "wh_main_emp_cav_demigryph_knights_1",
+   "caste": "monstrous_cavalry",
+   "category": "cavalry",
+   "class": "cav_shk",
+   "men": 32,
+   "mount": "wh_main_emp_mnt_demigryph",
+   "num_mounts": 32,
+   "engine": null,
+   "rank_depth": 2,
+   "entity": "wh_main_cavalry_rider_standard_blood",
+   "spacing": {
+    "template": "wh_main_monstrous_cavalry",
+    "h": 3.2,
+    "v": 4.4,
+    "scatter": 1.0,
+    "chaotic": false
+   },
+   "hp_per_man": 233,
+   "hp_total": 7456,
+   "mass": 1500.0,
+   "size": "medium",
+   "height_m": 2.3,
+   "radius_m": 1.2,
+   "radii_ratio": 0.6,
+   "speed": {
+    "walk": 1.8,
+    "run": 7.5,
+    "charge": 11.0,
+    "charge_distance": 35.0,
+    "charge_pose_distance": 30.0,
+    "acceleration": 4.6,
+    "deceleration": 5.8,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 34,
+    "defence": 36,
+    "charge_bonus": 48,
+    "weapon": "wh_main_emp_demigryph_halberd",
+    "damage": 18,
+    "ap_damage": 38,
+    "bonus_v_large": 25,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.8,
+    "splash_target_size": "small",
+    "splash_max_attacks": 2,
+    "splash_power_multiplier": 1.2,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 125,
+   "armour_material": "plate",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 80,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 3,
+   "projectile_speed_keep": 0.85,
+   "attributes": [
+    "causes_fear",
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1450,
+   "combat_potential": {
+    "melee": 1450.0,
     "missile": 0.0
    },
    "missile": null,

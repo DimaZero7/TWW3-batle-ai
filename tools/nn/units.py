@@ -67,6 +67,8 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
 # their passports (config/nn/abilities.json "spells", python -m tools.nn.abilities).
 SPELLS = {"wh3_dlc25_emp_cha_wizard_metal": ("wh_main_spell_metal_searing_doom",),
           "wh2_main_skv_cha_warlock_engineer": ("wh2_main_spell_ruin_warp_lightning",)}
+# The database's entity sizes in order (battle_entities.size; tools/nn/sim/state.py SIZE_RANK the same).
+SIZES = ("very_small", "small", "medium", "large", "very_large")
 TABLES = ("main_units", "land_units", "battle_entities", "mounts", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects",
@@ -93,12 +95,16 @@ FIELDS = {
     "spacing.scatter": ("unit_spacings.close_formation_spacing_variation, m", None),
     "spacing.chaotic": ("unit_spacings.is_chaotic_formation: a chaotic (loose, irregular) formation", None),
     "entity": ("land_units.man_entity", None),
-    "hp_per_man": ("battle_entities.hit_points + land_units.bonus_hit_points", "card HealthMax / men"),
+    "hp_per_man": ("battle_entities.hit_points + land_units.bonus_hit_points (+ the mount's battle_entities.hit_points "
+                   "of a mounted unit: the charge probe 28.10, Empire Knights 6480 = 60 x (8 + 8 + 92))",
+                   "card HealthMax / men"),
     "hp_total": ("hp_per_man * men", "card HealthMax"),
     "mass": ("battle_entities.mass (a mounted unit: its mount's, mounts.entity - as radius_m, radii_ratio, speed.*)",
              "card Mass"),
-    "size": ("battle_entities.size", None),
-    "height_m": ("battle_entities.height", None),
+    "size": ("battle_entities.size; a mounted unit the larger of the rider's and the mount's (medium and above is "
+             "'large': bonus v large, charge defence v large; build/diag_cav/mechanic.md M1)", None),
+    "height_m": ("battle_entities.height; a mounted unit the taller of the rider and the mount (the warhorse 2.0, the "
+                 "demigryph 2.3; the rider 1.8)", None),
     "radius_m": ("battle_entities.radius", None),
     "radii_ratio": ("battle_entities.radii_ratio: an ellipse body (shape 'ellipse') is radius long and radius x this "
                     "across; 1 a circle (every man)", None),
@@ -128,6 +134,8 @@ FIELDS = {
     "melee.splash_max_attacks": ("melee_weapons.splash_attack_max_attacks", None),
     "melee.splash_power_multiplier": ("melee_weapons.splash_attack_power_multiplier", None),
     "melee.magic": ("melee_weapons.is_magical: magical attacks - the censer, the plain Giant Rats' claws", None),
+    "melee.flaming": ("melee_weapons.ignition_amount > 0: flaming attacks (the RPFM schema: 'if set to a value higher "
+                      "than 0, it will deal fire damage'; Knights of the Blazing Sun's lance 1.0)", None),
     "melee.contact_phase": ("melee_weapons.contact_phase: the contact effect a blow lays on its target (its "
                             "numbers in the document's contact_phases)", None),
     "armour": ("unit_armour_types.armour_value of land_units.armour", "card stat_armour"),
@@ -146,9 +154,11 @@ FIELDS = {
                       "simulator", None),
     "projectile_resistance": ("battle_entities.projectile_penetration_resistance: what a man adds to a penetrating "
                               "projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number "
-                              "means this entity can stop projectiles more easily')", None),
+                              "means this entity can stop projectiles more easily'); a mounted unit the mount's (the "
+                              "warhorse 2, the demigryph 3)", None),
     "projectile_speed_keep": ("battle_entities.projectile_penetration_speed_change: the share of its speed a projectile "
-                              "keeps passing through the man (0.9 men, 0.95 Skaven)", None),
+                              "keeps passing through the man (0.9 men, 0.95 Skaven); a mounted unit the mount's (0.85)",
+                              None),
     "attributes": ("unit_attributes_to_groups_junctions for land_units.attribute_group", None),
     "abilities": ("land_units_to_unit_abilites_junctions.ability", "card owned abilities"),
     "spells": ("ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md "
@@ -207,7 +217,17 @@ PHASE_FIELDS = {
 MISSING = {
     "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile "
                                                 "of our units but the Huntsmen's arrow (+8 against large; not in the "
-                                                "passport: no large units in the pools)",
+                                                "passport: no large units in the training pools - the cavalry is the "
+                                                "probes' only, data/units/probe-units.json)",
+    "mount knock resistance": "battle_entities.hit_reactions_ignore_chance / knock_interrupts_ignore_chance of the mount "
+                              "(the demigryph 20 %, the warhorse 0): the simulator has no knock-downs in melee yet "
+                              "(build/diag_cav/units.md 4.5)",
+    "mount turning": "battle_entities.min_turning_speed (the warhorse 1.0 m/s, infantry 0) and strafe_speed (3.0): what "
+                     "they do in numbers is not known (build/diag_cav/units.md 4.6)",
+    "charge target pick": "battle_entities.charge_distance_pick_target (35 m the warhorse, 30 the demigryph): no reader "
+                          "found in the game's program (build/diag_cav/mechanic.md 8)",
+    "melee weapon type": "melee_weapons.melee_weapon_type (lance / sword) and weapon_length (1.0 for all six cavalry): no "
+                         "mechanic known to depend on them for our units",
     "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit "
                                         "cannot; the others arc over friends (knowledge base, not measured)",
     "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global "
@@ -238,13 +258,18 @@ def passport(key, t):
     shield = _index(t["unit_shield_types"], "key")[land["shield"]]
     sp = _index(t["unit_spacings"], "key")[land["spacing"]]
     pen = _index(t.get("projectile_penetration_junctions") or (), "key")
-    hp = entity["hit_points"] + land["bonus_hit_points"]
     # A mounted unit (land_units.mount: cavalry, chariots' beasts) moves and collides as its mount: the mount's
-    # battle_entities (mounts.entity) give the speeds, the charge distances, the body (radius, ellipse) and the mass;
-    # the rider's - hit points, height and size (the man's). Before: the rider's for all (Empire Knights ran at 3.3 m/s,
-    # the game's 5.7-6.5 on grass, the probe ground; the warhorse 7.8).
+    # battle_entities (mounts.entity) give the speeds, the charge distances, the body (radius, ellipse) and the mass
+    # (before: the rider's for all - Empire Knights ran at 3.3 m/s, the warhorse 7.8).
     mount_row = _index(t.get("mounts") or (), "key").get(land["mount"]) if land["mount"] else None
     body = _index(t["battle_entities"], "key")[mount_row["entity"]] if mount_row else entity
+    # ... and its health is the rider's and the mount's together, with the unit's bonus (the charge probe 28.10: Empire
+    # Knights 6480 = 60 x (8 rider + 8 warhorse + 92); the rider's alone gave 100 a man); its size the larger of the two
+    # (medium and above is 'large', build/diag_cav/mechanic.md M1), its height the taller (the shadow a projectile hits
+    # and the sight), its resistance to a penetrating projectile the mount's (the demigryph 3, the rider 2)
+    hp = entity["hit_points"] + land["bonus_hit_points"] + (body["hit_points"] if mount_row else 0)
+    size = max(entity["size"], body["size"], key=lambda s: SIZES.index(s) if s in SIZES else 1)
+    height = max(entity["height"], body["height"])
     out = {
         "land_unit": land["key"], "caste": main["caste"], "category": land["category"], "class": land["class"],
         "men": main["num_men"], "mount": land["mount"], "num_mounts": land["num_mounts"], "engine": land["engine"],
@@ -252,8 +277,8 @@ def passport(key, t):
         "spacing": {"template": land["spacing"], "h": sp["close_formation_spacing_horizontal"],
                     "v": sp["close_formation_spacing_vertical"], "scatter": sp["close_formation_spacing_variation"],
                     "chaotic": sp["is_chaotic_formation"]},
-        "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": body["mass"], "size": entity["size"],
-        "height_m": entity["height"], "radius_m": body["radius"],
+        "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": body["mass"], "size": size,
+        "height_m": height, "radius_m": body["radius"],
         "radii_ratio": body["radii_ratio"] if body["shape"] == "ellipse" else 1.0,
         "speed": {"walk": body["walk_speed"], "run": body["run_speed"], "charge": body["charge_speed"],
                   "charge_distance": body["charge_distance_commence_run"],
@@ -268,15 +293,16 @@ def passport(key, t):
                   "splash_target_size": weapon["splash_attack_target_size"],
                   "splash_max_attacks": weapon["splash_attack_max_attacks"],
                   "splash_power_multiplier": weapon["splash_attack_power_multiplier"],
-                  "magic": weapon["is_magical"], "contact_phase": weapon["contact_phase"]},
+                  "magic": weapon["is_magical"], "flaming": (weapon.get("ignition_amount") or 0) > 0,
+                  "contact_phase": weapon["contact_phase"]},
         "armour": armour["armour_value"], "armour_material": armour["audio_type"],
         "shield": {"key": shield["key"], "missile_block_chance": shield["missile_block_chance"]},
         "leadership": land["morale"],
         "damage_resist": {k: land[f"damage_mod_{k}"] for k in ("all", "physical", "missile", "magic", "flame")},
         "can_skirmish": land["can_skirmish"], "can_brace": land["can_brace"], "hiding_scalar": land["hiding_scalar"],
         "spotting": {"scrub": land["spot_dist_scrub"], "tree": land["spot_dist_tree"]},
-        "projectile_resistance": entity["projectile_penetration_resistance"],
-        "projectile_speed_keep": entity["projectile_penetration_speed_change"],
+        "projectile_resistance": body["projectile_penetration_resistance"],
+        "projectile_speed_keep": body["projectile_penetration_speed_change"],
         "attributes": sorted(r["attribute"] for r in t["unit_attributes_to_groups_junctions"]
                              if land["attribute_group"] and r["attribute_group"] == land["attribute_group"]),
         "abilities": sorted(r["ability"] for r in t["land_units_to_unit_abilites_junctions"]

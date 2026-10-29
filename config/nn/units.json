@@ -63,7 +63,7 @@
    "checked": null
   },
   "hp_per_man": {
-   "source": "battle_entities.hit_points + land_units.bonus_hit_points",
+   "source": "battle_entities.hit_points + land_units.bonus_hit_points (+ the mount's battle_entities.hit_points of a mounted unit: the charge probe 28.10, Empire Knights 6480 = 60 x (8 + 8 + 92))",
    "checked": "card HealthMax / men"
   },
   "hp_total": {
@@ -71,15 +71,15 @@
    "checked": "card HealthMax"
   },
   "mass": {
-   "source": "battle_entities.mass",
+   "source": "battle_entities.mass (a mounted unit: its mount's, mounts.entity - as radius_m, radii_ratio, speed.*)",
    "checked": "card Mass"
   },
   "size": {
-   "source": "battle_entities.size",
+   "source": "battle_entities.size; a mounted unit the larger of the rider's and the mount's (medium and above is 'large': bonus v large, charge defence v large; build/diag_cav/mechanic.md M1)",
    "checked": null
   },
   "height_m": {
-   "source": "battle_entities.height",
+   "source": "battle_entities.height; a mounted unit the taller of the rider and the mount (the warhorse 2.0, the demigryph 2.3; the rider 1.8)",
    "checked": null
   },
   "radius_m": {
@@ -174,6 +174,10 @@
    "source": "melee_weapons.is_magical: magical attacks - the censer, the plain Giant Rats' claws",
    "checked": null
   },
+  "melee.flaming": {
+   "source": "melee_weapons.ignition_amount > 0: flaming attacks (the RPFM schema: 'if set to a value higher than 0, it will deal fire damage'; Knights of the Blazing Sun's lance 1.0)",
+   "checked": null
+  },
   "melee.contact_phase": {
    "source": "melee_weapons.contact_phase: the contact effect a blow lays on its target (its numbers in the document's contact_phases)",
    "checked": null
@@ -223,11 +227,11 @@
    "checked": null
   },
   "projectile_resistance": {
-   "source": "battle_entities.projectile_penetration_resistance: what a man adds to a penetrating projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number means this entity can stop projectiles more easily')",
+   "source": "battle_entities.projectile_penetration_resistance: what a man adds to a penetrating projectile's counter (1 infantry, 2 the Giant Rats; the RPFM schema: 'higher number means this entity can stop projectiles more easily'); a mounted unit the mount's (the warhorse 2, the demigryph 3)",
    "checked": null
   },
   "projectile_speed_keep": {
-   "source": "battle_entities.projectile_penetration_speed_change: the share of its speed a projectile keeps passing through the man (0.9 men, 0.95 Skaven)",
+   "source": "battle_entities.projectile_penetration_speed_change: the share of its speed a projectile keeps passing through the man (0.9 men, 0.95 Skaven); a mounted unit the mount's (0.85)",
    "checked": null
   },
   "attributes": {
@@ -360,7 +364,11 @@
   }
  },
  "_missing": {
-  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the pools)",
+  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the training pools - the cavalry is the probes' only, data/units/probe-units.json)",
+  "mount knock resistance": "battle_entities.hit_reactions_ignore_chance / knock_interrupts_ignore_chance of the mount (the demigryph 20 %, the warhorse 0): the simulator has no knock-downs in melee yet (build/diag_cav/units.md 4.5)",
+  "mount turning": "battle_entities.min_turning_speed (the warhorse 1.0 m/s, infantry 0) and strafe_speed (3.0): what they do in numbers is not known (build/diag_cav/units.md 4.6)",
+  "charge target pick": "battle_entities.charge_distance_pick_target (35 m the warhorse, 30 the demigryph): no reader found in the game's program (build/diag_cav/mechanic.md 8)",
+  "melee weapon type": "melee_weapons.melee_weapon_type (lance / sword) and weapon_length (1.0 for all six cavalry): no mechanic known to depend on them for our units",
   "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
@@ -488,6 +496,7 @@
     "splash_max_attacks": 4,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 85,
@@ -580,6 +589,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 30,
@@ -668,6 +678,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -781,6 +792,7 @@
     "splash_max_attacks": 4,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 90,
@@ -874,6 +886,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 25,
@@ -965,6 +978,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 0,
@@ -1055,6 +1069,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 0,
@@ -1172,6 +1187,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 30,
@@ -1260,6 +1276,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 90,
@@ -1351,6 +1368,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 30,
@@ -1439,6 +1457,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 30,
@@ -1525,6 +1544,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 0.2,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 0,
@@ -1615,6 +1635,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 95,
@@ -1701,6 +1722,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 25,
@@ -1816,6 +1838,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 0,
@@ -1906,6 +1929,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 25,
@@ -1995,6 +2019,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 10,
@@ -2112,6 +2137,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -2225,6 +2251,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -2338,6 +2365,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 25,
@@ -2427,6 +2455,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 25,
@@ -2518,6 +2547,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 90,
@@ -2607,6 +2637,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 10,
@@ -2725,6 +2756,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 70,
@@ -2841,6 +2873,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 10,
@@ -2931,6 +2964,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": true,
+    "flaming": false,
     "contact_phase": "wh2_main_unit_contact_plague_monk_censer_morale"
    },
    "armour": 10,
@@ -3021,6 +3055,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": true,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 15,
@@ -3112,6 +3147,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": "wh_main_unit_contact_poison"
    },
    "armour": 15,
@@ -3203,6 +3239,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 25,
@@ -3319,6 +3356,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 60,
@@ -3434,6 +3472,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -3548,6 +3587,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -3667,6 +3707,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": "wh_main_unit_contact_poison"
    },
    "armour": 20,
@@ -3786,6 +3827,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 20,
@@ -3904,6 +3946,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": "wh_main_unit_contact_poison"
    },
    "armour": 20,
@@ -4022,6 +4065,7 @@
     "splash_max_attacks": 1,
     "splash_power_multiplier": 1.0,
     "magic": false,
+    "flaming": false,
     "contact_phase": null
    },
    "armour": 70,

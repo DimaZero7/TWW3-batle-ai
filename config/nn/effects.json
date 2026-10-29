@@ -65,9 +65,9 @@
    "source": "db: unit_attributes_to_groups_junctions (charge_defense_vs_large)",
    "kb": "docs/en/game/mechanics/melee.md#bracing-and-charge-defence",
    "does": "braced, cancels the charge bonus of large chargers from the front",
-   "modelled": false,
-   "sim": null,
-   "why": "no large units in our pools (no cavalry or monsters yet)"
+   "modelled": true,
+   "sim": "braced (slower than melee.braced_speed), cancels the charge bonus of a large charger within 45 deg of its front (melee.py; config/nn/sim.json contact.charge_defence)",
+   "why": null
   },
   "charge_reflection": {
    "kind": "attribute",

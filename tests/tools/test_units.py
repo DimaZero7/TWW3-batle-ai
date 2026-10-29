@@ -268,16 +268,49 @@ KNIGHTS = "wh_main_emp_cav_empire_knights"
 
 def test_a_mounted_unit_moves_and_collides_as_its_mount():
     # the probe passports (data/units/probe-units.json, written by tools.nn.units): the Empire Knights' speeds, charge
-    # distances, body and mass are the barded warhorse's battle entity (mounts.entity wh_main_cavalry_slow_blood), the
-    # rider's are hit points, height and size (before: the rider's 3.3 m/s run - the game's knights 5.7-6.5 on grass)
-    p = json.loads((project.ROOT / "data/units/probe-units.json").read_text(encoding="utf-8"))["units"][KNIGHTS]
+    # distances, body and mass are the barded warhorse's battle entity (mounts.entity wh_main_cavalry_slow_blood)
+    # (before: the rider's 3.3 m/s run - the game's knights 5.7-6.5 on grass); the health the rider's and the horse's
+    # with the bonus (the charge probe 28.10: 6480 = 60 x (8 + 8 + 92)), the height the taller (the horse's 2.0), the
+    # size the larger (both medium), the resistance to a penetrating projectile the horse's
+    p = probe()[KNIGHTS]
     assert p["mount"] == "wh_main_emp_mnt_warhorse_barded"
     assert p["speed"] == {"walk": 2.0, "run": 7.8, "charge": 10.8, "charge_distance": 40.0, "charge_pose_distance": 35.0,
                           "acceleration": 7.0, "deceleration": 7.0, "turn_deg_s": 120.0}
     assert (p["radius_m"], p["radii_ratio"], p["mass"]) == (1.4, 0.5, 1000.0)
-    assert (p["height_m"], p["size"], p["hp_per_man"]) == (1.8, "medium", 100)
+    assert (p["height_m"], p["size"], p["hp_per_man"], p["hp_total"]) == (2.0, "medium", 108, 6480)
+    assert (p["projectile_resistance"], p["projectile_speed_keep"]) == (2, 0.85)
+    assert not p["melee"]["flaming"]
     # no unit of the training roster has a mount (config/nn/units.json: their passports unchanged by the rule)
     assert not any(u.get("mount") for u in saved()["units"].values())
+
+
+def probe():
+    return json.loads((project.ROOT / "data/units/probe-units.json").read_text(encoding="utf-8"))["units"]
+
+
+CAVALRY = {"wh_main_emp_cav_empire_knights": 108, "wh_main_emp_cav_reiksguard": 116,
+           "wh_dlc04_emp_cav_knights_blazing_sun_0": 116, "wh3_dlc25_emp_cav_knights_of_the_black_rose": 126,
+           "wh_main_emp_cav_demigryph_knights_0": 233, "wh_main_emp_cav_demigryph_knights_1": 233}
+
+
+def test_the_empire_cavalry_in_the_probe_passports():
+    # build/diag_cav/units.md: the six Empire cavalry units (the probes' only: config/nn/units.json keeps its 36)
+    u = probe()
+    assert {k: u[k]["hp_per_man"] for k in CAVALRY} == CAVALRY
+    assert all(u[k]["size"] == "medium" and u[k]["mount"] for k in CAVALRY)
+    assert not any(k in saved()["units"] for k in CAVALRY)
+    # the Blazing Sun's lance is flaming (melee_weapons.ignition_amount 1.0), no other's
+    assert [k for k in CAVALRY if u[k]["melee"]["flaming"]] == ["wh_dlc04_emp_cav_knights_blazing_sun_0"]
+    # the demigryph's body: 32 men of 233 HP, the beast's height 2.3 m and resistance 3 to a penetrating projectile,
+    # a splash blow on two small targets (its splash power x1.2 is the knock-back's, not modelled)
+    d = u["wh_main_emp_cav_demigryph_knights_0"]
+    assert (d["men"], d["hp_total"], d["height_m"], d["projectile_resistance"], d["mass"]) == (32, 7456, 2.3, 3, 1500.0)
+    assert (d["melee"]["splash_target_size"], d["melee"]["splash_max_attacks"]) == ("small", 2)
+    assert u["wh_main_emp_cav_demigryph_knights_1"]["melee"]["bonus_v_large"] == 25
+    assert "causes_fear" in d["attributes"]
+    # an infantry unit (no mount) keeps its own: health, height, resistance (the pool unchanged but the new field)
+    sw = saved()["units"]["wh_main_emp_inf_swordsmen"]
+    assert (sw["hp_per_man"], sw["height_m"], sw["projectile_resistance"], sw["melee"]["flaming"]) == (69, 1.8, 1, False)
 
 
 @pytest.mark.skipif(game_db() is None, reason="needs the installed game and Python 3.14+ (compression.zstd)")
@@ -287,3 +320,6 @@ def test_the_knights_run_is_their_warhorse_s_in_the_game_s_database():
     horse = {r["key"]: r for r in tables["battle_entities"]}[mount["entity"]]
     p = units.build(tables, (KNIGHTS,))[KNIGHTS]
     assert p["speed"]["run"] == horse["run_speed"] == 7.8 and p["radius_m"] == horse["radius"]
+    rider = {r["key"]: r for r in tables["battle_entities"]}[p["entity"]]
+    land = {r["key"]: r for r in tables["land_units"]}[p["land_unit"]]
+    assert p["hp_per_man"] == rider["hit_points"] + horse["hit_points"] + land["bonus_hit_points"] == 108

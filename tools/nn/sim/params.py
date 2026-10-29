@@ -196,6 +196,10 @@ class Params:
             "damage": m["damage"], "ap_damage": m["ap_damage"], "bonus_v_large": m["bonus_v_large"],
             "bonus_v_inf": m["bonus_v_infantry"], "interval": m["attack_interval_s"],
             "splash": max(1, m.get("splash_max_attacks") or 1),
+            # the largest target a blow strikes several of (melee.splash_by_size; build/diag_cav/mechanic.md M18): the
+            # weapon's splash_attack_target_size, else smaller than the striker
+            "splash_cap": float(SIZE_RANK[m["splash_target_size"]] if m.get("splash_target_size") in SIZE_RANK
+                                else SIZE_RANK.get(u.get("size", "small"), 1) - 1),
             "armour": u["armour"], "shield": (u.get("shield") or {}).get("missile_block_chance", 0) / 100,
             "leadership": u["leadership"], "resist_missile": resist.get("missile", 0) / 100,
             # damage_mod_all (a ward save) adds to physical: every damage here is physical (melee, and missiles
