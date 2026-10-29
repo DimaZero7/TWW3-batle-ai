@@ -531,6 +531,26 @@ class TestArmiesV3:
         with_cav = np.mean([any(u["key"] in cav for u in side["units"]) for side in sides])
         assert 0.3 < with_cav < 0.7                                  # 0.49 on 600 seeds (build/diag_cav/step3)
 
+    def test_the_artillery_only_in_v3(self, battles_v3):
+        # artillery step 1 (29.10.2026): the Empire's four guns and the Skaven's two in the v3 pools only (v1 / v2 bit for
+        # bit, the test above), in the generator's artillery_long_range group (cdir_military_generator_unit_qualities);
+        # their width one file a gun (4 x the template's h)
+        art = {"wh_main_emp_art_mortar": (EMP, 24.0), "wh_main_emp_art_great_cannon": (EMP, 24.0),
+               "wh_main_emp_art_helblaster_volley_gun": (EMP, 24.0), "wh_main_emp_art_helstorm_rocket_battery": (EMP, 24.0),
+               "wh2_main_skv_art_plagueclaw_catapult": (SKV, 40.0), "wh2_main_skv_art_warp_lightning_cannon": (SKV, 40.0)}
+        for scheme in ("v1", "v2"):
+            for fac in (EMP, SKV):
+                assert not set(art) & {u.key for u in P.load(scheme=scheme)[fac].units}
+        v3 = P.load(scheme="v3")
+        for key, (fac, width) in art.items():
+            units = {u.key: u for u in v3[fac].units}
+            doc = json.loads(P.TEMPLATES.read_text(encoding="utf-8"))["factions"][fac]["units"]
+            assert doc[key][0]["group"] == "wh3_default_land_artillery_long_range"
+            assert units[key].width == width and units[key].category == "artillery" and units[key].missile
+        sides = [a["sides"][s] for a in battles_v3 for s in ("own", "enemy")]
+        with_art = np.mean([any(u["key"] in art for u in side["units"]) for side in sides])
+        assert 0.2 < with_art < 0.5                                  # 0.32 a side on 600 seeds (half the battles)
+
     def test_full_battles_both_sides_full(self):
         gen = G.Generator()
         gen.v3 = dict(gen.v3, full=1.0)

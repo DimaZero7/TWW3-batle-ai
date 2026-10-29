@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 
 from tools.nn import scenario as arena_scenario
-from tools.nn.sim import abilities as sim_abilities, effects as sim_effects, magic, morale, replay, stealth
+from tools.nn.sim import abilities as sim_abilities, artillery, effects as sim_effects, magic, morale, replay, stealth
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 
@@ -32,7 +32,8 @@ def build(armies, params=None, device="cpu", per_side=None):
     H = per_side or max(max(len(a["sides"][s]["units"]) for s in (1, 2)) for a in armies)
     st = S.empty(B, 2 * H, device=device, history=morale.history_steps(params, params.dt))
     rows = {k: [[0.0] * (2 * H) for _ in range(B)] for k in S.STATIC}
-    for k in ("sp0", "sp1", "fxd"):   # an empty slot holds no spell, no delayed effect (-1; 0 would be the first's index)
+    for k in ("sp0", "sp1", "fxd", "ex_fx"):   # an empty slot holds no spell, no delayed effect, no blast's contact effect
+        # (-1; 0 would be the first's index)
         rows[k] = [[-1.0] * (2 * H) for _ in range(B)]
     obs = {k: [[0.0] * (2 * H) for _ in range(B)] for k in ("x", "z", "b", "men")}
     attacker = []
@@ -70,6 +71,7 @@ def build(armies, params=None, device="cpu", per_side=None):
     present = u["side"] > 0
     u["men"] = torch.where(present, u["men"], torch.zeros_like(u["men"]))
     u["hp_abs"] = u["hp0"] * u["men"] / u["men0"].clamp(min=1)
+    artillery.start(u)              # an artillery unit's guns and their health (artillery.py; nothing for the others)
     u["hp"] = torch.where(present, torch.ones_like(u["hp"]), torch.zeros_like(u["hp"]))
     u["morale"] = u["leadership"].clone()
     u["mp"] = torch.where(present, torch.ones_like(u["mp"]), torch.zeros_like(u["mp"]))
@@ -132,6 +134,8 @@ def from_arena(name, own_ai="attack", arena_path=None):
             # A placement is the formation's front centre (as the game's order point): step back
             # half a depth to the centre.
             back = float(replay.half_depth(p["men"], p["width"], params.spacing_of(p["key"]))) if p["men"] > 1 else 0.0
+            if (params.units.get(p["key"]) or {}).get("engines") and params.static(p["key"])["eng0"] > 0:
+                back = params.spacing_of(p["key"])[1] / 2          # artillery: one rank of guns (geometry.dims)
             br = math.radians(p["bearing_deg"])
             units.append({"key": p["key"], "x": p["x"] - back * math.sin(br), "z": p["z"] - back * math.cos(br),
                           "b": float(p["bearing_deg"]), "width": p["width"], "general": p["general"],

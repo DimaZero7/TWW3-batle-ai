@@ -14,9 +14,10 @@ from tools import config as project
 PASSPORTS = project.ROOT / "config" / "nn" / "units.json"
 
 # (the database's caste of war beasts is "war_beast": "warbeast" here until 11.10.2026 sent the Giant Rats to "other";
-# its column keeps its place)
+# its column keeps its place; the war machines' is "warmachine": "war_machine" here until the artillery of 29.10.2026,
+# no unit had it before)
 CASTES = ("lord", "hero", "melee_infantry", "missile_infantry", "melee_cavalry", "missile_cavalry",
-          "monstrous_infantry", "monstrous_cavalry", "monster", "war_beast", "chariot", "war_machine")
+          "monstrous_infantry", "monstrous_cavalry", "monster", "war_beast", "chariot", "warmachine")
 SIZES = ("small", "medium", "large", "very_large")
 ATTRIBUTES = ("encourages", "expendable", "charge_defense_vs_large", "charge_reflection",
               "hide_forest", "stalk", "causes_fear", "causes_terror", "unbreakable", "strider",
@@ -64,8 +65,10 @@ def features(p):
     attrs = set(p.get("attributes") or ())
     out += [float(a in attrs) for a in ATTRIBUTES]
     cal_d = miss.get("calibration_distance_m") or 0
+    # (the spread: above 1 squeezed into 1-1.5 - the artillery's 5-25, 29.10.2026; every other unit's below 1 unchanged)
+    spread = 20 * (miss.get("calibration_area_m") or 0) / cal_d if cal_d else 0.0
     out += [float(bool(miss.get("direct"))),
-            20 * (miss.get("calibration_area_m") or 0) / cal_d if cal_d else 0.0,
+            spread if spread <= 1 else 1 + 0.5 * (1 - 1 / spread),
             (miss.get("muzzle_velocity") or 0) / 100]
     return out
 
@@ -110,10 +113,15 @@ def men(keys, passports=None):
 
 
 def ammo(keys, passports=None):
-    """Projectiles of the whole unit at full strength (0: no missile weapon)."""
+    """Projectiles of the whole unit at full strength (0: no missile weapon); an artillery unit's per gun (missile.ammo_per
+    'engine': its guns x ammo, as the simulator's ammo0)."""
     passports = passports or load()
-    return np.array([(passports[k].get("missile") or {}).get("ammo", 0) * passports[k]["men"] if k else 0
-                     for k in keys], dtype=np.float32)
+
+    def whole(p):
+        m = p.get("missile") or {}
+        per = (p.get("engines") or {}).get("n", 0) if m.get("ammo_per") == "engine" else p["men"]
+        return m.get("ammo", 0) * per
+    return np.array([whole(passports[k]) if k else 0 for k in keys], dtype=np.float32)
 
 
 def reload(keys, passports=None):

@@ -65,7 +65,14 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # halberds). No army scheme fields them yet (config/nn/pools.json): units.md "Cavalry"
          "wh_main_emp_cav_empire_knights", "wh_main_emp_cav_reiksguard", "wh_dlc04_emp_cav_knights_blazing_sun_0",
          "wh3_dlc25_emp_cav_knights_of_the_black_rose", "wh_main_emp_cav_demigryph_knights_0",
-         "wh_main_emp_cav_demigryph_knights_1")
+         "wh_main_emp_cav_demigryph_knights_1",
+         # 29.10.2026, artillery step 1 (build/diag_arty/empire.md, skaven.md; the simulator's guns: tools/nn/sim/artillery.py):
+         # the Empire's Mortar, Great Cannon, Helblaster Volley Gun and Helstorm Rocket Battery, the Skaven's Plagueclaw
+         # Catapult and Warp Lightning Cannon - 4 engines and their crew each. Only the v3 army scheme fields them
+         # (config/nn/pools.json units_v3): units.md "Artillery"
+         "wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
+         "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
+         "wh2_main_skv_art_warp_lightning_cannon")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
@@ -78,7 +85,7 @@ SIZES = ("very_small", "small", "medium", "large", "very_large")
 TABLES = ("main_units", "land_units", "battle_entities", "mounts", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects",
-          "special_ability_phases", "projectile_penetration_junctions")
+          "special_ability_phases", "projectile_penetration_junctions", "battlefield_engines", "projectiles_explosions")
 
 # Where each passport field comes from: table.column by the RPFM schema's names (tools/nn/dbschema.py). checked:
 # compared with the unit card from battle (check_card); "ours": what we make of a named column.
@@ -91,6 +98,22 @@ FIELDS = {
     "mount": ("land_units.mount", None),
     "num_mounts": ("land_units.num_mounts", None),
     "engine": ("land_units.engine", None),
+    "engines.n": ("an artillery unit's guns (land_units.num_engines with land_units.engine; no `engines` for a unit "
+                  "without)", None),
+    "engines.type": ("battlefield_engines.engine_type (Generic_3_Crew: the animation set with 3 crew places, R-work "
+                     "artillery_rules.md 5)", None),
+    "engines.crew_per_engine": ("ours: the number in engines.type (3) - the men a gun needs to fire (the game's code "
+                                "names no number: the probe 'crew under fire' to check)", None),
+    "engines.entity": ("battlefield_engines.battle_entity: the gun's body", None),
+    "engines.hp": ("the gun's battle_entities.hit_points + land_units.bonus_hit_points (425 + 48 the Empire's)", None),
+    "engines.mass": ("the gun's battle_entities.mass (2000)", None),
+    "engines.size": ("the gun's battle_entities.size (large)", None),
+    "engines.radius_m": ("the gun's battle_entities.radius", None),
+    "engines.radii_ratio": ("the gun's battle_entities.radii_ratio (a capsule's or an ellipse's; 1 a circle)", None),
+    "engines.height_m": ("the gun's battle_entities.height", None),
+    "engines.turn_deg_s": ("the gun's battle_entities.turn_speed, deg/s (45): the unit's speed.turn_deg_s", None),
+    "engines.fire_arc_deg": ("the gun's battle_entities.fire_arc_close / 2 (25): the unit's missile.fire_arc_deg", None),
+    "engines.projectile_resistance": ("the gun's battle_entities.projectile_penetration_resistance (5)", None),
     "rank_depth": ("land_units.rank_depth", None),
     "spacing.template": ("land_units.spacing (the formation template)", None),
     "spacing.h": ("unit_spacings.close_formation_spacing_horizontal: a man's place across the front in close "
@@ -104,7 +127,8 @@ FIELDS = {
     "hp_per_man": ("battle_entities.hit_points + land_units.bonus_hit_points (+ the mount's battle_entities.hit_points "
                    "of a mounted unit: the charge probe 28.10, Empire Knights 6480 = 60 x (8 + 8 + 92))",
                    "card HealthMax / men"),
-    "hp_total": ("hp_per_man * men", "card HealthMax"),
+    "hp_total": ("hp_per_man * men (+ engines.n x engines.hp of an artillery unit: one number for the crew and the guns, "
+                 "as the game's card)", "card HealthMax"),
     "mass": ("battle_entities.mass (a mounted unit: its mount's, mounts.entity - as radius_m, radii_ratio, speed.*)",
              "card Mass"),
     "size": ("battle_entities.size; a mounted unit the larger of the rider's and the mount's (medium and above is "
@@ -114,7 +138,8 @@ FIELDS = {
     "radius_m": ("battle_entities.radius", None),
     "radii_ratio": ("battle_entities.radii_ratio: an ellipse body (shape 'ellipse') is radius long and radius x this "
                     "across; 1 a circle (every man)", None),
-    "speed.walk": ("battle_entities.walk_speed, m/s", "card slow_speed"),
+    "speed.walk": ("battle_entities.walk_speed, m/s (a mounted unit its mount's, an artillery unit its gun's: 2.0, run 2.0 - "
+                   "the attribute cant_run; the speed.* and turn_deg_s alike)", "card slow_speed"),
     "speed.run": ("battle_entities.run_speed, m/s", "card fast_speed; scalar_speed = run x 10"),
     "speed.charge": ("battle_entities.charge_speed, m/s", None),
     "speed.charge_distance": ("battle_entities.charge_distance_commence_run, m: an attacking unit closes "
@@ -176,7 +201,9 @@ FIELDS = {
                                  "left)", None),
     "missile.weapon": ("land_units.primary_missile_weapon", None),
     "missile.projectile": ("missile_weapons.default_projectile", None),
-    "missile.ammo": ("land_units.primary_ammo, per man", "card stat_ammo"),
+    "missile.ammo": ("land_units.primary_ammo, per man; per gun of an artillery unit (missile.ammo_per 'engine': the "
+                     "projectiles - 198 Helblaster = 22 x 9 bullets, R-work artillery_rules.md 4)", "card stat_ammo"),
+    "missile.ammo_per": ("ours: 'man', or 'engine' for an artillery unit", None),
     "missile.accuracy": ("land_units.accuracy", None),
     "missile.category": ("projectiles.category", None),
     "missile.range_m": ("projectiles.effective_range", "card scalar_missile_range"),
@@ -211,6 +238,19 @@ FIELDS = {
     "missile.shot_type": ("projectiles.shot_type", None),
     "missile.contact_phase": ("projectiles.contact_stat_effect: the contact effect a hit lays on its target "
                               "(the Ratling Gun's suppressing fire)", None),
+    "missile.fixed_elevation": ("projectiles.fixed_elevation, degrees: the launch angle of a 'fixed' trajectory (the "
+                                "Mortar 50; read only for 'fixed')", None),
+    "missile.magic": ("projectiles.is_magical", None),
+    "missile.bonus_v_large": ("projectiles.bonus_v_large (the Warp Lightning Cannon +70)", None),
+    "missile.bonus_v_infantry": ("projectiles.bonus_v_infantry", None),
+    "missile.can_bounce": ("projectiles.can_bounce (the Great Cannon): no number of the bounce in the database", None),
+    "missile.can_roll": ("projectiles.can_roll", None),
+    "missile.mass": ("projectiles.mass, kg", None),
+    "missile.collision_radius_m": ("projectiles.collision_radius, m", None),
+    "missile.blast": ("projectiles_explosions of missile.explosion (null: none): radius_m detonation_radius, speed "
+                      "detonation_speed (the ring's growth, m/s), damage / ap_damage detonation_damage / _ap, force "
+                      "detonation_force, allies affects_allies, magic is_magical, contact_phase contact_phase_effect, "
+                      "type detonation_type", None),
 }
 # The document's contact_phases: per contact phase a unit's weapon lays (melee.contact_phase, missile.contact_phase).
 PHASE_FIELDS = {
@@ -221,10 +261,6 @@ PHASE_FIELDS = {
 }
 # Asked for, but not in the tables read (or not decoded): why (docs/*/training/units.md).
 MISSING = {
-    "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile "
-                                                "of our units but the Huntsmen's arrow (+8 against large; not in the "
-                                                "passport: no large units in the training pools - the cavalry is the "
-                                                "probes' only, data/units/probe-units.json)",
     "mount knock resistance": "battle_entities.hit_reactions_ignore_chance / knock_interrupts_ignore_chance of the mount "
                               "(the demigryph 20 %, the warhorse 0): the simulator has no knock-downs in melee yet "
                               "(build/diag_cav/units.md 4.5)",
@@ -276,21 +312,42 @@ def passport(key, t):
     hp = entity["hit_points"] + land["bonus_hit_points"] + (body["hit_points"] if mount_row else 0)
     size = max(entity["size"], body["size"], key=lambda s: SIZES.index(s) if s in SIZES else 1)
     height = max(entity["height"], body["height"])
+    # An artillery unit (land_units.engine, num_engines > 0): its men are the crew (their body, size and health as any
+    # infantry's), its guns move it (the gun's battle_entities give the speeds and the turn: 2.0 m/s, cant_run, 45 deg/s)
+    # and fire its missile weapon (battlefield_engines.missile_weapon); the unit's health is the crew's and the guns'
+    # together (one number, as the game's card: build/diag_arty/empire.md 1)
+    eng_row = (_index(t.get("battlefield_engines") or (), "key").get(land.get("engine"))
+               if land.get("engine") and (land.get("num_engines") or 0) > 0 else None)
+    gun = _index(t["battle_entities"], "key")[eng_row["battle_entity"]] if eng_row else None
+    mover = gun if gun else body
+    engines = None
+    if gun:
+        import re
+        crew = re.search(r"(\d+)_Crew", eng_row["engine_type"] or "")
+        engines = {"n": land["num_engines"], "type": eng_row["engine_type"], "entity": gun["key"],
+                   "crew_per_engine": int(crew.group(1)) if crew else 1,
+                   "hp": gun["hit_points"] + land["bonus_hit_points"], "mass": gun["mass"], "size": gun["size"],
+                   "radius_m": gun["radius"], "radii_ratio": gun["radii_ratio"] if gun["shape"] in ("ellipse", "capsule")
+                   else 1.0, "height_m": gun["height"], "turn_deg_s": gun["turn_speed"],
+                   "fire_arc_deg": gun["fire_arc_close"] / 2,
+                   "projectile_resistance": gun["projectile_penetration_resistance"]}
     out = {
         "land_unit": land["key"], "caste": main["caste"], "category": land["category"], "class": land["class"],
         "men": main["num_men"], "mount": land["mount"], "num_mounts": land["num_mounts"], "engine": land["engine"],
+        **({"engines": engines} if engines else {}),
         "rank_depth": land["rank_depth"], "entity": land["man_entity"],
         "spacing": {"template": land["spacing"], "h": sp["close_formation_spacing_horizontal"],
                     "v": sp["close_formation_spacing_vertical"], "scatter": sp["close_formation_spacing_variation"],
                     "chaotic": sp["is_chaotic_formation"]},
-        "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": body["mass"], "size": size,
+        "hp_per_man": hp, "hp_total": hp * main["num_men"] + (engines["n"] * engines["hp"] if engines else 0),
+        "mass": body["mass"], "size": size,
         "height_m": height, "radius_m": body["radius"],
         "radii_ratio": body["radii_ratio"] if body["shape"] == "ellipse" else 1.0,
-        "speed": {"walk": body["walk_speed"], "run": body["run_speed"], "charge": body["charge_speed"],
-                  "charge_distance": body["charge_distance_commence_run"],
-                  "charge_pose_distance": body["charge_distance_adopt_charge_pose"],
-                  "acceleration": body["acceleration"], "deceleration": body["deceleration"],
-                  "turn_deg_s": body["turn_speed"]},
+        "speed": {"walk": mover["walk_speed"], "run": mover["run_speed"], "charge": mover["charge_speed"],
+                  "charge_distance": mover["charge_distance_commence_run"],
+                  "charge_pose_distance": mover["charge_distance_adopt_charge_pose"],
+                  "acceleration": mover["acceleration"], "deceleration": mover["deceleration"],
+                  "turn_deg_s": mover["turn_speed"]},
         "melee": {"attack": land["melee_attack"], "defence": land["melee_defence"],
                   "charge_bonus": land["charge_bonus"], "weapon": weapon["key"], "damage": weapon["damage"],
                   "ap_damage": weapon["ap_damage"], "bonus_v_large": weapon["bonus_v_large"],
@@ -317,11 +374,15 @@ def passport(key, t):
         "combat_potential": {"melee": main["melee_cp"], "missile": main["missile_cp"]},
         "missile": None,
     }
-    if land["primary_missile_weapon"]:
-        mw = _index(t["missile_weapons"], "key")[land["primary_missile_weapon"]]
+    weapon_key = land["primary_missile_weapon"] or (eng_row["missile_weapon"] if eng_row else None)
+    if weapon_key:
+        mw = _index(t["missile_weapons"], "key")[weapon_key]
         pr = _index(t["projectiles"], "key")[mw["default_projectile"]]
+        ex = (_index(t.get("projectiles_explosions") or (), "key").get(pr["explosion_type"])
+              if pr["explosion_type"] else None)
         out["missile"] = {
-            "weapon": mw["key"], "projectile": pr["key"], "ammo": land["primary_ammo"], "accuracy": land["accuracy"],
+            "weapon": mw["key"], "projectile": pr["key"], "ammo": land["primary_ammo"],
+            "ammo_per": "engine" if engines else "man", "accuracy": land["accuracy"],
             "category": pr["category"], "range_m": pr["effective_range"], "min_range_m": pr["minimum_range"],
             "reload_s": pr["base_reload_time"], "damage": pr["damage"], "ap_damage": pr["ap_damage"],
             "projectile_number": pr["projectile_number"], "shots_per_volley": pr["shots_per_volley"],
@@ -329,11 +390,20 @@ def passport(key, t):
             "muzzle_velocity": pr["muzzle_velocity"],
             "max_elevation": pr["max_elevation"], "calibration_distance_m": pr["calibration_distance"],
             "calibration_area_m": pr["calibration_area"], "marksmanship": pr["marksmanship_bonus"],
-            "fire_arc_deg": entity["fire_arc_close"] / 2, "explosion": pr["explosion_type"],
+            "fire_arc_deg": (gun or entity)["fire_arc_close"] / 2, "explosion": pr["explosion_type"],
             "penetration": pr["projectile_penetration"], "shot_type": pr["shot_type"],
             "penetration_max": (pen.get(pr["projectile_penetration"]) or {}).get("max_penetration") or 0,
             "penetration_cap": (pen.get(pr["projectile_penetration"]) or {}).get("entity_size_cap"),
-            "contact_phase": pr["contact_stat_effect"]}
+            "contact_phase": pr["contact_stat_effect"],
+            "fixed_elevation": pr["fixed_elevation"], "magic": bool(pr["is_magical"]),
+            "bonus_v_large": pr["bonus_v_large"], "bonus_v_infantry": pr["bonus_v_infantry"],
+            "can_bounce": bool(pr["can_bounce"]), "can_roll": bool(pr["can_roll"]), "mass": pr["mass"],
+            "collision_radius_m": pr["collision_radius"],
+            "blast": {"key": ex["key"], "type": ex["detonation_type"], "radius_m": ex["detonation_radius"],
+                      "speed": ex["detonation_speed"], "damage": ex["detonation_damage"],
+                      "ap_damage": ex["detonation_damage_ap"], "force": ex["detonation_force"],
+                      "allies": bool(ex["affects_allies"]), "magic": bool(ex["is_magical"]),
+                      "contact_phase": ex["contact_phase_effect"]} if ex else None}
     if key in SPELLS:
         out["spells"] = list(SPELLS[key])
     return out
@@ -342,7 +412,9 @@ def passport(key, t):
 def phase_keys(units):
     """The contact phases the units' weapons lay (melee.contact_phase, missile.contact_phase), sorted."""
     return sorted({p for u in units.values() for p in ((u.get("melee") or {}).get("contact_phase"),
-                                                       (u.get("missile") or {}).get("contact_phase")) if p})
+                                                       (u.get("missile") or {}).get("contact_phase"),
+                                                       ((u.get("missile") or {}).get("blast") or {}).get("contact_phase"))
+                   if p})
 
 
 def contact_phases(units, t):

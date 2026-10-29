@@ -9,6 +9,7 @@ tensors, one unit = one object (men, health, place, facing, morale, fatigue, amm
     movement.py  moving, fleeing, the map's edge
     melee.py     blows in melee
     missile.py   shooting
+    artillery.py guns and their crew, shells, blasts
     morale.py    morale, wavering, rout, rally
     fatigue.py   fatigue
     battle.py    one step of all battles, the end of a battle

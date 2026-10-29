@@ -39,7 +39,7 @@ TABLES = (
     "special_ability_to_special_ability_phase_junctions", "special_ability_phase_stat_effects",
     "special_ability_phase_attribute_effects", "special_ability_to_recharge_contexts",
     "special_ability_to_auto_deactivate_flags", "unit_abilities", "projectile_bombardments", "projectiles_explosions",
-    "projectile_penetration_junctions",
+    "projectile_penetration_junctions", "battlefield_engines",
     "cdir_military_generator_template_priorities", "cdir_military_generator_template_ratios",
     "cdir_military_generator_unit_group_overrides", "cdir_military_generator_unit_qualities",
 )

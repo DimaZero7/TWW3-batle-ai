@@ -39,7 +39,7 @@ fires while `a` > 0) - the general's shooters' shares, the "shoot" mask and the 
 
 The scales are the unit network's passport's (tools/nn/model/passport.py) wherever it has the field; new ones: the
 come shares (0..1 already), the spread at 100 m (m / SPREAD_SCALE_M: handguns 0.30, crossbows 0.44, slings 0.60,
-throwing stars 0.78), shots a volley / passport.VOLLEY_SHOTS and the aim times / passport.AIM_S (the unit token's
+throwing stars 0.78; above 1 squeezed into 1-1.5: the Mortar's 1.9 -> 1.24), shots a volley / passport.VOLLEY_SHOTS and the aim times / passport.AIM_S (the unit token's
 WEAPON / AIM columns), the fire arc / 180 (the token's ARC). A unit without a missile weapon has 0 in every missile number and trajectory 0, whose vector is
 fixed at zero (army_reader.py).
 
@@ -80,7 +80,7 @@ SIDE_SLOTS = 40
 SLOTS = 2 * SIDE_SLOTS
 
 # --- the labels: fixed lists, new variants appended at the end (old indices keep their places) ---------------------
-CASTES = pp.CASTES                    # 12: lord, hero, melee_infantry, ..., war_beast, chariot, war_machine
+CASTES = pp.CASTES                    # 12: lord, hero, melee_infantry, ..., war_beast, chariot, warmachine
 SIZES = pp.SIZES                      # 4: small, medium, large, very_large
 # The flight (the database's projectiles.trajectory_sight): index 0 is "no missile weapon" (a zero vector, not a
 # variant). direct: flat fire, hits the first in its line, never over friends (low: guns, militia, throwing stars);
@@ -114,7 +114,7 @@ NUMBERS = (
     *((f"resist_{k}", "defence", 100) for k in RESISTS),
     ("range", "missile", 500), ("ammo", "missile", ("log", 100)),
     ("missile_damage", "missile", ("log", 500)), ("missile_ap", "missile", ("log", 500)),
-    ("reload", "missile", 20), ("spread_100", "missile", SPREAD_SCALE_M),
+    ("reload", "missile", 20), ("spread_100", "missile", ("squeeze", SPREAD_SCALE_M)),
     ("projectiles", "missile", 10), ("volley_shots", "missile", pp.VOLLEY_SHOTS),
     ("muzzle_velocity", "missile", 100), ("fire_arc", "missile", 180),
     ("aim", "missile", pp.AIM_S), ("silence", "missile", pp.AIM_S),
@@ -267,6 +267,11 @@ def final_stats(p, card=None, unit="", rule=None):
 def _scaled(v, scale):
     if scale in ("flag", "share"):
         return float(v)
+    if isinstance(scale, tuple) and scale[0] == "squeeze":
+        # v / scale, above 1 squeezed into 1-1.5 (the spread: the artillery's mortar 1.9, 29.10.2026; the others below 1
+        # unchanged)
+        x = float(v) / scale[1]
+        return x if x <= 1 else 1 + 0.5 * (1 - 1 / x)
     if isinstance(scale, tuple):
         return pp._log(v, scale[1])
     return float(v) / scale

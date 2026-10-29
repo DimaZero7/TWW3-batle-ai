@@ -201,7 +201,8 @@ SIGHT = ("hidden", "pierce_men", "spotting")
 # snipe, ignore_trees, the shield breaker, Snare Net, Blackpowder Discipline) are the tail group FX_NEW after FIGHT - so
 # every older token is a beginning of today's (old_columns, encoder.pad_inputs). The next effects of the catalogue need a
 # group of their own at the end (test_nn_g43_input: FX_MID + FX_G43 + the later groups' pairs = the catalogue's): the
-# cavalry's (29.10.2026: causes_fear, immune_to_psychology) are FX_CAV, the token's last.
+# cavalry's (29.10.2026: causes_fear, immune_to_psychology) and the artillery's (29.10.2026: cant_run) are FX_CAV, the
+# token's last.
 FX_MID = 19
 FX_G43 = 6
 FX_NEW = effects.NAMES[2 * FX_MID:2 * (FX_MID + FX_G43)]

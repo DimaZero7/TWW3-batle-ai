@@ -165,9 +165,18 @@ def in_range(u, pw, per_man=False, reach=(0.0, 0.0)):
     those shooters, per_man_mask) a shooter's men each to the target's nearest men (rank_share > 0)."""
     centre = pw["dist"] <= u["range"][:, :, None]
     if per_man is None or per_man is False:
-        return centre
+        return centre & min_range_ok(u, pw)
     mask = u["direct"] if per_man is True else per_man
-    return torch.where(mask[:, :, None], rank_share(u, pw, *reach) > 0, centre)
+    return torch.where(mask[:, :, None], rank_share(u, pw, *reach) > 0, centre) & min_range_ok(u, pw)
+
+
+def min_range_ok(u, pw):
+    """[B, i, j] j is not nearer than i's minimum range (the projectile's minimum_range, given only to artillery:
+    artillery.py), edge to edge (the formations' gap; R-work artillery_rules.md 6); True without one."""
+    if "min_range" not in u:
+        return torch.ones_like(pw["enemy"])
+    m = u["min_range"][:, :, None]
+    return (m <= 0) | (pw["gap"] >= m)
 
 
 def router_share(age, ages, shares):
@@ -876,6 +885,15 @@ def _path_block(lo, hi, xa, xb, rk, dmin=None):
     return torch.minimum(near + far + pushed, span + pushed)
 
 
+def _lob_tan(u):
+    """[B, N, 1] tan of a lobbing shooter's arc: its fixed elevation (artillery: the Mortar's 50 deg; STATIC fix_el),
+    else 45 deg (1)."""
+    if "fix_el" not in u:
+        return None
+    el = u["fix_el"] * (math.pi / 180)
+    return torch.where(u["fix_el"] > 0, torch.tan(el), torch.ones_like(el))[:, :, None]
+
+
 def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True):
     """(men [B, N] or None, closed [B, N] bool or None) of shooter i at its target (slot, -1: zeros) past the men of
     its other own units (missile.friend_los, module docstring "Friends in the way"):
@@ -977,8 +995,14 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
             tan = _arc_tan(v, L, dh)
             a = ((tan * L - dh) / (L * L)).clamp(min=0)                 # height hm + tan x - a x^2: through the aim
         if high is not None:
-            tan = torch.where(high, torch.ones_like(tan), tan)
-            a = torch.where(high, ((L - dh) / (L * L)).clamp(min=0), a)
+            # (the 45 deg arc; a fixed trajectory's own elevation: _lob_tan)
+            th = _lob_tan(u)
+            if th is None:
+                tan = torch.where(high, torch.ones_like(tan), tan)
+                a = torch.where(high, ((L - dh) / (L * L)).clamp(min=0), a)
+            else:
+                tan = torch.where(high, th.expand_as(tan), tan)
+                a = torch.where(high, ((th * L - dh) / (L * L)).clamp(min=0), a)
         disc = tan * tan - 4 * a * q
         sq = torch.sqrt(disc.clamp(min=0))
         aa = (2 * a).clamp(min=1e-9)
@@ -1082,6 +1106,10 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, wit
                 closed = closed | terrain.ground_closed(u, pw, tg, params)
             d = pw["dist"].gather(2, tg.clamp(min=0)[:, :, None]).squeeze(2)
             lob = ~direct & closed & (d > lob_min)
+            if "fix_el" in u:
+                # a fixed trajectory (artillery: the Mortar's 50 deg) always arcs: over friends and hills, its men's
+                # paths on its own arc (artillery_rules.md 6)
+                lob = lob | ((u["fix_el"] > 0) & (tg >= 0))
             return lob, closed & ~lob
         lob, bad = judge(target)
         exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
@@ -1256,7 +1284,9 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     B = params.battle
     shooting = target >= 0
     per_man = dt / u["reload"].clamp(min=1e-6) if loaded is None else loaded
-    shots = torch.where(shooting, u["men"] * per_man, torch.zeros_like(u["men"]))
+    # (an artillery unit's projectiles: its firing guns x shots_per_volley; artillery.shooters)
+    from tools.nn.sim import artillery
+    shots = torch.where(shooting, artillery.shooters(u) * per_man, torch.zeros_like(u["men"]))
     if clear is not None:
         shots = shots * clear
     shots = torch.minimum(shots, u["a"])
@@ -1349,6 +1379,10 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         resist = (resist + u["resist_physical"]).clamp(max=0.9)
     # the same damage rule as a blow (melee.per_hit: armour roll, overkill; a lone man loses the mean)
     md, ma = u["m_damage"][:, :, None], u["m_ap"][:, :, None]
+    if "m_bvl" in u:
+        # the projectile's bonus against a large target (projectiles.bonus_v_large: the Warp Lightning Cannon +70) on
+        # its base damage, as a blow's (given only to artillery: config/nn/sim.json artillery.why)
+        md = md + u["m_bvl"][:, :, None] * u["large"][:, None, :].float()
     if "dh" in pw:
         # the height between shooter and target (terrain.missile_factor: x (1 + clamp(0.3 x (shooter's ground - the
         # target's) / 40 m, +-0.3)) on the projectile's damage before the armour; a battle without a height map: none)
@@ -1358,6 +1392,9 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     hit = melee.per_hit(md, ma, u["armour"][:, None, :],
                         u["hp_man"][:, None, :], resist[:, None, :], single=(u["men0"] <= 1)[:, None, :])
     hp = landed * hit * (1 - shield)
+    if "fix_el" in u:
+        # a fixed trajectory's shell (the Mortar) strikes when it lands, with its blast (artillery.land): none here
+        hp = torch.where((u["fix_el"] > 0)[:, :, None], torch.zeros_like(hp), hp)
     if (ms.get("penetration") or {}).get("on") and "pen_max" in u:
         # a projectile through several men (penetration: the Jezzails, the Long Rifles)
         pen = penetration(u, pw, params, shield, fs=(info or {}).get("front"))

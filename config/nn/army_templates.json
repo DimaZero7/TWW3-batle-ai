@@ -236,6 +236,30 @@
       "group": "wh3_default_land_melee_cavalry_main_mounted_heavy",
       "quality": "tier_4_step_1_units"
      }
+    ],
+    "wh_main_emp_art_mortar": [
+     {
+      "group": "wh3_default_land_artillery_long_range",
+      "quality": "tier_2_step_2_units"
+     }
+    ],
+    "wh_main_emp_art_great_cannon": [
+     {
+      "group": "wh3_default_land_artillery_long_range",
+      "quality": "tier_2_step_4_units"
+     }
+    ],
+    "wh_main_emp_art_helblaster_volley_gun": [
+     {
+      "group": "wh3_default_land_artillery_long_range",
+      "quality": "tier_3_step_1_units"
+     }
+    ],
+    "wh_main_emp_art_helstorm_rocket_battery": [
+     {
+      "group": "wh3_default_land_artillery_long_range",
+      "quality": "tier_3_step_1_units"
+     }
     ]
    }
   },
@@ -454,6 +478,18 @@
      {
       "group": "wh3_default_land_ranged_infantry_main_heavy_long_range",
       "quality": "tier_3_step_1_units"
+     }
+    ],
+    "wh2_main_skv_art_plagueclaw_catapult": [
+     {
+      "group": "wh3_default_land_artillery_long_range",
+      "quality": "tier_2_step_5_units"
+     }
+    ],
+    "wh2_main_skv_art_warp_lightning_cannon": [
+     {
+      "group": "wh3_default_land_artillery_long_range",
+      "quality": "tier_2_step_5_units"
      }
     ]
    }

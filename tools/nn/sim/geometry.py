@@ -19,7 +19,7 @@ def melee_depth(sim):
 
 def dims(u, spacing, melee_depth=0.0):
     """(front, depth) [B, N], m: files = floor(ordered width / h) (at least 1, at most the men), front = files x h,
-    depth = ceil(men / files) x v (the game's own formations, data/roster: front (files - 1) h, depth (ranks - 1)
+    depth = ceil(men / files) x v (an artillery unit: one rank, v) (the game's own formations, data/roster: front (files - 1) h, depth (ranks - 1)
     v, within 1 % / 10 % at 15-40 m; build/meleecore/spacing_check.py). spacing: h and v of a unit without its own.
     melee_depth (formation.melee_depth.ranks, c; 0: off): a formation in melee (its melee clock contact_s > 0) does
     not close up as its men fall - ranks = max(ceil(r), min(r + c (1 - men / men0), ceil(men0 / files0))), r = men /
@@ -40,6 +40,10 @@ def dims(u, spacing, melee_depth=0.0):
         loose = torch.minimum(men.clamp(min=1) / files + melee_depth * (1 - men / men0).clamp(min=0),
                               torch.ceil(men0 / files0))
         ranks = torch.where(u["contact_s"] > 0, torch.maximum(ranks, loose), ranks)
+    if "eng0" in u:
+        # an artillery unit (artillery.py): one rank of its guns, eng0 files h apart, its crew round them - the box is
+        # the guns' line, v deep (the database's artillery spacing templates; NOT MEASURED: the probe reads the places)
+        ranks = torch.where(u["eng0"] > 0, torch.ones_like(ranks), ranks)
     front = files * h
     depth = ranks * v
     lord = 2 * u["radius"]

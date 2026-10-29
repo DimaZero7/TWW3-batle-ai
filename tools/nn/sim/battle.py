@@ -10,7 +10,8 @@ import math
 
 import torch
 
-from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale, movement
+from tools.nn.sim import abilities, artillery, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale
+from tools.nn.sim import movement
 from tools.nn.sim import ground, impact, reform, skirmish, stealth, terrain
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
@@ -567,6 +568,10 @@ def step(st, orders, params=None, dt=None):
     # swordsmen in contact with it)
     free = ~engaged | u["melee_fire"] if "melee_fire" in u else ~engaged
     ready = standing & free & (u["a"] > 0) & (u["range"] > 0) & still & (~sk_run | u["fire_move"])
+    art_on = artillery.on(params)
+    if art_on:
+        # an artillery unit fires while one of its guns has its crew (artillery.guns; config/nn/sim.json artillery)
+        ready = ready & artillery.can_fire(u)
     # On the move (fire whilst moving) a unit shoots only at targets within missile.move_fire_arc_deg of its
     # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why) -
     # unless its own fire arc (the database's, passport missile.fire_arc_deg) is wider: the Night Runners' throwing
@@ -711,13 +716,26 @@ def step(st, orders, params=None, dt=None):
         pen_info["front"] = missile.front_share(u, pw, params)
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch_geo, clear=clear,
                                              loaded=share, catch=catch, info=pen_info)
+    trunk = None
     if ground.on(u):
         # the trunks on the way (ground.trunk_keep: a projectile meeting a trunk past its first ~42 m stops, no damage)
-        hp_missile = hp_missile * ground.trunk_keep(u, pw, volley_target, los.get("lob"), params)[:, :, None]
+        trunk = ground.trunk_keep(u, pw, volley_target, los.get("lob"), params)
+        hp_missile = hp_missile * trunk[:, :, None]
         # the cover of a target's men on forest ground (ground.missile_cover: the hits on it x forest_cover by the share
         # of its men on forest cells; the probe cover's measure)
         hp_missile = hp_missile * ground.missile_cover(u, ground.shares(u, pw["front"], pw["depth"], params),
                                                        params)[:, None, :]
+    hp_art = kills_art = hits_art = None
+    if art_on:
+        # artillery's shells (artillery.py): the volleys in flight that land now - their own hits (a fixed shell) and
+        # blasts on every unit round the landing point, friends too - then this step's volleys take flight (a direct
+        # shell a trunk stopped does not reach its target: trunk_keep; a fixed one flies over the trees)
+        hp_art, kills_art, hits_art, knocks_art = artillery.land(
+            u, params, dt, pw["front"], pw["depth"], (shots > 0) & artillery.shell(u),
+            noise=bool((params.sim.get("noise") or {}).get("blows")))
+        keep_t = None if trunk is None else torch.where(u["fix_el"] > 0, torch.ones_like(trunk), trunk)
+        artillery.launch(u, pw, params, shots, volley_target, keep=keep_t)
+        u["art_kd"] = u["art_kd"] + (knocks_art * pw["enemy"]).sum(2)
     hp_bomb = kills_bomb = None
     if magic.on(params) and "bm0_s" in u:
         # the bombardments landing this step (magic.py): the HP and the men each caster's strike takes from each unit,
@@ -755,9 +773,27 @@ def step(st, orders, params=None, dt=None):
             return torch.where(ok, torch.poisson(lam) * per, hp)
         hp_melee = rolled(hp_melee, mhit)
         hp_missile = rolled(hp_missile, shit)
+    gun_hp = None
+    if art_on:
+        # an artillery unit's guns take their share of the HP it takes (artillery.gun_share), its crew the rest: the
+        # rules below see the crew's health (hp_abs less the guns' eng_w), the guns' pool goes down after
+        # (artillery.guns_after); a unit without guns keeps all (share 0)
+        gs = artillery.gun_share(u)
+        keep_c = (1 - gs)[:, None, :]
+        gun_hp = (hp_melee + hp_missile).sum(1)
+        hp_melee, hp_missile = hp_melee * keep_c, hp_missile * keep_c
+        if hp_bomb is not None:
+            gun_hp = gun_hp + hp_bomb.sum(1)
+            hp_bomb, kills_bomb = hp_bomb * keep_c, kills_bomb * keep_c
+        gun_hp = gun_hp + hp_art.sum(1)
+        hp_art, kills_art, hits_art = hp_art * keep_c, kills_art * keep_c, hits_art * keep_c
+        gun_hp = gun_hp * gs
+        u["hp_abs"] = u["hp_abs"] - u["eng_w"]
     dmg = hp_melee + hp_missile
     if hp_bomb is not None:
         dmg = dmg + hp_bomb
+    if hp_art is not None:
+        dmg = dmg + hp_art
     hit = torch.where(hp_missile > 0, shit, mhit)
     taken = dmg.sum(1)
     scale = torch.where(taken > u["hp_abs"], u["hp_abs"] / taken.clamp(min=1e-9), torch.ones_like(taken))
@@ -767,6 +803,8 @@ def step(st, orders, params=None, dt=None):
     u["gold_out"] = u["gold_out"] + (dmg * pw["enemy"] * (u["cost"] / u["hp0"].clamp(min=1e-6))[:, None, :]).sum(2)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
     db = hp_bomb * scale[:, None, :] if hp_bomb is not None else torch.zeros_like(dmg)    # (the bombardments' own kills)
+    if hp_art is not None:
+        db = db + hp_art * scale[:, None, :]           # (the shells' own kills, as the bombardments': artillery.land)
     if hp_bomb is not None and "bm_hit" in u:
         # bookkeeping (no effect on the battle): who spell projectiles struck (the network's spell_strike) and each
         # caster's gold of enemy and own health and the enemy men knocked down so far (the spell price's bricks)
@@ -831,6 +869,8 @@ def step(st, orders, params=None, dt=None):
         kills = torch.where((u["men0"] > 1)[:, None, :], pool_k + shot_k, kills)
     if kills_bomb is not None:
         kills = kills + torch.where((u["men0"] > 1)[:, None, :], kills_bomb * scale[:, None, :], torch.zeros_like(kills))
+    if kills_art is not None:
+        kills = kills + torch.where((u["men0"] > 1)[:, None, :], kills_art * scale[:, None, :], torch.zeros_like(kills))
     hp_new = (u["hp_abs"] - taken).clamp(min=0)
     floor = torch.ceil(hp_new / u["hp_man"].clamp(min=1e-6) - 1e-6)
     men_new = torch.maximum(u["men"] - kills.sum(1), floor)
@@ -861,6 +901,14 @@ def step(st, orders, params=None, dt=None):
     credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
+    if gun_hp is not None:
+        # the guns' pool and the guns left (none once the crew is dead); hp_abs back to the unit's whole health
+        w0 = u["eng_w"]
+        artillery.guns_after(u, gun_hp)
+        gun_lost = w0 - u["eng_w"]
+        taken = taken + gun_lost
+        u["hp_abs"] = u["hp_abs"] + u["eng_w"]
+        hp_new = u["hp_abs"]
     if stuck_cal.get("on") and "stk_n" in u:
         # the stuck men are the ones dying (nobody else reaches them) and the rest work free over escape_s (measured)
         left = (u["stk_n"] - drop).clamp(min=0) * math.exp(-dt / float(stuck_cal["escape_s"]))
@@ -884,7 +932,8 @@ def step(st, orders, params=None, dt=None):
     u["shot_taken"] = u["shot_taken"] * fade + shot_scaled.sum(1)
     # contact effects (poison, the censer's contagion, suppressing fire): a hit of a weapon that lays one starts it on
     # the enemy hit (effects.lay; friendly fire lays none); it acts from the next step
-    effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
+    effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t,
+                blast=None if hits_art is None else hits_art * scale[:, None, :])
     # the slowing from hits of gunpowder (missile.hit_slow): a hit starts its timer on the enemy hit; it acts in this
     # step's movement (below)
     missile.hit_slow_lay(u, params, dt, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)

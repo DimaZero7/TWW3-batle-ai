@@ -580,6 +580,30 @@
     ["max_penetration", "I32"]
    ]
   },
+  "battlefield_engines": {
+   "24": [
+    ["destroyed_model", "OptionalStringU8"],
+    ["destruction_animation", "OptionalStringU8"],
+    ["engine_type", "StringU8"],
+    ["gun_animation_table", "StringU8"],
+    ["key", "StringU8"],
+    ["missile_weapon", "OptionalStringU8"],
+    ["model", "StringU8"],
+    ["battle_entity", "StringU8"],
+    ["asset_folder", "OptionalStringU8"],
+    ["variant", "OptionalStringU8"],
+    ["draught_attachment_point", "OptionalStringU8"],
+    ["tech_folder", "OptionalStringU8"],
+    ["rider_attachment_point", "OptionalStringU8"],
+    ["destruct_model", "OptionalStringU8"],
+    ["destruct_anim", "OptionalStringU8"],
+    ["destruct_meta", "OptionalStringU8"],
+    ["audio_armour_type", "OptionalStringU8"],
+    ["riders_shoot_behaviour", "StringU8"],
+    ["scale", "F32"],
+    ["crew_reserve_distance_offset", "F32"]
+   ]
+  },
   "cdir_military_generator_template_priorities": {
    "1": [
     ["config_key", "StringU8"],

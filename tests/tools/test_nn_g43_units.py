@@ -92,7 +92,8 @@ def test_the_effects_catalogue():
     assert len(doc["order"]) == ob.FX_MID + (len(ob.FX_NEW) + len(ob.FX_CAV)) // 2
     assert set(doc["order"][ob.FX_MID:ob.FX_MID + ob.FX_G43]) == {
         "ignore_trees", "snipe", "stalk", BREAKER, SNARE, BLACKPOWDER}
-    assert doc["order"][ob.FX_MID + ob.FX_G43:] == ["causes_fear", "immune_to_psychology"]
+    # ... and the artillery's cant_run (29.10.2026: catalogued, no rule - its run speed is its walk's)
+    assert doc["order"][ob.FX_MID + ob.FX_G43:] == ["causes_fear", "immune_to_psychology", "cant_run"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():

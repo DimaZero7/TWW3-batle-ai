@@ -97,8 +97,8 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
     # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026), nor the
     # third wave (07.10.2026).
-    # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10 (no cards)
-    assert checked >= 9 and len(units.UNITS) == 42
+    # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10 (no cards)
+    assert checked >= 9 and len(units.UNITS) == 48
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -119,7 +119,11 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
                 "wh2_dlc13_emp_inf_huntsmen_0", "wh3_dlc25_emp_inf_nuln_ironsides",
                 "wh3_dlc25_emp_inf_hochland_long_rifles", "wh2_main_skv_inf_gutter_runners_0",
                 "wh2_main_skv_inf_gutter_runners_1", "wh2_main_skv_inf_gutter_runner_slingers_0",
-                "wh2_main_skv_inf_gutter_runner_slingers_1", "wh2_dlc12_skv_inf_warplock_jezzails_0")
+                "wh2_main_skv_inf_gutter_runner_slingers_1", "wh2_dlc12_skv_inf_warplock_jezzails_0",
+                # the artillery (29.10.2026): its guns' weapon
+                "wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
+                "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
+                "wh2_main_skv_art_warp_lightning_cannon")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)
@@ -327,3 +331,66 @@ def test_the_knights_run_is_their_warhorse_s_in_the_game_s_database():
     rider = {r["key"]: r for r in tables["battle_entities"]}[p["entity"]]
     land = {r["key"]: r for r in tables["land_units"]}[p["land_unit"]]
     assert p["hp_per_man"] == rider["hit_points"] + horse["hit_points"] + land["bonus_hit_points"] == 108
+
+
+ART = ("wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
+       "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
+       "wh2_main_skv_art_warp_lightning_cannon")
+
+
+def test_the_artillery_passports():
+    """Artillery step 1 (29.10.2026; build/diag_arty/empire.md, skaven.md): the crew are the men, 4 guns from
+    battlefield_engines and their battle entity, the unit's health one number (honga's 4356 for the Empire's), the
+    guns' speeds, turn and fire arc, the weapon from the engine, ammunition per gun, the blast from
+    projectiles_explosions."""
+    u = saved()["units"]
+    for key in ART:
+        p, e, m = u[key], u[key]["engines"], u[key]["missile"]
+        assert e["n"] == 4 and e["type"] == "Generic_3_Crew" and e["crew_per_engine"] == 3, key
+        assert e["mass"] == 2000 and e["size"] == "large" and e["turn_deg_s"] == 45 and e["fire_arc_deg"] == 25, key
+        assert p["hp_total"] == p["men"] * p["hp_per_man"] + 4 * e["hp"], key
+        assert p["size"] == "small" and p["speed"]["walk"] == p["speed"]["run"] == 2.0, key
+        assert p["speed"]["turn_deg_s"] == 45 and m["fire_arc_deg"] == 25 and m["ammo_per"] == "engine", key
+        assert "cant_run" in p["attributes"] and p["caste"] == "warmachine" and m["category"] == "artillery", key
+    emp = [u[k] for k in ART[:4]]
+    assert all(p["hp_total"] == 4356 and p["men"] == 44 and p["hp_per_man"] == 56 and p["engines"]["hp"] == 473
+               for p in emp)
+    assert (u[ART[4]]["hp_total"], u[ART[5]]["hp_total"]) == (56 * 51 + 4 * 543, 56 * 48 + 4 * 540)
+    mortar, cannon, volley, rockets, claw, warp = (u[k]["missile"] for k in ART)
+    assert mortar["trajectory"] == "fixed" and mortar["fixed_elevation"] == 50 and not mortar["direct"]
+    assert (mortar["range_m"], mortar["min_range_m"], mortar["reload_s"], mortar["ammo"]) == (380, 60, 19.0, 22)
+    assert mortar["blast"] == {"key": "wh_main_emp_mortar_explosion", "type": "shockwave", "radius_m": 6.0,
+                               "speed": 11.0, "damage": 60.0, "ap_damage": 16.0, "force": 260.0, "allies": True,
+                               "magic": False, "contact_phase": None}
+    assert cannon["direct"] and cannon["can_bounce"] and cannon["can_roll"] and cannon["blast"] is None
+    assert (cannon["penetration_max"], cannon["penetration_cap"], cannon["damage"], cannon["ap_damage"]) == (
+        9, "very_large", 88, 352)
+    assert (volley["shots_per_volley"], volley["ammo"], volley["penetration_max"], volley["penetration_cap"]) == (
+        9, 198, 3, "medium")
+    assert rockets["shots_per_volley"] == 3 and rockets["min_range_m"] == 40 and rockets["blast"]["radius_m"] == 6.0
+    assert claw["magic"] and claw["blast"]["contact_phase"] == "wh2_main_unit_contact_plague_monk_censer_morale"
+    assert claw["penetration_max"] == 10 and claw["penetration_cap"] == "large" and claw["min_range_m"] == 35
+    assert warp["bonus_v_large"] == 70 and warp["magic"] and warp["blast"]["radius_m"] == 2.0
+    # the other units have no guns
+    assert not any("engines" in p for k, p in u.items() if k not in ART)
+
+
+def test_the_artillery_in_the_simulators_static_row():
+    """params.static: ammunition per gun, the database's reload (missile.reload_db_categories), one file a gun, the
+    fixed elevation only for the Mortar, the blast's numbers; zeros for every other unit."""
+    from tools.nn.sim.params import load
+    P = load()
+    mortar, volley, claw = (P.static(k) for k in (ART[0], ART[2], ART[4]))
+    assert mortar["ammo0"] == 88 and volley["ammo0"] == 4 * 198 and mortar["reload"] == 19.0
+    assert mortar["eng0"] == 4 and mortar["eng_hp"] == 473 and mortar["crew_k"] == 3 and mortar["hp0"] == 4356
+    assert mortar["width"] == 4 * mortar["sp_h"] and mortar["fix_el"] == 50 and volley["fix_el"] == 0
+    assert (mortar["min_range"], mortar["ex_r"], mortar["ex_d"], mortar["ex_ap"], mortar["ex_f"]) == (
+        60.0, 6.0, 60.0, 16.0, 260.0)
+    assert mortar["ex_allies"] and not mortar["ex_magic"] and claw["ex_magic"] and claw["ex_fx"] >= 0
+    assert claw["ex_fx"] == claw["sfx"]                     # the projectile's and the blast's contact effect: one
+    assert P.static(ART[5])["m_bvl"] == 70 and volley["m_bvl"] == 0 and volley["spv"] == 9
+    for key in ("wh_main_emp_inf_handgunners", "wh2_dlc13_emp_inf_huntsmen_0", "wh_main_emp_cav_empire_knights"):
+        s = P.static(key)
+        assert all(s[f] == 0 for f in ("eng0", "eng_hp", "fix_el", "min_range", "m_bvl", "ex_r")), key
+        assert s["ex_fx"] == -1 and not s["ex_allies"]
+    assert P.has_art and P.pen_men == 11

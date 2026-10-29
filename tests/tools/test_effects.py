@@ -54,7 +54,9 @@ def test_contact_effects_come_from_the_weapons_with_the_database_numbers():
                         # line g43 (25.10.2026): the poisoned stars and slings, the Jezzails' shield breaker
                         "wh2_main_skv_inf_gutter_runners_1": [POISON],
                         "wh2_main_skv_inf_gutter_runner_slingers_1": [POISON],
-                        "wh2_dlc12_skv_inf_warplock_jezzails_0": ["wh2_dlc09_unit_contact_shieldbreaker"]}
+                        "wh2_dlc12_skv_inf_warplock_jezzails_0": ["wh2_dlc09_unit_contact_shieldbreaker"],
+                        # artillery step 1 (29.10.2026): the Plagueclaw Catapult's shell (its projectile and its blast)
+                        "wh2_main_skv_art_plagueclaw_catapult": [CENSER]}
     # nobody owns a contact effect (it lies on the enemy it hits)
     assert not any(k in v for v in links.values() for k in (POISON, CENSER, SUPPRESS))
     for k in (POISON, CENSER, SUPPRESS):

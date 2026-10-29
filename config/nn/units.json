@@ -34,6 +34,58 @@
    "source": "land_units.engine",
    "checked": null
   },
+  "engines.n": {
+   "source": "an artillery unit's guns (land_units.num_engines with land_units.engine; no `engines` for a unit without)",
+   "checked": null
+  },
+  "engines.type": {
+   "source": "battlefield_engines.engine_type (Generic_3_Crew: the animation set with 3 crew places, R-work artillery_rules.md 5)",
+   "checked": null
+  },
+  "engines.crew_per_engine": {
+   "source": "ours: the number in engines.type (3) - the men a gun needs to fire (the game's code names no number: the probe 'crew under fire' to check)",
+   "checked": null
+  },
+  "engines.entity": {
+   "source": "battlefield_engines.battle_entity: the gun's body",
+   "checked": null
+  },
+  "engines.hp": {
+   "source": "the gun's battle_entities.hit_points + land_units.bonus_hit_points (425 + 48 the Empire's)",
+   "checked": null
+  },
+  "engines.mass": {
+   "source": "the gun's battle_entities.mass (2000)",
+   "checked": null
+  },
+  "engines.size": {
+   "source": "the gun's battle_entities.size (large)",
+   "checked": null
+  },
+  "engines.radius_m": {
+   "source": "the gun's battle_entities.radius",
+   "checked": null
+  },
+  "engines.radii_ratio": {
+   "source": "the gun's battle_entities.radii_ratio (a capsule's or an ellipse's; 1 a circle)",
+   "checked": null
+  },
+  "engines.height_m": {
+   "source": "the gun's battle_entities.height",
+   "checked": null
+  },
+  "engines.turn_deg_s": {
+   "source": "the gun's battle_entities.turn_speed, deg/s (45): the unit's speed.turn_deg_s",
+   "checked": null
+  },
+  "engines.fire_arc_deg": {
+   "source": "the gun's battle_entities.fire_arc_close / 2 (25): the unit's missile.fire_arc_deg",
+   "checked": null
+  },
+  "engines.projectile_resistance": {
+   "source": "the gun's battle_entities.projectile_penetration_resistance (5)",
+   "checked": null
+  },
   "rank_depth": {
    "source": "land_units.rank_depth",
    "checked": null
@@ -67,7 +119,7 @@
    "checked": "card HealthMax / men"
   },
   "hp_total": {
-   "source": "hp_per_man * men",
+   "source": "hp_per_man * men (+ engines.n x engines.hp of an artillery unit: one number for the crew and the guns, as the game's card)",
    "checked": "card HealthMax"
   },
   "mass": {
@@ -91,7 +143,7 @@
    "checked": null
   },
   "speed.walk": {
-   "source": "battle_entities.walk_speed, m/s",
+   "source": "battle_entities.walk_speed, m/s (a mounted unit its mount's, an artillery unit its gun's: 2.0, run 2.0 - the attribute cant_run; the speed.* and turn_deg_s alike)",
    "checked": "card slow_speed"
   },
   "speed.run": {
@@ -267,8 +319,12 @@
    "checked": null
   },
   "missile.ammo": {
-   "source": "land_units.primary_ammo, per man",
+   "source": "land_units.primary_ammo, per man; per gun of an artillery unit (missile.ammo_per 'engine': the projectiles - 198 Helblaster = 22 x 9 bullets, R-work artillery_rules.md 4)",
    "checked": "card stat_ammo"
+  },
+  "missile.ammo_per": {
+   "source": "ours: 'man', or 'engine' for an artillery unit",
+   "checked": null
   },
   "missile.accuracy": {
    "source": "land_units.accuracy",
@@ -361,10 +417,45 @@
   "missile.contact_phase": {
    "source": "projectiles.contact_stat_effect: the contact effect a hit lays on its target (the Ratling Gun's suppressing fire)",
    "checked": null
+  },
+  "missile.fixed_elevation": {
+   "source": "projectiles.fixed_elevation, degrees: the launch angle of a 'fixed' trajectory (the Mortar 50; read only for 'fixed')",
+   "checked": null
+  },
+  "missile.magic": {
+   "source": "projectiles.is_magical",
+   "checked": null
+  },
+  "missile.bonus_v_large": {
+   "source": "projectiles.bonus_v_large (the Warp Lightning Cannon +70)",
+   "checked": null
+  },
+  "missile.bonus_v_infantry": {
+   "source": "projectiles.bonus_v_infantry",
+   "checked": null
+  },
+  "missile.can_bounce": {
+   "source": "projectiles.can_bounce (the Great Cannon): no number of the bounce in the database",
+   "checked": null
+  },
+  "missile.can_roll": {
+   "source": "projectiles.can_roll",
+   "checked": null
+  },
+  "missile.mass": {
+   "source": "projectiles.mass, kg",
+   "checked": null
+  },
+  "missile.collision_radius_m": {
+   "source": "projectiles.collision_radius, m",
+   "checked": null
+  },
+  "missile.blast": {
+   "source": "projectiles_explosions of missile.explosion (null: none): radius_m detonation_radius, speed detonation_speed (the ring's growth, m/s), damage / ap_damage detonation_damage / _ap, force detonation_force, allies affects_allies, magic is_magical, contact_phase contact_phase_effect, type detonation_type",
+   "checked": null
   }
  },
  "_missing": {
-  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units but the Huntsmen's arrow (+8 against large; not in the passport: no large units in the training pools - the cavalry is the probes' only, data/units/probe-units.json)",
   "mount knock resistance": "battle_entities.hit_reactions_ignore_chance / knock_interrupts_ignore_chance of the mount (the demigryph 20 %, the warhorse 0): the simulator has no knock-downs in melee yet (build/diag_cav/units.md 4.5)",
   "mount turning": "battle_entities.min_turning_speed (the warhorse 1.0 m/s, infantry 0) and strafe_speed (3.0): what they do in numbers is not known (build/diag_cav/units.md 4.6)",
   "charge target pick": "battle_entities.charge_distance_pick_target (35 m the warhorse, 30 the demigryph): no reader found in the game's program (build/diag_cav/mechanic.md 8)",
@@ -717,6 +808,7 @@
     "weapon": "wh2_dlc13_emp_bow_archers",
     "projectile": "wh2_dlc13_emp_bow_arrow",
     "ammo": 20,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "arrow",
     "range_m": 130,
@@ -739,7 +831,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 3.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "equal"
   },
@@ -1112,6 +1213,7 @@
     "weapon": "wh2_main_skv_sling",
     "projectile": "wh2_main_skv_sling",
     "ammo": 22,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "sling",
     "range_m": 120,
@@ -1134,7 +1236,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 50,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "equal"
   },
@@ -1763,6 +1874,7 @@
     "weapon": "wh_dlc04_emp_free_company_pistol",
     "projectile": "wh_dlc04_emp_free_company_pistol_bullet",
     "ammo": 18,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "musket",
     "range_m": 90,
@@ -1785,7 +1897,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 2,
     "penetration_cap": "small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.05,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -2062,6 +2183,7 @@
     "weapon": "wh2_main_skv_sling_night_runners",
     "projectile": "wh2_main_skv_sling_night_runners",
     "ammo": 22,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "sling",
     "range_m": 140,
@@ -2084,7 +2206,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 50,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -2176,6 +2307,7 @@
     "weapon": "wh_main_emp_rifle",
     "projectile": "wh_emp_rifle_bullet",
     "ammo": 22,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "musket",
     "range_m": 145,
@@ -2198,7 +2330,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 5.0,
+    "collision_radius_m": 0.05,
+    "blast": null
    },
    "card_check": "equal"
   },
@@ -2290,6 +2431,7 @@
     "weapon": "wh_main_emp_crossbow",
     "projectile": "wh_emp_crossbow_bolt",
     "ammo": 22,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "arrow",
     "range_m": 160,
@@ -2312,7 +2454,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 5.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "equal"
   },
@@ -2681,6 +2832,7 @@
     "weapon": "wh2_main_skv_throwing_stars",
     "projectile": "wh2_main_skv_throwing_star",
     "ammo": 10,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "musket",
     "range_m": 70,
@@ -2703,7 +2855,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "equal"
   },
@@ -2798,6 +2959,7 @@
     "weapon": "wh2_dlc12_skv_ratling_gun_bullet",
     "projectile": "wh2_dlc12_skv_ratling_gun_bullet",
     "ammo": 270,
+    "ammo_per": "man",
     "accuracy": 20,
     "category": "musket",
     "range_m": 145,
@@ -2820,7 +2982,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": "wh2_dlc12_unit_contact_suppressive_fire"
+    "contact_phase": "wh2_dlc12_unit_contact_suppressive_fire",
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 5.0,
+    "collision_radius_m": 0.05,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3281,6 +3452,7 @@
     "weapon": "wh2_dlc13_emp_bow_huntsmen",
     "projectile": "wh2_dlc13_emp_bow_arrow_huntsman",
     "ammo": 22,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "arrow",
     "range_m": 160,
@@ -3303,7 +3475,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 8,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 3.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3397,6 +3578,7 @@
     "weapon": "wh_main_emp_rifle_ironsides",
     "projectile": "wh3_dlc25_emp_rifle_bullet_ironsides",
     "ammo": 30,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "musket",
     "range_m": 145,
@@ -3419,7 +3601,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 2,
     "penetration_cap": "small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 5.0,
+    "collision_radius_m": 0.05,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3512,6 +3703,7 @@
     "weapon": "wh3_dlc25_emp_rifle_hochland",
     "projectile": "wh3_dlc25_emp_inf_rifle_bullet_hochland",
     "ammo": 24,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "musket",
     "range_m": 260,
@@ -3534,7 +3726,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 1,
     "penetration_cap": "medium",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 6.0,
+    "collision_radius_m": 0.05,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3632,6 +3833,7 @@
     "weapon": "wh2_main_skv_throwing_star_gutter_runners",
     "projectile": "wh2_main_skv_throwing_star_gutter_runners",
     "ammo": 12,
+    "ammo_per": "man",
     "accuracy": 15,
     "category": "musket",
     "range_m": 70,
@@ -3654,7 +3856,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3752,6 +3963,7 @@
     "weapon": "wh2_main_skv_throwing_star_gutter_runners_poison",
     "projectile": "wh2_main_skv_throwing_star_gutter_runners_poison",
     "ammo": 12,
+    "ammo_per": "man",
     "accuracy": 15,
     "category": "musket",
     "range_m": 70,
@@ -3774,7 +3986,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": "wh_main_unit_contact_poison"
+    "contact_phase": "wh_main_unit_contact_poison",
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3871,6 +4092,7 @@
     "weapon": "wh2_main_skv_sling_gutter_runners",
     "projectile": "wh2_main_skv_sling_gutter_runners",
     "ammo": 24,
+    "ammo_per": "man",
     "accuracy": 15,
     "category": "sling",
     "range_m": 140,
@@ -3893,7 +4115,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": null
+    "contact_phase": null,
+    "fixed_elevation": 50,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -3990,6 +4221,7 @@
     "weapon": "wh2_main_skv_sling_gutter_runners_poison",
     "projectile": "wh2_main_skv_sling_gutter_runners_poison",
     "ammo": 24,
+    "ammo_per": "man",
     "accuracy": 15,
     "category": "sling",
     "range_m": 140,
@@ -4012,7 +4244,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 0,
     "penetration_cap": "very_small",
-    "contact_phase": "wh_main_unit_contact_poison"
+    "contact_phase": "wh_main_unit_contact_poison",
+    "fixed_elevation": 50,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.1,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -4107,6 +4348,7 @@
     "weapon": "wh2_dlc12_skv_warp_jezzails",
     "projectile": "wh2_dlc12_skv_warp_jezzails_bullet",
     "ammo": 22,
+    "ammo_per": "man",
     "accuracy": 10,
     "category": "musket",
     "range_m": 275,
@@ -4129,7 +4371,16 @@
     "shot_type": "small_arm_default",
     "penetration_max": 1,
     "penetration_cap": "medium",
-    "contact_phase": "wh2_dlc09_unit_contact_shieldbreaker"
+    "contact_phase": "wh2_dlc09_unit_contact_shieldbreaker",
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 6.0,
+    "collision_radius_m": 0.05,
+    "blast": null
    },
    "card_check": "no card"
   },
@@ -4656,6 +4907,884 @@
     "missile": 0.0
    },
    "missile": null,
+   "card_check": "no card"
+  },
+  "wh_main_emp_art_mortar": {
+   "land_unit": "wh_main_emp_art_mortar",
+   "caste": "warmachine",
+   "category": "artillery",
+   "class": "art_fld",
+   "men": 44,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": "wh_main_emp_art_mortar",
+   "engines": {
+    "n": 4,
+    "type": "Generic_3_Crew",
+    "entity": "wh_main_emp_art_mortar",
+    "crew_per_engine": 3,
+    "hp": 473,
+    "mass": 2000.0,
+    "size": "large",
+    "radius_m": 1.5,
+    "radii_ratio": 0.7,
+    "height_m": 1.7,
+    "turn_deg_s": 45.0,
+    "fire_arc_deg": 25.0,
+    "projectile_resistance": 5
+   },
+   "rank_depth": 5,
+   "entity": "wh2_dlc16_infantry_standard_crew_blood_dismembers",
+   "spacing": {
+    "template": "wh_main_artillery_small",
+    "h": 6.0,
+    "v": 9.0,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 56,
+   "hp_total": 4356,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 2.0,
+    "run": 2.0,
+    "charge": 2.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 20.0,
+    "acceleration": 2.0,
+    "deceleration": 3.0,
+    "turn_deg_s": 45.0
+   },
+   "melee": {
+    "attack": 10,
+    "defence": 6,
+    "charge_bonus": 5,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "cant_run"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 600,
+   "combat_potential": {
+    "melee": 60.0,
+    "missile": 590.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_mortar",
+    "projectile": "wh_emp_mortar_shell",
+    "ammo": 22,
+    "ammo_per": "engine",
+    "accuracy": 10,
+    "category": "artillery",
+    "range_m": 380,
+    "min_range_m": 60,
+    "reload_s": 19.0,
+    "damage": 100,
+    "ap_damage": 30,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "fixed",
+    "direct": false,
+    "muzzle_velocity": 68.0,
+    "max_elevation": 56,
+    "calibration_distance_m": 300.0,
+    "calibration_area_m": 380.0,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 25.0,
+    "explosion": "wh_main_emp_mortar_explosion",
+    "penetration": "low",
+    "shot_type": "artillery_explosive",
+    "penetration_max": 2,
+    "penetration_cap": "small",
+    "contact_phase": null,
+    "fixed_elevation": 50,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 50.0,
+    "collision_radius_m": 0.16,
+    "blast": {
+     "key": "wh_main_emp_mortar_explosion",
+     "type": "shockwave",
+     "radius_m": 6.0,
+     "speed": 11.0,
+     "damage": 60.0,
+     "ap_damage": 16.0,
+     "force": 260.0,
+     "allies": true,
+     "magic": false,
+     "contact_phase": null
+    }
+   },
+   "card_check": "no card"
+  },
+  "wh_main_emp_art_great_cannon": {
+   "land_unit": "wh_main_emp_art_great_cannon",
+   "caste": "warmachine",
+   "category": "artillery",
+   "class": "art_fld",
+   "men": 44,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": "wh_main_emp_art_great_cannon",
+   "engines": {
+    "n": 4,
+    "type": "Generic_3_Crew",
+    "entity": "wh_main_emp_art_great_cannon",
+    "crew_per_engine": 3,
+    "hp": 473,
+    "mass": 2000.0,
+    "size": "large",
+    "radius_m": 2.6,
+    "radii_ratio": 0.45,
+    "height_m": 2.0,
+    "turn_deg_s": 45.0,
+    "fire_arc_deg": 25.0,
+    "projectile_resistance": 5
+   },
+   "rank_depth": 5,
+   "entity": "wh2_dlc16_infantry_standard_crew_blood_dismembers",
+   "spacing": {
+    "template": "wh_main_artillery_small",
+    "h": 6.0,
+    "v": 9.0,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 56,
+   "hp_total": 4356,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 2.0,
+    "run": 2.0,
+    "charge": 2.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 20.0,
+    "acceleration": 2.0,
+    "deceleration": 3.0,
+    "turn_deg_s": 45.0
+   },
+   "melee": {
+    "attack": 10,
+    "defence": 6,
+    "charge_bonus": 5,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "cant_run"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 800,
+   "combat_potential": {
+    "melee": 80.0,
+    "missile": 720.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_cannon",
+    "projectile": "wh_emp_great_cannon_ball",
+    "ammo": 22,
+    "ammo_per": "engine",
+    "accuracy": 10,
+    "category": "artillery",
+    "range_m": 450,
+    "min_range_m": 10,
+    "reload_s": 22.0,
+    "damage": 88,
+    "ap_damage": 352,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 40,
+    "calibration_distance_m": 275.0,
+    "calibration_area_m": 8.5,
+    "marksmanship": 25.0,
+    "fire_arc_deg": 25.0,
+    "explosion": null,
+    "penetration": "very_high_low_entity",
+    "shot_type": "artillery_default",
+    "penetration_max": 9,
+    "penetration_cap": "very_large",
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": true,
+    "can_roll": true,
+    "mass": 350.0,
+    "collision_radius_m": 0.3,
+    "blast": null
+   },
+   "card_check": "no card"
+  },
+  "wh_main_emp_art_helblaster_volley_gun": {
+   "land_unit": "wh_main_emp_art_helblaster_volley_gun",
+   "caste": "warmachine",
+   "category": "artillery",
+   "class": "art_fld",
+   "men": 44,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": "wh_main_emp_art_helblaster_volley_gun",
+   "engines": {
+    "n": 4,
+    "type": "Generic_3_Crew",
+    "entity": "wh_main_emp_art_helblaster",
+    "crew_per_engine": 3,
+    "hp": 473,
+    "mass": 2000.0,
+    "size": "large",
+    "radius_m": 1.8,
+    "radii_ratio": 0.45,
+    "height_m": 2.0,
+    "turn_deg_s": 45.0,
+    "fire_arc_deg": 25.0,
+    "projectile_resistance": 5
+   },
+   "rank_depth": 5,
+   "entity": "wh2_dlc16_infantry_standard_crew_blood_dismembers",
+   "spacing": {
+    "template": "wh_main_artillery_small",
+    "h": 6.0,
+    "v": 9.0,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 56,
+   "hp_total": 4356,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 2.0,
+    "run": 2.0,
+    "charge": 2.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 20.0,
+    "acceleration": 2.0,
+    "deceleration": 3.0,
+    "turn_deg_s": 45.0
+   },
+   "melee": {
+    "attack": 10,
+    "defence": 6,
+    "charge_bonus": 5,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "cant_run"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1000,
+   "combat_potential": {
+    "melee": 130.0,
+    "missile": 1020.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_helblaster_volley_gun",
+    "projectile": "wh_emp_helblaster_volley_gun_bullet",
+    "ammo": 198,
+    "ammo_per": "engine",
+    "accuracy": 10,
+    "category": "artillery",
+    "range_m": 290,
+    "min_range_m": 0,
+    "reload_s": 10.0,
+    "damage": 18,
+    "ap_damage": 57,
+    "projectile_number": 1,
+    "shots_per_volley": 9,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 35,
+    "calibration_distance_m": 275.0,
+    "calibration_area_m": 7.0,
+    "marksmanship": 20.0,
+    "fire_arc_deg": 25.0,
+    "explosion": null,
+    "penetration": "medium_3",
+    "shot_type": "artillery_default",
+    "penetration_max": 3,
+    "penetration_cap": "medium",
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 8.0,
+    "collision_radius_m": 0.05,
+    "blast": null
+   },
+   "card_check": "no card"
+  },
+  "wh_main_emp_art_helstorm_rocket_battery": {
+   "land_unit": "wh_main_emp_art_helstorm_rocket_battery",
+   "caste": "warmachine",
+   "category": "artillery",
+   "class": "art_fld",
+   "men": 44,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": "wh_main_emp_art_helstorm_rocket_battery",
+   "engines": {
+    "n": 4,
+    "type": "Generic_3_Crew",
+    "entity": "wh_main_emp_art_helstorm",
+    "crew_per_engine": 3,
+    "hp": 473,
+    "mass": 2000.0,
+    "size": "large",
+    "radius_m": 1.9,
+    "radii_ratio": 0.45,
+    "height_m": 2.3,
+    "turn_deg_s": 45.0,
+    "fire_arc_deg": 25.0,
+    "projectile_resistance": 5
+   },
+   "rank_depth": 5,
+   "entity": "wh2_dlc16_infantry_standard_crew_blood_dismembers",
+   "spacing": {
+    "template": "wh_main_artillery_small",
+    "h": 6.0,
+    "v": 9.0,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 56,
+   "hp_total": 4356,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 2.0,
+    "run": 2.0,
+    "charge": 2.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 20.0,
+    "acceleration": 2.0,
+    "deceleration": 3.0,
+    "turn_deg_s": 45.0
+   },
+   "melee": {
+    "attack": 10,
+    "defence": 6,
+    "charge_bonus": 5,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.9,
+   "attributes": [
+    "cant_run"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 1050,
+   "combat_potential": {
+    "melee": 130.0,
+    "missile": 1070.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_rocket_battery",
+    "projectile": "wh_emp_rocket",
+    "ammo": 66,
+    "ammo_per": "engine",
+    "accuracy": 10,
+    "category": "artillery",
+    "range_m": 480,
+    "min_range_m": 40,
+    "reload_s": 17.0,
+    "damage": 30,
+    "ap_damage": 70,
+    "projectile_number": 1,
+    "shots_per_volley": 3,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 72.0,
+    "max_elevation": 65,
+    "calibration_distance_m": 300.0,
+    "calibration_area_m": 220.0,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 25.0,
+    "explosion": "wh_main_emp_rocket_explosion",
+    "penetration": "low",
+    "shot_type": "artillery_explosive",
+    "penetration_max": 2,
+    "penetration_cap": "small",
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": false,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 1.0,
+    "collision_radius_m": 0.25,
+    "blast": {
+     "key": "wh_main_emp_rocket_explosion",
+     "type": "shockwave",
+     "radius_m": 6.0,
+     "speed": 11.0,
+     "damage": 22.0,
+     "ap_damage": 51.0,
+     "force": 200.0,
+     "allies": true,
+     "magic": false,
+     "contact_phase": null
+    }
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_art_plagueclaw_catapult": {
+   "land_unit": "wh2_main_skv_art_plagueclaw_catapult",
+   "caste": "warmachine",
+   "category": "artillery",
+   "class": "art_fld",
+   "men": 56,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": "wh2_main_skv_art_plagueclaw_catapult",
+   "engines": {
+    "n": 4,
+    "type": "Generic_3_Crew",
+    "entity": "wh2_main_skv_art_plagueclaw_catapult",
+    "crew_per_engine": 3,
+    "hp": 543,
+    "mass": 2000.0,
+    "size": "large",
+    "radius_m": 3.0,
+    "radii_ratio": 0.5,
+    "height_m": 5.5,
+    "turn_deg_s": 45.0,
+    "fire_arc_deg": 25.0,
+    "projectile_resistance": 5
+   },
+   "rank_depth": 4,
+   "entity": "wh2_dlc16_skv_infantry_crew",
+   "spacing": {
+    "template": "wh_main_artillery",
+    "h": 10.0,
+    "v": 15.0,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 51,
+   "hp_total": 5028,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 2.0,
+    "run": 2.0,
+    "charge": 2.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 20.0,
+    "acceleration": 2.0,
+    "deceleration": 3.0,
+    "turn_deg_s": 45.0
+   },
+   "melee": {
+    "attack": 15,
+    "defence": 17,
+    "charge_bonus": 2,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 30,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 54,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "cant_run"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 900,
+   "combat_potential": {
+    "melee": 90.0,
+    "missile": 810.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_plagueclaw_catapult",
+    "projectile": "wh2_main_skv_plagueclaw",
+    "ammo": 22,
+    "ammo_per": "engine",
+    "accuracy": 10,
+    "category": "artillery",
+    "range_m": 400,
+    "min_range_m": 35,
+    "reload_s": 18.0,
+    "damage": 45,
+    "ap_damage": 105,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 67.0,
+    "max_elevation": 60,
+    "calibration_distance_m": 600.0,
+    "calibration_area_m": 150.0,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 25.0,
+    "explosion": "wh2_main_skv_plagueclaw",
+    "penetration": "high",
+    "shot_type": "artillery_default",
+    "penetration_max": 10,
+    "penetration_cap": "large",
+    "contact_phase": "wh2_main_unit_contact_plague_monk_censer_morale",
+    "fixed_elevation": 45,
+    "magic": true,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 50.0,
+    "collision_radius_m": 0.2,
+    "blast": {
+     "key": "wh2_main_skv_plagueclaw",
+     "type": "shockwave",
+     "radius_m": 5.0,
+     "speed": 11.0,
+     "damage": 35.0,
+     "ap_damage": 70.0,
+     "force": 180.0,
+     "allies": true,
+     "magic": true,
+     "contact_phase": "wh2_main_unit_contact_plague_monk_censer_morale"
+    }
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_art_warp_lightning_cannon": {
+   "land_unit": "wh2_main_skv_art_warp_lightning_cannon",
+   "caste": "warmachine",
+   "category": "artillery",
+   "class": "art_fld",
+   "men": 56,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": "wh2_main_skv_art_warplightning_cannon",
+   "engines": {
+    "n": 4,
+    "type": "Generic_3_Crew",
+    "entity": "wh2_main_skv_art_warp_lightning_cannon",
+    "crew_per_engine": 3,
+    "hp": 540,
+    "mass": 2000.0,
+    "size": "large",
+    "radius_m": 3.5,
+    "radii_ratio": 0.5,
+    "height_m": 4.5,
+    "turn_deg_s": 45.0,
+    "fire_arc_deg": 25.0,
+    "projectile_resistance": 5
+   },
+   "rank_depth": 4,
+   "entity": "wh2_dlc16_skv_infantry_crew",
+   "spacing": {
+    "template": "wh_main_artillery",
+    "h": 10.0,
+    "v": 15.0,
+    "scatter": 0.0,
+    "chaotic": false
+   },
+   "hp_per_man": 48,
+   "hp_total": 4848,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.65,
+   "radii_ratio": 1.0,
+   "speed": {
+    "walk": 2.0,
+    "run": 2.0,
+    "charge": 2.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 20.0,
+    "acceleration": 2.0,
+    "deceleration": 3.0,
+    "turn_deg_s": 45.0
+   },
+   "melee": {
+    "attack": 16,
+    "defence": 16,
+    "charge_bonus": 2,
+    "weapon": "wh2_main_skv_sword_skavenslaves",
+    "damage": 14,
+    "ap_damage": 4,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": null
+   },
+   "armour": 30,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "cant_run"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 950,
+   "combat_potential": {
+    "melee": 100.0,
+    "missile": 850.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_warp_lightning",
+    "projectile": "wh2_main_skv_warp_lightning",
+    "ammo": 22,
+    "ammo_per": "engine",
+    "accuracy": 10,
+    "category": "artillery",
+    "range_m": 430,
+    "min_range_m": 10,
+    "reload_s": 21.0,
+    "damage": 80,
+    "ap_damage": 260,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 110.0,
+    "max_elevation": 50,
+    "calibration_distance_m": 350.0,
+    "calibration_area_m": 9.0,
+    "marksmanship": 30.0,
+    "fire_arc_deg": 25.0,
+    "explosion": "wh2_main_skv_warp_lightning",
+    "penetration": "very_high_low_entity",
+    "shot_type": "artillery_default",
+    "penetration_max": 9,
+    "penetration_cap": "very_large",
+    "contact_phase": null,
+    "fixed_elevation": 45,
+    "magic": true,
+    "bonus_v_large": 70,
+    "bonus_v_infantry": 0,
+    "can_bounce": false,
+    "can_roll": false,
+    "mass": 300.0,
+    "collision_radius_m": 0.1,
+    "blast": {
+     "key": "wh2_main_skv_warp_lightning",
+     "type": "shockwave",
+     "radius_m": 2.0,
+     "speed": 12.0,
+     "damage": 5.0,
+     "ap_damage": 20.0,
+     "force": 70.0,
+     "allies": true,
+     "magic": true,
+     "contact_phase": null
+    }
+   },
    "card_check": "no card"
   }
  }

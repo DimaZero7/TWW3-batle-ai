@@ -502,12 +502,13 @@ def contact_on(u, params, E, alive):
     return on
 
 
-def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t):
+def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None):
     """The contact effects laid this step (module doc), in place: each timer cfx{j}_s runs down by dt, then starts at
     the effect's duration_s on every unit an enemy weapon of it hit this step. hp_melee / hp_missile [B, i, j]: HP i's
     blows / projectiles took from j this step, mhit / shit [B, i, j] the HP a hit; enemy [B, i, j]. Hits land as
     Poisson counts of the expected ones: at least one with 1 - exp(-hits) (a hash draw per battle, unit and step,
-    morale._hash_uniform, so a replay draws the same)."""
+    morale._hash_uniform, so a replay draws the same). blast [B, i, j]: the hits of i's shells' blasts on j (artillery.land),
+    which lay i's blast's contact effect (STATIC ex_fx: the Plagueclaw's -10 morale); None: none."""
     keys = contact_keys(params)
     if not keys or "cfx0_s" not in u:
         return
@@ -521,6 +522,8 @@ def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t):
     T = table(params, u["men"].device)
     for j, i, _ in keys:
         hits = ((u["mfx"] == i).float()[:, :, None] * n_m).sum(1) + ((u["sfx"] == i).float()[:, :, None] * n_s).sum(1)
+        if blast is not None and "ex_fx" in u:
+            hits = hits + ((u["ex_fx"] == i).float()[:, :, None] * blast * enemy).sum(1)
         draw = morale._hash_uniform(B, N, k, u["men"].device, salt=52817 + 131 * j, ids=ids)
         hit = (hits > 0) & (draw < 1 - torch.exp(-hits))
         left = (u[f"cfx{j}_s"] - dt).clamp(min=0)

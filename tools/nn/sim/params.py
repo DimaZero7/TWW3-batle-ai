@@ -92,6 +92,7 @@ class Params:
     # loop over the passports inside the compiled step)
     pen_men: int = field(init=False, default=1)       # the most men a projectile strikes (missile.pen_limit)
     can_hide: bool = field(init=False, default=False)  # some unit can hide: the attribute stalk (stealth.on)
+    has_art: bool = field(init=False, default=False)   # some unit has guns and artillery is on (artillery.on)
 
     def __post_init__(self):
         self.pen_men = pen_limit_of(self.units or {}, self.sim or {})
@@ -99,6 +100,8 @@ class Params:
         # meets the conditions, so stealth's step changes nothing)
         self.can_hide = any({"stalk", "hide_forest"} & set(u.get("attributes") or ())
                             for u in (self.units or {}).values())
+        self.has_art = bool(((self.sim or {}).get("artillery") or {}).get("on")) and any(
+            (u.get("engines") or {}).get("n") for u in (self.units or {}).values())
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -156,6 +159,12 @@ class Params:
             return float(table.get(key, table["default"])) if isinstance(table, dict) else float(table)
         return {"sk_m": by_key(cal["start_gap_m"]), "sk_stop_m": by_key(cal["stop_gap_m"])}
 
+    def artillery_static(self, key):
+        """The unit's STATIC artillery fields (module artillery_static)."""
+        # (the blast's contact effect as the weapons' own: the modelled contact effects, effects.laid_by)
+        idx = {k: i for _, i, k in innate.contact_keys(self)}
+        return artillery_static(self.units, self.sim, idx, key)
+
     def static(self, key, faction=None):
         """The STATIC fields (tools/nn/sim/state.py) of a unit key, without its place."""
         u = self.units[key]
@@ -170,12 +179,16 @@ class Params:
         own = (ms.get("reload_projectile_s") or {}).get(missile.get("projectile")) if missile else None
         if own is not None:
             reload_s = float(own)
+        elif missile and cat in (ms.get("reload_db_categories") or ()):
+            # (missile.reload_db_why) artillery: the database's reload, unmeasured (no fitted scale)
+            reload_s = float(missile.get("reload_s") or 0.0)
         elif missile:
             ref = (ms.get("reload_ref_s") or {}).get(cat)
             reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
                         if cat in ms["reload_s"] else missile.get("reload_s", 0) * ms["reload_scale_other"])
         aim_s, rt_s, quiet_s = aim_times(missile, ms)
         resist = u.get("damage_resist") or {}
+        eng = u.get("engines") or None
         h, v = self.spacing_of(key)
         men = u["men"]
         return {
@@ -184,7 +197,9 @@ class Params:
             # the body across: an ellipse body (a beast, a weapon team) is radius long and radius x this across
             "body_ratio": u.get("radii_ratio", 1.0),
             # the default order: men / rank_depth files (the database's ranks), h apart
-            "width": (men / max(1, u.get("rank_depth") or 1)) * h if men > 1 else 2 * u["radius_m"],
+            # (an artillery unit: its guns side by side, one file a gun - geometry.dims)
+            "width": (eng["n"] * h if eng and (self.sim.get("artillery") or {}).get("on")
+                      else (men / max(1, u.get("rank_depth") or 1)) * h if men > 1 else 2 * u["radius_m"]),
             # the narrowest formation's files as a share of the men by the database's class (formation.reform; 0: fixed)
             "wmin_k": reform_share(u.get("class"), self.sim["formation"].get("reform") or {}),
             "walk": u["speed"]["walk"], "run": u["speed"]["run"], "charge_speed": u["speed"]["charge"],
@@ -224,7 +239,9 @@ class Params:
             "melee_fire": bool(missile) and missile.get("projectile") in (ms.get("fire_in_melee") or ()),
             # its hits on a lone man in melee land as out of melee (missile.single_in_melee_projectiles: the Ratling Gun)
             "lone_hit": bool(missile) and missile.get("projectile") in (ms.get("single_in_melee_projectiles") or ()),
-            "ammo0": men * missile.get("ammo", 0) if missile else 0,
+            # (an artillery unit's ammunition is per gun: missile.ammo_per 'engine')
+            "ammo0": ((eng["n"] if missile.get("ammo_per") == "engine" and eng else men) * missile.get("ammo", 0)
+                      if missile else 0),
             "range": missile.get("range_m", 0) if missile else 0,
             "reload": reload_s,
             # the database's reload (the reload skill's base, effects.py: Blackpowder Discipline's +10)
@@ -284,10 +301,41 @@ class Params:
             # by scenario.build / abilities.set_rule
             **self.skirmish_gaps(key),
             "sk": False,
+            # artillery (tools/nn/sim/artillery.py; config/nn/sim.json artillery): its guns, their crew, the trajectory,
+            # the minimum range, the bonus against large and the projectile's blast - 0 / -1 for every other unit
+            **self.artillery_static(key),
             **{f"ab{k}": i for k, i in enumerate(abilities.slots_of(self, key))},
             # its spells (the passport's `spells`, config/nn/abilities.json spells; magic.py)
             **{f"sp{k}": i for k, i in enumerate(magic.slots_of(self, key))},
         }
+
+
+def artillery_static(units, sim, effects_index, key):
+    """The STATIC artillery fields of a unit (state.py eng0 ... c_mom): its guns (engines.n, hp, crew_per_engine), its
+    projectile's fixed elevation (trajectory 'fixed'), minimum range, bonus against large, collision radius and
+    momentum, its blast (missile.blast) and the blast's contact effect (index in effects_index, -1 none). Every field 0
+    (ex_fx -1) for a unit without guns or with sim.json artillery off: the rules then never act on it."""
+    u = units[key]
+    eng = u.get("engines") or {}
+    m = u.get("missile") or {}
+    out = {"eng0": 0.0, "eng_hp": 0.0, "crew_k": 0.0, "fix_el": 0.0, "min_range": 0.0, "m_bvl": 0.0, "ex_r": 0.0,
+           "ex_d": 0.0, "ex_ap": 0.0, "ex_f": 0.0, "ex_v": 0.0, "ex_allies": False, "ex_magic": False, "ex_fx": -1,
+           "c_rad": 0.0, "c_mom": 0.0}
+    if not (sim.get("artillery") or {}).get("on") or not eng.get("n"):
+        return out
+    out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1))
+    if m:
+        bl = m.get("blast") or {}
+        out.update(fix_el=float(m.get("fixed_elevation") or 0.0) if m.get("trajectory") == "fixed" else 0.0,
+                   min_range=float(m.get("min_range_m") or 0.0), m_bvl=float(m.get("bonus_v_large") or 0.0),
+                   c_rad=float(m.get("collision_radius_m") or 0.0),
+                   c_mom=float(m.get("mass") or 0.0) * float(m.get("muzzle_velocity") or 0.0))
+        if bl and bl.get("type") == "shockwave":
+            out.update(ex_r=float(bl["radius_m"]), ex_d=float(bl["damage"]), ex_ap=float(bl["ap_damage"]),
+                       ex_f=float(bl["force"]), ex_v=float(bl["speed"]), ex_allies=bool(bl.get("allies")),
+                       ex_magic=bool(bl.get("magic")),
+                       ex_fx=effects_index.get(bl.get("contact_phase"), -1) if bl.get("contact_phase") else -1)
+    return out
 
 
 def pen_limit_of(units, sim):

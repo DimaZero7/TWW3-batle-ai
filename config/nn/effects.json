@@ -49,7 +49,8 @@
   "wh2_main_unit_passive_snare_net",
   "wh3_dlc25_unit_passive_blackpowder_discipline",
   "causes_fear",
-  "immune_to_psychology"
+  "immune_to_psychology",
+  "cant_run"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -826,6 +827,25 @@
    "modelled": true,
    "sim": "no fear (morale.py; config/nn/sim.json morale.fear); terror is not modelled",
    "why": null
+  },
+  "cant_run": {
+   "kind": "attribute",
+   "name": "Cant Run",
+   "rules": [
+    "cant_run"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (cant_run)",
+   "kb": null,
+   "does": null,
+   "modelled": false,
+   "sim": null,
+   "why": "no rule known for this attribute yet (ATTRIBUTES)"
   }
  },
  "units": {
@@ -861,6 +881,12 @@
    "moulder_monster",
    "strider",
    "wh2_main_unit_passive_scurry_away"
+  ],
+  "wh2_main_skv_art_plagueclaw_catapult": [
+   "cant_run"
+  ],
+  "wh2_main_skv_art_warp_lightning_cannon": [
+   "cant_run"
   ],
   "wh2_main_skv_cha_warlord_0": [
    "encourages",
@@ -1003,6 +1029,18 @@
    "hide_forest",
    "mounted_fire_move"
   ],
+  "wh_main_emp_art_great_cannon": [
+   "cant_run"
+  ],
+  "wh_main_emp_art_helblaster_volley_gun": [
+   "cant_run"
+  ],
+  "wh_main_emp_art_helstorm_rocket_battery": [
+   "cant_run"
+  ],
+  "wh_main_emp_art_mortar": [
+   "cant_run"
+  ],
   "wh_main_emp_cav_demigryph_knights_0": [
    "causes_fear",
    "hide_forest"
@@ -1060,6 +1098,9 @@
   ],
   "wh2_dlc16_skv_mon_wolf_rats_1": [
    "wh_main_unit_contact_poison"
+  ],
+  "wh2_main_skv_art_plagueclaw_catapult": [
+   "wh2_main_unit_contact_plague_monk_censer_morale"
   ],
   "wh2_main_skv_inf_gutter_runner_slingers_1": [
    "wh_main_unit_contact_poison"

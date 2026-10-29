@@ -216,6 +216,29 @@ STATIC = {
     "size_k": ("f", "a man's size as SIZE_RANK (battle_entities size: small 1)"),
     "fxd": ("i", "its delayed innate effect (the catalogue's delay_s: Blackpowder Discipline), index in the order, -1 "
                  "none (effects.py)"),
+    # (29.10.2026, artillery step 1: tools/nn/sim/artillery.py; 0 / -1 for every other unit)
+    "eng0": ("f", "an artillery unit's guns at the start (the database's num_engines; 0: not artillery): its men are the "
+                  "crew, its guns fire (artillery.guns)"),
+    "eng_hp": ("f", "health of one gun (its battle entity's hit_points + the unit's bonus_hit_points: 473 the Empire's)"),
+    "crew_k": ("f", "the crew a gun needs to fire (engines.crew_per_engine: 3, the engine_type Generic_3_Crew)"),
+    "fix_el": ("f", "the launch angle of a 'fixed' trajectory, degrees (the Mortar 50: it arcs over friends and hills, "
+                    "its shells land after their flight; 0: not fixed)"),
+    "min_range": ("f", "the projectile's minimum range, m: a target nearer, edge to edge, is not taken (0: none; given "
+                       "only to artillery)"),
+    "m_bvl": ("f", "the projectile's bonus damage against a large target (projectiles.bonus_v_large: the Warp Lightning "
+                   "Cannon 70; given only to artillery)"),
+    "ex_r": ("f", "its projectile's blast radius, m (projectiles_explosions detonation_radius; 0: no blast; artillery only)"),
+    "ex_d": ("f", "the blast's damage (detonation_damage) at its centre"),
+    "ex_ap": ("f", "the blast's armour-piercing damage (detonation_damage_ap)"),
+    "ex_f": ("f", "the blast's force (detonation_force)"),
+    "ex_v": ("f", "the blast's ring speed, m/s (detonation_speed)"),
+    "ex_allies": ("b", "the blast strikes its own side too (affects_allies)"),
+    "ex_magic": ("b", "the blast is magical (is_magical): spell resistance cuts it"),
+    "ex_fx": ("i", "the contact effect the blast lays on the units it strikes (contact_phase_effect; index in "
+                   "config/nn/effects.json order, -1 none)"),
+    "c_rad": ("f", "the projectile's collision radius, m (a fixed shell's own hit: the men within it + their radius)"),
+    "c_mom": ("f", "the projectile's momentum, mass x muzzle velocity (a fixed shell's own hit knocks a man down at "
+                   "momentum / his mass >= collision_speed_delta_threshold_knocked_down)"),
     "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
                  "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
                  "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),
@@ -404,6 +427,16 @@ INTERNAL = {
     "hid_t": ("f", "seconds since it hid (the enemies' spotting + stealth.fresh_bonus_m for stealth.fresh_s)"),
     "hid_g": ("f", "seconds of the grace used out of cover while hidden (stealth.grace_s)"),
     "hid_r": ("f", "seconds left of the window after it was revealed in which it hides again at once (stealth.quick_s)"),
+    # (artillery step 1: tools/nn/sim/artillery.py)
+    "eng": ("f", "an artillery unit's guns left (the guns' health pool eng_w over a gun's eng_hp, rounded up)"),
+    "eng_w": ("f", "an artillery unit's guns' health left, HP: part of hp_abs (one number for the unit, as the game's); "
+                   "the crew's is hp_abs - eng_w"),
+    "sh_s": ("f", "seconds until its volley's shells in flight land (-1: none in flight; artillery.py)"),
+    "sh_x": ("f", "their landing point x, m (the target's centre + its velocity x the flight time at the shot)"),
+    "sh_z": ("f", "their landing point z, m"),
+    "sh_n": ("f", "the shells of that volley"),
+    "sh_R": ("f", "the radius of the disc they land uniformly over, m (the spread and the target's box, artillery.py)"),
+    "art_kd": ("f", "bookkeeping: men its shells have knocked down so far"),
     "hid_d": ("b", "deployed, not stepped yet: a hide_forest unit in the woods at the first step starts hidden "
                    "(stealth.start_hidden)"),
 }
@@ -532,6 +565,8 @@ def empty(B, N, device="cpu", history=0):
     u["fxt1"].fill_(-1)
     u["mfx"].fill_(-1)
     u["sfx"].fill_(-1)
+    u["ex_fx"].fill_(-1)
+    u["sh_s"].fill_(-1)
     u["fxd"].fill_(-1)
     u["snap_ab"].fill_(-1)
     for name in ("sp0", "sp1", "cq_k", "cq_t", "cast_k", "cast_t", "bm0_s", "bm0_t", "bm1_s", "bm1_t"):

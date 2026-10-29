@@ -212,7 +212,7 @@ def test_men_struck_by_the_rule():
     H = st.N // 2
     jez, lr, iron, gun = 0, 1, 2, 3
     spear, rats = H, H + 1
-    assert missile.pen_limit(P) == 2
+    assert missile.pen_limit(P) == 11          # (the artillery's catapult since 29.10.2026: 1 + 10; was 2)
     assert n[jez, spear] == 2 and n[lr, spear] == 2 and n[iron, spear] == 1 and n[gun, spear] == 1
     assert n[jez, rats] == 1
 
@@ -387,8 +387,10 @@ def test_the_nets_charge_is_the_catalogues_081_and_its_speed_09():
 
 
 def test_the_penetration_limit_and_hiding_are_worked_out_once():
-    assert P.pen_men == 2 and missile.pen_limit(P) == 2 and P.can_hide and stealth.on(P)
-    old = {k: u for k, u in P.units.items() if "gutter" not in k and "jezzail" not in k and "long_rifles" not in k
+    assert P.pen_men == 11 and missile.pen_limit(P) == 11 and P.can_hide and stealth.on(P)
+    lines = {k: u for k, u in P.units.items() if "_art_" not in k}          # (without the artillery, 29.10.2026)
+    assert Params(lines, P.rules, P.sim, P.abilities, P.effects, P.spells).pen_men == 2
+    old = {k: u for k, u in lines.items() if "gutter" not in k and "jezzail" not in k and "long_rifles" not in k
            and "huntsmen" not in k}
     q = Params(old, P.rules, P.sim, P.abilities, P.effects, P.spells)
     # (hide_forest units hide in woods: stealth is on while any unit can hide - ground.py's forest)
