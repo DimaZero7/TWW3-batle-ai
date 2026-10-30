@@ -35,6 +35,11 @@ class ModelConfig:
     pairs: bool = True       # v2: the pair features (reach, closing speed, bearing: pairs.py) in the units' attention
     #                          bias and the target pointer; their weights start at 0, so a v2 checkpoint saved before
     #                          them (its config has no `pairs`: True) loads and computes what it did
+    form: bool = False       # v2: the formation's heads (chain.py): a facing (keep or one of chain.FACES directions in
+    #                          the side's frame) and a width (keep or one of chain.WIDTHS - 1 steps from the unit's
+    #                          narrowest to its widest frontage); they start on 'keep' (chain.FORM_KEEP_BIAS), so a v2
+    #                          checkpoint saved before them (its config has no `form`: False) loads and, given them
+    #                          (run.py --exec-form 1), computes what it did with 'keep' all but always
     critic_d: int = 128      # the centralised critic (training only)
     critic_layers: int = 3
     critic_heads: int = 4

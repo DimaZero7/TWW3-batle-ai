@@ -642,14 +642,21 @@ def ability_timers(doc, names, slots, passports=None, own=1):
     return out
 
 
-def orders_list(names, side, kind, x, z, target, run, own=1):
-    """The network's orders [N] (numpy, the simulator's layout) -> one dict per unit of side `own`."""
+def orders_list(names, side, kind, x, z, target, run, own=1, face=None, width=None):
+    """The network's orders [N] (numpy, the simulator's layout) -> one dict per unit of side `own`. face, width [N]
+    (Orders.face / Orders.width: degrees of the world's bearing / m, < 0 none): a hold's, a move's or a withdraw's
+    "face" / "width" when given (the formation's heads, tools/nn/model/chain.py cfg.form)."""
     out = []
     for i, name in enumerate(names):
         if side[i] != own:
             continue
         k = KINDS[int(kind[i])]
         o = {"unit": name, "kind": k}
+        if k in ("hold", "move", "withdraw"):
+            if face is not None and float(face[i]) >= 0:
+                o["face"] = round(float(face[i]), 2)
+            if width is not None and float(width[i]) >= 0:
+                o["width"] = round(float(width[i]), 1)
         if k in ("move", "withdraw"):
             o.update(x=round(float(x[i]), 1), z=round(float(z[i]), 1), run=bool(run[i]) or k == "withdraw")
         elif k == "attack":
@@ -695,13 +702,21 @@ def orders_text(batch, move, orders, think_ms=None, abilities=()):
         if k in ("move", "withdraw"):
             if not (math.isfinite(o["x"]) and math.isfinite(o["z"])):
                 raise ValueError(f"order point not finite: {o}")
-            lines.append(f"unit {o['unit']} {k} {o['x']:.1f} {o['z']:.1f} {int(bool(o['run']))}")
+            line = f"unit {o['unit']} {k} {o['x']:.1f} {o['z']:.1f} {int(bool(o['run']))}"
         elif k == "attack":
-            lines.append(f"unit {o['unit']} attack {o['target']} {int(bool(o['run']))}")
+            line = f"unit {o['unit']} attack {o['target']} {int(bool(o['run']))}"
         elif k in ("hold", "keep"):
-            lines.append(f"unit {o['unit']} {k}")
+            line = f"unit {o['unit']} {k}"
         else:
             raise ValueError(f"unknown order kind: {k}")
+        if k in ("hold", "move", "withdraw"):
+            # the formation (orders_list): "face <deg>" (the world's bearing 0..360) and / or "width <m>" at the end
+            for f, fmt in (("face", "{:.2f}"), ("width", "{:.1f}")):
+                if o.get(f) is not None:
+                    if not (math.isfinite(o[f]) and o[f] >= 0):
+                        raise ValueError(f"order {f} not finite or negative: {o}")
+                    line += f" {f} " + fmt.format(o[f])
+        lines.append(line)
     for a in abilities:
         target = a.get("target") or ""
         if not a["unit"] or not a["key"] or any(c.isspace() for c in a["unit"] + a["key"] + target):
@@ -728,10 +743,17 @@ def parse_orders(text):
             doc["think_ms"] = float(w[1])
         elif w[0] == "unit":
             o = {"kind": w[2]}
+            rest = []
             if w[2] in ("move", "withdraw"):
                 o.update(x=float(w[3]), z=float(w[4]), run=w[5] == "1")
+                rest = w[6:]
             elif w[2] == "attack":
                 o.update(target=w[3], run=w[4] == "1")
+            elif w[2] == "hold":
+                rest = w[3:]
+            for f, v in zip(rest[::2], rest[1::2]):
+                if f in ("face", "width"):
+                    o[f] = float(v)
             doc["orders"][w[1]] = o
         elif w[0] == "ability":
             doc["abilities"].append({"unit": w[1], "key": w[2], **({"target": w[3]} if len(w) > 3 else {})})

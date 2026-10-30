@@ -27,7 +27,9 @@ ABILITY_PARAMS = ("abilities.", "heads.ability_", "ability_extra.")
 # ... and a v2 actor saved before the pair features (cfg.pairs, pairs.py): their layers start at zero (computes what
 # it did).
 PAIR_PARAMS = ("pair_bias.", "heads.target_pair.")
-FRESH_PARAMS = ABILITY_PARAMS + ("heads.cell_",) + PAIR_PARAMS
+# ... and the formation's heads (cfg.form, chain.py) of a network saved before them: fresh, on keep (tools/nn/general/form.py)
+FORM_PARAMS = ("heads.face.", "heads.width.")
+FRESH_PARAMS = ABILITY_PARAMS + ("heads.cell_",) + PAIR_PARAMS + FORM_PARAMS
 
 
 def to_torch(obs, device=None):

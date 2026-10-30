@@ -16,7 +16,7 @@ import torch
 # state and passport, the "none" score); the trunk's ability encoder (policy.ABILITY_PARAMS "abilities.") stays.
 PARTS = {"kind": ("kind",), "target": ("q", "k", "target_pair"), "sector": ("place_q", "place_k", "place_near"),
          "cell": ("fine",), "hold": ("commit",), "run": ("run",), "cond": ("cond",),
-         "ability": ("ability_q", "ability_k", "ability_none")}
+         "ability": ("ability_q", "ability_k", "ability_none"), "face": ("face",), "width": ("width",)}
 
 
 def parse(spec):

@@ -50,8 +50,10 @@ class Action:
     run: torch.Tensor      # [B, N] bool
     ability: torch.Tensor = None   # [B, N] long: ability slot to use, -1 none; None: not chosen
     commit: torch.Tensor = None    # [B, N] long: the commitment's duration (commit.DURATIONS index; v2 only, chain.py)
+    face: torch.Tensor = None      # [B, N] long: the facing, 0 keep, 1 + k direction k (v2 with cfg.form, chain.py)
+    width: torch.Tensor = None     # [B, N] long: the width, 0 keep, 1 + k step k (v2 with cfg.form, chain.py)
 
-    FIELDS = ("kind", "point", "target", "run", "ability", "commit")
+    FIELDS = ("kind", "point", "target", "run", "ability", "commit", "face", "width")
 
     def parts(self):
         """The fields that are set (not None), in order."""

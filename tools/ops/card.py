@@ -353,6 +353,31 @@ def groups_line(folder):
             + ", ".join(f"{title} {f.format(g[k])}" for k, title, f in GROUP_KEYS if k in g)]
 
 
+def formation_line(folder):
+    """["exec formation heads (training log, mean of N updates): keep face x (rows a update), width y (...)"] - the
+    executor's facing and width heads (tools/nn/model/chain.py cfg.form; ppo head_keep_*, head_rows_*): the share of
+    the decisions with a choice that kept the facing / width in force; [] without them."""
+    log = Path(folder).parent.parent / "runs" / f"test5_{Path(folder).name}" / "log.jsonl"
+    if not log.is_file():
+        return []
+    vals = {}
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        for k in ("head_keep_face", "head_rows_face", "head_keep_width", "head_rows_width"):
+            if isinstance(row.get(k), (int, float)):
+                vals.setdefault(k, []).append(float(row[k]))
+    if not vals.get("head_keep_face") and not vals.get("head_keep_width"):
+        return []
+    m = {k: sum(v) / len(v) for k, v in vals.items()}
+    n = max(len(vals.get("head_keep_face", ())), len(vals.get("head_keep_width", ())))
+    return [f"exec formation heads (training log, mean of {n} updates): keep " + ", ".join(
+        f"{h} {m['head_keep_' + h]:.4f} ({m.get('head_rows_' + h, 0):.0f} decisions with a choice an update)"
+        for h in ("face", "width") if "head_keep_" + h in m)]
+
+
 def card(folder, prev=None):
     """The card's lines (markdown) and its data ({"points", "rows", "anomalies", "capacity"})."""
     pts, rep = points_of(folder)
@@ -396,6 +421,7 @@ def card(folder, prev=None):
                      "rows are not computed (\"-\"); judge by the exam's proxy, the pinned window and own lord deaths")
     lines += ["anomalies: " + ("; ".join(anomaly) if anomaly else "none")]
     lines += groups_line(folder)
+    lines += formation_line(folder)
     capacity = (rep or {}).get("capacity")
     if capacity:
         lines.append(f"capacity: {capacity.get('verdict')} - {'; '.join(capacity.get('reasons') or [])}")

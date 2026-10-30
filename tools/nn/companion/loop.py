@@ -63,6 +63,18 @@ class Brain:
         self.shape_last = None               # (t s, [N, F] tensor, [N] read) of the last reading: the observation's SHAPE
         self.shape_ms = None                 # what the last computation took
 
+    def wlim(self, b):
+        """[1, N, 2] each unit's narrowest and widest frontage (m) for the width head of a network with the formation's
+        heads (tools/nn/model/chain.py cfg.form; tools/nn/general/form.py: the simulator's limits by the units' keys),
+        once a battle; None for another network."""
+        if not getattr(self.actor.cfg, "form", False):
+            return None
+        if getattr(self, "_wlim", (None,))[0] != b.batch:
+            from tools.nn.general import form
+            from tools.nn.sim.params import load
+            self._wlim = (b.batch, form.limits_static(b.setup.keys[0], load())[None].numpy())
+        return self._wlim[1]
+
     def orders_before(self, batch, move):
         """The network's orders in force as the simulator's opponent sees them at decision `move`: before
         this move's answer (both sides decide on the same state). {} for another battle."""
@@ -105,9 +117,10 @@ class Brain:
             task, self.plans = self.general.decide(b, state, obs, self.memory)
             actor = companion_general.with_task(self.actor, task)
         orders, self.h, _, _ = decide.act(actor, obs, b.setup, self.h, self.greedy, self.temperature,
-                                          commit_state=self.commit, t=state["t"])
+                                          commit_state=self.commit, t=state["t"], wlim=self.wlim(b))
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
-        out = exchange.orders_list(b.names, b.side, *cols, own=me)
+        out = exchange.orders_list(b.names, b.side, *cols, own=me, face=orders.face[0].cpu().numpy(),
+                                   width=orders.width[0].cpu().numpy())
         ctrl = np.asarray(obs.ctrl[0])
         ctrl_names = {n for n, c in zip(b.names, ctrl) if c}
         for o in out:

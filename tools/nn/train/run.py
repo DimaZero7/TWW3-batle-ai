@@ -650,6 +650,15 @@ def _train(args, every=None, teacher=None, normal=None):
         args.preset = checkpoint.read(args.init).get("preset", "small") if args.init else "small"
     actor, critic = networks(args.preset, device, args.init, args.critic_init)
     actor = with_grid(actor, args.grid)
+    if getattr(args, "exec_form", 0):
+        # the formation's heads (the facing, the width: chain.py cfg.form), fresh on keep; a network that has them
+        # already goes on as it is (tools/nn/general/form.py)
+        from tools.nn.general import form as gform
+        had = getattr(actor.cfg, "form", False)
+        actor = gform.with_form(actor)
+        if not had:
+            print("--exec-form: the facing and width heads added, fresh (keep all but always: chain.FORM_KEEP_BIAS)",
+                  flush=True)
     actor, glearn_cfg = with_general(actor, args)
     if general_only and glearn_cfg is None:
         raise SystemExit("--general-only 1 needs a general to learn: --general (or an --init with a general)")
@@ -1404,6 +1413,10 @@ def _train(args, every=None, teacher=None, normal=None):
                     if "head_share_" + h in st)
                       + ("; floors' weights " + " ".join(f"{h} {w:.4f}" for h, w in u_cfg.heads) if u_cfg.heads else ""),
                       flush=True)
+            if any(k.startswith("head_keep_") for k in st):
+                print("      formation heads' keep (of the decisions with a choice) " + " ".join(
+                    f"{h} {st['head_keep_' + h]:.4f} of {st.get('head_rows_' + h, 0):.0f}" for h in ("face", "width")
+                    if "head_keep_" + h in st), flush=True)
             if row["nan_fixed"] or st.get("skipped"):
                 print(f"      non-finite: logits taken as masked {row['nan_fixed']:.0f}, update steps skipped "
                       f"{st.get('skipped', 0):.0f}", flush=True)
@@ -1625,6 +1638,10 @@ def parser():
     ap.add_argument("--reward", choices=sorted(REWARD_PRESETS),
                     help="a reward preset: its values replace --order-cost, --lord, --idle, --retarget (v2: win / loss "
                          "+ gold trade + order change 0.006; lord, idle and retarget 0)")
+    ap.add_argument("--exec-form", type=int, default=0,
+                    help="1: a v2 network gets the formation's heads - the facing and the width (tools/nn/model/chain.py "
+                         "cfg.form; tools/nn/general/form.py) - fresh on 'keep' when --init has none; a network that has "
+                         "them keeps them whatever this flag")
     ap.add_argument("--grid", type=int, default=0,
                     help="> 0: the move point as a cell of a grid x grid map grid (tools/nn/model/heads.py); a checkpoint "
                          "of the bin head keeps every other weight, the grid head starts fresh")

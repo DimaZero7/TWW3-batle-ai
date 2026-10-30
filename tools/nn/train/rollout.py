@@ -768,6 +768,7 @@ class Battles:
             obs_r = self._v2_inputs(cs, obs_r, t, fr, bounds)
         if h is None:
             h = actor.initial(obs_r)
+        obs_r = self._form(actor, rows, obs_r)
         obs_r = self._task(actor, rows, obs_r, fr)
         logits, action, orders, h_new = self._decide(actor, obs_r, h, fr, bounds, greedy)
         if v2:
@@ -808,7 +809,7 @@ class Battles:
                 if obs_v2 is None:
                     obs_v2 = self._v2_inputs(cs, obs_r, t, fr, bounds)
             o_in = obs_v2 if actor.cfg.sectors else obs_r
-            o_in = self._task(actor, rows, o_in, fr)
+            o_in = self._task(actor, rows, self._form(actor, rows, o_in), fr)
             h = self.past_h[k] if self.past_h[k] is not None else actor.initial(o_in)
             logits, act, o, hs[k] = self._decide(actor, o_in, h, fr, bounds, greedy)
             mine = slot == k
@@ -867,7 +868,8 @@ class Battles:
                 if obs_v2 is None:
                     obs_v2 = self._v2_inputs(cs, obs_r, t, fr, bounds)
             fr_k = frame_rows(fr, sel)
-            o_in = self._task(actor, rows[sel], sub(obs_v2 if actor.cfg.sectors else obs_r, sel), fr_k)
+            o_in = self._task(actor, rows[sel], self._form(actor, rows[sel], sub(obs_v2 if actor.cfg.sectors else obs_r,
+                                                                                  sel)), fr_k)
             h_all = self.past_h[k]
             h = h_all[sel] if h_all is not None else actor.initial(o_in)
             logits, act, o, h_new = self._decide(actor, o_in, h, fr_k, bounds[sel], greedy)
@@ -905,6 +907,15 @@ class Battles:
             if first is not None:
                 self.general_rt = Runtime(self, first.cfg, first.gcfg)
         return self.general_rt
+
+    def _form(self, actor, rows, obs_r):
+        """obs_r with each unit's width limits ("wlim" [R, N, 2], m: tools/nn/general/form.py) when the actor has the
+        formation's heads (cfg.form, chain.py); else as it is. Stored with the observation: the update's masks are the
+        decision's."""
+        if not getattr(actor.cfg, "form", False):
+            return obs_r
+        from tools.nn.general import form as gform
+        return dict(obs_r, wlim=gform.limits(self.st.u, self.params)[rows % self.B])
 
     def _task(self, actor, rows, obs_r, fr):
         """obs_r with the executor's task input of rows (the general's plans) when the actor reads one."""

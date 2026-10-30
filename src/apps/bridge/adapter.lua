@@ -63,6 +63,7 @@ local orders = require('apps.orders.adapter')
 local exchange = require('apps.bridge.exchange_adapter')
 local services = require('apps.bridge.services')
 local winds = require('apps.battle.winds')
+local value = require('apps.core.value')
 
 local M = {}
 
@@ -225,12 +226,43 @@ function M.start(opts)
         return true
     end
 
+    -- A hold, a move or a withdraw with a facing and / or a width (services.unit_order): one
+    -- goto_location_angle_width - at the unit's own place for a hold (the simulator's facing / width order to a
+    -- standing unit), at the point for a move; the part not given: the unit's bearing now (a move: the way to its
+    -- point) and its ordered width.
+    local function formation(it, order)
+        local u = it.unit
+        local pos = read(function() return u:position() end)
+        if not pos then return false end
+        local face, width = order.face, order.width
+        if order.kind == 'hold' then
+            face = face or read(function() return u:bearing() end)
+        else
+            if not face then
+                local dx, dz = order.x - pos:get_x(), order.z - pos:get_z()
+                face = math.deg((math.atan2 or math.atan)(dx, dz)) % 360
+            end
+            pos = opts.vector(order.x, order.z)
+        end
+        width = width or read(function() return u:ordered_width() end)
+        if not (value.finite(face) and value.finite(width)) then return false end
+        orders.set_fire_at_will(it.uc, true)
+        orders.move_formation(it.uc, pos, face, width, order.kind == 'withdraw' or order.run)
+        opts.emit('nn_formation', {t = opts.now_ms(), u = it.name, k = order.kind, face = order.face,
+            width = order.width})
+        return true
+    end
+
     local function give(it, order)
         local uc = it.uc
         if order.kind ~= 'attack' and order.kind ~= 'hold' then reaim[it.name] = nil end
         if order.kind ~= 'attack' then duty[it.name] = nil end
         guard[it.name] = nil
         stall[it.name] = nil
+        if (order.face or order.width) and order.kind ~= 'attack' and formation(it, order) then
+            if order.kind == 'hold' then guard[it.name] = {} end    -- a held shooter is aimed as under any hold
+            return 'given'
+        end
         if order.kind == 'hold' then
             -- A shooter firing at the unit it would be aimed at under hold goes on (no halt).
             local me = seen[it.name]

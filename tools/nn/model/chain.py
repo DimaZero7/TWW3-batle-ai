@@ -20,6 +20,17 @@ Masks: the kinds as heads.py's, and a unit held by its commitment (Obs "free" of
 heads.py's; sectors and cells outside the map never (Obs "geo", sectors.inside). Fresh, the place prefers the sectors
 near the unit (a learned per-unit weight x the distance in sectors, softplus 1 at the start, as the grid head).
 
+The formation's heads (cfg.form; after the commitment, reading the same condition c): the facing - keep, or one of FACES
+directions in the side's frame (0 = towards the enemy, then clockwise every 360 / FACES deg: decide.face_world) - and the
+width - keep, or one of WIDTHS - 1 steps evenly from the unit's narrowest to its widest frontage (obs "wlim",
+decide.width_metres; the simulator snaps to whole files, tools/nn/sim/reform.py). Keep is the order's Orders.face /
+Orders.width -1. Allowed only with a hold, a move or a withdraw of a unit that decides (Obs "free") and is NOT in melee
+(the token's melee flag): a facing or a width given in melee is the game's melee exit - 24 s without blows
+(tools/nn/sim/battle.py contact.face_breakoff) - so there only keep, as the unit network's leash; the width also only
+where the unit's width can change (wlim's narrowest below its widest: not artillery, not a lone man; no "wlim" in the
+observation: keep only). Fresh, they keep all but always: zero weights, the bias FORM_KEEP_BIAS on keep (a checkpoint
+saved before them plays as it did).
+
 Action.point is the cell of the (sectors x fine)^2 grid (sectors.point_index): its centre is the order's point
 (heads.point_world). Sampling needs the parts in order, so the actor samples itself (ChainHeads.forward with no
 action); given an action (training), the logits of every part are those under that action's earlier parts.
@@ -38,6 +49,10 @@ from tools.nn.sim.orders import ATTACK, KEEP, KINDS, MOVE, WITHDRAW
 
 
 CAP = 30.0     # every head's logits are soft-capped: CAP x tanh(x / CAP) (no change while |x| < ~10)
+FACES = 16     # the facing head's directions (cfg.form): every 22.5 deg in the side's frame, as the place's n_dir; the
+#                game holds 64 sectors (orders.snap_face), 16 suffice for a line's front and keep the head small
+WIDTHS = 8     # the width head: 0 keep, 1..7 the narrowest .. the widest frontage (as the unit network's, unit/net.py)
+FORM_KEEP_BIAS = 8.0   # keep at the start: p(another facing) = 16 / (e^8 + 16) = 0.5 %, another width 7 / (e^8 + 7) = 0.2 %
 
 
 def _cap(x, bad):
@@ -101,6 +116,9 @@ class ChainHeads(nn.Module):
         if cfg.pairs:     # the pair features (pairs.py) -> + the logit of attacking j; 0 at the start
             from tools.nn.model import pairs as pr
             self.target_pair = pr.zero_linear(1)
+        if getattr(cfg, "form", False):     # the formation's heads (module doc): keep all but always at the start
+            self.face = keep_linear(d, 1 + FACES)
+            self.width = keep_linear(d, WIDTHS)
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
         """Ability features appended since the checkpoint load with zero weights (encoder.pad_inputs)."""
@@ -128,10 +146,28 @@ class ChainHeads(nn.Module):
             score = score.index_put((b, n, k), (q[b, n] * self.ability_k(xr)).sum(-1) / math.sqrt(p))
         return score
 
+    def _form(self, c, obs_t, a_kind, ctrl, free, out, bad, action, greedy, temperature):
+        """The formation's heads (module doc; cfg.form): their masked logits into out ("face" [B, N, 1 + FACES],
+        "width" [B, N, WIDTHS]) and the choices - sampled, or the action's. -> (a_face, a_width, bad); without cfg.form
+        (None, None, bad)."""
+        if not getattr(self.cfg, "form", False):
+            return None, None, bad
+        able = form_able(obs_t, a_kind, ctrl, free)                               # [B, N]
+        face, bad = _cap(self.face(c), bad)
+        width, bad = _cap(self.width(c), bad)
+        f_ok = torch.cat([torch.ones_like(able[..., None]), able[..., None].expand(*able.shape, face.shape[-1] - 1)], -1)
+        w_able = (able & width_free(obs_t, able))[..., None]
+        w_ok = torch.cat([torch.ones_like(w_able), w_able.expand(*able.shape, width.shape[-1] - 1)], -1)
+        out["face"], out["width"] = face.masked_fill(~f_ok, NEG), width.masked_fill(~w_ok, NEG)
+        if action is None:
+            return _pick(out["face"], greedy, temperature), _pick(out["width"], greedy, temperature), bad
+        return action.face, action.width, bad
+
     def forward(self, x, s, cells_in, obs_t, action=None, greedy=False, temperature=1.0, abilities=True, pairs=None):
         """x [B, 1 + N, d] unit tokens, s [B, S, ds] sector tokens, cells_in [B, S, k2] (sectors.inside) -> (logits,
         action). logits: kind [B, N, 5], target [B, N, N], sector [B, N, S], fine [B, N, k2], commit [B, N, 4],
-        run [B, N], ability [B, N, 1 + ACTIVE] - each under the action's earlier parts. action None: sampled.
+        run [B, N], ability [B, N, 1 + ACTIVE], with cfg.form face [B, N, 1 + FACES] and width [B, N, WIDTHS] - each
+        under the action's earlier parts. action None: sampled.
         pairs [B, 1 + N, 1 + N, pairs.SIZE]: the pair features (cfg.pairs), added to the target's logits."""
         cfg = self.cfg
         u = self.norm(x[:, 1:])
@@ -199,16 +235,48 @@ class ChainHeads(nn.Module):
                 a_target = torch.where(cast, _pick(target, greedy, temperature), a_target)
             elif action is not None:
                 a_ability = action.ability
+        # (after the ability: a sampled decision draws the other parts as without the formation's heads)
+        a_face, a_width, bad = self._form(c, obs_t, a_kind, ctrl, free, out, bad, action, greedy, temperature)
         point = sc.point_index(cfg, a_sector, a_fine)
         out["nan_fixed"] = bad                     # [B] non-finite logits of the row (taken as masked)
-        return out, Action(a_kind, point, a_target, a_run, a_ability, a_commit)
+        return out, Action(a_kind, point, a_target, a_run, a_ability, a_commit, a_face, a_width)
+
+
+def keep_linear(d, n):
+    """A formation head's layer (module doc): zero weights, the bias FORM_KEEP_BIAS on keep (choice 0), 0 elsewhere."""
+    layer = nn.Linear(d, n)
+    nn.init.zeros_(layer.weight)
+    with torch.no_grad():
+        layer.bias.zero_()
+        layer.bias[0] = FORM_KEEP_BIAS
+    return layer
+
+
+def form_able(obs_t, kind, ctrl, free):
+    """[B, N] bool: the units whose facing and width the formation's heads may change (module doc): a unit that decides
+    now (ctrl and Obs "free") under a hold, a move or a withdraw, not in melee (the token's melee flag)."""
+    from tools.nn.model import observation as ob
+    from tools.nn.sim.orders import HOLD
+    melee = obs_t["tokens"][..., ob.INDEX["melee"]] > 0.5
+    return ctrl & free & ((kind == HOLD) | (kind == MOVE) | (kind == WITHDRAW)) & ~melee
+
+
+def width_free(obs_t, like):
+    """[B, N] bool: the units whose width can change - obs "wlim" [B, N, 2] (narrowest, widest m) with the widest above
+    the narrowest; no "wlim": none."""
+    w = obs_t.get("wlim")
+    if w is None:
+        return torch.zeros_like(like)
+    return w[..., 1] > w[..., 0] + 1e-3
 
 
 def log_prob(logits, a, ctrl):
     """(log-probability [B, N], entropy [B, N]) of the parts that matter (module doc): the kind always (a held unit's
     only choice, keep, gives 0); the target for an attack; the sector and the cell for move and withdraw; run for move
-    and attack; the commitment with a new order (not keep); the ability when the action has one. Zero where ctrl is
-    off. The entropy: the kind's + each later part's weighted by the chance of a kind that uses it (a held unit: 0)."""
+    and attack; the commitment with a new order (not keep); the ability when the action has one; the facing and the width when the
+    action has them (cfg.form: a row where only keep was allowed gives 0). Zero where ctrl is off. The entropy: the
+    kind's + each later part's weighted by the chance of a kind that uses it (a held unit: 0) + the formation heads'
+    (0 where only keep is allowed)."""
     logits = {k: torch.nan_to_num(v, nan=NEG) for k, v in logits.items()}     # (a non-finite logit: masked)
     kind = Categorical(logits=logits["kind"], validate_args=False)
     move, attack = a.kind == MOVE, a.kind == ATTACK
@@ -234,6 +302,11 @@ def log_prob(logits, a, ctrl):
         d = Categorical(logits=logits["ability"], validate_args=False)
         lp = lp + d.log_prob(a.ability.clamp(min=-1) + 1)
         ent = ent + d.entropy()
+    for f in ("face", "width"):
+        if getattr(a, f, None) is not None and f in logits:
+            d = Categorical(logits=logits[f], validate_args=False)
+            lp = lp + d.log_prob(getattr(a, f))
+            ent = ent + d.entropy()
     return torch.where(ctrl, lp, zero), torch.where(ctrl, ent, zero)
 
 

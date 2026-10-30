@@ -13,7 +13,8 @@ map (sectors outside the map are masked).
 The rows (the parts that matter, as chain.log_prob): the kind - the units that decide (Obs "free"); the target - those
 whose action was an attack; the sector and the cell - a move or a withdraw (their logits are under that kind's
 condition); the hold - a new order (not keep); run - a move or an attack; the ability - a unit that takes orders with
-an ability ready (none or a slot, independent of the kind). Rows with fewer than 2 allowed choices are left out
+an ability ready (none or a slot, independent of the kind); the facing and the width (cfg.form, chain.py) - a hold, a
+move or a withdraw (their masks keep only "keep" in melee: such rows have one choice). Rows with fewer than 2 allowed choices are left out
 (nothing to spread). The ability with one slot ready at a share of 0.5: p(press) ~0.11 or ~0.89 (0.35 of log 2 nats).
 
 The floor: each head with a target has its own weight in the loss (- weight x share): x rate every update while its
@@ -25,11 +26,11 @@ import torch
 from torch.distributions import Bernoulli, Categorical
 
 from tools.nn.model.heads import NEG
-from tools.nn.sim.orders import ATTACK, KEEP, MOVE, WITHDRAW
+from tools.nn.sim.orders import ATTACK, HOLD, KEEP, MOVE, WITHDRAW
 
-HEADS = ("kind", "target", "sector", "cell", "hold", "run", "ability")
+HEADS = ("kind", "target", "sector", "cell", "hold", "run", "ability", "face", "width")
 LOGITS = {"kind": "kind", "target": "target", "sector": "sector", "cell": "fine", "hold": "commit", "run": "run",
-          "ability": "ability"}
+          "ability": "ability", "face": "face", "width": "width"}
 
 
 def parse(spec):
@@ -58,6 +59,8 @@ def rows(head, action, free, ctrl):
         return ctrl & ((k == MOVE) | (k == WITHDRAW))
     if head == "hold":
         return ctrl & (k != KEEP)
+    if head in ("face", "width"):
+        return ctrl & ((k == HOLD) | (k == MOVE) | (k == WITHDRAW))
     if head == "ability":
         # every unit that takes orders; measure() keeps those with an ability ready (2+ allowed: none and a slot)
         return ctrl
@@ -90,6 +93,15 @@ def measure(logits, action, free, ctrl, heads=HEADS, grad=()):
             nats = (ent.detach() * mf).sum() / n.clamp(min=1)
         out[h] = (share, nats, n)
     return out
+
+
+def keep_rows(head, logits, action, free, ctrl):
+    """(rows that chose keep, rows) of a formation head (face / width, cfg.form): the rows where it is used (rows())
+    and had another choice than keep; 0-d tensors (no read of the GPU)."""
+    x = torch.nan_to_num(logits[LOGITS[head]], nan=NEG)
+    m = rows(head, action, free, ctrl) & ((x > NEG / 2).sum(-1) >= 2)
+    chosen = getattr(action, head)
+    return (m & (chosen == 0)).sum().float(), m.sum().float()
 
 
 def bonus(measured, weights):

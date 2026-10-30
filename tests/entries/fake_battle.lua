@@ -101,7 +101,11 @@ local function controller(log)
         log[#log + 1] = string.format('goto %s %g %g %s', self.unit:name(), p:get_x(), p:get_z(), tostring(run))
     end
     -- Arrives at once: entry tests check wiring, not movement.
-    function uc:goto_location_angle_width(p) self.unit.pos = vec(p:get_x(), p:get_y(), p:get_z()) end
+    -- (its arguments kept for the formation's tests: formation_args)
+    function uc:goto_location_angle_width(p, angle, width, run)
+        self.unit.pos = vec(p:get_x(), p:get_y(), p:get_z())
+        self.unit.formation_args = {x = p:get_x(), z = p:get_z(), angle = angle, width = width, run = run}
+    end
     function uc:rotate() end
     -- Morale behaviour and death, as the engine's controller has them (lord_fall, lord_swarm).
     function uc:morale_behavior_fearless() self.unit.fearless = true end

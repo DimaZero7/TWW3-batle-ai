@@ -476,14 +476,16 @@ class MaskedChainHeads(chain.ChainHeads):
                 a_target = torch.where(cast, chain._pick(target, greedy, temperature), a_target)
             elif action is not None:
                 a_ability = action.ability
+        # (after the ability: a sampled decision draws the other parts as without the formation's heads)
+        a_face, a_width, bad = self._form(c, obs_t, a_kind, ctrl, free, out, bad, action, greedy, temperature)
         point = sc.point_index(cfg, a_sector, a_fine)
         out["nan_fixed"] = bad                     # [B] non-finite logits of the row (taken as masked)
-        return out, chain.Action(a_kind, point, a_target, a_run, a_ability, a_commit)
+        return out, chain.Action(a_kind, point, a_target, a_run, a_ability, a_commit, a_face, a_width)
 
 
 # ChainHeads.forward's source this copy follows (source_sha(); test_general_taskmask_torch.py: a change there is to be
 # copied here, then this updated)
-SOURCE_SHA = "09b0aa0586717d69"
+SOURCE_SHA = "939e14e292d8c71e"
 
 
 def source_sha():

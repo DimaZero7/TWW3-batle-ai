@@ -19,7 +19,10 @@ local function words(line)
 end
 
 -- One unit line: unit <name> hold | move <x> <z> <run> | withdraw <x> <z> <run>
--- | attack <target name> <run> | keep. run is 1 or 0.
+-- | attack <target name> <run> | keep. run is 1 or 0. A hold, a move or a withdraw may end with
+-- 'face <deg>' (the world's bearing to stand at, 0..360) and / or 'width <m>' (the frontage to
+-- re-form to): the network's formation heads (tools/nn/model/chain.py cfg.form); given as one
+-- goto_location_angle_width (apps.orders.adapter move_formation). Files without them are as before.
 -- An ability line: ability <unit name> <ability key> [<target unit name>]: use it now (once;
 -- independent of the unit's order); with a target (a spell: a bombardment or a hex on an enemy,
 -- an augment on a friend) on that unit, without one on the unit itself. Files without ability
@@ -28,14 +31,27 @@ local function unit_order(w)
     local name, kind = w[2], w[3]
     if not name or not M.KINDS[kind] then return nil, 'bad kind: ' .. tostring(kind) end
     local order = {kind = kind, run = false}
+    local rest
     if kind == 'move' or kind == 'withdraw' then
         order.x, order.z = tonumber(w[4]), tonumber(w[5])
         if not (value.finite(order.x) and value.finite(order.z)) then return nil, 'bad point for ' .. name end
         order.run = w[6] == '1'
+        rest = 7
+    elseif kind == 'hold' then
+        rest = 4
     elseif kind == 'attack' then
         order.target = w[4]
         if not order.target then return nil, 'attack without a target for ' .. name end
         order.run = w[5] == '1'
+    end
+    while rest and w[rest] do
+        local field, v = w[rest], tonumber(w[rest + 1])
+        if (field == 'face' or field == 'width') and value.finite(v) and v >= 0 then
+            order[field] = v
+        else
+            return nil, 'bad formation for ' .. name
+        end
+        rest = rest + 2
     end
     return name, order
 end
@@ -75,10 +91,17 @@ function M.parse_orders(text)
     return doc
 end
 
--- Is `new` a different order from `old` (the one in force)?
+-- Is `new` a different order from `old` (the one in force)? The facing: given or taken away, or
+-- another one (more than FACE_SAME_DEG off: the engine's 64 sectors are 5.6 deg); the width: a new one
+-- given more than WIDTH_SAME_M off (none given: the width in force stays - no change), as the simulator.
+M.FACE_SAME_DEG = 1
+M.WIDTH_SAME_M = 1
 function M.changed(old, new)
     if not old then return true end
     if old.kind ~= new.kind or old.run ~= new.run or old.target ~= new.target then return true end
+    if (old.face == nil) ~= (new.face == nil) then return true end
+    if new.face and math.abs((new.face - old.face + 180) % 360 - 180) > M.FACE_SAME_DEG then return true end
+    if new.width and (old.width == nil or math.abs(new.width - old.width) > M.WIDTH_SAME_M) then return true end
     if new.x and old.x then
         return math.sqrt((new.x - old.x) ^ 2 + (new.z - old.z) ^ 2) > M.REPEAT_M
     end

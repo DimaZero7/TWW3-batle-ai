@@ -267,3 +267,44 @@ def test_targetless_recovery_prefers_the_order_then_nearest_valid_enemy(lua):
     watch, rows = t({}), t([t(near)])
     assert [recover(watch, t(me), rows, 120, None, False) for _ in range(6)] == [
         None, None, "near", None, None, "near"]  # rejected engine orders retry only every 3 decisions
+
+
+def test_a_formation_rides_with_a_hold_move_or_withdraw_and_reads_back(lua):
+    names, side = ["own_lord", "own_spear_1", "own_spear_2", "own_archer_1"], [1, 1, 1, 1]
+    kind, x, z = [0, 1, 3, 2], [0.0, 10.0, -5.0, 0.0], [0.0, 20.0, 5.0, 0.0]
+    face, width = [92.81, -1.0, 270.0, 45.0], [-1.0, 40.0, 25.5, 60.0]
+    orders = exchange.orders_list(names, side, kind, x, z, [-1, -1, -1, 0], [False, True, False, False],
+                                  face=face, width=width)
+    assert orders[0] == {"unit": "own_lord", "kind": "hold", "face": 92.81}
+    assert orders[1]["width"] == 40.0 and "face" not in orders[1]
+    assert "face" not in orders[3] and "width" not in orders[3]          # an attack carries neither
+    text = exchange.orders_text("b", 3, orders)
+    assert "unit own_lord hold face 92.81\n" in text and "unit own_spear_1 move 10.0 20.0 1 width 40.0\n" in text
+    back = exchange.parse_orders(text)["orders"]
+    assert back["own_spear_2"] == {"kind": "withdraw", "x": -5.0, "z": 5.0, "run": True, "face": 270.0, "width": 25.5}
+    doc, _ = parse(lua, text)
+    o = doc.orders
+    assert (o.own_lord.kind, o.own_lord.face, o.own_lord.width) == ("hold", 92.81, None)
+    assert (o.own_spear_1.x, o.own_spear_1.run, o.own_spear_1.width, o.own_spear_1.face) == (10.0, True, 40.0, None)
+    assert (o.own_spear_2.face, o.own_spear_2.width) == (270.0, 25.5)
+    assert o.own_archer_1.face is None
+    # files without the formation are as before
+    plain = exchange.orders_text("b", 3, exchange.orders_list(names, side, kind, x, z, [-1, -1, -1, 0], [False] * 4))
+    assert " face " not in plain and " width " not in plain
+    bad, why = parse(lua, exchange.FORMAT + "\nmove 3\nbatch b\nunit own_lord hold face nan\nend\n")
+    assert bad is None and why == "bad formation for own_lord"
+
+
+def test_a_formation_order_is_new_when_its_facing_or_width_changes(lua):
+    changed = lua.eval("function(a, b) return bridge.changed(a, b) end")
+    t = lua.table_from
+    hold = t({"kind": "hold", "run": False})
+    faced = t({"kind": "hold", "run": False, "face": 92.81})
+    assert changed(hold, faced) and changed(faced, hold)            # given or taken away (the simulator's -1)
+    assert not changed(faced, t({"kind": "hold", "run": False, "face": 93.0}))
+    assert changed(faced, t({"kind": "hold", "run": False, "face": 98.4}))
+    assert not changed(t({"kind": "hold", "run": False, "face": 359.5}), t({"kind": "hold", "run": False, "face": 0.2}))
+    wide = t({"kind": "hold", "run": False, "width": 40})
+    assert changed(hold, wide) and not changed(wide, hold)          # no width given: the width in force stays
+    assert not changed(wide, t({"kind": "hold", "run": False, "width": 40.6}))
+    assert changed(wide, t({"kind": "hold", "run": False, "width": 45}))

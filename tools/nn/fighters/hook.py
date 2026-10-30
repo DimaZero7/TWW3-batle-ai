@@ -283,8 +283,9 @@ class Hook:
             return lim
         return torch.where(self.contact, torch.full_like(lim, 1e6), torch.full_like(lim, -1e6))
 
-    def strikes(self, u, pw, contact, params, charge_now, first=False, ran=None):
-        out = self.orig["strikes"](u, pw, contact, params, charge_now, first=first, ran=ran)
+    def strikes(self, u, pw, contact, params, charge_now, first=False, ran=None, late=None):
+        # (late: the large chargers that rode in, melee.strikes - passed through; the men's own blows are the lab's)
+        out = self.orig["strikes"](u, pw, contact, params, charge_now, first=first, ran=ran, late=late)
         if not self.on or u is not self.st.u:
             return out
         dt = float(params.dt)

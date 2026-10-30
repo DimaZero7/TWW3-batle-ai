@@ -623,6 +623,7 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
     cache = [] if tap is not None and branch is not None else None   # per minibatch: its parts' priced rows
     head_w = dict(cfg.heads)
     head_acc = {}                                # head -> [share x rows, nats x rows, rows] (head_entropy.measure)
+    keep_acc = {}                                # formation head -> [rows that kept, rows with a choice] (keep_rows)
     need_kl = bool(train_policy and cfg.target_kl)
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
@@ -691,6 +692,12 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                             acc[0] += _f(sh) * r
                             acc[1] += _f(nats) * r
                             acc[2] += r
+                        for h in ("face", "width"):          # the formation heads' keep (cfg.form, chain.py)
+                            if h in logits and getattr(act, h, None) is not None:
+                                kept_r, rows_r = head_entropy.keep_rows(h, logits, act, free, ctrl)
+                                acc = keep_acc.setdefault(h, [0.0, 0.0])
+                                acc[0] += _f(kept_r)
+                                acc[1] += _f(rows_r)
                     if reference is not None and cfg.anchor:
                         with torch.no_grad():
                             ref, _ = reference.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
@@ -809,6 +816,11 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
         if r:
             out[f"head_share_{h}"] = s_sum / r
             out[f"head_ent_{h}"] = n_sum / r
+    for h, acc in keep_acc.items():
+        k, r = _read(dict(enumerate(acc))).values()
+        out[f"head_rows_{h}"] = r / max(cfg.epochs, 1)          # (each epoch sees every row once)
+        if r:
+            out[f"head_keep_{h}"] = k / r
     if taught:
         out["teach"] = drill_teach.summary(teach_acc, teach, taught.get("shares"))
     if obs_on:

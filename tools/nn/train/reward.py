@@ -229,15 +229,27 @@ def idle_cost(st, weights=Weights(), last_hit=None):
     return torch.stack([weights.idle * scale * ((st.attacker == s) & ~st.done).float() for s in (1, 2)], 1)
 
 
+WIDTH_CHANGE_M = 1.0     # m: a width order this far from the width order in force is a change (the unit network's,
+#                          tools/nn/unit/train.py: any file, h >= 1.4 m)
+
+
 def order_changes(u, orders, move_m=Weights.order_move_m):
     """[B, N] bool: standing units whose order in force really changes with `orders` (before the
     simulator's step takes them): a new kind, a new attack target, or a move / withdraw point
-    more than move_m metres from the one in force. KEEP is never a change."""
+    more than move_m metres from the one in force; with a hold, a move or a withdraw also a facing given
+    (Orders.face) other than the one in force (both snapped to the game's 64 sectors: state oface) and a width
+    given (Orders.width) more than WIDTH_CHANGE_M from the width order in force (state ow) - the formation's heads
+    (tools/nn/model/chain.py cfg.form); orders without them (-1) change nothing there. KEEP is never a change."""
     k = orders.kind
     new_kind = k != u["order_kind"]
     new_target = (k == O.ATTACK) & (orders.target != u["order_target"])
     point = (k == O.MOVE) | (k == O.WITHDRAW)
     moved = point & ((orders.x - u["ox"]) ** 2 + (orders.z - u["oz"]) ** 2 > move_m ** 2)
+    formed = point | (k == O.HOLD)
+    if "oface" in u:
+        moved = moved | (formed & (orders.face >= 0) & (O.snap_face(orders.face) != u["oface"]))
+    if "ow" in u:
+        moved = moved | (formed & (orders.width >= 0) & ((orders.width - u["ow"]).abs() > WIDTH_CHANGE_M))
     return standing_mask(u) & (k != O.KEEP) & (new_kind | new_target | moved)
 
 
