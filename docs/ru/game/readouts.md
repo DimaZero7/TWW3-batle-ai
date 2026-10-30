@@ -34,9 +34,9 @@
 
 | ID | Что это | Статус | Доступ для ИИ |
 |---|---|---|---|
-| `native.number_of_men_alive` | Сколько бойцов живо | ✅ собираем | только свои |
-| `native.initial_number_of_men` | Сколько бойцов было в начале | ✅ собираем | только свои |
-| `native.unary_of_men_alive` | Доля живых бойцов | ✅ собираем | только свои |
+| `native.number_of_men_alive` | Сколько бойцов живо | ✅ собираем | свои и видимые враги |
+| `native.initial_number_of_men` | Сколько бойцов было в начале | ✅ собираем | свои и видимые враги |
+| `native.unary_of_men_alive` | Доля живых бойцов | ✅ собираем | свои и видимые враги |
 | `cco.NumEntities` | Сколько бойцов (по интерфейсу) | ✅ собираем | только свои |
 | `cco.NumEntitiesInitial` | Сколько бойцов было (по интерфейсу) | ✅ собираем | только свои |
 | `unit.strategic_value` | Оценка силы отряда от игры (одно число) | ⬜ есть в игре | только свои |
@@ -46,7 +46,7 @@
 
 | ID | Что это | Статус | Доступ для ИИ |
 |---|---|---|---|
-| `native.unary_hitpoints` | Доля здоровья от начального | ✅ собираем | только свои |
+| `native.unary_hitpoints` | Доля здоровья от начального | ✅ собираем | свои и видимые враги |
 | `cco.HealthValue` | Здоровье (число) | ✅ собираем | только свои |
 | `cco.HealthMax` | Максимум здоровья | ✅ собираем | только свои |
 | `cco.HealthPercent` | Здоровье в процентах (как в интерфейсе) | ✅ собираем | только свои |
@@ -62,11 +62,11 @@
 
 | ID | Что это | Статус | Доступ для ИИ |
 |---|---|---|---|
-| `native.is_wavering` | Колеблется (на грани бегства) | ✅ собираем | только свои |
-| `native.is_routing` | Бежит | ✅ собираем | только свои |
-| `native.is_shattered` | Рассеян (уже не вернётся) | ✅ собираем | только свои |
-| `cco.MoralePercent` | Мораль в процентах | ✅ собираем | только свои |
-| `cco.MoraleState` | Состояние морали (число) | ✅ собираем | только свои |
+| `native.is_wavering` | Колеблется (на грани бегства) | ✅ собираем | свои и видимые враги |
+| `native.is_routing` | Бежит | ✅ собираем | свои и видимые враги |
+| `native.is_shattered` | Рассеян (уже не вернётся) | ✅ собираем | свои и видимые враги |
+| `cco.MoralePercent` | Мораль в процентах | ✅ собираем | свои и видимые враги |
+| `cco.MoraleState` | Состояние морали (число) | ✅ собираем | свои и видимые враги |
 | `cco.MoraleName` | Состояние морали (текст) | ✅ собираем | только свои |
 | `cco.MoraleGreatestEffect` | Что сильнее всего влияет на мораль | ✅ собираем | только свои |
 | `cco.IsRouting` | Бежит (по интерфейсу) | ✅ собираем | только свои |
@@ -75,7 +75,7 @@
 | `cco.IsInLastStand` | Последний рубеж (некуда бежать) | ✅ собираем | только свои |
 | `cco.IsOutOfControl` | Вне контроля | ✅ собираем | только свои |
 | `cco.IsAwaitingOrderAfterRally` | Вернулся после бегства и ждёт приказа | ✅ собираем | только свои |
-| `morale.terrified` | В ужасе от страшного врага | ⬜ есть в игре | только свои |
+| `morale.terrified` | В ужасе от страшного врага | ⬜ есть в игре | свои и видимые враги |
 | `morale.rampaging` | В неистовстве (не слушается, лезет в драку) | ⬜ есть в игре | только свои |
 | `morale.undead` | Нежить/демоны: рассыпается, нестабилен | ⬜ есть в игре | только свои |
 
@@ -83,8 +83,8 @@
 
 | ID | Что это | Статус | Доступ для ИИ |
 |---|---|---|---|
-| `native.fatigue_state` | Усталость (состояние) | ✅ собираем | только свои |
-| `cco.FatigueState` | Усталость (число) | ✅ собираем | только свои |
+| `native.fatigue_state` | Усталость (состояние) | ✅ собираем | свои и видимые враги |
+| `cco.FatigueState` | Усталость (число) | ✅ собираем | свои и видимые враги |
 | `cco.FatigueName` | Усталость (текст) | ✅ собираем | только свои |
 
 ## Движение и положение
@@ -93,11 +93,11 @@
 |---|---|---|---|
 | `native.position` | Где стоит отряд | ✅ собираем | свои и видимые враги |
 | `native.ordered_position` | Куда отряду приказано идти | ✅ собираем | только свои |
-| `native.bearing` | Куда повёрнут отряд | ✅ собираем | только свои |
+| `native.bearing` | Куда повёрнут отряд | ✅ собираем | свои и видимые враги |
 | `native.ordered_bearing` | Куда приказано повернуться | ✅ собираем | только свои |
-| `native.ordered_width` | Приказанная ширина строя | ✅ собираем | только свои |
-| `native.is_moving` | Двигается | ✅ собираем | только свои |
-| `native.is_moving_fast` | Бежит бегом | ✅ собираем | только свои |
+| `native.ordered_width` | Приказанная ширина строя | ✅ собираем | свои и видимые враги |
+| `native.is_moving` | Двигается | ✅ собираем | свои и видимые враги |
+| `native.is_moving_fast` | Бежит бегом | ✅ собираем | свои и видимые враги |
 | `native.is_idle` | Стоит без приказа | ✅ собираем | только свои |
 | `native.is_leaving_battle` | Покидает поле | ✅ собираем | только свои |
 | `native.slow_speed` | Скорость шагом | ✅ собираем | только свои |
@@ -126,7 +126,7 @@
 
 | ID | Что это | Статус | Доступ для ИИ |
 |---|---|---|---|
-| `native.is_in_melee` | В рукопашной | ✅ собираем | только свои |
+| `native.is_in_melee` | В рукопашной | ✅ собираем | свои и видимые враги |
 | `native.current_target` | Кого атакует (только если цель видна) | ✅ собираем | только свои |
 | `native.flank_threats` | Угроза с левого/правого фланга и с тыла, и кто угрожает | ✅ собираем | только свои |
 | `cco.DamageInflictedRecently` | Урон, нанесённый за 4 секунды | ✅ собираем | только свои |
@@ -141,11 +141,11 @@
 
 | ID | Что это | Статус | Доступ для ИИ |
 |---|---|---|---|
-| `native.ammo_left` | Сколько осталось стрел/патронов | ✅ собираем | только свои |
-| `native.starting_ammo` | Сколько боеприпасов было | ✅ собираем | только свои |
+| `native.ammo_left` | Сколько осталось стрел/патронов | ✅ собираем | свои и видимые враги |
+| `native.starting_ammo` | Сколько боеприпасов было | ✅ собираем | свои и видимые враги |
 | `cco.PrimaryAmmoPercent` | Боезапас в процентах | ✅ собираем | только свои |
 | `native.is_under_missile_attack` | Под обстрелом | ✅ собираем | только свои |
-| `cco.IsFiringMissiles` | Стреляет сейчас | ✅ собираем | только свои |
+| `cco.IsFiringMissiles` | Стреляет сейчас | ✅ собираем | свои и видимые враги |
 | `range.missile_range` | Дальность стрельбы (движок и карточка) | ✅ собираем | только свои |
 | `range.in_range` | Цель в радиусе стрельбы | ✅ собираем | только свои |
 | `ranged.reload` | Перезарядка: сколько осталось до выстрела | ⬜ есть в игре | только свои |
@@ -160,8 +160,8 @@
 | `abilities.owned` | Какие способности есть у отряда | ✅ собираем | только свои |
 | `abilities.can_perform` | Можно ли применить способность сейчас | ✅ собираем | только свои |
 | `abilities.state` | Состояние способностей: перезарядка, осталось применений, активна, радиус, мана, шанс сбоя | ⬜ есть в игре | только свои |
-| `abilities.effects_count` | Сколько эффектов действует на отряд | ✅ собираем | только свои |
-| `abilities.effects` | Какие эффекты действуют (свои усиления, вражеские заклинания) и сколько им осталось | ⬜ есть в игре | только свои |
+| `abilities.effects_count` | Сколько эффектов действует на отряд | ✅ собираем | свои и видимые враги |
+| `abilities.effects` | Какие эффекты действуют (свои усиления, вражеские заклинания) и сколько им осталось | ⬜ есть в игре | свои и видимые враги |
 | `cco.StatusList` | Значки состояний отряда: готов к натиску, скрыт, стреляет, в бою… | ✅ собираем | только свои |
 | `magic.winds` | Запас магии армии и скорость восстановления | ⬜ есть в игре | только свои |
 | `magic.can_use` | Отряд умеет колдовать | ⬜ есть в игре | только свои |
@@ -274,7 +274,7 @@
 | `cco.IsInLastStand` | `CCO IsInLastStand` | apps.units.state_adapter |
 | `cco.IsOutOfControl` | `CCO IsOutOfControl` | apps.units.state_adapter |
 | `cco.IsAwaitingOrderAfterRally` | `CCO IsAwaitingOrderAfterRally` | apps.units.state_adapter |
-| `morale.terrified` | `CCO IsTerrified` | — |
+| `morale.terrified` | `CCO IsTerrified` | entries.nn_arena (row tr: read in game 30.10, the 'true' case not met yet) |
 | `morale.rampaging` | `unit:is_rampaging() / CCO IsForceRampage` | — |
 | `morale.undead` | `unit:is_crumbling() / is_unstable() / CCO IsUndead` | — |
 | `native.fatigue_state` | `unit:fatigue_state()` | apps.units.state_adapter |
@@ -284,7 +284,7 @@
 | `native.ordered_position` | `unit:ordered_position()` | apps.units.state_adapter |
 | `native.bearing` | `unit:bearing()` | apps.units.state_adapter |
 | `native.ordered_bearing` | `unit:ordered_bearing()` | apps.units.state_adapter |
-| `native.ordered_width` | `unit:ordered_width()` | apps.units.state_adapter |
+| `native.ordered_width` | `unit:ordered_width()` | apps.units.state_adapter; entries.nn_arena (row ow, both sides) |
 | `native.is_moving` | `unit:is_moving()` | apps.units.state_adapter |
 | `native.is_moving_fast` | `unit:is_moving_fast()` | apps.units.state_adapter |
 | `native.is_idle` | `unit:is_idle()` | apps.units.state_adapter |

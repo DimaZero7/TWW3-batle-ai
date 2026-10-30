@@ -150,7 +150,12 @@ function M.main(bm, config, globals)
             ox = o and round(o:get_x()), oz = o and round(o:get_z()),
             lf = try(function() return u:is_left_flank_threatened() end),
             rf = try(function() return u:is_right_flank_threatened() end),
-            bf = try(function() return u:is_rear_flank_threatened() end)}
+            bf = try(function() return u:is_rear_flank_threatened() end),
+            -- the unit network's input (tools/nn/companion/unit_input.py, the same formula as the simulator's,
+            -- tools/nn/unit/row.py): the ordered width (the formation's front and depth come from it and the men),
+            -- in flight from terror (CCO IsTerrified), hidden (own units' row; the companion hides the enemy's)
+            ow = round(try(function() return u:ordered_width() end), 1),
+            tr = try(cco, u, 'IsTerrified'), hid = try(function() return u:is_hidden() end)}
         if it.can_sk then row.sk = orders.skirmish_active(u) end   -- (false must stay false: not an and-or)
         return row
     end
@@ -316,7 +321,7 @@ function M.main(bm, config, globals)
             state_file = bridge.ENEMY_STATE_FILE, orders_file = bridge.ENEMY_ORDERS_FILE,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
                 attacker = config.enemy_role == 'defend' and 1 or 2, control = 2, script = config.enemy_script,
-                layout = layout}})
+                layout = layout, map = config.map}})
         emit('enemy_ai', {mode = 'companion', enemy_ai = config.enemy_ai, script = config.enemy_script,
             state_file = bridge.ENEMY_STATE_FILE, orders_file = bridge.ENEMY_ORDERS_FILE})
     end
@@ -330,7 +335,7 @@ function M.main(bm, config, globals)
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
-                attacker = config.enemy_role == 'defend' and 1 or 2}})
+                attacker = config.enemy_role == 'defend' and 1 or 2, map = config.map}})
         emit('own_ai', {mode = 'net', own_ai = config.own_ai, decide_ms = config.decide_ms,
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
         if config.enemy_ai == 'companion' then enemy_start() end

@@ -132,7 +132,7 @@ def on(u):
 
 
 def _device(dev):
-    key = str(dev)
+    key = (str(dev), len(terrain._MAPS))          # (a map registered since: the stacked layers again)
     if key not in _DEV:
         Rm = max(g.shape[0] for g, *_ in terrain._MAPS)
         Cm = max(g.shape[1] for g, *_ in terrain._MAPS)

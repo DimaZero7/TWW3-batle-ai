@@ -111,7 +111,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "docs":
         catalog = load_catalog()
-        for lang in ("ru", "en"):
+        for lang in ("ru",):   # (docs/en is not kept up: the user's decision 23.10, CLAUDE.md rule 13)
             out = project.ROOT / "docs" / lang / "game" / "readouts.md"
             out.write_text(render(lang, catalog), encoding="utf-8")
             print("written", out.relative_to(project.ROOT))

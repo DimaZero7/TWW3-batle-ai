@@ -5,7 +5,7 @@ field); only the map's layers are read through the battle's frame (terrain.set_m
 
 A place: the skirmish's extent - its units, its areas (with their half diagonals) and goals, about the middle of their
 box, + MARGIN_M for the approach - turned by a random angle and centred at a random point of the map that keeps it
-within the map's frame (less EDGE_M); a place whose units start on ground the game calls not clear (heights.npz clear 0:
+within the map's field (terrain.FRAMES, less EDGE_M); a place whose units start on ground the game calls not clear (heights.npz clear 0:
 water, cliffs) is drawn again (at most TRIES; then the last one). A skirmish wider than the map stands at its middle.
 The exam's places: a fixed seed for every build (the same set for every network measured).
 
@@ -39,9 +39,12 @@ def activate(name, exam=False, root=MAPS):
     H = d["height"]
     x0, z0, step = float(d["x0"]), float(d["z0"]), float(d["step"])
     clear = d["clear"] if "clear" in d.files else np.ones(H.shape, np.uint8)
+    # the map's field (terrain.FRAMES: meta.json frame - the playable area; without one the grid's extent; Kislev: both
+    # -512..512, the places as before)
+    lo_x, hi_x, lo_z, hi_z = terrain.FRAMES[mid]
     _ACTIVE.clear()
     _ACTIVE.update(name=name, mid=mid, clear=clear, height=H, x0=x0, z0=z0, step=step, exam=exam,
-                   lo_x=x0, hi_x=x0 + (H.shape[1] - 1) * step, lo_z=z0, hi_z=z0 + (H.shape[0] - 1) * step)
+                   lo_x=lo_x, hi_x=hi_x, lo_z=lo_z, hi_z=hi_z)
     return mid
 
 

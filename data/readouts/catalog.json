@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Every unit/battle readout we know of. status: tracked = collected and answered in game; available = in the game's API, not yet tested. access: own = own units only; enemy = also visible enemies; public = battle-wide; truth = full summary only, never an AI input.",
+  "description": "Every unit/battle readout we know of. status: tracked = collected and answered in game; available = in the game's API, not yet tested. access: own = own units only; enemy = also visible enemies (the network's input rule: what the player sees on a visible enemy - its card, its formation - tools/nn/model/observation.py, CLAUDE.md 'net input one-to-one'); public = battle-wide; truth = full summary only, never an AI input.",
   "sources": [
     "documentation/script/battle/*.html (installed game)",
     "ui/metadata.json (CCO spec, installed game)",
@@ -247,7 +247,7 @@
       "api": "unit:number_of_men_alive()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.initial_number_of_men",
@@ -257,7 +257,7 @@
       "api": "unit:initial_number_of_men()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.unary_of_men_alive",
@@ -267,7 +267,7 @@
       "api": "unit:unary_of_men_alive()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.NumEntities",
@@ -317,7 +317,7 @@
       "api": "unit:unary_hitpoints()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.HealthValue",
@@ -427,7 +427,7 @@
       "api": "unit:is_wavering()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.is_routing",
@@ -437,7 +437,7 @@
       "api": "unit:is_routing()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.is_shattered",
@@ -447,7 +447,7 @@
       "api": "unit:is_shattered()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.MoralePercent",
@@ -457,7 +457,7 @@
       "api": "CCO MoralePercent",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.MoraleState",
@@ -467,7 +467,7 @@
       "api": "CCO MoraleState",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.MoraleName",
@@ -556,8 +556,8 @@
       "en": "Terrified",
       "api": "CCO IsTerrified",
       "status": "available",
-      "module": "",
-      "access": "own"
+      "module": "entries.nn_arena (row tr: read in game 30.10, the 'true' case not met yet)",
+      "access": "enemy"
     },
     {
       "id": "morale.rampaging",
@@ -587,7 +587,7 @@
       "api": "unit:fatigue_state()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.FatigueState",
@@ -597,7 +597,7 @@
       "api": "CCO FatigueState",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.FatigueName",
@@ -637,7 +637,7 @@
       "api": "unit:bearing()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.ordered_bearing",
@@ -656,8 +656,8 @@
       "en": "Ordered width",
       "api": "unit:ordered_width()",
       "status": "tracked",
-      "module": "apps.units.state_adapter",
-      "access": "own"
+      "module": "apps.units.state_adapter; entries.nn_arena (row ow, both sides)",
+      "access": "enemy"
     },
     {
       "id": "native.is_moving",
@@ -667,7 +667,7 @@
       "api": "unit:is_moving()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.is_moving_fast",
@@ -677,7 +677,7 @@
       "api": "unit:is_moving_fast()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.is_idle",
@@ -867,7 +867,7 @@
       "api": "unit:is_in_melee()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.current_target",
@@ -967,7 +967,7 @@
       "api": "unit:ammo_left()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "native.starting_ammo",
@@ -977,7 +977,7 @@
       "api": "unit:starting_ammo()",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.PrimaryAmmoPercent",
@@ -1007,7 +1007,7 @@
       "api": "CCO IsFiringMissiles",
       "status": "tracked",
       "module": "apps.units.state_adapter",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "range.missile_range",
@@ -1107,7 +1107,7 @@
       "api": "CCO ActiveEffectList.Size",
       "status": "tracked",
       "module": "entries.unit_readout (profile)",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "abilities.effects",
@@ -1117,7 +1117,7 @@
       "api": "CCO ActiveEffectList -> Name / TimeRemainingSeconds",
       "status": "available",
       "module": "",
-      "access": "own"
+      "access": "enemy"
     },
     {
       "id": "cco.StatusList",

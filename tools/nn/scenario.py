@@ -203,6 +203,7 @@ def run_config(arena):
     """The entry's view of the arena: slots and script names of both sides."""
     places = placements(arena)
     return {"arena": arena.get("name", DEFAULT), "gap_m": arena["gap_m"], "defend_radius_m": arena["defend_radius_m"],
+            "map": arena["map"],
             "factions": {side: army["faction"] for side, army in armies(arena).items()},
             "units": {side: [{"script_name": u["script_name"], "slot": u["slot"], "key": u["key"],
                               "x": u["x"], "z": u["z"], "bearing_deg": u["bearing_deg"], "width": u["width"]}

@@ -22,6 +22,7 @@ import numpy as np
 import torch
 
 _MAPS = []          # (grid float32 [R, C], x0, z0, step) on the host
+FRAMES = {}         # map id -> (min_x, max_x, min_z, max_z): the playable area (the field), map coordinates
 _DEV = {}           # device -> (flat grids [M * Rmax * Cmax], R [M], C [M], x0 [M], z0 [M], step [M], Rmax, Cmax)
 
 
@@ -31,16 +32,53 @@ def register(grid, x0, z0, step):
     assert g.ndim == 2 and g.shape[0] >= 2 and g.shape[1] >= 2, "a height grid is [rows >= 2, columns >= 2]"
     _MAPS.append((g, float(x0), float(z0), float(step)))
     _DEV.clear()
-    return len(_MAPS) - 1
+    mid = len(_MAPS) - 1
+    FRAMES[mid] = (float(x0), float(x0) + (g.shape[1] - 1) * float(step), float(z0),
+                   float(z0) + (g.shape[0] - 1) * float(step))
+    return mid
+
+
+def set_frame(map_id, min_x, max_x, min_z, max_z):
+    """The map's field: the playable area, where move orders are allowed (the minimap's frame: the Assembly Kit's
+    Playable Area sets the radar's extent - docs/ru/game/map/boundaries.md; Kislev's -512..512 x -512..512, the manual
+    ride reached 3.7-20.7 m of each side). Without one: the height grid's extent (register)."""
+    FRAMES[int(map_id)] = (float(min_x), float(max_x), float(min_z), float(max_z))
+
+
+def frame_local(terr, place=None):
+    """The field of each battle's map in the battle's own frame: (cx, cz, b, front, depth) [R] - a turned rectangle
+    (the map's x span across its bearing, z span along it; a bearing as everywhere: degrees clockwise from +z), for
+    terr [R] map ids (>= 0) and place (tpx, tpz, tpr) [R] each or None (the map's own frame). A battle laid on the map
+    at (px, pz, a) (set_map) sees the map's point (X, Z) at x = dX cos a - dZ sin a, z = dX sin a + dZ cos a, dX = X - px,
+    dZ = Z - pz; the map's bearing 0 is the battle's -a."""
+    dev = terr.device
+    ids = terr.long().clamp(min=0)
+    tab = torch.tensor([FRAMES.get(k, (0.0, 0.0, 0.0, 0.0)) for k in range(max(len(_MAPS), 1))], device=dev)
+    f = tab[ids]
+    cx, cz = (f[:, 0] + f[:, 1]) / 2, (f[:, 2] + f[:, 3]) / 2
+    front, depth = f[:, 1] - f[:, 0], f[:, 3] - f[:, 2]
+    if place is None:
+        return cx, cz, torch.zeros_like(cx), front, depth
+    px, pz, a = (v.float() for v in place)
+    t = a * (math.pi / 180)
+    c, s = torch.cos(t), torch.sin(t)
+    dx, dz = cx - px, cz - pz
+    return dx * c - dz * s, dx * s + dz * c, torch.remainder(-a, 360.0), front, depth
 
 
 def load_npz(path, layers=True):
     """Register a map_grid heights.npz (height [rows, columns], x0, z0, step: tools/nn/map_grid.py); returns its id.
     layers: with the map folder's ground types (heights.npz ground + meta.json names) and trunks (trees.npz) - ground.py;
-    False: the heights alone."""
+    False: the heights alone. The map's field (set_frame): meta.json's frame when the folder has one."""
     from pathlib import Path
+    import json
     d = np.load(path)
     mid = register(d["height"], float(d["x0"]), float(d["z0"]), float(d["step"]))
+    meta = Path(path).parent / "meta.json"
+    if meta.exists():
+        fr = json.loads(meta.read_text(encoding="utf-8")).get("frame")
+        if fr:
+            set_frame(mid, fr["min_x"], fr["max_x"], fr["min_z"], fr["max_z"])
     if layers:
         from tools.nn.sim import ground
         ground.load_layers(mid, Path(path).parent)

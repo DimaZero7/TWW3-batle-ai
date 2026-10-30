@@ -13,6 +13,6 @@ def test_every_tracked_readout_is_in_the_current_profile():
 
 def test_docs_are_up_to_date():
     catalog = readouts.load_catalog()
-    for lang in ("ru", "en"):
+    for lang in ("ru",):   # (docs/en is not kept up: CLAUDE.md rule 13)
         page = (readouts.project.ROOT / "docs" / lang / "game" / "readouts.md").read_text(encoding="utf-8")
         assert page == readouts.render(lang, catalog), f"run: python -m tools.readouts docs ({lang})"

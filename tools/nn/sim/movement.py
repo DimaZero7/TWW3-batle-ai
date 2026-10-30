@@ -8,6 +8,8 @@ rout_speed of its run, measured) away from the enemies near it (or towards its o
 and leaves the battle when it crosses the map's edge; standing units stay inside. Formations do
 not pass through each other: overlapping units are pushed apart along the line of centres.
 """
+import math
+
 import torch
 
 
@@ -103,12 +105,37 @@ def limit_turn(u, before, mask, max_deg):
 
 
 def clamp_to_map(u, bounds):
-    """Standing units stay on the map; routing units that cross the edge leave the battle."""
-    out = (u["x"].abs() > bounds) | (u["z"].abs() > bounds)
+    """Standing units stay on the map; routing units that cross the edge leave the battle. A battle on a real map
+    (terrain.set_map with a place; its field: terrain.FRAMES) keeps its standing units inside the map's field - the
+    playable area, where the game takes move orders (docs/ru/game/map/boundaries.md) - and its routers leave at
+    |x| or |z| = bounds of the MAP's coordinates (the game's routers run on past the field: Crossroads' field reaches
+    768 m, its routers left at 1020); a flat battle: the square +-bounds of its own frame, as before."""
+    from tools.nn.sim import terrain
+    on_map = "tpx" in u and "terr" in u and bool((u["terr"][:, 0] >= 0).any())
+    if not on_map:
+        out = (u["x"].abs() > bounds) | (u["z"].abs() > bounds)
+        leave = out & u["r"]
+        u["gone"] = u["gone"] | leave
+        keep = ~u["r"]
+        u["x"] = torch.where(keep, u["x"].clamp(-bounds, bounds), u["x"])
+        u["z"] = torch.where(keep, u["z"].clamp(-bounds, bounds), u["z"])
+        return leave
+    mapped = (u["terr"][:, :1] >= 0).expand_as(u["x"])
+    mx, mz = terrain.to_map(u, u["x"], u["z"])
+    out = torch.where(mapped, (mx.abs() > bounds) | (mz.abs() > bounds),
+                      (u["x"].abs() > bounds) | (u["z"].abs() > bounds))
     leave = out & u["r"]
     u["gone"] = u["gone"] | leave
     keep = ~u["r"]
-    u["x"] = torch.where(keep, u["x"].clamp(-bounds, bounds), u["x"])
-    u["z"] = torch.where(keep, u["z"].clamp(-bounds, bounds), u["z"])
+    cx, cz, b, front, depth = terrain.frame_local(u["terr"][:, 0], [u[k][:, 0] for k in terrain.PLACE])
+    t = (b * (math.pi / 180))[:, None]
+    c, s = torch.cos(t), torch.sin(t)
+    dx, dz = u["x"] - cx[:, None], u["z"] - cz[:, None]
+    across, along = dx * c - dz * s, dx * s + dz * c         # (the field's right and forward: zmap.local's rule)
+    hw, hd = (front / 2)[:, None], (depth / 2)[:, None]
+    across, along = torch.maximum(torch.minimum(across, hw), -hw), torch.maximum(torch.minimum(along, hd), -hd)
+    fx, fz = cx[:, None] + across * c + along * s, cz[:, None] - across * s + along * c
+    u["x"] = torch.where(keep, torch.where(mapped, fx, u["x"].clamp(-bounds, bounds)), u["x"])
+    u["z"] = torch.where(keep, torch.where(mapped, fz, u["z"].clamp(-bounds, bounds)), u["z"])
     return leave
 

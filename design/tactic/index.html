@@ -20,7 +20,7 @@
   --done:#1f8a5b; --done-bg:#e3f4ec; --open:#b07300; --open-bg:#fff3d9; --later:#5b6b86; --later-bg:#e9edf4;
   --field:#cfe3a8; --out:#7a7f88; --mine:#2b9a6a; --minev:#8fd3b2; --foe:#cc4a3f; --foev:#f0a8a1; --neutral:#eceff3;
   --ours:#3a7bd5; --tc-test:#1a9a8a; --pass:#7b8496; --live:#3a7bd5;
-  --c-pass:#6f7fd0; --c-live:#2f9488; --c-who:#4aa99c; --c-state:#237066; --c-cst:#68bdb1; --c-ars:#b0679a; --c-out:#d08a1c; --c-order:#a88a00;
+  --c-pass:#6f7fd0; --c-live:#2f9488; --c-who:#4aa99c; --c-state:#237066; --c-cst:#68bdb1; --c-ars:#b0679a; --c-out:#d08a1c; --c-order:#a88a00; --c-grp:#4f86c6; --c-map:#5b8f4a;
   --f-body:"Golos Text",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
@@ -28,14 +28,14 @@
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
   --pass:#8a93a6; --live:#5b9bf0;
-  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c;
+  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72;
   color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
   --pass:#8a93a6; --live:#5b9bf0;
-  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c;
+  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72;
   color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.55;
@@ -129,8 +129,8 @@ a{color:inherit}
   <header style="display:flex;flex-direction:column;gap:8px">
     <h1>Тактик: архитектура</h1>
     <span class="status">Проектирование, кода нет; здесь только то, о чём договорились.</span>
-    <p class="muted">Тактик — сеть уровня группы: ведёт группу из 1–6 своих отрядов с одной задачей от оперативника (уровень выше). Отрядам он раздаёт приказы «займи область», дальше каждым отрядом правит сеть отряда (<a href="../unit/index.html">страница отряда</a>). Решения словами — <code>build/diag_g49/unit_base.md</code>, раздел «Заметки для старших уровней».</p>
-    <p class="muted">Сейчас на схеме <b>вход</b> — три карточки, из которых складывается строка одного отряда, и первый блок обработки: «Анализ отряда» → «Карточка отряда» (решения пользователя 30.10): паспорт (постоянное), что меняется по ходу боя (живая часть, «кто это», состояние), арсенал способностей (кнопки). Список карточек, команду от оперативника и обработку вернём позже. Нажми на блок — под схемой откроется описание.</p>
+    <p class="muted">Тактик — сеть уровня группы: ведёт группу из 1–10 своих отрядов (рабочий размер упражнений — 2–4) с одной задачей от оперативника (уровень выше). Отрядам он раздаёт приказы «займи область», дальше каждым отрядом правит сеть отряда (<a href="../unit/index.html">страница отряда</a>). Решения словами — <code>build/diag_g49/unit_base.md</code>, раздел «Заметки для старших уровней».</p>
+    <p class="muted">Сейчас на схеме (решения пользователя 30.10): <b>строка отряда</b> — три карточки (паспорт, что меняется по ходу боя, арсенал) → «Анализ отряда» → «Карточка отряда»; <b>группа</b> — посылка от оперативника → зона плитками → карта группы; <b>приказ</b> — глагол и темп. <b>Тактик не делится:</b> 1 моя группа = 1 набор целей, граница — зона; цели дальше, чем дотянуться из зоны, — сосредоточить всех на одной и ждать, пока оперативник перекроит; другие группы — только как тела. Нажми на блок — под схемой откроется описание.</p>
   </header>
 
   <section class="net" aria-label="Схема сети тактика">
@@ -287,21 +287,103 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-group">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Посылка от оперативника <span class="chip done">решено 30.10</span> <span class="chip later">выход оперативника = вход тактика</span></h2>
+        <ul class="small">
+          <li><b>Одна посылка на группу</b>, обновляется каждым новым шагом оперативника:</li>
+        </ul>
+        <div class="ptwrap"><table class="ptab"><thead><tr><th>Поле</th><th>Что это</th><th class="num">Чисел</th></tr></thead><tbody>
+          <tr><td>маска моих слотов</td><td>по слотам моей стороны, 0/1; единиц 1–10 (рабочий размер упражнений 2–4). Из неё — N боеспособных</td><td class="num">S</td></tr>
+          <tr><td>маска цели</td><td>по слотам врага, 0/1. <b>Может быть вся нулевая</b> — «держи точку» без цели: глагол ко всем, кто придёт</td><td class="num">S</td></tr>
+          <tr><td>центр зоны x, z</td><td>середина зоны группы</td><td class="num">2</td></tr>
+          <tr><td>поворот зоны sin, cos</td><td>куда «вверх» — так же стоит карта группы</td><td class="num">2</td></tr>
+          <tr><td>форма зоны</td><td>«линия» / «квадрат» — 2 позиции 0/1 (как строится — блок «Зона группы — плитки»)</td><td class="num">2</td></tr>
+          <tr><td>номер группы</td><td>постоянен, пока оперативник держит группу — для памяти</td><td class="num">1</td></tr>
+          <tr class="tot"><td>Всего</td><td>S — слотов на сторону</td><td class="num">S + S + 7</td></tr>
+        </tbody></table></div>
+        <ul class="small">
+          <li><b>Ширины и глубины в посылке нет</b> — их считает код из N и формы.</li>
+          <li><b>Всё остальное тактик строит сам кодом:</b> маски → пометка «кто это» у строк; центр + поворот + форма + N → зона плитками и система координат карты группы; строки и карта — из состояния боя.</li>
+          <li><b>Посылка проверяется на входе:</b> слоты живы, отряд ровно в одной группе, зона внутри поля, цель компактна. Плохая посылка — ошибка оперативника или генератора, тактик её не чинит.</li>
+          <li><b>Правило посылки:</b> новая зона не дальше половины стороны карты от центра группы — иначе оперативник даёт промежуточный шаг.</li>
+          <li>Приказ (глагол и темп) — в контейнере «Приказы тактику».</li>
+        </ul>
+        <div class="box ans" style="gap:6px"><b>Тактик не делится</b> (решение пользователя 30.10)
+          <ul class="small">
+            <li><b>1 моя группа = 1 набор целей. Граница — зона:</b> обе цели достижимы из зоны — тактик делит внимание ролями; цели дальше, чем дотянуться из зоны, — сосредоточить всех на одной: это сигнал оперативнику перекроить группы.</li>
+            <li>Другие группы тактик видит <b>только как тела</b> («свой другой» в строках) — не стрелять в спину, не лезть на место.</li>
+            <li><b>Генератор училища выдаёт посылки в том же формате</b>, что оперативник: тактик не знает, кто дал группу.</li>
+          </ul></div>
+        <div class="box ans" style="gap:6px"><b>Язык уровней</b>
+          <ul class="small">
+            <li>У личного уровня «займи область» сейчас названо <b>приказом</b>. По этой логике область отряда — тоже <b>данные</b>, а приказ — глагол: «держи / дойди / атакуй цель».</li>
+            <li>Код не переименовываем; язык уровней выравниваем на страницах.</li>
+          </ul></div>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>Чем нормировать</b> центр зоны (у отряда — / 100 м) — не обсуждали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-zone">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Зона группы — плитки <span class="chip done">решено 30.10</span></h2>
+        <ul class="small">
+          <li><b>Плитка = максимальная личная область отряда</b>, 80 × 80 м. <b>Зона</b> — полный прямоугольник сетки плиток.</li>
+          <li><b>Форма</b> — одно слово от оперативника: <b>«линия»</b> — 1 × N; <b>«квадрат»</b> — ряды × столбцы, ближайшие к квадрату, с округлением вверх: 3 → 2 × 2, 5 → 2 × 3, 10 → 3 × 4.</li>
+          <li><b>Лишние плитки — дополнительное пространство тактика.</b> Ряд, где отрядов меньше, получает всю ширину ряда: 2 пехоты впереди, стрелки сзади в полосе 160 м. Сколько отрядов в каком ряду — роли тактика.</li>
+          <li><b>Выбыл отряд</b> (погиб или бежит) → убирается плитка, ближайшая к его последнему положению (дыра на месте). Без нового отряда обратно не отрастает.</li>
+          <li><b>Личные области отрядов внутри зоны не пересекаются</b> — правило переводчика, не сети: плиток не меньше N по построению; два отряда в одно место — переводчик сдвигает по ряду или отказывает.</li>
+          <li><b>Личный уровень не меняется:</b> область отряда по-прежнему не больше 80 × 80 м, теперь — внутри зоны. Тактик может дать всем минимум 48 × 48 и поставить вплотную — зона остаётся большой.</li>
+          <li><b>Своих весов нет</b> — это правило кода (как «Сложение» у генерала).</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-gmap">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Карта группы <span class="chip done">решено 30.10</span></h2>
+        <div class="where">образец: карта зоны отряда — <b>tools/nn/unit/zmap.py</b> (30 × 30, 16 слоёв)</div>
+        <ul class="small">
+          <li><b>30 × 30 клеток</b>, масштаб — из числа отрядов N (сторона = √(3 · N · 6400 м²), клетка не крупнее 24 м).</li>
+          <li><b>Центр карты = центр зоны</b> (не группы): квадрат зоны всегда целиком на карте и не дрожит. <b>«Вверх» = поворот зоны</b> (дан сверху, стабилен) — не на цель: цель — набор отрядов, может стоять в двух концах строя. В той же системе координат считаются положения, фронт и скорость в строках отрядов.</li>
+          <li><b>Собирает код</b> из посылки, состояния боя и снятой карты местности.</li>
+          <li><b>По 1 числу на клетку в каждом слое. Обсуждены пока два слоя:</b>
+            <ul>
+              <li><b>зона группы</b> — плитки (доля клетки в зоне);</li>
+              <li><b>личные области отрядов</b>, нарезанные тактиком в прошлый раз — собственный прошлый выход тактика на входе: он меняет раскладку относительно неё, и плата за смену роли имеет смысл. Не пересекаются.</li>
+            </ul></li>
+          <li><b>Следующие слои — по одному</b>, после обсуждения.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>Остальные слои</b> (свои и враги на карте, край поля, высота, уклон, лес) — не обсуждали.</li>
+      <li><b>Куда входит карта</b> — в какой блок сети — ещё не обсуждали; стрелки дальше пока нет.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
 <template id="tpl-orders">
   <section class="cards">
     <div><div class="colh">Договорились</div>
       <div class="box done"><h2>Приказы тактику <span class="chip done">решено 30.10</span></h2>
-        <div class="where">образец: приказ отряду от тактика — <b>tools/nn/unit/net.py</b> ORDER (область сырыми числами относительно отряда, / 100 м; поворот cos, sin)</div>
         <ul class="small">
-          <li><b>Контейнер:</b> сюда входит всё, что тактик получает от оперативника. Внутри — <b>по карточке на приказ</b>, в том же виде, что входные карточки (иконка · поле · клетки по числу чисел · число). Новый приказ добавляется своей карточкой внутрь.</li>
-          <li><b>Пока одна карточка — «Область группы»</b>, где группе можно двигаться, прямоугольник: центр (x, z) — 2, ширина и глубина — 2, поворот (sin, cos) — 2. Итого <b>6 чисел</b>.</li>
-          <li>Размер области (решение 29.10): от N × минимальной до N × максимальной области одного отряда (N — боеспособные отряды группы); не больше трети карты группы.</li>
-          <li><b>Остальные приказы</b> (задача к цели, темп, «что дальше») добавляем по одному, каждый — после обсуждения.</li>
+          <li><b>Контейнер приказов</b> от оперативника; внутри — по карточке на приказ, в том же виде, что входные карточки.</li>
+          <li><b>Одна карточка — «Приказ»:</b> глагол — 4 позиции 0/1 (уничтожить / сдержать / связать боем / не вступать) + темп — 2 позиции (шаг / бег) = <b>6 чисел</b>. От оперативника; тактик передаёт отрядам как есть.</li>
+          <li><b>Без подсказки «что дальше»</b> (отменено 30.10): тактик знает один шаг; цепочку (дойти до холма → атаковать) держит оперативник и даёт следующий шаг, когда сам видит, что шаг сделан. Перестройка — по факту, как у штатного ИИ.</li>
+          <li><b>Цель — не в приказе:</b> маска цели в посылке → метки «враг — моя цель» в строках.</li>
+          <li><b>Второго приказа нет:</b> «подойди на холм» — это зона (данные), «уничтожь» — глагол. При «уничтожить» бьёт, пока дотягивается из зоны; преследование — оперативник двигает зону.</li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
       <li><b>Куда входят приказы</b> — в какой блок сети — ещё не обсуждали; стрелки от контейнера пока нет.</li>
-      <li><b>Относительно чего центр и поворот</b> — от чего мерить и чем нормировать (у отряда — относительно себя, / 100 м) — не обсуждали.</li>
     </ul></div></div></div>
   </section>
 </template>
@@ -462,6 +544,7 @@ a{color:inherit}
         <div class="where">образец: строка отряда у личного уровня — <b>tools/nn/unit/view.py</b> · RAW (33 числа), ROW (27 чисел)</div>
         <ul class="small">
           <li><b>Сырые числа, как их даёт игра</b>, без пересчёта в «оценки»: сеть сама решает, что важно.</li>
+          <li><b>Координаты</b> (положение, фронт, скорость) — в системе карты группы: центр — центр группы, «вверх» — на цель (решение 30.10).</li>
           <li><b>Про своих известно всё.</b> Про врага — только то, что игра показывает игроку (см. таблицу), и только пока враг виден.</li>
           <li>Невидимый враг — в список не попадает (как у отряда: «враг вне зоны — ни бита»).</li>
           <li><b>Раскладка — как в строке отряда</b> (<code>view.py</code> <code>_row()</code>: 27 чисел = эти 22 + «кто» 3 + «цель моего приказа» 1 + «приказ подменён поводком» 1). На всех уровнях «кто» и «цель» заменяет общая пометка «кто это» (5 чисел), поводка у тактика нет.</li>
@@ -482,6 +565,7 @@ a{color:inherit}
             <tr><td class="ic"><img src="icons/ammo.png" alt=""></td><td>боезапас</td><td class="num">1</td><td>доля</td><td class="yes">да</td><td class="yes">да *</td></tr>
             <tr><td class="ic"><img src="icons/height.svg" alt=""></td><td>высота земли</td><td class="num">1</td><td>земля под его центром минус моя, м / 20, в пределах ±4</td><td class="yes">да</td><td class="yes">да</td></tr>
             <tr><td class="ic"><img src="icons/order.svg" alt=""></td><td>его приказ и цель <span class="chip open">новое у тактика</span></td><td class="num">?</td><td>вид приказа (позиции 0/1 по вариантам) + номер строки цели — раскладку не обсуждали</td><td class="yes">да</td><td class="no">нет</td></tr>
+            <tr><td class="ic"><img src="icons/role.svg" alt=""></td><td>прошлая роль отряда <span class="chip open">новое у тактика</span></td><td class="num">?</td><td>собственный прошлый выход тактика: какую роль и место он дал отряду в прошлый раз — раскладка ролей ещё не обсуждалась</td><td class="yes">да</td><td class="no">нет</td></tr>
             <tr class="tot"><td></td><td>Итого из кода отряда</td><td class="num">22</td><td colspan="3">+ новое у тактика: приказ (сколько — не обсуждали); способности — отдельная карточка</td></tr>
           </tbody></table></div>
         <p class="small">* — см. вопрос справа: в решении 30.10 записано «не отдаёт», по коду — отдаёт.</p>
@@ -494,8 +578,7 @@ a{color:inherit}
       </ul></div></div>
       <div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
         <li><b>Усталость и боезапас врага.</b> По коду игра их отдаёт (слева). Дать их тактику — как у отряда — или нет? Решает пользователь.</li>
-        <li><b>Относительно чего координаты.</b> У отряда — относительно самого отряда. У тактика — относительно области группы (центр, её фронт)? Не обсуждали.</li>
-        <li><b>Память.</b> У отряда 10 прошлых снимков (видно, кто куда движется). Нужна ли память тактику и какая — не обсуждали.</li>
+                <li><b>Память.</b> У отряда 10 прошлых снимков (видно, кто куда движется). Нужна ли память тактику и какая — не обсуждали.</li>
       </ul></div></div>
     </div>
   </section>
@@ -507,12 +590,12 @@ a{color:inherit}
       <div class="box done"><h2>Пометка «кто это» — общая для всех уровней <span class="chip done">решено 30.10</span></h2>
         <div class="where">образец: у личного уровня в строке «я / свой / враг» + «цель моего приказа» — <b>tools/nn/unit/view.py</b> · ROW self, own, enemy, my_target (4 числа; станет этими 5)</div>
         <ul class="small">
-          <li><b>Пометку ставит код по приказу сверху, а не сеть.</b> Тактику — переводчик от оперативника: его метки целей превращаются в этот столбец; отряду — так же от тактика. Сеть пометки не выбирает и не меняет: это <b>вход, а не решение</b>.</li>
+          <li><b>Пометку ставит код по приказу сверху, а не сеть.</b> Тактику — код из масок посылки оперативника (мои → «свой в группе», прочие свои → «свой другой», цель → «враг — моя цель», прочие видимые → «враг прочий»); отряду — так же от тактика. Сеть пометки не выбирает и не меняет: это <b>вход, а не решение</b>.</li>
           <li><b>5 чисел, по 0/1</b> — одно из пяти равно 1. Позиции <b>одинаковые на всех уровнях</b> (отряд, тактик, оперативник, стратег) — чтобы общий «Анализ отряда» читал одну и ту же строку.</li>
         </ul>
         <div class="ptwrap"><table class="ptab"><tbody>
           <tr><td><span class="tag" style="color:var(--open);border-color:var(--open)">я сам</span></td><td>у сети отряда — он сам; у тактика и выше такой строки нет — <b>всегда 0</b>.</td></tr>
-          <tr><td><span class="tag" style="color:var(--mine);border-color:var(--mine)">свой в моей группе</span></td><td>у тактика — отряд его группы (1–6). Бегущий остаётся в группе, живая часть показывает «бежит»; роли и приказа у него нет.</td></tr>
+          <tr><td><span class="tag" style="color:var(--mine);border-color:var(--mine)">свой в моей группе</span></td><td>у тактика — отряд его группы (1–10). Бегущий остаётся в группе, живая часть показывает «бежит»; роли и приказа у него нет.</td></tr>
           <tr><td><span class="tag" style="color:var(--mine);border-color:var(--minev)">свой другой</span></td><td>свой отряд в зоне из другой группы: сосед, с ним не столкнуться и не стрелять ему в спину.</td></tr>
           <tr><td><span class="tag" style="color:var(--foe);border-color:var(--foe)">враг — моя цель</span></td><td>у тактика — отряд чужой группы, которую пометил оперативник. Сколько пометил — столько строк.</td></tr>
           <tr><td><span class="tag" style="color:var(--foe);border-color:var(--foev)">враг прочий</span></td><td>видимый враг в зоне, не из цели. Задача к нему не относится, но от него надо защищаться.</td></tr>
@@ -523,8 +606,8 @@ a{color:inherit}
           <li>Зона тактика — карта его группы (решение 29.10: тактик видит карту группы, её масштаб зависит от числа отрядов).</li>
         </ul>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Своя прошлая раскладка</b> <span class="chip open">новое у тактика</span>. Нужно ли в строке «моего» отряда, какую роль и место ему тактик дал в прошлый раз (у отряда так есть флаг «приказ подменён поводком»)? Не обсуждали.</li>
+    <div class="side"><div><div class="colh">Решено</div><div class="box ans"><ul class="small">
+      <li><b>Прошлая роль отряда — да</b> (решение 30.10): собственный прошлый выход тактика идёт на вход — строкой «прошлая роль» в живой части (сколько чисел — «?», роли ещё не обсуждали) и слоем личных областей на карте группы.</li>
     </ul></div></div></div>
   </section>
 </template>
@@ -536,7 +619,7 @@ a{color:inherit}
         <div class="where">образец: строки зоны у личного уровня — <b>tools/nn/unit/view.py</b> · build() → rows, card, mask, whose (K = 16)</div>
         <ul class="small">
           <li><b>Один список, а не два входа</b> (свои отдельно, враги отдельно). Каждая строка — карточка одного отряда: паспорт <b>69</b> + живая часть <b>22</b> + метка «кто это» <b>5</b> + состояние <b>50</b> + характеристики <b>15</b> + способности <b>24</b> = <b>185 чисел</b> у своих, <b>150</b> у врага (остальное маской).</li>
-          <li><b>Кто в списке:</b> мои отряды (1–6), цель (сколько пометил оперативник), прочие враги и прочие свои в зоне тактика.</li>
+          <li><b>Кто в списке:</b> мои отряды (1–10), цель (сколько пометил оперативник), прочие враги и прочие свои в зоне тактика.</li>
           <li><b>Пустые места закрыты маской</b> — список одной длины при любом числе отрядов.</li>
           <li><b>Одна и та же часть сети читает каждую строку</b> (общие веса). Поэтому всё равно, сколько отрядов и в каком порядке, а знание «как выглядит алебардист» одно на своих и чужих. У сети отряда так же — строки с флагом «свой / чужой», и это работает.</li>
         </ul>
@@ -602,7 +685,10 @@ a{color:inherit}
     {id:"changing",t:"Что меняется по ходу боя",ty:"in",st:"agreed",b:[0,410,360,1260],pic:"changing",tpl:["live","who","state","cstats"],n:"живая 22 + кто это 5 + состояние 50 + характеристики 15 = 92 (враг 65)",ref:"tools/nn/unit/view.py · tools/nn/model/effects.py"},
     {id:"abilities",t:"Арсенал способностей",ty:"in",st:"agreed",b:[0,1710,360,310],pic:"abilities",n:"8 кнопок: свой × 3 = 24, враг × 2 = 16",ref:"tools/nn/model/abilities.py (генерал)"},
     {id:"unitproc",t:"Анализ отряда",ty:"proc",st:"agreed",b:[500,770,360,460],pic:"unitproc",n:"185 → 256 → 128, два слоя, ≈ 80 тыс. весов, общие веса (враг 150) · общий блок всех уровней",ref:"tools/nn/unit/net.py RowEncoder (отряд); «Анализ армий» (генерал)"},
-    {id:"orders",t:"Приказы тактику",ty:"order",st:"agreed",b:[0,2060,360,260],pic:"orders",n:"контейнер: по карточке на приказ; пока «Область группы» — 6 чисел",ref:"tools/nn/unit/net.py ORDER (приказ отряду)"},
+    {id:"group",t:"Посылка от оперативника",ty:"in",st:"agreed",b:[0,2060,360,236],pic:"group",n:"маска моих S + маска цели S + центр 2 + поворот 2 + форма 2 + номер группы 1",ref:"выход оперативника = вход тактика"},
+    {id:"zone",t:"Зона группы — плитки",ty:"alg",st:"agreed",b:[0,2336,360,340],pic:"zone",n:"плитка 80×80; линия 1×N / квадрат; лишние — пространство тактика; выбыл — дыра",ref:"— (правило кода, своих весов нет)"},
+    {id:"gmap",t:"Карта группы",ty:"in",st:"agreed",b:[0,2716,360,350],pic:"gmap",n:"30 × 30; центр — центр зоны, вверх — поворот зоны; 2 слоя: зона, личные области",ref:"tools/nn/unit/zmap.py (карта зоны отряда)"},
+    {id:"orders",t:"Приказы тактику",ty:"order",st:"agreed",b:[0,3106,360,250],pic:"orders",n:"«Приказ»: глагол 4 + темп 2 = 6 чисел, без «что дальше»",ref:"—"},
     {id:"unitcard",t:"Карточка отряда",ty:"out",st:"agreed",b:[960,830,340,340],pic:"unitcard",n:"128 чисел на отряд (настройка)",ref:"«Карточки отрядов» (генерал)"}
   ];
   // links: from -> to; fy / ty where on the side (0 top .. 1 bottom), xm the elbow x (default: halfway), label (over the
@@ -611,12 +697,14 @@ a{color:inherit}
     {from:"passport",to:"unitproc",fy:.5,ty:.18,xm:430,label:"69",col:"--c-pass"},
     {from:"changing",to:"unitproc",fy:.42,ty:.5,xm:430,label:"92 / 65",col:"--c-live"},
     {from:"abilities",to:"unitproc",fy:.5,ty:.82,xm:430,label:"24 / 16",col:"--c-ars"},
-    {from:"unitproc",to:"unitcard",fy:.5,ty:.5,label:"128",col:"--c-out"}
+    {from:"unitproc",to:"unitcard",fy:.5,ty:.5,label:"128",col:"--c-out"},
+    {from:"group",to:"zone",dir:"down",label:"центр, поворот, форма, N",col:"--c-grp"},
+    {from:"zone",to:"gmap",dir:"down",label:"слой зоны",col:"--c-grp"}
   ];
   // PARKED (the user 30.10: off the page for now, back later) - move into NODES / EDGES to show again; their descriptions
   // (tpl-cards, tpl-command, tpl-stub) and pictures stay in the file
   var PARKED_NODES=[
-    {id:"cards",t:"Список карточек отрядов",ty:"in",st:"agreed",b:[470,130,580,580],pic:"cards",n:"строка 185 / 150 чисел; мои 1–6 + цель + прочие; пусто — маска",ref:"tools/nn/unit/view.py · build()"},
+    {id:"cards",t:"Список карточек отрядов",ty:"in",st:"agreed",b:[470,130,580,580],pic:"cards",n:"строка 185 / 150 чисел; мои 1–10 + цель + прочие; пусто — маска",ref:"tools/nn/unit/view.py · build()"},
     {id:"command",t:"Команда от оперативника",ty:"in",st:"agreed",b:[470,770,580,320],pic:"command",n:"область · задача (4) · темп · «что дальше»",ref:"tools/nn/unit/net.py · ORDER"},
     {id:"stub",t:"Обработка",ty:"stub",st:"stub",b:[1200,330,340,560],pic:"stub",n:"ещё не обсуждали",ref:"—"}
   ];
@@ -645,11 +733,15 @@ a{color:inherit}
   // the live part's rows on the scheme: icon, field, numbers, enemy (1 yes, 2 yes - against the decision, 0 no)
   var LIVE=[["place.svg","положение","2",1],["position.svg","фронт","2",1],["speed.png","скорость","2",1],["formation.svg","строй","2",1],
     ["men.svg","бойцы","1",1],["health.png","здоровье","1",1],["morale.png","мораль","2",1],["flags.svg","в бою, бегом…","7",1],
-    ["fatigue.png","усталость","1",2],["ammo.png","боезапас","1",2],["height.svg","высота земли","1",1],["order.svg","приказ и цель","?",0]];
+    ["fatigue.png","усталость","1",2],["ammo.png","боезапас","1",2],["height.svg","высота земли","1",1],["order.svg","приказ и цель","?",0],["role.svg","прошлая роль","?",0]];
   // the state's dictionary on the scheme: icon, short name, enemy (1 an icon on its card, 2 to check, 3 not given on purpose, 0 the game does not give it)
   var STL=[["eff_poison.svg","яд",1],["eff_contaminated.svg","заражение",1],["eff_suppressed.svg","подавлен",1],["shieldbreaker.png","щитолом",1],["eff_frenzy.svg","бешенство",1],["eff_numbers.svg","сила в числе",1],["eff_scurry.svg","удрать",1],["eff_single.svg","раны одиночки",1],["eff_penitent.svg","сила кающихся",1],["blackpowder.png","выдержка",1],["flaming.png","реген. порезан",2],["snare_net.png","сеть-ловушка",1],["hold_the_line.png","держать строй",1],["encourages.png","воодушевлён",1],["fear.png","страх рядом",1],["terror.png","бежит от ужаса",1],["immune_psychology.png","иммун. к ужасу",0],["class_artillery.png","под огнём арт.",4],["explosive_damage.png","попадание арт.",4],["charge_bonus.png","в натиске",4],["braced.png","упор",4],["class_cavalry.png","строй проломлен",2],["walk.png","замедлен",4],["magical.png","чужая на мне",1],["stalk.png","скрыт",0]];
   // the orders to the tactic (the container "Приказы тактику"): a card per order - title, rows [icon, field, numbers]
-  var ORD=[{t:"Область группы",rows:[["place.svg","центр (x, z)",2],["formation.svg","ширина, глубина",2],["position.svg","поворот (sin, cos)",2]]}];
+  var ORD=[{t:"Приказ",rows:[["order.svg","глагол (4 варианта)",4],["run.png","темп: шаг / бег",2]]}];
+  // the group map's layers agreed so far: [kind, layer] (more come one by one)
+  var GML=[["zone","зона группы (плитки)"],["areas","личные области отрядов"]];
+  // the group card: icon, field, numbers
+  var GRP=[["mask","маска моих слотов","S"],["maskt","маска цели (м. б. пустая)","S"],["place.svg","центр зоны (x, z)",2],["position.svg","поворот зоны (sin, cos)",2],["formation.svg","форма: линия / квадрат",2],["role.svg","номер группы",1]];
   // the current stats (with every effect on): icon, short name
   var CSL=[["attack.png","атака"],["defence.png","защита"],["morale.png","лидерство"],["speed.png","скорость"],["run.png","скор. натиска"],["charge_bonus.png","бонус натиска"],["damage.png","урон"],["damage_ap.png","бронебойный"],["res_physical.png","физ. сопротивл."],["res_fire.png","сопр. огню"],["shield.png","щит"],["snipe.png","точность"],["reload.png","перезарядка"],["missile_damage.png","урон снаряда"],["missile_damage_ap.png","бронеб. снаряда"]];
   // the abilities' dictionary (buttons): icon, short name
@@ -699,18 +791,73 @@ a{color:inherit}
       s+=T(x+w/2,bot+88,'и не склеиваются: сеть сочетает их сама',9.5,'middle');
       s+=T(x+w/2,bot+106,'враг: 150 чисел, остальное — маска',9.5,'middle');
       return s;},
+    // "Карта группы": a 30 x 30 map - centre = the zone's centre, up = the zone's turn; only the layers agreed so far
+    gmap:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,GML.length+' слоя × 30 × 30 клеток · каждое решение',10.5,'middle');
+      var cs=5,mx=x+16,my=y+44,t=8*cs,zx=mx+15*cs-t,zy=my+15*cs-t;     // a 2 x 2 zone (tiles of 80 m = 8 cells) round the centre
+      s+=R(mx,my,30*cs,30*cs,M('--ink',5),3,' stroke="'+M('--ink',25)+'" stroke-width="1"');
+      for(var r=0;r<2;r++)for(var c=0;c<2;c++)s+=R(zx+c*t,zy+r*t,t,t,M('--c-grp',14),2,' stroke="var(--c-grp)" stroke-width="1.2" stroke-dasharray="3 2"');
+      // the units' own areas (cut last time): smaller than a tile, never overlapping; the 4th tile - the tactic's spare room
+      [[0,0,.15,.25,.7,.5],[1,0,.15,.25,.7,.5],[0,1,.1,.2,.8,.45]].forEach(function(a){s+=R(zx+a[0]*t+a[2]*t,zy+a[1]*t+a[3]*t,a[4]*t,a[5]*t,M('--mine',45),2,' stroke="var(--mine)" stroke-width="1.2"');});
+      s+='<circle cx="'+(mx+15*cs)+'" cy="'+(my+15*cs)+'" r="2.6" fill="var(--ink)"/>'+T(mx+15*cs,my-4,'↑ поворот зоны',9,'middle','fill:var(--ink)');
+      var lx=mx+30*cs+14;
+      s+=R(lx,my+6,10,10,M('--c-grp',30),2,' stroke="var(--c-grp)" stroke-dasharray="2 1.5"')+T(lx+15,my+15,'плитка зоны 80×80',9.5);
+      s+=R(lx,my+24,10,10,M('--mine',45),2,' stroke="var(--mine)"')+T(lx+15,my+33,'личная область',9.5);
+      s+='<circle cx="'+(lx+5)+'" cy="'+(my+47)+'" r="2.6" fill="var(--ink)"/>'+T(lx+15,my+51,'центр зоны = центр',9.5);
+      s+=T(lx,my+72,'квадрат всегда целиком',9)+T(lx,my+85,'и не дрожит',9)+T(lx,my+104,'масштаб — из N',9);
+      var y0=my+30*cs+16;
+      GML.forEach(function(g,i){var yy=y0+i*17;
+        s+=g[0]==='zone'?R(x+12,yy-1,13,13,M('--c-grp',30),3,' stroke="var(--c-grp)" stroke-width="1.4" stroke-dasharray="3 2"'):R(x+12,yy-1,13,13,M('--mine',45),3,' stroke="var(--mine)"');
+        s+=T(x+31,yy+9,g[1],10)+R(x+200,yy,6.5,11,M('--c-map',40+i*25),1.5)+T(x+w-14,yy+9,'1',10,'end','font-family:var(--f-mono)');});
+      var yd=y0+GML.length*17+6;
+      s+=R(x+10,yd,w-20,26,'none',8,' stroke="'+M('--ink',35)+'" stroke-dasharray="6 4"')+T(x+w/2,yd+17,'+ следующие слои — по одному',10,'middle');
+      s+=T(x+w/2,yd+46,'по 1 числу на клетку в каждом слое',10.5,'middle','fill:var(--ink);font-weight:600');
+      return s;},
+    // "Зона группы — плитки": the build rule drawn on three small examples (no weights of its own)
+    zone:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'плитка = личная область отряда 80 × 80 м',10.5,'middle'),t=30;
+      function tile(tx,ty,kind){return R(tx,ty,t,t,kind==='spare'?M('--c-grp',38):kind==='hole'?'none':M('--c-grp',12),2,' stroke="'+(kind==='hole'?'var(--foe)':'var(--c-grp)')+'" stroke-width="1.2" stroke-dasharray="3 2"')+
+        (kind==='hole'?'<path d="M'+(tx+8)+' '+(ty+8)+'l'+(t-16)+' '+(t-16)+'M'+(tx+t-8)+' '+(ty+8)+'l'+(16-t)+' '+(t-16)+'" stroke="var(--foe)" stroke-width="1.6"/>':'');}
+      function area(tx,ty,fw,fh){return R(tx+(t-fw)/2,ty+(t-fh)/2,fw,fh,M('--mine',45),1.5,' stroke="var(--mine)" stroke-width="1"');}
+      var ex=x+20,ey=y+44;
+      // 1) a line 1 x 4
+      s+=T(ex,ey+9,'«линия» — 1 × N (4 отряда → 1 × 4)',10,null,'fill:var(--ink);font-weight:600');ey+=16;
+      for(var i=0;i<4;i++){s+=tile(ex+i*(t+2),ey)+area(ex+i*(t+2),ey,22,14);}
+      s+=T(ex+4*(t+2)+8,ey+12,'320 × 80 м',9.5)+T(ex+4*(t+2)+8,ey+25,'области не пересекаются',9);ey+=t+18;
+      // 2) a square for 3 units: 2 x 2, one spare tile
+      s+=T(ex,ey+9,'«квадрат» — ряды × столбцы, вверх (3 → 2 × 2)',10,null,'fill:var(--ink);font-weight:600');ey+=16;
+      s+=tile(ex,ey)+area(ex,ey,22,14)+tile(ex+t+2,ey)+area(ex+t+2,ey,22,14)+tile(ex,ey+t+2)+tile(ex+t+2,ey+t+2,'spare');
+      s+=R(ex+t+1-12,ey+t+2+8,24,14,M('--mine',45),1.5,' stroke="var(--mine)" stroke-width="1"');   // (the shooters: their own area, at most a tile, anywhere in the row's 160 m)
+      s+=T(ex+2*(t+2)+8,ey+12,'2 пехоты впереди',9.5)+T(ex+2*(t+2)+8,ey+t+14,'стрелки сзади: весь ряд,',9.5)+T(ex+2*(t+2)+8,ey+t+27,'полоса 160 м',9.5);
+      s+=T(ex+2*(t+2)+8,ey+t+44,'лишняя плитка — пространство тактика',9,null,'fill:var(--c-grp);font-weight:600');ey+=2*t+30;
+      // 3) a unit left: the tile nearest to its last place goes (a hole), the zone does not grow back
+      s+=T(ex,ey+9,'выбыл отряд (бежит / погиб) → дыра',10,null,'fill:var(--ink);font-weight:600');ey+=16;
+      for(var i=0;i<4;i++){s+=i===2?tile(ex+i*(t+2),ey,'hole'):tile(ex+i*(t+2),ey)+area(ex+i*(t+2),ey,22,14);}
+      s+=T(ex+4*(t+2)+8,ey+12,'убрана плитка, ближайшая',9.5)+T(ex+4*(t+2)+8,ey+25,'к его последнему месту',9.5);ey+=t+22;
+      s+=T(x+w/2,ey+4,'квадрат: 3 → 2×2, 5 → 2×3, 10 → 3×4',10,'middle','fill:var(--ink)');
+      s+=T(x+w/2,ey+20,'своих весов нет — правило кода',9.5,'middle');
+      return s;},
+    // "Посылка от оперативника": what the operational level sends (= its output); the masks have a number per slot (S)
+    group:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'выход оперативника = вход тактика',10.5,'middle');
+      GRP.forEach(function(g,i){var yy=y+40+i*17,k=g[0];
+        if(k==='mask'||k==='maskt'){s+=R(x+12,yy-1,13,13,k==='mask'?'var(--mine)':'var(--foe)',3,' stroke="var(--ink)" stroke-opacity=".25"');
+          for(var j=0;j<10;j++)s+=R(x+200+j*8,yy,6.5,11,j%3===0||(k==='mask'&&j===4)?M(k==='mask'?'--mine':'--foe',75):M('--ink',8),1.5);}
+        else{s+=IMG(x+12,yy-1,13,k);for(var j=0;j<g[2];j++)s+=R(x+200+j*8,yy,6.5,11,M('--c-grp',30+rnd(i+170,j)*50),1.5);}
+        s+=T(x+31,yy+9,g[1],10)+T(x+w-14,yy+9,g[2],10,'end','font-family:var(--f-mono)');});
+      var yb=y+40+GRP.length*17;
+      s+=T(x+w/2,yb+18,'S + S + 7 · одна посылка на группу',10.5,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,yb+34,'остальное тактик строит сам кодом',9,'middle')+T(x+w/2,yb+48,'посылка проверяется на входе',9,'middle');
+      return s;},
     // "Приказы тактику": a container of order cards (one order a card, in the input cards' style); ORD is its data
-    orders:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'всё, что тактик получает от оперативника',10.5,'middle'),cy=y+38;
+    orders:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'глагол + темп от оперативника · без «что дальше»',10.5,'middle'),cy=y+38;
       ORD.forEach(function(o){var n=0;o.rows.forEach(function(r){n+=r[2];});var hh=30+o.rows.length*17+6;
         s+=R(x+10,cy,w-20,hh,'var(--panel)',10,' stroke="var(--c-order)" stroke-width="1.4"');
         s+=T(x+22,cy+18,o.t,10.5,null,'fill:var(--ink);font-weight:600')+T(x+w-24,cy+18,n+' чисел',9.5,'end');
         o.rows.forEach(function(r,i){var yy=cy+28+i*17;s+=IMG(x+22,yy-1,13,r[0])+T(x+41,yy+9,r[1],10);
-          for(var k=0;k<r[2];k++)s+=R(x+170+k*8,yy,6.5,11,M('--c-order',30+rnd(i+150,k)*50),1.5);
+          for(var k=0;k<r[2];k++)s+=R(x+w-80+k*8,yy,6.5,11,M('--c-order',30+rnd(i+150,k)*50),1.5);
           s+=T(x+w-24,yy+9,r[2],10,'end','font-family:var(--f-mono)');});
         cy+=hh+8;});
-      s+=R(x+10,cy,w-20,30,'none',10,' stroke="'+M('--c-order',60)+'" stroke-width="1.2" stroke-dasharray="6 4"')+T(x+w/2,cy+19,'+ следующий приказ — своей карточкой',10,'middle');
-      s+=T(x+w/2,cy+50,'остальные приказы добавляем по одному',10,'middle','fill:var(--ink);font-weight:600');
-      s+=T(x+w/2,cy+65,'куда они входят — ещё не обсуждали',9.5,'middle','fill:var(--open)');
+      s+=R(x+10,cy,w-20,44,'none',10,' stroke="'+M('--c-order',60)+'" stroke-width="1.2" stroke-dasharray="6 4"')+T(x+w/2,cy+19,'+ новый приказ — своей карточкой',10,'middle')+T(x+w/2,cy+34,'второго приказа нет: «подойди на холм» — это зона',9.5,'middle');
+      s+=T(x+w/2,cy+64,'цель — не в приказе: маска в посылке',10,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,cy+79,'куда они входят — ещё не обсуждали',9.5,'middle','fill:var(--open)');
       return s;},
     // "Карточка отряда": a learned row of 128 numbers per list row (drawn 16 cells)
     unitcard:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'128 чисел на отряд · № как у строки входа',10.5,'middle');
@@ -797,7 +944,7 @@ a{color:inherit}
       var yb=y+42+rows.length*36+6;
       s+=Pa('M'+(x0)+' '+yb+'v8H'+(xm+8)+'v-8',M('--ink',45),1.3);
       s+=T(x+b[2]/2,yb+26,'одна и та же часть сети читает каждую строку (общие веса)',11,'middle','fill:var(--ink)');
-      s+=T(x+b[2]/2,yb+42,'строк: мои 1–6 + цель + прочие в зоне; пустые закрыты маской',10.5,'middle');
+      s+=T(x+b[2]/2,yb+42,'строк: мои 1–10 + цель + прочие в зоне; пустые закрыты маской',10.5,'middle');
       return s;},
     command:function(b){var x=b[0],y=b[1],s="",fx=x+16,fy=y+18,fw=230,fh=200;
       // the group's area on a small field: the group's units inside, the target outside
@@ -834,10 +981,13 @@ a{color:inherit}
   var marks={};   // (an arrow head per link colour)
   EDGES.forEach(function(e){var a=byId[e.from].b,c=byId[e.to].b,x1=a[0]+a[2],y1=a[1]+a[3]*(e.fy==null?.5:e.fy),x2=c[0]-2,y2=c[1]+c[3]*(e.ty==null?.5:e.ty),
       xm=e.xm!=null?e.xm:(x1+x2)/2,stub=e.kind==="stub",d=Math.abs(y1-y2)<1?'M'+x1+' '+y1+'H'+x2:'M'+x1+' '+y1+'H'+xm+'V'+y2+'H'+x2;
+    var lx=(xm+x2)/2,ly=y2-7,la='middle';
+    if(e.dir==="down"){x1=a[0]+a[2]*(e.fx==null?.5:e.fx);y1=a[1]+a[3];x2=c[0]+c[2]*(e.tx==null?.5:e.tx);y2=c[1]-2;var ym=(y1+y2)/2;
+      d=Math.abs(x1-x2)<1?'M'+x1+' '+y1+'V'+y2:'M'+x1+' '+y1+'V'+ym+'H'+x2+'V'+y2;lx=x2+10;ly=ym+5;la='start';}
     var col=e.col?'var('+e.col+')':stub?'#9aa1ab':'var(--muted)',mk=e.col?'arr_'+e.col.replace(/-/g,''):stub?'arrS':'arrM';
     if(e.col&&!marks[mk])marks[mk]='<marker id="'+mk+'" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="'+col+'"/></marker>';
     ln+=Pa(d,col,e.col?2.4:1.8,stub?'7 5':null,mk);
-    if(e.label)ln+='<text class="elab" x="'+((xm+x2)/2)+'" y="'+(y2-7)+'" text-anchor="middle"'+(e.col?' style="fill:'+col+';font-weight:600"':'')+'>'+esc(e.label)+'</text>';});
+    if(e.label)ln+='<text class="elab" x="'+lx+'" y="'+ly+'" text-anchor="'+la+'"'+(e.col?' style="fill:'+col+';font-weight:600"':'')+'>'+esc(e.label)+'</text>';});
   h+='<defs>'+Object.keys(marks).map(function(k){return marks[k];}).join('')+'</defs>';
   h+='<g pointer-events="none">'+ln+'</g>';
   NODES.forEach(function(n){var b=n.b;
