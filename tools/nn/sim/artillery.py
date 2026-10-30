@@ -277,8 +277,68 @@ def exposure(P, Cx, r_b, r_e, smooth):
     return m1, m2, pk, pc
 
 
+def flung(P, Cx, r_b, r_e, ux, uz, b_deg, F, D, delta):
+    """[M, N, C, C + 1]: where the men a burst knocks down in each cell land - the share of them in each cell of their
+    unit's box, the last 'out of the box' (artillery.holes): a knocked man (closeness >= 0.5, exposure's) flies delta m
+    on from the burst, straight away from it. P [M, Q, 2] the bursts, Cx [M, N, C, 2] the cells' centres, r_b [M, N],
+    r_e [M]; ux, uz, b_deg, F, D [M, N]: the units' centres, bearings and boxes (cells' layout)."""
+    ca, cl = CELLS
+    v = Cx[:, :, :, None, :] - P[:, None, None, :, :]                                           # [M, N, C, Q, 2]
+    d = torch.sqrt((v * v).sum(-1)).clamp(min=1e-6)
+    rb = r_b[..., None, None]
+    re = r_e[:, None, None, None]
+    kn = ((d * d - rb * rb < re * re) & (re > 0) & (1 - ((d - rb) / re.clamp(min=1e-6)).clamp(0, 1) >= 0.5)).float()
+    to = Cx[:, :, :, None, :] + v / d[..., None] * delta
+    rad = torch.deg2rad(b_deg)[:, :, None, None]
+    dx, dz = to[..., 0] - ux[:, :, None, None], to[..., 1] - uz[:, :, None, None]
+    a = dx * torch.cos(rad) - dz * torch.sin(rad)                                               # across
+    l = dx * torch.sin(rad) + dz * torch.cos(rad)                                               # along
+    col = torch.floor((a / F[:, :, None, None].clamp(min=1e-3) + 0.5) * ca)
+    row = torch.floor((l / D[:, :, None, None].clamp(min=1e-3) + 0.5) * cl)
+    inside = (col >= 0) & (col < ca) & (row >= 0) & (row < cl)
+    idx = torch.where(inside, col * cl + row, torch.full_like(col, float(ca * cl))).long()
+    out = torch.zeros((*kn.shape[:3], ca * cl + 1), device=P.device)
+    out.scatter_add_(3, idx, kn)
+    # (a cell no burst knocks: its men stay - the knocks of a fixed shell's own hit fly nowhere here)
+    own = torch.eye(ca * cl + 1, device=P.device)[: ca * cl]                                    # [C, C + 1]
+    out = torch.where(out.sum(-1, keepdim=True) > 0, out, own.expand_as(out))
+    return out / out.sum(-1, keepdim=True)
+
+
 def _eager(fn):
     return torch.compiler.disable(fn)
+
+
+def holes_cal(params):
+    """artillery.holes (config/nn/sim.json): {move_v, knock_min} or {} (off)."""
+    h = cal(params).get("holes") or {}
+    return h if h.get("on") else {}
+
+
+def holes_reform(u, params):
+    """In place, each step (land()): a unit holding its men unformed (hole_m > 0) forms again - its men fill its box
+    evenly, the box closes up to its men (geometry.dims) - once it moves (its speed over holes.move_v), routs, re-forms
+    to a new width (reform.py), is gone or dead (artillery.holes; the probe: walking targets close up, standing ones
+    under the Mortar and the rockets do not)."""
+    hc = holes_cal(params)
+    if not hc or "cellm" not in u:
+        return
+    speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
+    go = (u["hole_m"] > 0) & ((speed > float(hc["move_v"])) | u["r"] | (u["men"] <= 0) | u["gone"] | (u["wnew"] >= 0))
+    u["hole_m"] = torch.where(go, torch.zeros_like(u["hole_m"]), u["hole_m"])
+    B, N = go.shape
+    cm = u["cellm"].view(B, N, -1)
+    u["cellm"] = torch.where(go[..., None], torch.zeros_like(cm), cm).reshape(B, -1)
+
+
+def holes_box(u, params, front, depth):
+    """(front, depth) [B, N]: the box a unit's men stand in for the shells - a unit holding them unformed (hole_m > 0)
+    keeps the box of its men then (geometry.dims at hole_m: the probe's standing targets under the Mortar kept 29-31 x
+    16-23 m from 160 to 100 men), the others the one given (geometry.dims at their men)."""
+    from tools.nn.sim import geometry
+    holed = u["hole_m"] > 0
+    f, d = geometry.dims(dict(u, men=torch.where(holed, u["hole_m"], u["men"])), params.sim["formation"]["spacing_m"])
+    return torch.where(holed, f, front), torch.where(holed, d, depth)
 
 
 def morale_cal(params):
@@ -346,6 +406,11 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
     dev = u["men"].device
     hp = torch.zeros((B, N, N), device=dev)
     kills, hits, knocks = torch.zeros_like(hp), torch.zeros_like(hp), torch.zeros_like(hp)
+    hc = holes_cal(params) if "cellm" in u else {}
+    if hc:
+        # (artillery.holes) a unit that moved forms again; the holed keep their box of the men they had then
+        holes_reform(u, params)
+        front, depth = holes_box(u, params, front, depth)
     fly = u["sh_s"] >= 0
     left = u["sh_s"] - dt
     now = fly & ((left <= 1e-6) | firing)
@@ -371,6 +436,13 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
     rad = torch.deg2rad(u["b"])
     res_m = (u["resist_missile"] + u["resist_physical"]).clamp(max=0.9)
     C = CELLS[0] * CELLS[1]
+    if hc:
+        # (artillery.holes) a holed unit's men by cell: its cells' shares of its men now (other losses thin all alike)
+        holed = u["hole_m"] > 0
+        cm = u["cellm"].view(B, N, C + 1)                                  # (the last: the men flung out of the box)
+        cshare = cm / cm.sum(-1, keepdim=True).clamp(min=1e-9)
+        kcell = torch.zeros((B, N, C + 1), device=dev)
+        delta = float(hc.get("flight_m", 0.0))
     rows = torch.nonzero(now)
     for lo in range(0, len(rows), CHUNK):
         bb, ii = rows[lo:lo + CHUNK, 0], rows[lo:lo + CHUNK, 1]
@@ -393,6 +465,9 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
         friend = u["side"][bb] == u["side"][bb, ii][:, None]
         whom = present[bb] & (~friend | u["ex_allies"][bb, ii][:, None])
         band_men = (men[bb] / C * whom.float())[..., None].expand(-1, -1, C)  # [M, N, C]: a cell's men
+        if hc:
+            band_men = torch.where(holed[bb][..., None], men[bb][..., None] * cshare[bb][..., :C] * whom.float()[..., None],
+                                   band_men)
         # a fixed shell's own hit: the men within its collision radius + a man's radius, at most the men it strikes
         fixed = (u["fix_el"][bb, ii] > 0)[:, None]                           # [M, 1]
         r_c = u["c_rad"][bb, ii][:, None] + u["radius"][bb]                  # [M, N]
@@ -448,4 +523,28 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
         hp.index_put_((bb, ii), (hpc + hpe).sum(-1), accumulate=True)
         kills.index_put_((bb, ii), (kc + ke).sum(-1), accumulate=True)
         hits.index_put_((bb, ii), (Hc + He).sum(-1), accumulate=True)
+        if hc:
+            # the dead leave their cells; the men knocked down fly delta m on from the burst (flung: the cell they land
+            # in, or out of the box)
+            moved = kc + ke
+            if delta > 0:
+                down = lam_k * op * band_men
+                down = torch.minimum(down, (band_men - kc - ke).clamp(min=0))
+                dest = flung(P, Cx, u["radius"][bb], r_e, u["x"][bb], u["z"][bb], u["b"][bb], front[bb], depth[bb], delta)
+                moved = moved + down
+                kcell.index_put_((bb,), -(down[..., None] * dest).sum(2), accumulate=True)
+            kcell.index_put_((bb,), torch.cat([moved, torch.zeros_like(moved[..., :1])], -1), accumulate=True)
+    if hc:
+        # (artillery.holes) a standing unit whose men the shells knock down (at least knock_min of them this step) holds
+        # its men where they stand from now on: its cells keep the men they had less this step's dead there
+        kn = knocks.sum(1)
+        speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
+        start = (~holed & (kn >= float(hc["knock_min"])) & (speed <= float(hc["move_v"])) & many & ~u["r"]
+                 & (u["wnew"] < 0) & present)
+        keep = holed | start
+        even = torch.cat([(men / C)[..., None].expand(-1, -1, C), torch.zeros_like(men)[..., None]], -1)
+        base = torch.where(holed[..., None], men[..., None] * cshare, even)
+        new_cm = (base - kcell).clamp(min=0)
+        u["cellm"] = torch.where(keep[..., None], new_cm, cm).reshape(B, -1)
+        u["hole_m"] = torch.where(start, men, u["hole_m"])
     return hp, kills, hits, knocks

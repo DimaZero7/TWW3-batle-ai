@@ -469,6 +469,9 @@ INTERNAL = {
     "sh_k": ("f", "the shots this gun has fired at sh_kt (the zeroing-in, artillery.spread_side)"),
     "sh_kt": ("f", "the target sh_k counts (-1: none; a new target starts the count again)"),
     "art_kd": ("f", "bookkeeping: men its shells have knocked down so far"),
+    "hole_m": ("f", "its men when shells that knock men down first struck it standing (artillery.holes; 0: none, its men "
+                    "fill its box evenly): its box keeps that size and its men stay where they stand (cellm) until it "
+                    "moves"),
     "art_s": ("f", "seconds since an artillery projectile was fired at it, landed within 12 m of its box or hit its men "
                    "(morale: 'attacked by artillery' for artillery.morale.window_s; below 0: the shot's delay before it "
                    "counts; artillery.morale_mark)"),
@@ -501,6 +504,14 @@ PAIRS = {
     "hit_sec": "the side of i that j's contact began on, + 1 (1 front, 2 flank, 3 rear; 0: no contact): held while the "
                "pair stays in contact (morale.attacked_first: the database's 'attacked in the flank / rear' is the "
                "first contact's side)",
+}
+
+# Per unit and cell of its box, [B, N * HOLE_CELLS] (2-D for the same reason; artillery.CELLS' 6 x 3 cells, across x
+# along, + the men flung out of it): where its men stand while it holds them unformed (artillery.holes):
+HOLE_CELLS = 19
+CELLS = {
+    "cellm": "its men in each cell of its box while hole_m > 0 (artillery.holes: the shells' dead leave their places "
+             "empty; other losses thin every cell alike - the shares are what counts); 0 otherwise",
 }
 
 # The battle's id [B, N] (int64, the same on every slot; empty() sets it, nothing per unit fills it): its row in the
@@ -600,6 +611,8 @@ def empty(B, N, device="cpu", history=0):
         u[name] = torch.zeros((B, history * N), device=device)
     for name in PAIRS:
         u[name] = torch.zeros((B, N * N), device=device)
+    for name in CELLS:
+        u[name] = torch.zeros((B, N * HOLE_CELLS), device=device)
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
     u["oface"].fill_(-1)

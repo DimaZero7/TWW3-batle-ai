@@ -158,9 +158,11 @@ class TestFunctions:
 
     def test_state_and_orders_shapes_and_perspective(self):
         st = S.empty(2, 6, history=3)
-        assert all(v.shape == (2, 6) for k, v in st.u.items() if k not in S.HISTORY and k not in S.PAIRS)
+        assert all(v.shape == (2, 6) for k, v in st.u.items()
+                   if k not in S.HISTORY and k not in S.PAIRS and k not in S.CELLS)
         assert st.u["lost_hist"].shape == (2, 18)
         assert all(st.u[k].shape == (2, 36) for k in S.PAIRS)
+        assert all(st.u[k].shape == (2, 6 * S.HOLE_CELLS) for k in S.CELLS)
         obs = st.observation()
         timers = {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")}
         order = {"order_kind", "order_target"}         # the order in force (observation ORDER)

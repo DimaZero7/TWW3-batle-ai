@@ -372,3 +372,76 @@ class TestTheCycle:
         assert s["reload"] == pytest.approx(19.0 + add["wh_emp_mortar_shell"]) and s["rl_add"] == add["wh_emp_mortar_shell"]
         assert P.static(ROCKETS)["reload"] == pytest.approx(17.0 + add["wh_emp_rocket"])
         assert P.static(ARCHERS)["rl_add"] == 0.0
+
+
+class TestHoles:
+    """artillery.holes (config/nn/sim.json; build/diag_form): a standing unit the shells knock down holds its men where
+    they stand - the dead leave their cells, the men knocked down fly flight_m on from the burst - and keeps its box, until
+    it moves; a unit not knocked (the Warp Lightning Cannon's small blast) and every walking one form again evenly."""
+
+    @staticmethod
+    def _volley(st, H, r=6.0):
+        """Launch one Mortar volley of 4 at slot H and land it now: (hp, kills, knocks) at H."""
+        u = st.u
+        pw = geometry.pairwise(u, SP)
+        shots = torch.zeros_like(u["men"])
+        shots[0, 0] = float(artillery.shooters(u)[0, 0])
+        target = torch.full_like(u["side"], -1)
+        target[0, 0] = H
+        artillery.launch(u, pw, P, shots, target)
+        u["sh_s"][0, 0] = 0.05
+        u["sh_r"][0, 0] = r
+        front, depth = geometry.dims(u, SP)
+        hp, kills, hits, knocks = artillery.land(u, P, P.dt, front, depth, torch.zeros_like(u["r"]))
+        u["men"][0, H] -= kills[0, 0, H]
+        u["hp_abs"][0, H] -= hp[0, 0, H]
+        return float(hp[0, 0, H]), float(kills[0, 0, H]), float(knocks[0, 0, H])
+
+    def test_a_standing_block_under_the_mortar_keeps_its_holes_and_its_box(self):
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        u = st.u
+        men0 = float(u["men"][0, H])
+        _, d_closed0 = geometry.dims(u, SP)
+        hp1, k1, kn1 = self._volley(st, H)
+        assert kn1 >= 5 and float(u["hole_m"][0, H]) == men0
+        cm = u["cellm"].view(st.B, st.N, -1)[0, H]
+        assert float(cm.sum()) == pytest.approx(men0 - k1, rel=1e-4)
+        cells = cm[:18].view(6, 3)
+        # the centre (aimed at) emptied, the edges not; some men flung out of the box
+        assert float(cells[2:4].mean()) < 0.6 * float(cells[[0, 5]].mean())
+        assert float(cm[18]) > 0
+        # the box keeps the men's then; the closed box (geometry.dims) would shrink
+        front, depth = geometry.dims(u, SP)
+        hf, hd = artillery.holes_box(u, P, front, depth)
+        assert float(hd[0, H]) == pytest.approx(float(d_closed0[0, H])) and float(depth[0, H]) <= float(hd[0, H])
+        # the second volley at the centre finds fewer men than at a target formed again evenly
+        st2 = st.clone()
+        hp2, _, _ = self._volley(st, H)
+        st2.u["hole_m"].zero_()
+        st2.u["cellm"].zero_()
+        hp2_even, _, _ = self._volley(st2, H)
+        assert hp2 < 0.8 * hp2_even
+
+    def test_holes_off_and_a_moving_block_form_again(self):
+        off = P.with_cal("artillery", holes={"on": 0})
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        front, depth = geometry.dims(st.u, SP)
+        artillery.land(st.u, off, P.dt, front, depth, torch.zeros_like(st.u["r"]))
+        assert float(st.u["hole_m"][0, H]) == 0 and float(st.u["cellm"].abs().sum()) == 0
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        self._volley(st, H)
+        assert float(st.u["hole_m"][0, H]) > 0
+        st.u["vx"][0, H] = 1.0                                     # it walks: its men take their places again
+        artillery.holes_reform(st.u, P)
+        assert float(st.u["hole_m"][0, H]) == 0 and float(st.u["cellm"].view(st.B, st.N, -1)[0, H].abs().sum()) == 0
+        # a walking block is not holed at all
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        st.u["vx"][0, H] = 1.0
+        self._volley(st, H)
+        assert float(st.u["hole_m"][0, H]) == 0
+
+    def test_the_warp_cannons_small_blast_leaves_no_holes(self):
+        st, H = TestShells._shot(WARP, SPEAR, dist=200.0)
+        front, depth = geometry.dims(st.u, SP)
+        artillery.land(st.u, P, P.dt, front, depth, torch.zeros_like(st.u["r"]))
+        assert float(st.u["hole_m"][0, H]) == 0

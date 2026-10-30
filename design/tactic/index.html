@@ -20,18 +20,23 @@
   --done:#1f8a5b; --done-bg:#e3f4ec; --open:#b07300; --open-bg:#fff3d9; --later:#5b6b86; --later-bg:#e9edf4;
   --field:#cfe3a8; --out:#7a7f88; --mine:#2b9a6a; --minev:#8fd3b2; --foe:#cc4a3f; --foev:#f0a8a1; --neutral:#eceff3;
   --ours:#3a7bd5; --tc-test:#1a9a8a; --pass:#7b8496; --live:#3a7bd5;
+  --c-pass:#6f7fd0; --c-live:#2f9488; --c-who:#4aa99c; --c-state:#237066; --c-cst:#68bdb1; --c-ars:#b0679a; --c-out:#d08a1c; --c-order:#a88a00;
   --f-body:"Golos Text",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
-  --pass:#8a93a6; --live:#5b9bf0; color-scheme:dark}}
+  --pass:#8a93a6; --live:#5b9bf0;
+  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c;
+  color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
-  --pass:#8a93a6; --live:#5b9bf0; color-scheme:dark}
+  --pass:#8a93a6; --live:#5b9bf0;
+  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c;
+  color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.55;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 48px}
@@ -44,7 +49,8 @@ code{font-family:var(--f-mono);font-size:.86em}
 .status{display:inline-block;font-size:14px;font-weight:600;padding:3px 12px;border-radius:999px;background:var(--open-bg);color:var(--open);border:1px solid var(--open);align-self:flex-start}
 .crumbs{font-size:14px;color:var(--muted)} .crumbs b{color:var(--ink)}
 .cards{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
-@media (max-width:900px){.cards{grid-template-columns:1fr}}
+@media (max-width:900px){.cards{grid-template-columns:minmax(0,1fr)}}
+.cards>div{min-width:0}
 .side{display:flex;flex-direction:column;gap:16px;min-width:0}
 .colh{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-bottom:6px}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -69,6 +75,10 @@ a{color:inherit}
 .ptab td.ic img{width:22px;height:22px;object-fit:contain;background:#2b2722;border-radius:5px;padding:2px;vertical-align:middle;margin-right:2px}
 .ptab code{font-size:12px}
 .ptab tr.tot td{font-weight:600}
+.ptab.pass td{vertical-align:middle}.ptab.pass td.grp{white-space:normal;min-width:120px;background:color-mix(in srgb,var(--ink) 3%,transparent);border-right:1px solid var(--line);font-size:14px;line-height:1.35}
+.ptab.pass tr.g0 td{border-top:2px solid var(--line)}
+.cards.wide{grid-template-columns:minmax(0,1fr)}
+
 .ptab tr.sel td{background:color-mix(in srgb,var(--open) 14%,transparent)}
 .ptab tr[data-go]{cursor:pointer}
 .ptab tr[data-go]:hover td{background:color-mix(in srgb,var(--ink) 5%,transparent)}
@@ -103,8 +113,15 @@ a{color:inherit}
 .snode:focus{outline:none}.snode:focus-visible{outline:none}.snode:focus-visible .hit{stroke:var(--open);stroke-width:2.5}
 .slab{fill:var(--ink);font-size:19px;font-weight:600}
 .ssub{fill:var(--muted);font-size:10px}
+.cw{stroke:var(--muted);stroke-width:.8;opacity:.5}
 .elab{fill:var(--muted);font-size:14px}
-.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-alg{--tc:#5f9a2e} .t-env{--tc:#a0a8b4} .t-test{--tc:#1a9a8a} .t-teach{--tc:#b5452b} .t-stub{--tc:#9aa1ab}
+.parth{font-size:19px;margin:18px 0 8px;padding-top:10px;border-top:1px dashed var(--line)}
+.why{border-top:1px dashed var(--line);padding-top:8px}
+.why summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--done)}
+.why summary:focus-visible{outline:2px solid var(--open);outline-offset:2px}
+.why ul{margin-top:6px}
+.why i{color:var(--foe);font-style:normal;font-weight:600}
+.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-alg{--tc:#5f9a2e} .t-env{--tc:#a0a8b4} .t-test{--tc:#1a9a8a} .t-teach{--tc:#b5452b} .t-stub{--tc:#9aa1ab} .t-order{--tc:var(--c-order)}
 </style>
 </head>
 <body>
@@ -113,12 +130,12 @@ a{color:inherit}
     <h1>Тактик: архитектура</h1>
     <span class="status">Проектирование, кода нет; здесь только то, о чём договорились.</span>
     <p class="muted">Тактик — сеть уровня группы: ведёт группу из 1–6 своих отрядов с одной задачей от оперативника (уровень выше). Отрядам он раздаёт приказы «займи область», дальше каждым отрядом правит сеть отряда (<a href="../unit/index.html">страница отряда</a>). Решения словами — <code>build/diag_g49/unit_base.md</code>, раздел «Заметки для старших уровней».</p>
-    <p class="muted">Сейчас на схеме только <b>вход</b> (решения пользователя 30.10). Всё, что дальше входа, — серая заглушка: ещё не обсуждали. Нажми на блок — под схемой откроется описание.</p>
+    <p class="muted">Сейчас на схеме <b>вход</b> — три карточки, из которых складывается строка одного отряда, и первый блок обработки: «Анализ отряда» → «Карточка отряда» (решения пользователя 30.10): паспорт (постоянное), что меняется по ходу боя (живая часть, «кто это», состояние), арсенал способностей (кнопки). Список карточек, команду от оперативника и обработку вернём позже. Нажми на блок — под схемой откроется описание.</p>
   </header>
 
   <section class="net" aria-label="Схема сети тактика">
     <h2 class="areah">Сеть</h2>
-    <div class="zoombox" id="zoombox"><div class="types zlegend" id="legend"></div><svg class="netsvg" id="netsvg" viewBox="0 0 900 600" role="group" aria-label="Схема сети тактика"></svg><div class="zbtns"><button type="button" id="zin" aria-label="Крупнее">+</button><button type="button" id="zout" aria-label="Мельче">−</button><button type="button" id="zreset" aria-label="Сбросить масштаб">⟲</button></div></div>
+    <div class="zoombox" id="zoombox"><div class="types zlegend" id="legend"></div><svg class="netsvg" id="netsvg" viewBox="0 0 900 600" preserveAspectRatio="xMinYMin meet" role="group" aria-label="Схема сети тактика"></svg><div class="zbtns"><button type="button" id="zin" aria-label="Крупнее">+</button><button type="button" id="zout" aria-label="Мельче">−</button><button type="button" id="zreset" aria-label="Сбросить масштаб">⟲</button></div></div>
     <p class="zoomcap">Колесо или кнопки — масштаб, перетаскивание — сдвиг, двойной щелчок — весь вид. Стрелки — путь данных за одно решение; пунктир — туда, что ещё не обсуждали.</p>
   </section>
 
@@ -134,32 +151,302 @@ a{color:inherit}
 
 <!-- ===================== descriptions: one template per block (tpl-ID) ===================== -->
 
-<template id="tpl-passport">
+<template id="tpl-state">
   <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Состояние — что действует на отряд сейчас <span class="chip done">решено 30.10</span></h2>
+        <div class="where">словарь — по симулятору: <b>config/nn/effects.json</b> (order) · <b>tools/nn/sim/effects.py</b>, morale.py, impact.py, regen.py, missile.py, stealth.py · образец: генерал — <b>tools/nn/model/effects.py</b></div>
+        <ul class="small">
+          <li><b>Закрытый словарь</b> того, что действует на отряд <b>в эту секунду</b> и включается-выключается по ходу боя. Постоянные свойства (страх, ужас, упор как умение) — в паспорте; кнопки — в карточке «Способности».</li>
+          <li><b>У своих 2 числа на эффект:</b> есть / нет (0/1) и сколько секунд осталось (доля от срока, 0–1). Итого 25 × 2 = <b>50</b>.</li>
+          <li><b>Врагу — всё, что видит игрок</b> (решение пользователя 30.10): значки на карточке вражеского отряда и то, что видно на поле (выстрелы, падения снарядов, натиск, упор). <b>Секунд у врага нет никогда.</b> Итого у врага <b>23</b> (по 1 числу), остальное — маска.</li>
+          <li><b>Правило:</b> каждое поле врага получаемо из игры через мост <b>тем же правилом, что в симуляторе</b> — иначе сеть, выученная в симуляторе, в игре увидит пустоту. Где игра не отдаёт флаг напрямую, стоит «мост: считается из …» — это задание кодеру моста.</li>
+          <li><b>«Держать строй»:</b> у лорда это способность (карточка «Способности»), у его отрядов рядом — эффект здесь.</li>
+          <li><b>Как у генерала:</b> словарь → маленькая сеть «анализ эффектов» → карточка эффектов (~32 числа). Она <b>не складывается</b> с карточкой отряда, а <b>приклеивается</b> к ней (склейка строк) — чтобы эффекты не размывались. Блоки «анализ» и «склейка» пока не рисуем.</li>
+          <li>Словарь только растёт (новое — в конец), как <code>order</code> в effects.json: старая сеть грузится с нулевыми весами для новых.</li>
+          <li><b>В строке:</b> свой — 69 + (22 + 5 + 50 + 15) + 24 = 185; враг — 69 + (22 + 5 + 23 + 15) + 16 = 150, остальное маской.</li>
+        </ul>
+        <div class="ptwrap"><table class="ptab">
+          <thead><tr><th></th><th>Эффект</th><th>Что делает</th><th>В симуляторе</th><th class="num">Свой</th><th class="num">Враг</th><th>Врагу</th></tr></thead>
+          <tbody>
+            <tr><td class="ic"><img src="icons/eff_poison.svg" alt=""></td><td>яд</td><td>скорость, урон в рукопашной и стрельбой ×0,85; 10 с после каждого попадания</td><td><code>effects.py · cfx*_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_contaminated.svg" alt=""></td><td>заражение (кадило)</td><td>контактный эффект кадильщиков и чумной катапульты, 10 с</td><td><code>effects.py · cfx*_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_suppressed.svg" alt=""></td><td>подавлен</td><td>контактный эффект Пушки Крысолинга, 10 с</td><td><code>effects.py · cfx*_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/shieldbreaker.png" alt=""></td><td>щитолом</td><td>контактный эффект джезайлей, 10 с</td><td><code>effects.py · cfx*_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_frenzy.svg" alt=""></td><td>бешенство</td><td>действует, пока мораль не ниже половины лидерства</td><td><code>effects.py · fx_on</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_numbers.svg" alt=""></td><td>сила в числе</td><td>снимается, когда здоровья меньше 50 % начального</td><td><code>effects.py · fx_on</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_scurry.svg" alt=""></td><td>удрать</td><td>включается, когда отряд колеблется или бежит</td><td><code>effects.py · fx_on</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_single.svg" alt=""></td><td>раны одиночки</td><td>включается, когда здоровья меньше 25 %</td><td><code>effects.py · fx_on, low_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/eff_penitent.svg" alt=""></td><td>сила кающихся</td><td>игра включает сама: 20 с, снова — после 3 с проигранной рукопашной</td><td><code>effects.py · fxt*_on / _cd</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/blackpowder.png" alt=""></td><td>пороховая выдержка</td><td>после 10 с на месте; снимается на ходу</td><td><code>effects.py · fx_on, fxd_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/flaming.png" alt=""></td><td>регенерация порезана огнём</td><td>после удара огнём регенерация вдвое меньше, 10 с</td><td><code>regen.py · burn_s</code></td><td class="num">2</td><td class="num">1</td><td style="color:var(--open);font-weight:700">? да</td></tr>
+            <tr><td class="ic"><img src="icons/snare_net.png" alt=""></td><td>сеть-ловушка</td><td>на враге ближе 35 м от отряда с сетями</td><td><code>effects.py · fx_rx</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/hold_the_line.png" alt=""></td><td>под аурой «Держать строй»</td><td>свой лорд в 35 м: +5 защиты, +4 морали (у самого лорда это способность — карточка «Способности»)</td><td><code>effects.py · fx_rx</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/encourages.png" alt=""></td><td>воодушевлён лордом</td><td>+4 лидерства в 70 м от своего лорда</td><td><code>morale.py</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/fear.png" alt=""></td><td>страх рядом</td><td>−8 морали: враг со «страхом» в 20 м</td><td><code>morale.py</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/terror.png" alt=""></td><td>бежит от ужаса</td><td>мораль < 13 и монстр с «ужасом» в 5 м: бежит 14 с</td><td><code>morale.py · ter_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/immune_psychology.png" alt=""></td><td>невосприимчив к ужасу</td><td>после бегства от ужаса — 85 с</td><td><code>morale.py · ter_imm</code></td><td class="num">2</td><td class="num">0</td><td class="no">нет — <span class="muted">признака нет; сеть помнит сама по памяти снимков</span></td></tr>
+            <tr><td class="ic"><img src="icons/class_artillery.png" alt=""></td><td>под огнём артиллерии</td><td>−8 морали на 30 с: снаряд выпущен по отряду или упал рядом</td><td><code>morale.py · art_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да · <span class="muted">мост: считается из выстрелов и падений снарядов рядом с отрядом</span></td></tr>
+            <tr><td class="ic"><img src="icons/explosive_damage.png" alt=""></td><td>попадание артиллерии</td><td>−10 морали на 30 с: снаряд ранил бойцов</td><td><code>morale.py · artd_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да · <span class="muted">мост: считается из падений снарядов и потерь бойцов в тот же миг</span></td></tr>
+            <tr><td class="ic"><img src="icons/charge_bonus.png" alt=""></td><td>в натиске</td><td>сила натиска 1 → 0 за 13 с; мораль +15 на время натиска</td><td><code>state charge, chm_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да · <span class="muted">мост: считается из скорости, курса и касания — тем же правилом, что в симуляторе</span></td></tr>
+            <tr><td class="ic"><img src="icons/braced.png" alt=""></td><td>упор</td><td>стоит в строю на своих местах — бойцы упираются против натиска</td><td><code>impact.py</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да · <span class="muted">мост: считается из «стоит, не движется, враг набегает» — тем же правилом, что в симуляторе</span></td></tr>
+            <tr><td class="ic"><img src="icons/class_cavalry.png" alt=""></td><td>строй проломлен</td><td>крупный враг въехал в строй, первая шеренга лежит</td><td><code>impact.py · ride, kd_q, kd_t</code></td><td class="num">2</td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ? · <span class="muted" style="font-weight:400">мост: лежащие бойцы по местам вблизи — проверить, видны ли</span></td></tr>
+            <tr><td class="ic"><img src="icons/walk.png" alt=""></td><td>замедлен попаданиями</td><td>попадания пуль замедляют маленькие строи</td><td><code>missile.py · hs_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да · <span class="muted">мост: считается из скорости ниже паспортной под обстрелом</span></td></tr>
+            <tr><td class="ic"><img src="icons/magical.png" alt=""></td><td>чужая способность или заклинание на мне</td><td>аура, бафф друга или чары врага</td><td><code>abilities · ab_rx, snap_s</code></td><td class="num">2</td><td class="num">1</td><td class="yes">да</td></tr>
+            <tr><td class="ic"><img src="icons/stalk.png" alt=""></td><td>скрыт</td><td>враг его не видит (у врага — строки нет вовсе)</td><td><code>stealth.py · hid</code></td><td class="num">2</td><td class="num">0</td><td class="no">нет — <span class="muted">строки нет: это и есть «скрыт» (маска)</span></td></tr>
+            <tr class="tot"><td></td><td>Всего</td><td>25 × 2 у своих; у врага — по 1 числу (без секунд)</td><td></td><td class="num">50</td><td class="num">23</td><td></td></tr>
+          </tbody></table></div>
+        <p class="small">«да · мост: считается из …» — игра флаг не отдаёт, мост считает его сам тем же правилом, что симулятор. «? да» / «да ?» — даём, если мост подтвердит. «нет» — признака в игре нет.</p>
+      </div></div>
+    <div class="side">
+      <div><div class="colh">Проверено по коду</div><div class="box ans"><ul class="small">
+        <li><b>Сеть отряда действующих эффектов не видит.</b> В её входе (<code>tools/nn/unit/view.py</code>: RAW 33, ROW 27) нет ни одного — только постоянные свойства из паспорта.</li>
+        <li><b>Генерал видит:</b> на каждый эффект «есть у отряда» + «действует» (0/1, без секунд), ауры и чары на отряде, что они меняют в числах (<code>observation.py</code>: RECEIVED, FX_STATS, MAGIC).</li>
+      </ul></div></div>
+      <div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+        <li><b>Дыра личного уровня: отряд не видит, что он отравлен</b> (и что под бешенством, под огнём артиллерии, бежит от ужаса…). Чинить у отряда — отдельное решение пользователя.</li>
+        <li><b>Регенерация, порезанная огнём:</b> показывает ли игра значок на вражеском отряде — проверить по мосту.</li>
+        <li><b>Секунды у своих.</b> Симулятор их знает; таймер яда и других контактных эффектов у своих игра показывает? — проверить по мосту.</li>
+        <li><b>Перекрытие с живой частью:</b> «бежит от ужаса» видно и флагом «бежит». Оставить оба или одно — не обсуждали.</li>
+      </ul></div></div>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-cstats">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Текущие характеристики — с учётом всех эффектов <span class="chip done">решено 30.10</span></h2>
+        <div class="where">какие числа меняются — по симулятору: <b>config/nn/effects.json</b> (stats → sim) · <b>config/nn/abilities.json</b> (effects) · <b>tools/nn/sim/effects.py</b> · образец: генерал — <b>tools/nn/model/effects.py</b> FX_STATS, FX_STATS2</div>
+        <ul class="small">
+          <li><b>По 1 числу на характеристику:</b> её значение сейчас, со всеми действующими эффектами и способностями, той же шкалой, что в паспорте — сеть сравнивает «сейчас» с «по паспорту». Итого <b>15</b>.</li>
+          <li><b>Только то, что эффекты в симуляторе реально меняют</b> (список ниже). Остальные числа паспорта по ходу боя не меняются — их тут нет.</li>
+          <li><b>Эффект — это узор по карточке:</b> флаг в «Состоянии» («под аурой», «отравлен») + изменённые числа здесь. Флаг говорит, <b>почему и надолго ли</b>; числа — <b>сколько</b>. Незнакомый сети эффект (новый лорд, новая аура) она всё равно увидит через числа.</li>
+          <li><b>Враг:</b> игрок видит изменённые цифры на карточке вражеского отряда — даём («да ?» — подтвердить по мосту, что игра отдаёт уже изменённые значения).</li>
+          <li><b>В строке:</b> свой — 69 + 92 + 24 = 185; враг — 69 + 65 + 16 = 150, остальное маской.</li>
+        </ul>
+        <div class="ptwrap"><table class="ptab">
+          <thead><tr><th></th><th>Характеристика</th><th>Что её меняет (в симуляторе)</th><th>Поле</th><th class="num">Свой</th><th class="num">Враг</th></tr></thead>
+          <tbody>
+            <tr><td class="ic"><img src="icons/attack.png" alt=""></td><td>атака в ближнем</td><td>бешенство</td><td><code>attack</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/defence.png" alt=""></td><td>защита в ближнем</td><td>«Держать строй», сила в числе, сила кающихся, «Стоять насмерть»</td><td><code>defence</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/morale.png" alt=""></td><td>лидерство</td><td>«Держать строй», сила в числе, «Сплотить», «Стоять насмерть», «Доблесть»</td><td><code>leadership</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/speed.png" alt=""></td><td>скорость</td><td>яд, сила в числе, удрать, раны одиночки, сеть-ловушка, «Доблесть», «Искатель врага»</td><td><code>speed</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/run.png" alt=""></td><td>скорость натиска</td><td>сеть-ловушка, «Искатель врага»</td><td><code>charge_speed</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/charge_bonus.png" alt=""></td><td>бонус натиска</td><td>бешенство, «Смертельный натиск»</td><td><code>charge</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/damage.png" alt=""></td><td>урон в ближнем</td><td>яд, бешенство, раны одиночки, «Смертельный натиск»</td><td><code>damage</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/damage_ap.png" alt=""></td><td>бронебойный урон в ближнем</td><td>яд, бешенство, раны одиночки, «Смертельный натиск»</td><td><code>ap</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/res_physical.png" alt=""></td><td>физическое сопротивление</td><td>сила кающихся</td><td><code>resist_physical</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/res_fire.png" alt=""></td><td>сопротивление огню</td><td>регенерация (уязвимость к огню)</td><td><code>resist_flame</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/shield.png" alt=""></td><td>щит (шанс отбить стрелу)</td><td>щитолом</td><td><code>shield</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/snipe.png" alt=""></td><td>точность</td><td>пороховая выдержка</td><td><code>accuracy</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/reload.png" alt=""></td><td>перезарядка</td><td>пороховая выдержка</td><td><code>reloading</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/missile_damage.png" alt=""></td><td>урон снаряда</td><td>яд</td><td><code>m_damage</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr><td class="ic"><img src="icons/missile_damage_ap.png" alt=""></td><td>бронебойный урон снаряда</td><td>яд</td><td><code>m_ap</code></td><td class="num">1</td><td style="color:var(--open);font-weight:700">да ?</td></tr>
+            <tr class="tot"><td></td><td>Всего</td><td></td><td></td><td class="num">15</td><td class="num">15</td></tr>
+          </tbody></table></div>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>Отдаёт ли игра изменённые числа врага.</b> Карточка врага в игре показывает их с учётом эффектов — проверить по мосту, что скрипт читает именно их, а не базовые.</li>
+      <li><b>Усталость тоже меняет характеристики</b> (атака, защита, натиск, перезарядка — по уровню усталости). Считать их здесь «с усталостью» или оставить усталость отдельным числом в живой части — не обсуждали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-abilities">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Арсенал способностей — кнопки отряда <span class="chip done">решено 30.10</span></h2>
+        <div class="where">словарь — по паспортам пула: <b>config/nn/abilities.json</b> (abilities: активные, spells) · <b>tools/nn/abilities.py</b> · таймеры в симуляторе: <code>ab*_on / ab*_cd</code>, <code>sp*_on / sp*_cd</code> (<b>tools/nn/sim/state.py</b>)</div>
+        <ul class="small">
+          <li><b>Закрытый словарь кнопок</b>, которые есть у отрядов и лордов пула. Пассивные свойства (бешенство, сила в числе, удрать…) — не кнопки: их действие видно в карточке «Состояние». «Сила кающихся» игра включает сама — тоже там.</li>
+          <li><b>У своих 3 числа:</b> есть у отряда (0/1), секунд до готовности (0 — готова; доля от перезарядки), секунд активна (доля от срока). Итого 8 × 3 = <b>24</b>.</li>
+          <li><b>Враг:</b> есть ли способность — да (паспорт показан до боя), активна сейчас — да (значок на карточке), перезарядка — <b>нет</b>. Итого 8 × 2 = <b>16</b>.</li>
+          <li><b>«Держать строй»</b> у лорда — здесь, у его отрядов — в «Состоянии» как эффект «под аурой». <b>Проверено:</b> по базе игры это пассивная аура, не кнопка (<code>config/nn/abilities.json</code>: passive, без перезарядки; ключ <code>wh_main_lord_passive_hold_the_line</code>; на карточке генерала в игре видна как пассивная — <code>docs/ru/apps/bridge.md</code>). В симуляторе так же — расхождения с игрой нет. Кнопкой она была в WH2.</li>
+          <li>Заклинаниям ещё нужно «хватает ли ветров магии» — у генерала это общий вход стороны (<code>observation.py</code> WINDS); у тактика не обсуждали.</li>
+          <li><b>В строке:</b> свой — 69 + (22 + 5 + 50 + 15) + 24 = 185; враг — 69 + (22 + 5 + 23 + 15) + 16 = 150, остальное маской.</li>
+        </ul>
+        <div class="ptwrap"><table class="ptab">
+          <thead><tr><th></th><th>Способность</th><th>У кого в пуле</th><th>Что делает</th><th class="num">Действует / перезарядка</th><th class="num">Свой</th><th class="num">Враг</th></tr></thead>
+          <tbody>
+            <tr><td class="ic"><img src="icons/verminous_valour.png" alt=""></td><td>Доблесть паразита</td><td>лорд скавенов (вожак)</td><td>себе: скорость ×1,25, мораль +8</td><td class="num">17 с / 60 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/deadly_onslaught.png" alt=""></td><td>Смертельный натиск</td><td>лорд скавенов (вожак)</td><td>себе: бонус натиска ×1,6, бронебойный урон ×1,25</td><td class="num">31 с / 90 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/rally.png" alt=""></td><td>Сплотить</td><td>лорд скавенов (вожак)</td><td>себе и своим в 35 м: мораль +16</td><td class="num">14 с / 60 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/foe_seeker.png" alt=""></td><td>Искатель врага</td><td>генерал Империи</td><td>себе: скорость и скорость натиска ×1,25</td><td class="num">25 с / 60 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/stand_your_ground.png" alt=""></td><td>Стоять насмерть</td><td>генерал Империи</td><td>себе и своим в 35 м: защита +24, мораль +16</td><td class="num">18 с / 90 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/hold_the_line.png" alt=""></td><td>Держать строй</td><td>генерал Империи</td><td>аура: своим в 35 м защита +5, лидерство +4. <b>Не кнопка:</b> по базе игры пассивная (WH3; в WH2 была кнопкой) — у неё «есть» = 1, таймеры 0</td><td class="num">пассивная, всегда</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/spell_warp_lightning.svg" alt=""></td><td>Варп-молния (заклинание)</td><td>маг скавенов</td><td>удар по врагам в 200 м; 6 ветров магии</td><td class="num">— / 30 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr><td class="ic"><img src="icons/spell_searing_doom.svg" alt=""></td><td>Палящая погибель (заклинание)</td><td>маг Империи</td><td>удар по врагам в 200 м; 6 ветров магии</td><td class="num">— / 30 с</td><td class="num">3</td><td class="num">2</td></tr>
+            <tr class="tot"><td></td><td>Всего</td><td>8 способностей</td><td>свой: есть + секунд до готовности + секунд активна; враг: есть + активна (0/1)</td><td></td><td class="num">24</td><td class="num">16</td></tr>
+          </tbody></table></div>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>Кто жмёт кнопку.</b> Способность отряда (щиты, бешенство) — личный уровень; аура лорда и групповые — тактик. Но <b>у сети личного уровня способностей ещё нет</b> вовсе — ни во входе, ни в выходе.</li>
+      <li><b>Словарь или паспорт способности.</b> Генерал знает способность по её паспорту — что она делает (<code>tools/nn/model/abilities.py</code>: «по тому, что делает, а не по имени»), поэтому новый лорд не требует новой сети. Закрытый словарь по именам проще, но каждая новая кнопка — новые столбцы. Выбор не обсуждали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-orders">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Приказы тактику <span class="chip done">решено 30.10</span></h2>
+        <div class="where">образец: приказ отряду от тактика — <b>tools/nn/unit/net.py</b> ORDER (область сырыми числами относительно отряда, / 100 м; поворот cos, sin)</div>
+        <ul class="small">
+          <li><b>Контейнер:</b> сюда входит всё, что тактик получает от оперативника. Внутри — <b>по карточке на приказ</b>, в том же виде, что входные карточки (иконка · поле · клетки по числу чисел · число). Новый приказ добавляется своей карточкой внутрь.</li>
+          <li><b>Пока одна карточка — «Область группы»</b>, где группе можно двигаться, прямоугольник: центр (x, z) — 2, ширина и глубина — 2, поворот (sin, cos) — 2. Итого <b>6 чисел</b>.</li>
+          <li>Размер области (решение 29.10): от N × минимальной до N × максимальной области одного отряда (N — боеспособные отряды группы); не больше трети карты группы.</li>
+          <li><b>Остальные приказы</b> (задача к цели, темп, «что дальше») добавляем по одному, каждый — после обсуждения.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>Куда входят приказы</b> — в какой блок сети — ещё не обсуждали; стрелки от контейнера пока нет.</li>
+      <li><b>Относительно чего центр и поворот</b> — от чего мерить и чем нормировать (у отряда — относительно себя, / 100 м) — не обсуждали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-unitproc">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Анализ отряда <span class="chip done">решено 30.10</span> <span class="chip" style="background:color-mix(in srgb,var(--tc-test) 18%,transparent);color:var(--tc-test)">общий блок всех уровней</span></h2>
+        <div class="where">образец: генерал — «Анализ армий» (<code>design/general</code>: общий читатель строк отрядов); у личного уровня — кодировщик строк <b>tools/nn/unit/net.py</b> RowEncoder (одни веса на все строки зоны)</div>
+        <ul class="small">
+          <li><b>Одна сеть читает всю строку отряда целиком:</b> паспорт 69 + «что меняется по ходу боя» 92 + арсенал 24 = <b>185 чисел</b>. У врага — 150, остальное маской.</li>
+          <li><b>Общие веса для всех строк:</b> мой, цель, прочий враг, прочий свой — одна и та же сеть; кто это — она узнаёт из метки «кто это» внутри строки.</li>
+          <li><b>Порядок строк не важен:</b> каждая строка читается сама по себе; какой это отряд — знает номер слота (ниже).</li>
+          <li><b>Сложения и склейки карточек нет:</b> части строки (паспорт, состояние, характеристики, кнопки) сеть сочетает сама — например «отравлен» + «скорость упала» + «пехота».</li>
+          <li>На выходе — карточка отряда (128 чисел).</li>
+          <li><b>Устройство:</b> два полносвязных слоя с нелинейностью, <b>185 → 256 → 128</b>, ≈ <b>80 тыс. весов</b> (185 × 256 + 256 ≈ 47,6 тыс. и 256 × 128 + 128 ≈ 32,9 тыс.).</li>
+          <li><b>Каста (13), размер тела (5) и «кто это» (5) подаём позициями 0/1</b> — отдельных таблиц-вложений, как касты у генерала, нет: первый слой выучит их сам.</li>
+          <li><b>Настройка:</b> если на экзамене сеть путает отряды — расширить скрытый слой до 512 (≈ 160 тыс. весов), но не углублять. Не помогло — дело во входе, а не в размере.</li>
+        </ul>
+        <div class="box ans" style="gap:6px"><b>Общий блок всех уровней</b> (решение пользователя 30.10): отряд, тактик, оперативник и стратег читают отряды одним и тем же «Анализом отряда».
+          <ul class="small">
+            <li><b>Учится вместе с личным уровнем</b> — там больше всего сигнала (каждый отряд, каждую секунду). После училища личного уровня блок замораживается и идёт наверх готовым.</li>
+            <li><b>Условие — одна и та же строка отряда на всех уровнях.</b> Личному уровню строка меняется с нынешних 27 чисел (<code>tools/nn/unit/view.py</code> ROW) на общую — отдельная задача «вход один в один».</li>
+            <li><b>Если верхнему уровню карточки не хватает:</b> сначала маленькая надстройка уровня поверх общей карточки; потом, если мало, — дообучение общего блока маленьким шагом и повторный экзамен нижних уровней.</li>
+            <li><b>Риск:</b> блок, выученный на личном уровне, сожмёт то, что нужно только верху. Против этого — запас ширины карточки (128).</li>
+          </ul></div>
+        <div class="box ans" style="gap:6px"><b>Тождество отряда — по слоту</b> (решение пользователя 30.10): вход → карточка → выход связаны номером слота.
+          <ul class="small">
+            <li>У каждого отряда <b>постоянный номер слота на весь бой</b>: строка № i → карточка № i → роль / приказ № i. Обработчик построчный, строки не смешивает.</li>
+            <li><b>Погиб — слот «пусто» и не переиспользуется</b>: иначе память (10 снимков) склеит двух разных отрядов.</li>
+            <li><b>В игре</b> слот привязан к постоянному идентификатору отряда из моста, <b>в симуляторе</b> — к индексу отряда.</li>
+            <li>Роль для слота i переводчик превращает в приказ отряду слота i.</li>
+            <li><b>Проверено по коду личного уровня</b> (<code>tools/nn/unit/view.py</code> build()): строки зоны каждую секунду заново сортируются (сам, враги, свои — по расстоянию), но каждая несёт номер слота боя, и память берётся <b>по слоту</b>, а не по месту строки. Слоты симулятора постоянны на весь бой: новых отрядов посреди боя нет, погибший слот не занимается. Переиспользования нет; снимок, где отряд мёртв, ушёл или (враг) не виден, — пустой.</li>
+          </ul></div>
+        <details class="why"><summary>Почему так и что отвергли</summary><ul class="small">
+          <li><i>Отвергли: два обработчика со сложением, как у генерала</i> (отдельно отряды, отдельно эффекты, потом карточка + карточка). У генерала так потому, что словарь эффектов <b>открытый</b>: 564 способности, строки любой длины — их нельзя положить в строку отряда постоянными столбцами.</li>
+          <li>У тактика словарь <b>закрытый и маленький</b>: 25 состояний, 8 кнопок, 15 характеристик. Всё помещается в одну строку постоянной длины — значит, хватает одного обработчика и нет шва «карточка + карточка», на котором признаки размываются.</li>
+          <li><i>Отвергли: глубокую сеть.</i> Блок только переводит строку постоянной формы в карточку; взаимодействий между отрядами здесь нет (они — дальше, в следующих блоках). Глубина не нужна, ширина важнее.</li>
+          <li><b>Когда вернём формат генерала:</b> если словарь откроется (все фракции, сотни способностей), вернётся «строка = одно изменение» с отдельным обработчиком. Сеть тогда учим заново — у нас переучивание с нуля в порядке вещей.</li>
+        </ul></details>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет: устройство решено 30.10 (185 → 256 → 128), ширина скрытого слоя — настройка.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-unitcard">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Карточка отряда <span class="chip done">решено 30.10</span></h2>
+        <div class="where">образец: генерал — «Карточки отрядов» (<code>design/general</code>)</div>
+        <ul class="small">
+          <li><b>Выученное описание отряда:</b> что сеть поняла про него из строки в 185 чисел (у врага — 150), уже сжато и пригодно для сравнения отрядов между собой.</li>
+          <li><b>Ширина — 128 чисел на отряд.</b> Пользователь: «чуть больше — опасаюсь, что не хватит признаков».</li>
+          <li><b>Это настройка, одно число.</b> Если на экзамене сеть путает отряды (не отличает копейщиков от мечников, отравленных от свежих) — расширить.</li>
+          <li>Одна карточка на каждую строку списка: свои, цель, прочие; пустые строки остаются пустыми (маска). <b>Карточка № i — это отряд слота № i</b>, тот же номер, что у строки входа.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет: ширина — настройка, меняется по итогам экзамена.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-passport">
+  <section class="cards wide">
     <div><div class="colh">Договорились</div>
       <div class="box done"><h2>Паспорт отряда — постоянная часть карточки <span class="chip done">решено 30.10</span></h2>
         <div class="where">тот же, что у личного уровня: <b>tools/nn/model/passport.py</b> · features() · SIZE = <b>69</b></div>
         <ul class="small">
           <li><b>69 чисел на отряд, одни на весь бой.</b> Берутся из базы игры (<code>config/nn/units.json</code>). Одинаковые для своих и врагов: состав врага игра показывает до боя.</li>
+          <li><b>Одна строка таблицы — одно число паспорта</b>, в том порядке, в каком они идут во входе (№ — место в векторе).</li>
           <li>Числа приведены примерно к 0…1: «/ N» — делим на N; «лог N» — log(1 + v) / log(1 + N), то есть N даёт 1 (для широких: здоровье, масса, урон, цена); «позиции 0/1» — по одному числу на вариант.</li>
           <li>Зачем тот же паспорт: сеть тактика и сеть отряда понимают отряд одинаково, а новый отряд в игре не требует новой работы.</li>
         </ul>
-        <div class="ptwrap"><table class="ptab">
-          <thead><tr><th></th><th>Группа полей</th><th>Что внутри</th><th class="num">Чисел</th><th>Поля паспорта</th><th>Как</th></tr></thead>
+        <div class="ptwrap"><table class="ptab pass">
+          <thead><tr><th class="num">№</th><th>Группа</th><th>Название</th><th>Поле в коде (units.json)</th><th>Как нормировано</th><th class="num">Чисел</th></tr></thead>
           <tbody>
-            <tr><td class="ic"><img src="icons/hp_unit.svg" alt=""><img src="icons/mass.png" alt=""></td><td>Размер и вес</td><td>бойцов, здоровье всего, здоровье бойца, масса</td><td class="num">4</td><td><code>men · hp_total · hp_per_man · mass</code></td><td>лог 200 · лог 20 000 · лог 10 000 · лог 10 000</td></tr>
-            <tr><td class="ic"><img src="icons/speed.png" alt=""><img src="icons/run.png" alt=""></td><td>Скорость</td><td>шаг, бег, натиск</td><td class="num">3</td><td><code>speed.walk · run · charge</code></td><td>/ 5 · / 10 · / 10 (м/с)</td></tr>
-            <tr><td class="ic"><img src="icons/attack.png" alt=""><img src="icons/charge_bonus.png" alt=""></td><td>Рукопашная</td><td>атака, защита, бонус натиска, урон, бронебойный урон, бонус против крупных, против пехоты, время между ударами, сколько бьёт за удар</td><td class="num">9</td><td><code>melee.attack · defence · charge_bonus · damage · ap_damage · bonus_v_large · bonus_v_infantry · attack_interval_s · splash_max_attacks</code></td><td>/ 100 · / 100 · / 100 · лог 500 · лог 500 · / 50 · / 50 · / 6 с · / 10</td></tr>
-            <tr><td class="ic"><img src="icons/armour.png" alt=""><img src="icons/morale.png" alt=""></td><td>Броня и дух</td><td>броня, щит (шанс отбить стрелу), лидерство</td><td class="num">3</td><td><code>armour · shield.missile_block_chance · leadership</code></td><td>/ 200 · / 100 · / 100</td></tr>
-            <tr><td class="ic"><img src="icons/res_physical.png" alt=""></td><td>Сопротивления</td><td>общее, физическое, стрелам, магии, огню</td><td class="num">5</td><td><code>damage_resist: all · physical · missile · magic · flame</code></td><td>/ 100</td></tr>
-            <tr><td class="ic"><img src="icons/braced.png" alt=""><img src="icons/skirmish.png" alt=""></td><td>Умения</td><td>уклоняется от боя, упор против натиска, скрытность</td><td class="num">3</td><td><code>can_skirmish · can_brace · hiding_scalar</code></td><td>0/1 · 0/1 · как есть (обычно 1)</td></tr>
-            <tr><td class="ic"><img src="icons/cost.png" alt=""></td><td>Цена</td><td>цена в сетевой игре</td><td class="num">1</td><td><code>multiplayer_cost</code></td><td>лог 5000</td></tr>
-            <tr><td class="ic"><img src="icons/range.png" alt=""><img src="icons/ammo.png" alt=""></td><td>Стрельба</td><td>есть ли, дальность, боезапас, урон, бронебойный урон, перезарядка, точность, снарядов за выстрел</td><td class="num">8</td><td><code>missile есть? · range_m · ammo · damage · ap_damage · reload_s · accuracy · projectile_number</code></td><td>0/1 · / 500 · лог 100 · лог 500 · лог 500 · / 20 · / 100 · / 10</td></tr>
-            <tr><td class="ic"><img src="icons/class_infantry.png" alt=""><img src="icons/class_cavalry.png" alt=""></td><td>Каста</td><td>лорд, герой, пехота, стрелки, конница, конные стрелки, монстр-пехота, монстр-конница, монстр, звери, колесница, боевая машина + «другая»</td><td class="num">13</td><td><code>caste: 12 каст + «другая»</code></td><td>позиции 0/1</td></tr>
-            <tr><td class="ic"><img src="icons/size_large.svg" alt=""></td><td>Размер тела</td><td>малый, средний, крупный, очень крупный + «другой»</td><td class="num">5</td><td><code>size: small · medium · large · very_large + «другой»</code></td><td>позиции 0/1</td></tr>
-            <tr><td class="ic"><img src="icons/fear.png" alt=""></td><td>Свойства</td><td>воодушевляет, расходный, защита от натиска крупных, отражение натиска, прячется в лесу, подкрадывается, страх, ужас, несломимый, проходит сквозь заросли, стреляет на ходу, расстановка в засаде</td><td class="num">12</td><td><code>attributes: encourages · expendable · charge_defense_vs_large · charge_reflection · hide_forest · stalk · causes_fear · causes_terror · unbreakable · strider · mounted_fire_move · guerrilla_deploy</code></td><td>по 0/1</td></tr>
-            <tr><td class="ic"><img src="icons/trajectory.svg" alt=""></td><td>Полёт снаряда</td><td>прямой ли, разброс, скорость снаряда</td><td class="num">3</td><td><code>missile.direct · разброс · muzzle_velocity</code></td><td>0/1 · 20 × площадь / дистанция пристрелки (выше 1 — сжато в 1–1,5) · / 100</td></tr>
-            <tr class="tot"><td></td><td>Всего</td><td></td><td class="num">69</td><td></td><td></td></tr>
+            <tr class="g0"><td class="num muted">0</td><td class="ic grp" rowspan="4"><img src="icons/hp_unit.svg" alt=""><img src="icons/mass.png" alt=""><br><b>Размер и вес</b><br><span class="muted">4</span></td><td>бойцов</td><td><code>men</code></td><td>лог 200</td><td class="num">1</td></tr>
+            <tr><td class="num muted">1</td><td>здоровье всего отряда</td><td><code>hp_total</code></td><td>лог 20 000</td><td class="num">1</td></tr>
+            <tr><td class="num muted">2</td><td>здоровье бойца</td><td><code>hp_per_man</code></td><td>лог 10 000</td><td class="num">1</td></tr>
+            <tr><td class="num muted">3</td><td>масса бойца</td><td><code>mass</code></td><td>лог 10 000</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">4</td><td class="ic grp" rowspan="3"><img src="icons/speed.png" alt=""><img src="icons/run.png" alt=""><br><b>Скорость</b><br><span class="muted">3</span></td><td>шаг, м/с</td><td><code>speed.walk</code></td><td>/ 5</td><td class="num">1</td></tr>
+            <tr><td class="num muted">5</td><td>бег, м/с</td><td><code>speed.run</code></td><td>/ 10</td><td class="num">1</td></tr>
+            <tr><td class="num muted">6</td><td>натиск, м/с</td><td><code>speed.charge</code></td><td>/ 10</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">7</td><td class="ic grp" rowspan="9"><img src="icons/attack.png" alt=""><img src="icons/charge_bonus.png" alt=""><br><b>Рукопашная</b><br><span class="muted">9</span></td><td>атака</td><td><code>melee.attack</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">8</td><td>защита</td><td><code>melee.defence</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">9</td><td>бонус натиска</td><td><code>melee.charge_bonus</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">10</td><td>урон</td><td><code>melee.damage</code></td><td>лог 500</td><td class="num">1</td></tr>
+            <tr><td class="num muted">11</td><td>бронебойный урон</td><td><code>melee.ap_damage</code></td><td>лог 500</td><td class="num">1</td></tr>
+            <tr><td class="num muted">12</td><td>бонус против крупных</td><td><code>melee.bonus_v_large</code></td><td>/ 50</td><td class="num">1</td></tr>
+            <tr><td class="num muted">13</td><td>бонус против пехоты</td><td><code>melee.bonus_v_infantry</code></td><td>/ 50</td><td class="num">1</td></tr>
+            <tr><td class="num muted">14</td><td>время между ударами, с</td><td><code>melee.attack_interval_s</code></td><td>/ 6</td><td class="num">1</td></tr>
+            <tr><td class="num muted">15</td><td>сколько целей бьёт за удар</td><td><code>melee.splash_max_attacks</code></td><td>/ 10 (нет — 1)</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">16</td><td class="ic grp" rowspan="3"><img src="icons/armour.png" alt=""><img src="icons/morale.png" alt=""><br><b>Броня и дух</b><br><span class="muted">3</span></td><td>броня</td><td><code>armour</code></td><td>/ 200</td><td class="num">1</td></tr>
+            <tr><td class="num muted">17</td><td>щит: шанс отбить снаряд, %</td><td><code>shield.missile_block_chance</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">18</td><td>лидерство</td><td><code>leadership</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">19</td><td class="ic grp" rowspan="5"><img src="icons/res_physical.png" alt=""><br><b>Сопротивления</b><br><span class="muted">5</span></td><td>ко всему (защита)</td><td><code>damage_resist.all</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">20</td><td>физическому</td><td><code>damage_resist.physical</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">21</td><td>снарядам</td><td><code>damage_resist.missile</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">22</td><td>магии</td><td><code>damage_resist.magic</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">23</td><td>огню</td><td><code>damage_resist.flame</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">24</td><td class="ic grp" rowspan="3"><img src="icons/braced.png" alt=""><img src="icons/skirmish.png" alt=""><br><b>Умения</b><br><span class="muted">3</span></td><td>уклоняется от боя (застрельщик)</td><td><code>can_skirmish</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">25</td><td>упор против натиска</td><td><code>can_brace</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">26</td><td>скрытность (множитель)</td><td><code>hiding_scalar</code></td><td>как есть (нет — 1)</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">27</td><td class="ic grp" rowspan="1"><img src="icons/cost.png" alt=""><br><b>Цена</b><br><span class="muted">1</span></td><td>цена в сетевой игре</td><td><code>multiplayer_cost</code></td><td>лог 5000</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">28</td><td class="ic grp" rowspan="8"><img src="icons/range.png" alt=""><img src="icons/ammo.png" alt=""><br><b>Стрельба</b><br><span class="muted">8</span></td><td>есть ли стрелковое оружие</td><td><code>missile (есть?)</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">29</td><td>дальность, м</td><td><code>missile.range_m</code></td><td>/ 500</td><td class="num">1</td></tr>
+            <tr><td class="num muted">30</td><td>боезапас</td><td><code>missile.ammo</code></td><td>лог 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">31</td><td>урон снаряда</td><td><code>missile.damage</code></td><td>лог 500</td><td class="num">1</td></tr>
+            <tr><td class="num muted">32</td><td>бронебойный урон снаряда</td><td><code>missile.ap_damage</code></td><td>лог 500</td><td class="num">1</td></tr>
+            <tr><td class="num muted">33</td><td>перезарядка, с</td><td><code>missile.reload_s</code></td><td>/ 20</td><td class="num">1</td></tr>
+            <tr><td class="num muted">34</td><td>точность</td><td><code>missile.accuracy</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr><td class="num muted">35</td><td>снарядов за выстрел</td><td><code>missile.projectile_number</code></td><td>/ 10</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">36</td><td class="ic grp" rowspan="13"><img src="icons/class_infantry.png" alt=""><img src="icons/class_cavalry.png" alt=""><br><b>Каста</b><br><span class="muted">13</span></td><td>лорд</td><td><code>caste = lord</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">37</td><td>герой</td><td><code>caste = hero</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">38</td><td>пехота ближнего боя</td><td><code>caste = melee_infantry</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">39</td><td>пехота-стрелки</td><td><code>caste = missile_infantry</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">40</td><td>конница ближнего боя</td><td><code>caste = melee_cavalry</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">41</td><td>конные стрелки</td><td><code>caste = missile_cavalry</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">42</td><td>монстр-пехота</td><td><code>caste = monstrous_infantry</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">43</td><td>монстр-конница</td><td><code>caste = monstrous_cavalry</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">44</td><td>монстр</td><td><code>caste = monster</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">45</td><td>боевые звери</td><td><code>caste = war_beast</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">46</td><td>колесница</td><td><code>caste = chariot</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">47</td><td>боевая машина</td><td><code>caste = warmachine</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">48</td><td>другая</td><td><code>caste — иная</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">49</td><td class="ic grp" rowspan="5"><img src="icons/size_large.svg" alt=""><br><b>Размер тела</b><br><span class="muted">5</span></td><td>малый</td><td><code>size = small</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">50</td><td>средний</td><td><code>size = medium</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">51</td><td>крупный</td><td><code>size = large</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">52</td><td>очень крупный</td><td><code>size = very_large</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">53</td><td>другой</td><td><code>size — иной</code></td><td>позиция 0/1</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">54</td><td class="ic grp" rowspan="12"><img src="icons/fear.png" alt=""><br><b>Свойства</b><br><span class="muted">12</span></td><td>воодушевляет</td><td><code>attributes ∋ encourages</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">55</td><td>расходный</td><td><code>attributes ∋ expendable</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">56</td><td>защита от натиска крупных</td><td><code>attributes ∋ charge_defense_vs_large</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">57</td><td>отражение натиска</td><td><code>attributes ∋ charge_reflection</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">58</td><td>прячется в лесу</td><td><code>attributes ∋ hide_forest</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">59</td><td>подкрадывается</td><td><code>attributes ∋ stalk</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">60</td><td>вызывает страх</td><td><code>attributes ∋ causes_fear</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">61</td><td>вызывает ужас</td><td><code>attributes ∋ causes_terror</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">62</td><td>несломимый</td><td><code>attributes ∋ unbreakable</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">63</td><td>проходит сквозь заросли</td><td><code>attributes ∋ strider</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">64</td><td>стреляет на ходу</td><td><code>attributes ∋ mounted_fire_move</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">65</td><td>расстановка в засаде</td><td><code>attributes ∋ guerrilla_deploy</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr class="g0"><td class="num muted">66</td><td class="ic grp" rowspan="3"><img src="icons/trajectory.svg" alt=""><br><b>Полёт снаряда</b><br><span class="muted">3</span></td><td>прямой (настильный) огонь</td><td><code>missile.direct</code></td><td>0/1</td><td class="num">1</td></tr>
+            <tr><td class="num muted">67</td><td>разброс</td><td><code>calibration_area_m / calibration_distance_m</code></td><td>× 20; выше 1 — сжато в 1–1,5</td><td class="num">1</td></tr>
+            <tr><td class="num muted">68</td><td>скорость снаряда, м/с</td><td><code>missile.muzzle_velocity</code></td><td>/ 100</td><td class="num">1</td></tr>
+            <tr class="tot"><td></td><td></td><td>Всего</td><td></td><td></td><td class="num">69</td></tr>
           </tbody></table></div>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
@@ -177,8 +464,8 @@ a{color:inherit}
           <li><b>Сырые числа, как их даёт игра</b>, без пересчёта в «оценки»: сеть сама решает, что важно.</li>
           <li><b>Про своих известно всё.</b> Про врага — только то, что игра показывает игроку (см. таблицу), и только пока враг виден.</li>
           <li>Невидимый враг — в список не попадает (как у отряда: «враг вне зоны — ни бита»).</li>
-          <li><b>Раскладка — как в строке отряда</b> (<code>view.py</code> <code>_row()</code>: 27 чисел = эти 22 + «кто» 3 + «цель моего приказа» 1 + «приказ подменён поводком» 1). У тактика «кто» и «цель» заменяет пометка «кто это» (4 числа), поводка нет.</li>
-          <li><b>Строка списка целиком:</b> паспорт 69 + живая часть 22 + «кто это» 4 = <b>95</b>; у своих ещё приказ и способности — новое, раскладку не обсуждали.</li>
+          <li><b>Раскладка — как в строке отряда</b> (<code>view.py</code> <code>_row()</code>: 27 чисел = эти 22 + «кто» 3 + «цель моего приказа» 1 + «приказ подменён поводком» 1). На всех уровнях «кто» и «цель» заменяет общая пометка «кто это» (5 чисел), поводка у тактика нет.</li>
+          <li><b>Строка списка целиком:</b> свой — паспорт 69 + живая часть 22 + «кто это» 5 + состояние 50 + характеристики 15 + способности 24 = <b>185</b>; враг — 69 + 22 + 5 + 23 + 15 + 16 = <b>150</b>, остальное маской. У своих ещё приказ — новое, раскладку не обсуждали.</li>
         </ul>
         <div class="ptwrap"><table class="ptab">
           <thead><tr><th></th><th>Поле</th><th class="num">Чисел</th><th>Как (как в коде отряда)</th><th>Свой</th><th>Враг, пока виден</th></tr></thead>
@@ -195,8 +482,7 @@ a{color:inherit}
             <tr><td class="ic"><img src="icons/ammo.png" alt=""></td><td>боезапас</td><td class="num">1</td><td>доля</td><td class="yes">да</td><td class="yes">да *</td></tr>
             <tr><td class="ic"><img src="icons/height.svg" alt=""></td><td>высота земли</td><td class="num">1</td><td>земля под его центром минус моя, м / 20, в пределах ±4</td><td class="yes">да</td><td class="yes">да</td></tr>
             <tr><td class="ic"><img src="icons/order.svg" alt=""></td><td>его приказ и цель <span class="chip open">новое у тактика</span></td><td class="num">?</td><td>вид приказа (позиции 0/1 по вариантам) + номер строки цели — раскладку не обсуждали</td><td class="yes">да</td><td class="no">нет</td></tr>
-            <tr><td class="ic"><img src="icons/cooldown.png" alt=""></td><td>готовность способностей <span class="chip open">новое у тактика</span></td><td class="num">?</td><td>секунды до готовности — на сколько способностей, не обсуждали</td><td class="yes">да</td><td class="no">нет</td></tr>
-            <tr class="tot"><td></td><td>Итого из кода отряда</td><td class="num">22</td><td colspan="3">+ новое у тактика: приказ и способности своих (сколько — не обсуждали)</td></tr>
+            <tr class="tot"><td></td><td>Итого из кода отряда</td><td class="num">22</td><td colspan="3">+ новое у тактика: приказ (сколько — не обсуждали); способности — отдельная карточка</td></tr>
           </tbody></table></div>
         <p class="small">* — см. вопрос справа: в решении 30.10 записано «не отдаёт», по коду — отдаёт.</p>
       </div></div>
@@ -218,20 +504,22 @@ a{color:inherit}
 <template id="tpl-who">
   <section class="cards">
     <div><div class="colh">Договорились</div>
-      <div class="box done"><h2>Пометка «кто это» <span class="chip done">решено 30.10</span></h2>
-        <div class="where">образец: у личного уровня в строке «я / свой / враг» + «цель моего приказа» — <b>tools/nn/unit/view.py</b> · ROW self, own, enemy, my_target</div>
+      <div class="box done"><h2>Пометка «кто это» — общая для всех уровней <span class="chip done">решено 30.10</span></h2>
+        <div class="where">образец: у личного уровня в строке «я / свой / враг» + «цель моего приказа» — <b>tools/nn/unit/view.py</b> · ROW self, own, enemy, my_target (4 числа; станет этими 5)</div>
         <ul class="small">
-          <li><b>Одна метка на строку</b> — по ней сеть отличает, чья это карточка. <b>4 числа, по 0/1</b> (одно из четырёх равно 1). <span class="chip open">новое у тактика</span> — у отряда на этом месте «я / свой / враг» (3) + «цель моего приказа» (1), тоже 4.</li>
+          <li><b>Пометку ставит код по приказу сверху, а не сеть.</b> Тактику — переводчик от оперативника: его метки целей превращаются в этот столбец; отряду — так же от тактика. Сеть пометки не выбирает и не меняет: это <b>вход, а не решение</b>.</li>
+          <li><b>5 чисел, по 0/1</b> — одно из пяти равно 1. Позиции <b>одинаковые на всех уровнях</b> (отряд, тактик, оперативник, стратег) — чтобы общий «Анализ отряда» читал одну и ту же строку.</li>
         </ul>
         <div class="ptwrap"><table class="ptab"><tbody>
-          <tr><td><span class="tag" style="color:var(--mine);border-color:var(--mine)">мой</span></td><td>отряд моей группы (1–6). Бегущий остаётся «моим», живая часть показывает «бежит»; роли и приказа у него нет.</td></tr>
-          <tr><td><span class="tag" style="color:var(--foe);border-color:var(--foe)">цель</span></td><td>отряд чужой группы, которую пометил оперативник (главная цель группы). Сколько пометил — столько строк.</td></tr>
-          <tr><td><span class="tag" style="color:var(--foe);border-color:var(--foev)">прочий враг</span></td><td>видимый враг в зоне тактика, не из цели. Задача к нему не относится, но от него надо защищаться.</td></tr>
-          <tr><td><span class="tag" style="color:var(--mine);border-color:var(--minev)">прочий свой</span></td><td>свой отряд в зоне, но из другой группы: сосед, с ним не столкнуться и не стрелять ему в спину.</td></tr>
+          <tr><td><span class="tag" style="color:var(--open);border-color:var(--open)">я сам</span></td><td>у сети отряда — он сам; у тактика и выше такой строки нет — <b>всегда 0</b>.</td></tr>
+          <tr><td><span class="tag" style="color:var(--mine);border-color:var(--mine)">свой в моей группе</span></td><td>у тактика — отряд его группы (1–6). Бегущий остаётся в группе, живая часть показывает «бежит»; роли и приказа у него нет.</td></tr>
+          <tr><td><span class="tag" style="color:var(--mine);border-color:var(--minev)">свой другой</span></td><td>свой отряд в зоне из другой группы: сосед, с ним не столкнуться и не стрелять ему в спину.</td></tr>
+          <tr><td><span class="tag" style="color:var(--foe);border-color:var(--foe)">враг — моя цель</span></td><td>у тактика — отряд чужой группы, которую пометил оперативник. Сколько пометил — столько строк.</td></tr>
+          <tr><td><span class="tag" style="color:var(--foe);border-color:var(--foev)">враг прочий</span></td><td>видимый враг в зоне, не из цели. Задача к нему не относится, но от него надо защищаться.</td></tr>
           <tr><td><span class="tag" style="color:var(--muted);border-color:var(--line);border-style:dashed">пусто</span></td><td>свободное место списка — закрыто маской, сеть его не читает.</td></tr>
         </tbody></table></div>
         <ul class="small">
-          <li>Метку «цель» ставит оперативник: он сам режет врага на группы (решение 29.10). Тактику его метки «группа А/Б/В» не нужны — только «моя цель или нет».</li>
+          <li>Метку «моя цель» у тактика ставит оперативник: он сам режет врага на группы (решение 29.10). Тактику метки «группа А/Б/В» не нужны — только «моя цель или нет».</li>
           <li>Зона тактика — карта его группы (решение 29.10: тактик видит карту группы, её масштаб зависит от числа отрядов).</li>
         </ul>
       </div></div>
@@ -247,7 +535,7 @@ a{color:inherit}
       <div class="box done"><h2>Список карточек отрядов <span class="chip done">решено 30.10</span></h2>
         <div class="where">образец: строки зоны у личного уровня — <b>tools/nn/unit/view.py</b> · build() → rows, card, mask, whose (K = 16)</div>
         <ul class="small">
-          <li><b>Один список, а не два входа</b> (свои отдельно, враги отдельно). Каждая строка — карточка одного отряда: паспорт <b>69</b> + живая часть <b>22</b> + метка «кто это» <b>4</b> = <b>95 чисел</b> (у своих — ещё приказ и способности, раскладку не обсуждали).</li>
+          <li><b>Один список, а не два входа</b> (свои отдельно, враги отдельно). Каждая строка — карточка одного отряда: паспорт <b>69</b> + живая часть <b>22</b> + метка «кто это» <b>5</b> + состояние <b>50</b> + характеристики <b>15</b> + способности <b>24</b> = <b>185 чисел</b> у своих, <b>150</b> у врага (остальное маской).</li>
           <li><b>Кто в списке:</b> мои отряды (1–6), цель (сколько пометил оперативник), прочие враги и прочие свои в зоне тактика.</li>
           <li><b>Пустые места закрыты маской</b> — список одной длины при любом числе отрядов.</li>
           <li><b>Одна и та же часть сети читает каждую строку</b> (общие веса). Поэтому всё равно, сколько отрядов и в каком порядке, а знание «как выглядит алебардист» одно на своих и чужих. У сети отряда так же — строки с флагом «свой / чужой», и это работает.</li>
@@ -307,19 +595,32 @@ a{color:inherit}
 <script>
 (function(){
   // block types: key -> the legend's name (the colour is the style's .t-KEY)
-  var TYPES={"in":"вход","proc":"обработка","out":"выход","alg":"алгоритм","env":"среда","test":"проверка","teach":"учитель","stub":"ещё не обсуждали"};
+  var TYPES={"in":"вход","proc":"обработка","out":"выход","order":"приказ","alg":"алгоритм","env":"среда","test":"проверка","teach":"учитель","stub":"ещё не обсуждали"};
   // blocks: id, title t, type ty, state st (agreed | stub), box b [x, y, w, h], picture pic, main numbers n, sample in code ref
   var NODES=[
-    {id:"passport",t:"Паспорт отряда",ty:"in",st:"agreed",b:[0,0,360,300],pic:"passport",n:"69 чисел, одни на бой",ref:"tools/nn/model/passport.py"},
-    {id:"live",t:"Живая часть",ty:"in",st:"agreed",b:[0,340,360,360],pic:"live",n:"22 числа (как у отряда) + новое: приказ, способности",ref:"tools/nn/unit/view.py · RAW / ROW"},
-    {id:"who",t:"Кто это",ty:"in",st:"agreed",b:[0,740,360,240],pic:"who",n:"4 числа 0/1: мой / цель / прочий враг / прочий свой",ref:"tools/nn/unit/view.py · ROW whose, my_target"},
-    {id:"cards",t:"Список карточек отрядов",ty:"in",st:"agreed",b:[470,130,580,580],pic:"cards",n:"строка 69 + 22 + 4 = 95; мои 1–6 + цель + прочие; пусто — маска",ref:"tools/nn/unit/view.py · build()"},
-    {id:"command",t:"Команда от оперативника",ty:"in",st:"agreed",b:[470,770,580,320],pic:"command",n:"область · задача (4) · темп · «что дальше»",ref:"tools/nn/unit/net.py · ORDER"},
-    {id:"stub",t:"Обработка",ty:"stub",st:"stub",b:[1200,330,340,560],pic:"stub",n:"ещё не обсуждали",ref:"—"}
+    {id:"passport",t:"Паспорт отряда",ty:"in",st:"agreed",b:[0,0,360,370],pic:"passport",n:"69 чисел, одни на бой",ref:"tools/nn/model/passport.py"},
+    {id:"changing",t:"Что меняется по ходу боя",ty:"in",st:"agreed",b:[0,410,360,1260],pic:"changing",tpl:["live","who","state","cstats"],n:"живая 22 + кто это 5 + состояние 50 + характеристики 15 = 92 (враг 65)",ref:"tools/nn/unit/view.py · tools/nn/model/effects.py"},
+    {id:"abilities",t:"Арсенал способностей",ty:"in",st:"agreed",b:[0,1710,360,310],pic:"abilities",n:"8 кнопок: свой × 3 = 24, враг × 2 = 16",ref:"tools/nn/model/abilities.py (генерал)"},
+    {id:"unitproc",t:"Анализ отряда",ty:"proc",st:"agreed",b:[500,770,360,460],pic:"unitproc",n:"185 → 256 → 128, два слоя, ≈ 80 тыс. весов, общие веса (враг 150) · общий блок всех уровней",ref:"tools/nn/unit/net.py RowEncoder (отряд); «Анализ армий» (генерал)"},
+    {id:"orders",t:"Приказы тактику",ty:"order",st:"agreed",b:[0,2060,360,260],pic:"orders",n:"контейнер: по карточке на приказ; пока «Область группы» — 6 чисел",ref:"tools/nn/unit/net.py ORDER (приказ отряду)"},
+    {id:"unitcard",t:"Карточка отряда",ty:"out",st:"agreed",b:[960,830,340,340],pic:"unitcard",n:"128 чисел на отряд (настройка)",ref:"«Карточки отрядов» (генерал)"}
   ];
   // links: from -> to; fy / ty where on the side (0 top .. 1 bottom), xm the elbow x (default: halfway), label (over the
   // last segment, into the block), kind (main | stub: dashed, grey)
   var EDGES=[
+    {from:"passport",to:"unitproc",fy:.5,ty:.18,xm:430,label:"69",col:"--c-pass"},
+    {from:"changing",to:"unitproc",fy:.42,ty:.5,xm:430,label:"92 / 65",col:"--c-live"},
+    {from:"abilities",to:"unitproc",fy:.5,ty:.82,xm:430,label:"24 / 16",col:"--c-ars"},
+    {from:"unitproc",to:"unitcard",fy:.5,ty:.5,label:"128",col:"--c-out"}
+  ];
+  // PARKED (the user 30.10: off the page for now, back later) - move into NODES / EDGES to show again; their descriptions
+  // (tpl-cards, tpl-command, tpl-stub) and pictures stay in the file
+  var PARKED_NODES=[
+    {id:"cards",t:"Список карточек отрядов",ty:"in",st:"agreed",b:[470,130,580,580],pic:"cards",n:"строка 185 / 150 чисел; мои 1–6 + цель + прочие; пусто — маска",ref:"tools/nn/unit/view.py · build()"},
+    {id:"command",t:"Команда от оперативника",ty:"in",st:"agreed",b:[470,770,580,320],pic:"command",n:"область · задача (4) · темп · «что дальше»",ref:"tools/nn/unit/net.py · ORDER"},
+    {id:"stub",t:"Обработка",ty:"stub",st:"stub",b:[1200,330,340,560],pic:"stub",n:"ещё не обсуждали",ref:"—"}
+  ];
+  var PARKED_EDGES=[
     {from:"passport",to:"cards",fy:.5,ty:.22,label:"69"},
     {from:"live",to:"cards",fy:.5,ty:.5,label:"сейчас"},
     {from:"who",to:"cards",fy:.45,ty:.78,label:"метка"},
@@ -335,38 +636,152 @@ a{color:inherit}
   function Pa(d,col,w,dash,mk){return '<path d="'+d+'" fill="none" stroke="'+col+'" stroke-width="'+(w||1.6)+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+(mk?' marker-end="url(#'+mk+')"':'')+' stroke-linejoin="round"/>';}
   function IMG(x,y,s,f){return R(x-1,y-1,s+2,s+2,'#2b2722',4)+'<image href="icons/'+f+'" x="'+x+'" y="'+y+'" width="'+s+'" height="'+s+'"/>';}
   function pill(x,y,w,t,col,fs,hh,dash,on){hh=hh||18;return R(x,y,w,hh,'color-mix(in srgb,'+col+' '+(on?40:14)+'%,var(--panel))',hh/2,' stroke="color-mix(in srgb,'+col+' '+(on?100:55)+'%,var(--panel))" stroke-width="'+(on?2:1)+'"'+(dash?' stroke-dasharray="4 3"':''))+T(x+w/2,y+hh/2+3.5,t,fs||10,'middle',on?'fill:var(--ink);font-weight:600':'');}
+  // the row's sums under every card: own, enemy (the rest masked)
+  // the sums under every card: the card's (own / enemy), then the whole row's
+  function SUMS(x,yb,w,own,foe){return T(x+w/2,yb+18,'карточка: свой '+own+' · враг '+foe,10.5,'middle','fill:var(--ink);font-weight:600')+
+    T(x+w/2,yb+34,'в строке свой: 69 + 92 + 24 = 185',9.5,'middle','fill:var(--ink)')+T(x+w/2,yb+48,'враг: 69 + 65 + 16 = 150 (остальное — маска)',9.5,'middle','fill:var(--ink)');}
+  function ENEMY(x,yy,k){return k===1?T(x,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700'):k===4?T(x,yy+10,'✓ᵐ',11,'middle','fill:var(--done);font-weight:700'):k===2?T(x,yy+10,'?',11,'middle','fill:var(--open);font-weight:700'):T(x,yy+10,'✗',11,'middle','fill:var(--foe);font-weight:700');}
   function rnd(i,k){var t=Math.sin(i*12.9898+k*78.233)*43758.5453;return t-Math.floor(t);}
   // the live part's rows on the scheme: icon, field, numbers, enemy (1 yes, 2 yes - against the decision, 0 no)
   var LIVE=[["place.svg","положение","2",1],["position.svg","фронт","2",1],["speed.png","скорость","2",1],["formation.svg","строй","2",1],
     ["men.svg","бойцы","1",1],["health.png","здоровье","1",1],["morale.png","мораль","2",1],["flags.svg","в бою, бегом…","7",1],
-    ["fatigue.png","усталость","1",2],["ammo.png","боезапас","1",2],["height.svg","высота земли","1",1],["order.svg","приказ и цель","?",0],["cooldown.png","способности","?",0]];
+    ["fatigue.png","усталость","1",2],["ammo.png","боезапас","1",2],["height.svg","высота земли","1",1],["order.svg","приказ и цель","?",0]];
+  // the state's dictionary on the scheme: icon, short name, enemy (1 an icon on its card, 2 to check, 3 not given on purpose, 0 the game does not give it)
+  var STL=[["eff_poison.svg","яд",1],["eff_contaminated.svg","заражение",1],["eff_suppressed.svg","подавлен",1],["shieldbreaker.png","щитолом",1],["eff_frenzy.svg","бешенство",1],["eff_numbers.svg","сила в числе",1],["eff_scurry.svg","удрать",1],["eff_single.svg","раны одиночки",1],["eff_penitent.svg","сила кающихся",1],["blackpowder.png","выдержка",1],["flaming.png","реген. порезан",2],["snare_net.png","сеть-ловушка",1],["hold_the_line.png","держать строй",1],["encourages.png","воодушевлён",1],["fear.png","страх рядом",1],["terror.png","бежит от ужаса",1],["immune_psychology.png","иммун. к ужасу",0],["class_artillery.png","под огнём арт.",4],["explosive_damage.png","попадание арт.",4],["charge_bonus.png","в натиске",4],["braced.png","упор",4],["class_cavalry.png","строй проломлен",2],["walk.png","замедлен",4],["magical.png","чужая на мне",1],["stalk.png","скрыт",0]];
+  // the orders to the tactic (the container "Приказы тактику"): a card per order - title, rows [icon, field, numbers]
+  var ORD=[{t:"Область группы",rows:[["place.svg","центр (x, z)",2],["formation.svg","ширина, глубина",2],["position.svg","поворот (sin, cos)",2]]}];
+  // the current stats (with every effect on): icon, short name
+  var CSL=[["attack.png","атака"],["defence.png","защита"],["morale.png","лидерство"],["speed.png","скорость"],["run.png","скор. натиска"],["charge_bonus.png","бонус натиска"],["damage.png","урон"],["damage_ap.png","бронебойный"],["res_physical.png","физ. сопротивл."],["res_fire.png","сопр. огню"],["shield.png","щит"],["snipe.png","точность"],["reload.png","перезарядка"],["missile_damage.png","урон снаряда"],["missile_damage_ap.png","бронеб. снаряда"]];
+  // the abilities' dictionary (buttons): icon, short name
+  var ABL=[["verminous_valour.png","доблесть"],["deadly_onslaught.png","смерт. натиск"],["rally.png","сплотить"],["foe_seeker.png","искатель врага"],["stand_your_ground.png","стоять насмерть"],["hold_the_line.png","держать строй"],["spell_warp_lightning.svg","варп-молния"],["spell_searing_doom.svg","погибель"]];
   // the "who" tags: colour of the tag and of its row
-  var WHO={mine:{t:"мой",c:"var(--mine)"},target:{t:"цель",c:"var(--foe)"},foe:{t:"прочий враг",c:"var(--foev)"},own:{t:"прочий свой",c:"var(--minev)"},none:{t:"пусто",c:"var(--muted)"}};
+  var WHO={self:{t:"я сам",c:"var(--open)"},mine:{t:"свой · группа",c:"var(--mine)"},target:{t:"враг · цель",c:"var(--foe)"},foe:{t:"враг · прочий",c:"var(--foev)"},own:{t:"свой · другой",c:"var(--minev)"},none:{t:"пусто",c:"var(--muted)"}};
 
   // ---- pictures inside the blocks: PICS[name](box) -> svg ----
   var PICS={
-    passport:function(b){var x=b[0],y=b[1],s=T(x+b[2]/2,y+24,'69 чисел · один раз на бой · свой и враг',10.5,'middle'),
+    passport:function(b){var x=b[0],y=b[1],s=T(x+b[2]/2,y+24,'строка № i · 69 чисел · один раз на бой · свой и враг',10.5,'middle'),
       G=[["размер и вес",4,"hp_unit.svg"],["скорость",3,"speed.png"],["рукопашная",9,"attack.png"],["броня и дух",3,"armour.png"],["сопротивления",5,"res_physical.png"],["умения",3,"braced.png"],["цена",1,"cost.png"],["стрельба",8,"range.png"],["каста",13,"class_infantry.png"],["размер тела",5,"size_large.svg"],["свойства",12,"fear.png"],["полёт снаряда",3,"trajectory.svg"]];
       G.forEach(function(g,i){var yy=y+40+i*17;s+=IMG(x+12,yy-1,13,g[2])+T(x+31,yy+9,g[0],10);
-        for(var k=0;k<g[1];k++)s+=R(x+136+k*8,yy,6.5,11,M('--pass',25+rnd(i,k)*55),1.5);
+        for(var k=0;k<g[1];k++)s+=R(x+136+k*8,yy,6.5,11,M('--c-pass',25+rnd(i,k)*55),1.5);
         s+=T(x+b[2]-14,yy+9,g[1],10,'end','font-family:var(--f-mono)');});
+      s+=SUMS(x,y+40+G.length*17,b[2],'69','69');
       return s;},
     // (the same layout as the passport's: icon, name, a cell per number, the count; then own / enemy marks before the count)
     live:function(b){var x=b[0],y=b[1],s=T(x+b[2]/2,y+24,'22 числа · каждое решение · свой и враг',10.5,'middle'),xo=x+b[2]-74,xe=x+b[2]-46;
       s+=T(xo,y+37,'свой',7,'middle')+T(xe,y+37,'враг',7,'middle');
       LIVE.forEach(function(g,i){var yy=y+40+i*17,q=g[2]==='?';s+=IMG(x+12,yy-1,13,g[0])+T(x+31,yy+9,g[1],10);
         if(q){for(var k=0;k<2;k++)s+=R(x+136+k*8,yy,6.5,11,'none',1.5,' stroke="'+M('--ink',35)+'" stroke-width="1" stroke-dasharray="2 1.5"');s+=T(x+156,yy+9,'?',10,null,'fill:var(--muted);font-weight:700');}
-        else for(var k=0;k<+g[2];k++)s+=R(x+136+k*8,yy,6.5,11,M('--live',25+rnd(i+40,k)*55),1.5);
+        else for(var k=0;k<+g[2];k++)s+=R(x+136+k*8,yy,6.5,11,M('--c-live',25+rnd(i+40,k)*55),1.5);
         s+=T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700');
         s+=g[3]===0?T(xe,yy+10,'✗',11,'middle','fill:var(--foe);font-weight:700'):T(xe,yy+10,g[3]===2?'✓*':'✓',11,'middle','fill:'+(g[3]===2?'var(--open)':'var(--done)')+';font-weight:700');
         s+=T(x+b[2]-14,yy+9,g[2],10,'end','font-family:var(--f-mono)'+(q?';fill:var(--muted)':''));});
       var yb=y+40+LIVE.length*17;
-      s+=T(x+b[2]/2,yb+18,'в строке: паспорт 69 + живая 22 + «кто это» 4 = 95',10.5,'middle','fill:var(--ink);font-weight:600');
-      s+=T(x+b[2]/2,yb+33,'«?» — новое у тактика, не обсуждали · ✓* — см. «!»',9,'middle');
+      s+=SUMS(x,yb,b[2])+T(x+b[2]/2,yb+48,'«?» — новое у тактика, не обсуждали · ✓* — см. «!»',9,'middle');
       return s;},
-    who:function(b){var x=b[0],y=b[1],s="",L=[["mine","моя группа, 1–6"],["target","чужая группа (оперативник)"],["foe","видимый враг в зоне"],["own","свой из другой группы"],["none","свободное место — маска"]];
-      L.forEach(function(q,i){var yy=y+20+i*27,w=WHO[q[0]];s+=pill(x+14,yy,104,w.t,w.c,10.5,20,q[0]==="none");s+=T(x+128,yy+14,q[1],10.5);});
-      s+=T(x+b[2]/2,y+170,'4 числа, по 0/1 (пустая строка — маска)',10.5,'middle','fill:var(--ink);font-weight:600')+T(x+b[2]/2,y+186,'новое у тактика (у отряда: я / свой / враг + цель)',9.5,'middle','fill:var(--open)');
+    // "Анализ отряда": the row's three parts go in, one shared network (two layers drawn), the card comes out
+    unitproc:function(b){var x=b[0],y=b[1],w=b[2],s=pill(x+w/2-110,y+10,220,'общий блок всех уровней','var(--tc-test)',10.5,20,false,true)+T(x+w/2,y+46,'185 → 256 → 128 · два полносвязных слоя',10.5,'middle')+T(x+w/2,y+62,'строки № 1 … № N — каждая отдельно, теми же весами',9.5,'middle');
+      // the row's numbers as cells, 12 a line, each part in its card's colour (the changing card's sub-parts in its shades)
+      var parts=[["паспорт · 69",[["--c-pass",69]]],["что меняется · 92",[["--c-live",22],["--c-who",5],["--c-state",50],["--c-cst",15]]],["арсенал · 24",[["--c-ars",24]]]];
+      var px=x+16,py=y+74,PER=12,mid=[];
+      parts.forEach(function(q,pi){s+=T(px,py+9,q[0],9.5,null,'fill:var(--ink);font-weight:600');py+=14;var k=0,y0=py;
+        q[1].forEach(function(c){for(var n=0;n<c[1];n++){s+=R(px+(k%PER)*8.5,py+Math.floor(k/PER)*8.5,7,7,M(c[0],35+rnd(pi*50+k,3)*55),1.3);k++;}});
+        var hh=Math.ceil(k/PER)*8.5;mid.push(y0+hh/2);py+=hh+10;});
+      var top=y+78,bot=py-10,NN=8,L1=[],L2=[];
+      for(var i=0;i<NN;i++){var yy=top+6+i*(bot-top-12)/(NN-1);L1.push([x+215,yy]);L2.push([x+290,yy]);}
+      var ln="";for(var i=0;i<NN;i++){var src=mid[Math.min(2,Math.floor(i*3/NN))];
+        ln+='<line x1="'+(px+PER*8.5+4)+'" y1="'+src+'" x2="'+L1[i][0]+'" y2="'+L1[i][1]+'" class="cw"/>';
+        for(var j=0;j<NN;j++)if((i+j)%3===0)ln+='<line x1="'+L1[i][0]+'" y1="'+L1[i][1]+'" x2="'+L2[j][0]+'" y2="'+L2[j][1]+'" class="cw"/>';
+        ln+='<line x1="'+L2[i][0]+'" y1="'+L2[i][1]+'" x2="'+(x+w-12)+'" y2="'+L2[i][1]+'" stroke="'+M('--c-out',70)+'" stroke-width="1"/>';}
+      s+=ln;L1.concat(L2).forEach(function(q){s+='<circle cx="'+q[0]+'" cy="'+q[1]+'" r="6.5" fill="'+M('--ink',18)+'" stroke="'+M('--ink',45)+'" stroke-width="1.2"/>';});
+      s+=T(x+215,bot+20,'256',10,'middle','fill:var(--ink);font-weight:600')+T(x+290,bot+20,'128',10,'middle','fill:var(--ink);font-weight:600')+T(x+252,bot+34,'2 слоя · ≈ 80 тыс. весов',9.5,'middle');
+      s+=T(x+w/2,bot+58,'одни веса на все строки: мой, цель, прочие',10.5,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,bot+74,'порядок строк не важен · части строки не складываются',9.5,'middle');
+      s+=T(x+w/2,bot+88,'и не склеиваются: сеть сочетает их сама',9.5,'middle');
+      s+=T(x+w/2,bot+106,'враг: 150 чисел, остальное — маска',9.5,'middle');
+      return s;},
+    // "Приказы тактику": a container of order cards (one order a card, in the input cards' style); ORD is its data
+    orders:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'всё, что тактик получает от оперативника',10.5,'middle'),cy=y+38;
+      ORD.forEach(function(o){var n=0;o.rows.forEach(function(r){n+=r[2];});var hh=30+o.rows.length*17+6;
+        s+=R(x+10,cy,w-20,hh,'var(--panel)',10,' stroke="var(--c-order)" stroke-width="1.4"');
+        s+=T(x+22,cy+18,o.t,10.5,null,'fill:var(--ink);font-weight:600')+T(x+w-24,cy+18,n+' чисел',9.5,'end');
+        o.rows.forEach(function(r,i){var yy=cy+28+i*17;s+=IMG(x+22,yy-1,13,r[0])+T(x+41,yy+9,r[1],10);
+          for(var k=0;k<r[2];k++)s+=R(x+170+k*8,yy,6.5,11,M('--c-order',30+rnd(i+150,k)*50),1.5);
+          s+=T(x+w-24,yy+9,r[2],10,'end','font-family:var(--f-mono)');});
+        cy+=hh+8;});
+      s+=R(x+10,cy,w-20,30,'none',10,' stroke="'+M('--c-order',60)+'" stroke-width="1.2" stroke-dasharray="6 4"')+T(x+w/2,cy+19,'+ следующий приказ — своей карточкой',10,'middle');
+      s+=T(x+w/2,cy+50,'остальные приказы добавляем по одному',10,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,cy+65,'куда они входят — ещё не обсуждали',9.5,'middle','fill:var(--open)');
+      return s;},
+    // "Карточка отряда": a learned row of 128 numbers per list row (drawn 16 cells)
+    unitcard:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'128 чисел на отряд · № как у строки входа',10.5,'middle');
+      var rows=[["mine"],["mine"],["mine"],["target"],["target"],["foe"],["own"],["none"],["none"]];
+      rows.forEach(function(r,i){var yy=y+44+i*22,wh=WHO[r[0]],e=r[0]==="none";
+        s+=R(x+14,yy,13,13,e?'none':wh.c,3,e?' stroke="'+M('--ink',35)+'" stroke-dasharray="2 1.5"':' stroke="var(--ink)" stroke-opacity=".25"')+T(x+33,yy+10,'№'+(i+1)+' '+wh.t,9.5);
+        if(e)s+=R(x+150,yy+1,16*9.5,11,'none',3,' stroke="'+M('--ink',30)+'" stroke-dasharray="4 3"');
+        else for(var k=0;k<16;k++)s+=R(x+150+k*9.5,yy+1,8,11,M('--c-out',15+rnd(i+130,k)*75),1.5);});
+      var yb=y+44+rows.length*22;
+      s+=T(x+w/2,yb+18,'выученное описание отряда',10.5,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,yb+34,'путает отряды на экзамене — расширить',9.5,'middle');
+      return s;},
+    // "what changes in the battle": the live part, who, the state - one card, thin sub-headings; rows as the passport's
+    changing:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'строка № i · каждое решение · свой и враг (пока виден)',10.5,'middle'),xo=x+w-74,xe=x+w-46,cur=y+34;
+      s+=T(xo,y+37,'свой',7,'middle')+T(xe,y+37,'враг',7,'middle');
+      function head(t,c){s+='<line x1="'+(x+12)+'" y1="'+(cur+4)+'" x2="'+(x+w-12)+'" y2="'+(cur+4)+'" stroke="'+M('--ink',25)+'" stroke-width="1"/>'+R(x+12,cur+8,10,10,'var('+c+')',2)+T(x+27,cur+16,t,9.5,null,'fill:var(--ink);font-weight:600');cur+=22;}
+      function mark(k,yy){return k===1?T(xe,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700'):k===2?T(xe,yy+10,'✓*',11,'middle','fill:var(--open);font-weight:700'):T(xe,yy+10,'✗',11,'middle','fill:var(--foe);font-weight:700');}
+      head('живая часть · 22 · сырые числа','--c-live');
+      LIVE.forEach(function(g,i){var yy=cur,q=g[2]==='?';s+=IMG(x+12,yy-1,13,g[0])+T(x+31,yy+9,g[1],10);
+        if(q){for(var k=0;k<2;k++)s+=R(x+136+k*8,yy,6.5,11,'none',1.5,' stroke="'+M('--ink',35)+'" stroke-width="1" stroke-dasharray="2 1.5"');s+=T(x+156,yy+9,'?',10,null,'fill:var(--muted);font-weight:700');}
+        else for(var k=0;k<+g[2];k++)s+=R(x+136+k*8,yy,6.5,11,M('--c-live',25+rnd(i+40,k)*55),1.5);
+        s+=T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700')+mark(g[3],yy);
+        s+=T(x+w-14,yy+9,g[2],10,'end','font-family:var(--f-mono)'+(q?';fill:var(--muted)':''));cur+=17;});
+      cur+=4;head('кто это · 5 · ставит код по приказу сверху','--c-who');
+      [["self","я сам"],["mine","свой · группа"],["own","свой · другой"],["target","враг · цель"],["foe","враг · прочий"],["none","пусто — маска"]].forEach(function(q){var yy=cur,wh=WHO[q[0]],e=q[0]==="none";
+        s+=R(x+12,yy-1,13,13,e?'none':wh.c,3,e?' stroke="'+M('--ink',35)+'" stroke-dasharray="2 1.5"':' stroke="var(--ink)" stroke-opacity=".25"')+T(x+31,yy+9,q[1],10);
+        if(e)s+=R(x+136,yy,6.5,11,'none',1.5,' stroke="'+M('--ink',35)+'" stroke-width="1" stroke-dasharray="2 1.5"')+T(x+150,yy+9,'строки нет',9,null,'fill:var(--muted)');
+        else s+=R(x+136,yy,6.5,11,M('--c-who',70),1.5)+(q[0]==='self'?T(x+150,yy+9,'у тактика всегда 0',9,null,'fill:var(--muted)'):T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700')+T(xe,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700'));
+        s+=T(x+w-14,yy+9,e?'—':'1',10,'end','font-family:var(--f-mono)'+(e?';fill:var(--muted)':''));cur+=17;});
+      cur+=4;head('состояние · '+STL.length+' эффектов × 2 = '+2*STL.length+' · враг 23','--c-state');
+      STL.forEach(function(g,i){var yy=cur;s+=IMG(x+12,yy-1,13,g[0])+T(x+31,yy+9,g[1],10);
+        s+=R(x+136,yy,6.5,11,M('--c-state',30+rnd(i+70,0)*45),1.5)+R(x+144,yy,6.5,11,M('--c-state',20+rnd(i+70,1)*45),1.5);
+        s+=T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700')+ENEMY(xe,yy,g[2]);
+        s+=T(x+w-14,yy+9,'2',10,'end','font-family:var(--f-mono)');cur+=17;});
+      cur+=4;head('текущие характеристики · '+CSL.length+' · с учётом эффектов','--c-cst');
+      CSL.forEach(function(g,i){var yy=cur;s+=IMG(x+12,yy-1,13,g[0])+T(x+31,yy+9,g[1],10);
+        s+=R(x+136,yy,6.5,11,M('--c-cst',30+rnd(i+110,0)*45),1.5);
+        s+=T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700')+T(xe,yy+10,'✓?',11,'middle','fill:var(--open);font-weight:700');
+        s+=T(x+w-14,yy+9,'1',10,'end','font-family:var(--f-mono)');cur+=17;});
+      s+=SUMS(x,cur,w,'92','65');
+      s+=T(x+w/2,cur+64,'«?» новое · ✓* ✓? см. «!» · враг в состоянии: 1 число, без секунд',8.5,'middle')+T(x+w/2,cur+77,'✓ᵐ мост считает сам, как симулятор · ✗ признака нет',8.5,'middle');
+      return s;},
+    // (the same layout as the passport's; the enemy mark: ✓ an icon on its card, ? to check, – not given on purpose, ✗ the game does not give it)
+    state:function(b){var x=b[0],y=b[1],s=T(x+b[2]/2,y+24,STL.length+' эффектов × 2 = '+2*STL.length+' · каждое решение · свой и враг*',10.5,'middle'),xo=x+b[2]-74,xe=x+b[2]-46;
+      s+=T(xo,y+37,'свой',7,'middle')+T(xe,y+37,'враг',7,'middle');
+      STL.forEach(function(g,i){var yy=y+40+i*17;s+=IMG(x+12,yy-1,13,g[0])+T(x+31,yy+9,g[1],10);
+        s+=R(x+136,yy,6.5,11,M('--c-state',30+rnd(i+70,0)*45),1.5)+R(x+144,yy,6.5,11,M('--c-state',20+rnd(i+70,1)*45),1.5);
+        s+=T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700')+ENEMY(xe,yy,g[2]);
+        s+=T(x+b[2]-14,yy+9,'2',10,'end','font-family:var(--f-mono)');});
+      var yb=y+40+STL.length*17;s+=SUMS(x,yb,b[2]);
+      s+=T(x+b[2]/2,yb+48,'враг: ✓ значок на карточке (1 число, без секунд) · ? проверить',9,'middle')+T(x+b[2]/2,yb+61,'✓ᵐ мост считает сам · ✗ признака нет',9,'middle');
+      return s;},
+    // (the same layout; 3 cells: owned, seconds to ready, seconds active; the enemy: owned + active)
+    abilities:function(b){var x=b[0],y=b[1],s=T(x+b[2]/2,y+24,'строка № i · '+ABL.length+' кнопок × 3 = '+3*ABL.length+' · свой и враг*',10.5,'middle'),xo=x+b[2]-74,xe=x+b[2]-46;
+      s+=T(xo,y+37,'свой',7,'middle')+T(xe,y+37,'враг',7,'middle');
+      ABL.forEach(function(g,i){var yy=y+40+i*17;s+=IMG(x+12,yy-1,13,g[0])+T(x+31,yy+9,g[1],10);
+        for(var k=0;k<3;k++)s+=R(x+136+k*8,yy,6.5,11,M('--c-ars',25+rnd(i+90,k)*50),1.5);
+        s+=T(xo,yy+10,'✓',11,'middle','fill:var(--done);font-weight:700')+T(xe,yy+10,'✓*',11,'middle','fill:var(--open);font-weight:700');
+        s+=T(x+b[2]-14,yy+9,'3',10,'end','font-family:var(--f-mono)');});
+      var yb=y+40+ABL.length*17;s+=SUMS(x,yb,b[2],'24','16');
+      s+=T(x+b[2]/2,yb+64,'свой: есть + до готовности + активна (секунды)',9,'middle')+T(x+b[2]/2,yb+77,'✓* враг: есть + активна (0/1), перезарядки нет',9,'middle');
+      return s;},
+    // (the same layout as the passport's: a colour tag for the icon, name, one cell (0/1), the count)
+    who:function(b){var x=b[0],y=b[1],s=T(x+b[2]/2,y+24,'4 числа · каждое решение · новое у тактика',10.5,'middle'),
+      L=[["mine","мой"],["target","цель"],["foe","прочий враг"],["own","прочий свой"],["none","пусто — маска"]];
+      L.forEach(function(q,i){var yy=y+40+i*17,w=WHO[q[0]],e=q[0]==="none";
+        s+=R(x+12,yy-1,13,13,e?'none':w.c,3,e?' stroke="'+M('--ink',35)+'" stroke-dasharray="2 1.5"':' stroke="var(--ink)" stroke-opacity=".25"')+T(x+31,yy+9,q[1],10);
+        if(e){s+=R(x+136,yy,6.5,11,'none',1.5,' stroke="'+M('--ink',35)+'" stroke-width="1" stroke-dasharray="2 1.5"')+T(x+150,yy+9,'строки нет',9,null,'fill:var(--muted)');}
+        else s+=R(x+136,yy,6.5,11,w.c,1.5);
+        s+=T(x+b[2]-14,yy+9,e?'—':'1',10,'end','font-family:var(--f-mono)'+(e?';fill:var(--muted)':''));});
+      s+=SUMS(x,y+40+L.length*17,b[2])+T(x+b[2]/2,y+40+L.length*17+48,'одна из четырёх клеток = 1, остальные 0',9,'middle');
       return s;},
     cards:function(b){var x=b[0],y=b[1],s="",x0=x+16,xp=x+142,wp=190,xl=x+344,wl=170,xm=x+b[2]-30;
       s+=T(x0+50,y+28,'кто',10,'middle','font-weight:600')+T(xp+wp/2,y+28,'паспорт · 69',10,'middle','font-weight:600')+T(xl+wl/2,y+28,'живая часть',10,'middle','font-weight:600')+T(xm,y+28,'маска',10,'middle','font-weight:600');
@@ -416,10 +831,14 @@ a{color:inherit}
   h+='<defs><marker id="arrM" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--muted)"/></marker>'+
      '<marker id="arrS" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#9aa1ab"/></marker></defs>';
   // a link: from the right side of one block to the left side of the other, with right-angle elbows (xm: the elbow's x)
+  var marks={};   // (an arrow head per link colour)
   EDGES.forEach(function(e){var a=byId[e.from].b,c=byId[e.to].b,x1=a[0]+a[2],y1=a[1]+a[3]*(e.fy==null?.5:e.fy),x2=c[0]-2,y2=c[1]+c[3]*(e.ty==null?.5:e.ty),
       xm=e.xm!=null?e.xm:(x1+x2)/2,stub=e.kind==="stub",d=Math.abs(y1-y2)<1?'M'+x1+' '+y1+'H'+x2:'M'+x1+' '+y1+'H'+xm+'V'+y2+'H'+x2;
-    ln+=Pa(d,stub?'#9aa1ab':'var(--muted)',1.8,stub?'7 5':null,stub?'arrS':'arrM');
-    if(e.label)ln+='<text class="elab" x="'+((xm+x2)/2)+'" y="'+(y2-7)+'" text-anchor="middle">'+esc(e.label)+'</text>';});
+    var col=e.col?'var('+e.col+')':stub?'#9aa1ab':'var(--muted)',mk=e.col?'arr_'+e.col.replace(/-/g,''):stub?'arrS':'arrM';
+    if(e.col&&!marks[mk])marks[mk]='<marker id="'+mk+'" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="'+col+'"/></marker>';
+    ln+=Pa(d,col,e.col?2.4:1.8,stub?'7 5':null,mk);
+    if(e.label)ln+='<text class="elab" x="'+((xm+x2)/2)+'" y="'+(y2-7)+'" text-anchor="middle"'+(e.col?' style="fill:'+col+';font-weight:600"':'')+'>'+esc(e.label)+'</text>';});
+  h+='<defs>'+Object.keys(marks).map(function(k){return marks[k];}).join('')+'</defs>';
   h+='<g pointer-events="none">'+ln+'</g>';
   NODES.forEach(function(n){var b=n.b;
     h+='<g class="node snode t-'+n.ty+' st-'+n.st+'" data-n="'+n.id+'" data-bx="'+(b[0]+b[2])+'" data-by="'+b[1]+'" tabindex="0" role="button" aria-label="'+esc(n.t)+'">'+
@@ -428,7 +847,8 @@ a{color:inherit}
   // the view box: every block and a margin
   var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   NODES.forEach(function(n){var b=n.b;x0=Math.min(x0,b[0]);y0=Math.min(y0,b[1]);x1=Math.max(x1,b[0]+b[2]);y1=Math.max(y1,b[1]+b[3]);});
-  var PAD=40,TOP=70;   // (TOP: room for the legend over the scheme)
+  var PAD=40,TOP=130,MINW=1600;   // (TOP: room for the legend over the scheme; MINW: the scheme at least this wide - room on the right for the blocks to come)
+  x1=Math.max(x1,x0+MINW);
   svg.setAttribute("viewBox",(x0-PAD)+" "+(y0-TOP)+" "+(x1-x0+2*PAD)+" "+(y1-y0+PAD+TOP));
   svg.innerHTML=h;
 
@@ -441,7 +861,9 @@ a{color:inherit}
 
   // "!" on a block: its description has an open question (.side .box.open)
   var NS="http://www.w3.org/2000/svg";
-  function bang(id){var t=document.getElementById("tpl-"+id);return !!(t&&t.content.querySelector(".side .box.open"));}
+  var PARTS={live:"Живая часть",who:"Кто это",state:"Состояние",cstats:"Текущие характеристики"};
+  function tplsOf(id){var n=byId[id];return n&&n.tpl?n.tpl:[id];}
+  function bang(id){return tplsOf(id).some(function(k){var t=document.getElementById("tpl-"+k);return !!(t&&t.content.querySelector(".side .box.open"));});}
   [].forEach.call(svg.querySelectorAll(".snode"),function(g){if(!bang(g.dataset.n))return;var bx=+g.dataset.bx,by=+g.dataset.by,e=document.createElementNS(NS,"g");
     e.setAttribute("pointer-events","none");
     e.innerHTML='<circle cx="'+(bx-4)+'" cy="'+(by+4)+'" r="13" fill="var(--open)" stroke="var(--panel)" stroke-width="2"/><text x="'+(bx-4)+'" y="'+(by+10)+'" text-anchor="middle" style="font-size:17px;font-weight:800" fill="#1b1206">!</text>';
@@ -479,7 +901,7 @@ a{color:inherit}
   tb.innerHTML=rows;
 
   // the description under the scheme
-  var cur="cards";
+  var cur="changing";
   try{var sv=localStorage.getItem("tactic-node");if(sv&&byId[sv])cur=sv;}catch(e){}
   function go(id,scroll){cur=id;try{localStorage.setItem("tactic-node",cur);}catch(e){}render();
     if(scroll)document.getElementById("crumbs").scrollIntoView({block:"start",behavior:"smooth"});}
@@ -489,8 +911,11 @@ a{color:inherit}
     [].forEach.call(svg.querySelectorAll(".node"),function(b){b.classList.toggle("on",b.dataset.n===cur);});
     [].forEach.call(tb.querySelectorAll("tr[data-go]"),function(r){r.classList.toggle("sel",r.dataset.go===cur);});
     var N=byId[cur];document.getElementById("crumbs").innerHTML="<b>"+TYPES[N.ty]+" · "+esc(N.t)+"</b> — "+(ST[N.st]||N.st);
-    var c=document.getElementById("content"),t=document.getElementById("tpl-"+cur);c.innerHTML="";
-    if(t)c.appendChild(t.content.cloneNode(true));else c.innerHTML='<p class="small">Описания пока нет.</p>';
+    var c=document.getElementById("content"),ks=tplsOf(cur);c.innerHTML="";
+    ks.forEach(function(k,i){var t=document.getElementById("tpl-"+k);if(!t)return;
+      if(ks.length>1){var h=document.createElement("h2");h.className="parth";h.textContent=(i+1)+". "+(PARTS[k]||k);c.appendChild(h);}
+      c.appendChild(t.content.cloneNode(true));});
+    if(!c.children.length)c.innerHTML='<p class="small">Описания пока нет.</p>';
   }
   render();
 })();
