@@ -328,6 +328,11 @@ def terms(u, ctx, params):
         # Fear (-8, the database's ume_concerned_unit_frightened): battle.py ctx fear (an enemy causing fear within
         # fear_effect_range 20 m; morale.fear)
         out["fear"] = torch.where(ctx["fear"], R["ume_concerned_unit_frightened"], 0.0)
+    # Artillery (artillery.morale_points: -8 attacked by artillery, -10 damaged by it, 30 s; R-work artillery_rules.md 3)
+    from tools.nn.sim import artillery
+    art = artillery.morale_points(u, params)
+    if art is not None:
+        out["artillery"] = art
     # The army is beaten as a whole (army_collapse: the database's 2.6x / 0.22 thresholds).
     out["collapse"] = torch.where(ctx.get("collapse", no), R["ume_concerned_army_destruction"], 0.0)
     for k in FIGHT_TERMS:

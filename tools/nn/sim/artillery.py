@@ -29,8 +29,14 @@ fire) and the projectile's square spread (missile.square_side; along the ground 
               shockwave thresholds, artillery_rules.md 1.4), a fixed shell's own hit at momentum / m >= 7; a man down
               takes no more of that landing (magic.open_share, its shells at once)
   effect      the blast's contact effect (the Plagueclaw's -10 morale) on the enemies it strikes (effects.lay)
+Morale (morale_mark; artillery.morale, R-work artillery_rules.md 3): a unit an artillery projectile is fired at (the
+mark 2 s after the shot), one a shell lands within 12 m of (artillery_near_miss_distance_squared 144, its box's edge;
+not the shooter's side) and one whose man a projectile hits (its own hit: a ball, a fixed shell's - not a blast) is
+'attacked by artillery' for 30 s (-8); one whose man is hit, 'damaged by artillery' for 30 s (-10, instead of -8).
+A magical projectile's own hit (p_magic: the Warp Lightning Cannon, the Plagueclaw) meets spell resistance, not the
+physical (missile.volley, land; as the blast's ex_magic).
 Not modelled (config/nn/sim.json artillery.shell_why): the cannonball's bounce and roll, the volley's rhythm, the
-rockets' extra scatter, morale from artillery, the knocked men's pause in melee.
+rockets' extra scatter, the knocked men's pause in melee.
 Needs torch.
 """
 import math
@@ -166,12 +172,62 @@ def _eager(fn):
     return torch.compiler.disable(fn)
 
 
+def morale_cal(params):
+    """artillery.morale (config/nn/sim.json): {window_s, delay_s, near_m} or {} (off)."""
+    m = cal(params).get("morale") or {}
+    return m if m.get("on") else {}
+
+
+def near_m(params):
+    """The near miss's reach, m: sqrt(artillery_near_miss_distance_squared) (the database's 144: 12 m)."""
+    for table in (params.morale, params.battle):
+        if "artillery_near_miss_distance_squared" in table:
+            return math.sqrt(float(table["artillery_near_miss_distance_squared"]))
+    return 12.0
+
+
+def morale_mark(u, params, dt, fired_at, near, hit):
+    """In place, each step: the units' artillery clocks (R-work artillery_rules.md 3) - art_s (attacked) and artd_s
+    (damaged) run on; a unit an artillery projectile was fired at now (fired_at [B, N]) is marked attacked delay_s
+    later (art_s -delay_s; a unit marked already keeps it, its window renewed), one a shell landed near (near) or whose
+    man was hit (hit) at once; a hit marks it damaged too. 'attacked' while 0 <= art_s < window_s, 'damaged' while
+    artd_s < window_s (morale.terms: -8 / -10)."""
+    m = morale_cal(params)
+    if not m or "art_s" not in u:
+        return
+    win, delay = float(m["window_s"]), float(m.get("delay_s", 0.0))
+    # (the clocks stop at the battle's start value, 1e6: a unit never shot at keeps it - scenario.build)
+    a = (u["art_s"] + dt).clamp(max=1e6)
+    on = (a >= 0) & (a < win)
+    a = torch.where(fired_at & ~on & (a >= win), torch.full_like(a, -delay), a)
+    a = torch.where(fired_at & on, torch.zeros_like(a), a)
+    u["art_s"] = torch.where(near | hit, torch.zeros_like(a), a)
+    u["artd_s"] = torch.where(hit, torch.zeros_like(u["artd_s"]), (u["artd_s"] + dt).clamp(max=1e6))
+
+
+def morale_points(u, params):
+    """[B, N] the artillery's morale term (morale.terms): ume_concerned_damaged_by_artillery (-10) while damaged,
+    else ume_concerned_attacked_by_artillery (-8) while attacked, else 0; None with artillery.morale off."""
+    m = morale_cal(params)
+    if not m or "art_s" not in u:
+        return None
+    win = float(m["window_s"])
+    R = params.morale
+    attacked = (u["art_s"] >= 0) & (u["art_s"] < win)
+    damaged = u["artd_s"] < win
+    zero = torch.zeros_like(u["art_s"])
+    return torch.where(damaged, zero + float(R["ume_concerned_damaged_by_artillery"]),
+                       torch.where(attacked, zero + float(R["ume_concerned_attacked_by_artillery"]), zero))
+
+
 @_eager
-def land(u, params, dt, front, depth, firing, noise=False):
+def land(u, params, dt, front, depth, firing, noise=False, info=None):
     """The shells landing this step: (hp, kills, hits, knocks) [B, i, j] - the HP shooter i's shells take from unit j,
     the men they kill, the hits they land (own hits and blasts), the men knocked down; zeros when none lands. A shell in
     flight lands when its time is up within this step or its shooter fires again now (firing [B, N]). front, depth
-    [B, N]: the boxes (geometry.dims). In place: the slots' clocks (sh_s -1 once landed)."""
+    [B, N]: the boxes (geometry.dims). In place: the slots' clocks (sh_s -1 once landed). info (a dict): filled with
+    "near" [B, N] (> 0: a shell of the other side landed within near_m of its box's edge: morale_mark) and "own" [B, N] (its
+    men's expected hits from the shells' own projectiles)."""
     from tools.nn.sim import melee
     B, N = u["men"].shape
     dev = u["men"].device
@@ -181,6 +237,9 @@ def land(u, params, dt, front, depth, firing, noise=False):
     left = u["sh_s"] - dt
     now = fly & ((left <= 1e-6) | firing)
     u["sh_s"] = torch.where(now, torch.full_like(left, -1.0), torch.where(fly, left, u["sh_s"]))
+    if info is not None:
+        info["near"] = torch.zeros((B, N), device=dev)
+        info["own"] = torch.zeros((B, N), device=dev)
     if not bool(now.any()):
         return hp, kills, hits, knocks
     rules = params.battle
@@ -220,6 +279,11 @@ def land(u, params, dt, front, depth, firing, noise=False):
         band_men = (rho[bb][..., None] * (inside[..., 1:] - inside[..., :-1])).clamp(min=0)    # [M, N, K]
         friend = u["side"][bb] == u["side"][bb, ii][:, None]
         whom = present[bb] & (~friend | u["ex_allies"][bb, ii][:, None])
+        if info is not None:
+            # (morale_mark) a near miss: the landing point within near_m of the box's edge, a unit of the other side
+            gap = torch.sqrt((across.abs() - hf).clamp(min=0) ** 2 + (along.abs() - hd).clamp(min=0) ** 2)
+            near = present[bb] & ~friend & (gap <= near_m(params))
+            info["near"].index_put_((bb,), near.float(), accumulate=True)
         band_men = band_men * whom[..., None]
         # a fixed shell's own hit: the men within its collision radius + a man's radius, at most the men it strikes
         fixed = (u["fix_el"][bb, ii] > 0)[:, None]                           # [M, 1]
@@ -241,8 +305,11 @@ def land(u, params, dt, front, depth, firing, noise=False):
         arm, hmj = u["armour"][bb][..., None], hm[bb][..., None]
         single = ~many[bb][..., None]
         base_c = (u["m_damage"][bb, ii][:, None] + u["m_bvl"][bb, ii][:, None] * u["large"][bb].float())[..., None]
+        # (a magical projectile's own hit: spell resistance, not the physical - p_magic)
+        res_c = torch.where(u["p_magic"][bb, ii][:, None], (u["resist_missile"] + u["resist_magic"]).clamp(-1.0, 0.9)[bb],
+                            res_m[bb]) if "p_magic" in u else res_m[bb]
         ph_c = melee.per_hit(base_c, u["m_ap"][bb, ii][:, None, None].expand_as(base_c), arm, hmj,
-                             res_m[bb][..., None], single=single)                                # [M, N, 1]
+                             res_c[..., None], single=single)                                    # [M, N, 1]
         ph_e = melee.per_hit(u["ex_d"][bb, ii][:, None, None] * size, u["ex_ap"][bb, ii][:, None, None] * size, arm,
                              hmj, res_e, single=single)                                          # [M, N, K]
         # the knock: the blast within half its radius at dv over the threshold; a fixed shell's own hit by momentum
@@ -259,6 +326,8 @@ def land(u, params, dt, front, depth, firing, noise=False):
         Hc, He = lam_c * band_men, lam_e * band_men
         if noise:
             Hc, He = torch.poisson(Hc), torch.poisson(He)
+        if info is not None:
+            info["own"].index_put_((bb,), Hc.sum(-1) * (~friend).float(), accumulate=True)
         # the band's men and their health: the unit's wounds by the band's share of its men
         A = torch.minimum(band_men, men[bb][..., None])
         Wk = W[bb][..., None] * A / men[bb][..., None].clamp(min=1e-6)

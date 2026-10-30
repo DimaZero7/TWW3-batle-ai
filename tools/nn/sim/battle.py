@@ -730,9 +730,22 @@ def step(st, orders, params=None, dt=None):
         # artillery's shells (artillery.py): the volleys in flight that land now - their own hits (a fixed shell) and
         # blasts on every unit round the landing point, friends too - then this step's volleys take flight (a direct
         # shell a trunk stopped does not reach its target: trunk_keep; a fixed one flies over the trees)
+        art_info = {}
         hp_art, kills_art, hits_art, knocks_art = artillery.land(
             u, params, dt, pw["front"], pw["depth"], (shots > 0) & artillery.shell(u),
-            noise=bool((params.sim.get("noise") or {}).get("blows")))
+            noise=bool((params.sim.get("noise") or {}).get("blows")), info=art_info)
+        if artillery.morale_cal(params):
+            # (artillery.morale_mark) the artillery's morale clocks: fired at now, a shell landed near, a man hit by a
+            # projectile's own hit - a ball's (missile.volley's hits of a gun) or a fixed shell's (land's own)
+            gun = (u["eng0"] > 0) & (shots > 0) & (volley_target >= 0)
+            fired_at = torch.zeros_like(u["men"]).scatter_add_(1, volley_target.clamp(min=0), gun.float()) > 0
+            ball = torch.where((u["eng0"] > 0)[:, :, None] & pw["enemy"], hp_missile / shit.clamp(min=1e-6),
+                               torch.zeros_like(hp_missile)).sum(1)
+            own = ball + art_info["own"]
+            draw = morale._hash_uniform(u["men"].shape[0], u["men"].shape[1], torch.round(st.t / dt).long(),
+                                        u["men"].device, salt=52817, ids=morale.battle_ids(u))
+            hit_now = (own > 0) & (draw < 1 - torch.exp(-own))
+            artillery.morale_mark(u, params, dt, fired_at, art_info["near"] > 0, hit_now)
         keep_t = None if trunk is None else torch.where(u["fix_el"] > 0, torch.ones_like(trunk), trunk)
         artillery.launch(u, pw, params, shots, volley_target, keep=keep_t)
         u["art_kd"] = u["art_kd"] + (knocks_art * pw["enemy"]).sum(2)

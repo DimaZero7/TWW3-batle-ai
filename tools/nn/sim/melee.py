@@ -7,7 +7,10 @@ Per pair of units in contact (i strikes j), per second:
                       h across its front or back, v along a flank; its formation template, config/nn/units.json
                       spacing; an ellipse body - a beast - takes its width there, melee.body_across), at most
                       men (through the target's flank: the striker's own side, melee.flank_face "striker");
-                      against a single man (a lord) at most lord_max_attackers in all, however many units surround him (the lord swarm probe, docs/en/game/units/lord-swarm.md); a single man
+                      against a single man (a lord) at most lord_max_attackers in all, however many units surround him (the lord swarm probe, docs/en/game/units/lord-swarm.md);
+                      a lone large body (a monster) the ring of men round it, a formation its face's share (ring,
+                      ring_face: half); a formation of large bodies wider apart than two (the rat ogres: contact.sparse)
+                      k_fit bodies a place, each striking (sparse_files); a single man
                       strikes once; a unit in contact with several enemies shares out no more than its own front
                       holds; a unit attacking another enemy strikes one it only touches at contact.unit_incidental
                       (a lord: lord_incidental) of its rate; a formation without a missile weapon under HOLD (no
@@ -293,6 +296,29 @@ def ring(u, single_j):
     return torch.where(single_j, n, torch.zeros_like(n))
 
 
+def ring_face(cc):
+    """The share of a lone large body's ring one formation brings (contact.ring_big face; build/diag_simfix ring.py): a
+    formation standing in its line meets a monster with its face - its men stand round the part of the body on their
+    side of the front line, the body's centre on that line (the monster probe 30.10: the Horror's and the Mutant's
+    centre -2..+1 m off the spearmen's front at 5-12 s, the men within 2.5 m of the body at 0-90 deg from the way in,
+    none behind it) - half the ring of a circle or a capsule end on; absent: the whole ring (1)."""
+    return float((cc.get("ring_big") or {}).get("face", 1.0))
+
+
+def sparse_files(u, h, cc):
+    """[B, N, 1] for a formation of large bodies wider apart than two of them (contact.sparse; the rat ogres): k_fit =
+    floor(h / (2 r + 2 clear_m)), the bodies one man's place along the contact holds side by side (h the place, r the
+    body's radius, clear_m the game's push-apart margin a body: build/diag_cav/mechanic.md M3), when k_fit >= 2 and
+    the unit is of size min_size or larger and has more than one man; 0 elsewhere (the fighting_files share as before).
+    None with the switch off."""
+    sp = cc.get("sparse") or {}
+    if not sp.get("on") or "size_k" not in u:
+        return None
+    k = torch.floor(h / (2 * u["radius"] + 2 * float(sp.get("clear_m", 0.25))).clamp(min=1e-3) + 1e-6)
+    ok = (u["men0"] > 1) & (u["size_k"] >= float(sp.get("min_size", 3))) & (k >= 2)
+    return torch.where(ok, k, torch.zeros_like(k))[:, :, None]
+
+
 def big_lone(u):
     """[B, N] a lone body of size large or above (a monster: the Brood Horror, the Mutant; size_k >= 3), the targets of
     contact.ring_big and missile.big_single_in_melee; False for the lords and every unit of the pools before them."""
@@ -503,7 +529,13 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
                + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
         ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
         length = torch.where(single_i | single_j | wrap, length, torch.minimum(length, ov + float(edge)))
+    # A formation of large bodies wider apart than two of them (contact.sparse; the rat ogres: spacing 6.5 m, body 2 m): its
+    # rear ranks step into the gaps of the front one, so a man's place along the contact holds k_fit bodies side by side
+    # and each man whose body is in reach strikes - not the fighting_files share of the files (sparse_files below).
+    sp_k = sparse_files(u, hc_u, cc)
     F = ff * length / along
+    if sp_k is not None:
+        F = torch.where(sp_k > 0, sp_k * length / along, F)
     if F_ans is not None:
         F = F + F_ans                    # (melee.wrap: the flank men answering a wrap, above)
     F = torch.minimum(F, men_i)
@@ -516,7 +548,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         # (contact.ring_big) a lone large body (a monster) is struck by the men round its body, not the lord's 6.5
         big_j = big_lone(u)[:, None, :] & ~single_i
         n_ring = ring(u, single_j)
-        F = torch.where(big_j, torch.minimum(men_i, n_ring), F)
+        # (contact.ring_big face) a formation meets the body with its face only: its men stand on the ring's share on
+        # their side of the front line the body stands on (ring_face)
+        F = torch.where(big_j, torch.minimum(men_i, n_ring * ring_face(cc)), F)
     F = torch.where(single_i, torch.ones_like(F), F)
     # Fewer men left, fewer bring their weapons to bear (and fewer can be reached).
     share_i = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, :, None]
@@ -540,6 +574,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     for g in range(4):
         in_g = side_of == g
         hold = ff * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
+        if sp_k is not None:
+            # (contact.sparse) a side of a sparse formation holds k_fit men a place along it
+            hold = torch.where(sp_k > 0, sp_k * (front_i / hc_u[:, :, None] if g in (0, 3)
+                                                  else depth_i / vc_u[:, :, None]), hold)
         if F_ans is not None:
             # (melee.wrap: the flank men answering a wrap stand on the flanks, not on this side)
             hold = hold + torch.where(in_g & contact, F_ans, torch.zeros_like(F_ans)).sum(dim=2, keepdim=True)
@@ -559,6 +597,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         if behind is not None and cal.get("stack_side"):
             side_j = torch.where(behind, side_k, side_j)
         used = F * along / ff                # metres of j's side each striker's men take
+        if sp_k is not None:
+            used = torch.where(sp_k > 0, F * along / sp_k.clamp(min=1.0), used)
         face_cap = (side_j, used, F)                             # (the cap again after the wave: melee.face_cap_wave)
         F = target_face_cap(F, used, side_j, pw, single_i, single_j)
     # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
@@ -576,6 +616,8 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         # swing (the probes: swordsmen running in under a move order 96 HP/s at 0-1 s, the steady swing 89). Formations
         # only.
         F_rank = F / ff
+        if sp_k is not None:
+            F_rank = torch.where(sp_k > 0, F / sp_k.clamp(min=1.0), F_rank)     # (contact.sparse: its files in contact)
         scope = cc.get("first_strike_rank_template")
         if scope:
             # (contact.first_strike_rank_template; config/nn/sim.json contact.first_strike_rank_template_why) the charge's
@@ -875,6 +917,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             h_t, v_t = spacing_of(u, params.sim["formation"]["spacing_m"])
             along_t = torch.where(through_front, h_t[:, :, None], v_t[:, :, None])
             front = F_pre / ff * (along / along_t.clamp(min=1e-6)).clamp(max=1.0)
+            if sp_k is not None:
+                front = torch.where(sp_k > 0, F_pre / sp_k.clamp(min=1.0) * (along / along_t.clamp(min=1e-6)).clamp(max=1.0),
+                                    front)
             s_f = (front / F.clamp(min=1e-6)).clamp(0, 1)
             if recv is not None:
                 back2 = (t2 >= interval).to(p.dtype)
@@ -892,6 +937,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     if gather > 0:
         grow = (u["contact_s"] / gather).clamp(0, 1)[:, :, None]
         ran_j = u["ran_in"][:, None, :] if "ran_in" in u else torch.ones_like(single_j)
+        g_big = (cc.get("ring_big") or {}).get("gather_s")
+        if g_big is not None and bool((cc.get("ring_big") or {}).get("on")):
+            # (contact.ring_big gather_s) round a monster the formation's face is there at once: its men reach the
+            # body in seconds, not the lord's 20 s of men walking round a small one
+            grow_big = (u["contact_s"] / max(float(g_big), 1e-6)).clamp(0, 1)[:, :, None]
+            grow = torch.where(big_lone(u)[:, None, :], grow_big, grow)
         rate = torch.where(single_j & ~single_i & ran_j, rate * grow, rate)
     if pursuit is not None:
         share = knobs.full_like(rate, knobs.get(u, "pursuit_rate", float(pursuit), 3))

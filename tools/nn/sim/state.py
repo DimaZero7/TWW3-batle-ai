@@ -234,6 +234,9 @@ STATIC = {
     "ex_v": ("f", "the blast's ring speed, m/s (detonation_speed)"),
     "ex_allies": ("b", "the blast strikes its own side too (affects_allies)"),
     "ex_magic": ("b", "the blast is magical (is_magical): spell resistance cuts it"),
+    "p_magic": ("b", "a gun's projectile is magical (the passport's missile.magic: the Warp Lightning Cannon, the "
+                     "Plagueclaw): its own hit meets the target's spell resistance, not the physical (missile.volley, "
+                     "artillery.land; build/diag_skv_mon/mechanic.md M20)"),
     "ex_fx": ("i", "the contact effect the blast lays on the units it strikes (contact_phase_effect; index in "
                    "config/nn/effects.json order, -1 none)"),
     "c_rad": ("f", "the projectile's collision radius, m (a fixed shell's own hit: the men within it + their radius)"),
@@ -453,6 +456,11 @@ INTERNAL = {
     "sh_n": ("f", "the shells of that volley"),
     "sh_R": ("f", "the radius of the disc they land uniformly over, m (the spread and the target's box, artillery.py)"),
     "art_kd": ("f", "bookkeeping: men its shells have knocked down so far"),
+    "art_s": ("f", "seconds since an artillery projectile was fired at it, landed within 12 m of its box or hit its men "
+                   "(morale: 'attacked by artillery' for artillery.morale.window_s; below 0: the shot's delay before it "
+                   "counts; artillery.morale_mark)"),
+    "artd_s": ("f", "seconds since an artillery projectile hit one of its men (morale: 'damaged by artillery' for "
+                    "artillery.morale.window_s)"),
     # (the Skaven monsters: regen.py, morale.py terror)
     "burn_s": ("f", "seconds left of the fire's cut of its regeneration (a flaming blow's damage starts it at regen.burn_s "
                     "10: the program's 100 ticks; regen.py)"),

@@ -80,6 +80,9 @@ def build(armies, params=None, device="cpu", per_side=None):
     u["ox"], u["oz"] = u["x"].clone(), u["z"].clone()
     u["rally_s"].fill_(1e6)
     u["under_fire_s"].fill_(1e6)
+    if "art_s" in u:
+        u["art_s"].fill_(1e6)
+        u["artd_s"].fill_(1e6)
     initial_cooldowns(u, params)
     magic.start(u, params)          # the sides' winds of magic, the spells' initial cooldowns
     u["vis"] = present.clone()

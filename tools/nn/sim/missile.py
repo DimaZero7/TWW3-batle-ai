@@ -1383,6 +1383,13 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     resist = u["resist_missile"]
     if ms.get("physical_resist"):
         resist = (resist + u["resist_physical"]).clamp(max=0.9)
+    resist = resist[:, None, :]
+    if "p_magic" in u:
+        # a gun's magical projectile (p_magic: the Warp Lightning Cannon, the Plagueclaw) meets the target's spell
+        # resistance and not the physical (the game sums the resistances that apply to the blow: build/diag_skv_mon/
+        # mechanic.md M20; artillery.py); every other projectile as before
+        magic_r = (u["resist_missile"] + u["resist_magic"]).clamp(-1.0, 0.9)[:, None, :]
+        resist = torch.where(u["p_magic"][:, :, None], magic_r, resist)
     # the same damage rule as a blow (melee.per_hit: armour roll, overkill; a lone man loses the mean)
     md, ma = u["m_damage"][:, :, None], u["m_ap"][:, :, None]
     if "m_bvl" in u:
@@ -1396,7 +1403,7 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         hf = terrain.missile_factor(pw["dh"], params)
         md, ma = md * hf, ma * hf
     hit = melee.per_hit(md, ma, u["armour"][:, None, :],
-                        u["hp_man"][:, None, :], resist[:, None, :], single=(u["men0"] <= 1)[:, None, :])
+                        u["hp_man"][:, None, :], resist, single=(u["men0"] <= 1)[:, None, :])
     hp = landed * hit * (1 - shield)
     if "fix_el" in u:
         # a fixed trajectory's shell (the Mortar) strikes when it lands, with its blast (artillery.land): none here

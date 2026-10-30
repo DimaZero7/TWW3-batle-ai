@@ -48,7 +48,8 @@
 --                  w (the caster's side's winds before), status given / failed}. No contact: the lane ends after max_s.
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
--- to men_all_s, wherever the enemy is (how a formation turns).
+-- to men_all_s, wherever the enemy is (how a formation turns); with lane.men_all_tg the target's and the extras' too
+-- (the artillery plan: who dies where in a block 150 m off the guns).
 -- The target (lane.target_mode): 'stand' halts and, with lane.answer, is ordered to attack the
 -- attacker at its first contact (both then fight under an attack order); 'hold' halts and is never
 -- ordered (braced spears); 'both' attacks the attacker at a run from the start ('both_walk': at a walk); 'rear' halts facing
@@ -941,7 +942,15 @@ function M.main(bm, config, globals)
                 end
             elseif lane.running and lane.men_all_s then
                 if now - lane.t0 <= lane.men_all_s * 1000 then
-                    rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit)}
+                    local row = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit)}
+                    if lane.men_all_tg then
+                        row.tg = soldiers(lane.t.unit)
+                        if lane.extras and #lane.extras > 0 then
+                            row.e = {}
+                            for _, e in ipairs(lane.extras) do row.e[#row.e + 1] = soldiers(state.units[e.name].unit) end
+                        end
+                    end
+                    rows[#rows + 1] = row
                 end
             elseif lane.running and lane.mode == 'tire' and lane.phase ~= 'fight' then
                 -- no soldier places while the pair shuttles (only the fight after it)

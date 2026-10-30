@@ -372,9 +372,9 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan cavcheck                 # the cavalry check (flank, recharge, chase)
     python -m tools.nn.charge_probe cavcheck [runs...] [--sim]          # its table (+ the twin, torch)
     python -m tools.nn.charge_probe run --plan monster --speed 20       # the Skaven monsters (build/diag_skv_mon/probes.md)
-    python -m tools.nn.charge_probe monster [runs...]                   # its table
+    python -m tools.nn.charge_probe monster [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe run --plan artillery --speed 20     # the guns (build/diag_skv_mon/probes.md)
-    python -m tools.nn.charge_probe artillery [runs...]                 # its table
+    python -m tools.nn.charge_probe artillery [runs...] [--sim]         # its table (--sim: + the twin, torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -761,13 +761,16 @@ MONSTER = {"gap_m": 80, "fight_s": 20, "decay_s": 13, "men_after_s": 15, "withdr
            "kinds": ("horror", "mutant", "ogres", "archers_held", "archers_alone"),
            "places": tuple((x, z) for z in (-250.0, 250.0) for x in (-480.0, -240.0, 0.0, 240.0, 480.0))}
 # the artillery plan (build/diag_skv_mon/probes.md): kinds (gun, target, target mode), each twice, on a 4 x 4 grid (240 m
-# apart); the guns 150 m off their targets (the archers 100 m off the gun); push_m: the walking block's way towards the guns
-# (it stops 70 m off: beyond the Mortar's minimum range 60); friend: the guns' own swordsmen 10 m beside the block (their
-# damage from the bursts); fire_s: the lane's length
+# apart); the guns 150 m off their targets front to front (a battery one rank of guns deep: depth()), the archers 80 m off
+# the gun (within their range from the go); push_m: the walking block's way towards the guns (it stops 70 m off: beyond the
+# Mortar's minimum range 60); friend: the guns' own swordsmen 10 m beside the block (their damage from the bursts); fire_s:
+# the lane's length; the soldiers' places all the lane at any distance (men_all_s); volley_glue_s: ammunition drops this
+# close are one volley (guns firing out of step), volley_window_s: a volley's kills counted to the next one or this long
 GREAT_CANNON, MORTAR, ROCKETS = ("wh_main_emp_art_great_cannon", "wh_main_emp_art_mortar",
                                  "wh_main_emp_art_helstorm_rocket_battery")
 WARP_CANNON = "wh2_main_skv_art_warp_lightning_cannon"
-ARTILLERY = {"gap_m": 150, "crew_gap_m": 100, "fire_s": 120, "push_m": 80, "friend_gap_m": 10, "t_w": 30, "copies": 2,
+ARTILLERY = {"gap_m": 150, "crew_gap_m": 80, "fire_s": 120, "push_m": 80, "friend_gap_m": 10, "t_w": 30, "copies": 2,
+             "volley_glue_s": 4.0, "volley_window_s": 12.0,
              "kinds": (("cannon", GREAT_CANNON, "cspear", "hold"), ("warp", WARP_CANNON, "spear", "hold"),
                        ("mortar_stand", MORTAR, "cspear", "hold"), ("mortar_walk", MORTAR, "cspear", "push"),
                        ("rockets_stand", ROCKETS, "cspear", "hold"), ("rockets_walk", ROCKETS, "cspear", "push"),
@@ -1530,7 +1533,8 @@ def artillery_lanes():
     sw = UNITS["swords"]
 
     def one(kind, gun, target, mode, k):
-        common = dict(kind=kind, copy=k, answer=False, t_w=c["t_w"], max_s=c["fire_s"])
+        common = dict(kind=kind, copy=k, answer=False, t_w=c["t_w"], max_s=c["fire_s"], men_all_s=c["fire_s"],
+                      men_all_tg=True)
         if kind == "crew":
             # archers at the gun's crew; the gun shoots back at them (skirmish target: fire at will, a ranged attack)
             return lane(gun, target, "shoot", mode, gap_m=c["crew_gap_m"], fight_s=c["fire_s"], a_w=30, t_skirmish=False,
@@ -1556,10 +1560,14 @@ def spacing(key):
 
 
 def depth(key, men, width=WIDTH_M):
-    """The close block's depth, m (the database's spacing); 0 for a lone man."""
+    """The close block's depth, m (the database's spacing); 0 for a lone man; an artillery unit (a passport with
+    engines): one rank of its guns, v deep (the simulator's box, tools/nn/sim/geometry.dims - its crew stand round the
+    guns, not in ranks of the template: the artillery probe 30.10 put the guns 50-150 m off with the template's 81 / 285 m)."""
     if men <= 1:
         return 0.0
     h, v = spacing(key)
+    if (passport(key) or {}).get("engines"):
+        return v
     files = max(1, int(width // h))
     return math.ceil(men / files) * v
 
@@ -2351,7 +2359,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     out = []
     for b, ln in enumerate(meta):
         A, T, L = int(slot["a"][b]), int(slot["tg"][b]), int(slot["l"][b])
-        samples, t2_rows = [], []
+        samples, t2_rows, ex_rows = [], [], []
         for t, r in zip(rec["t"], rec["rows"]):
             def row(i):
                 if i < 0:
@@ -2387,6 +2395,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             samples.append((t, row(A), row(T), row(L)))
             if int(slot["t2"][b]) >= 0:
                 t2_rows.append((t, row(int(slot["t2"][b]))))
+            ex_slots = [int(slot[f"e{j}"][b]) for j in range(1, len((ln["spec"].get("extras") or [])[:3]) + 1)]
+            if ex_slots:
+                # the extras' rows, as the game's (load_run: [(t, [row e1, row e2, ...])])
+                ex_rows.append((t, [row(e) for e in ex_slots]))
         contacts = {}
         if st_["contact"][b] is not None:
             contacts[1] = st_["contact"][b]
@@ -2394,7 +2406,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             contacts[2] = st_["contact2"][b]
         out.append({"run": "sim", "spec": ln["spec"], "samples": samples, "men": [], "contacts": contacts,
                     "end": None, "abilities": ln.get("abilities") and [{"status": "sim"}], "phases": st_["phases"][b],
-                    **({"t2": t2_rows} if t2_rows else {})})
+                    **({"t2": t2_rows} if t2_rows else {}), **({"extras": ex_rows} if ex_rows else {})})
     return out
 
 
@@ -3418,9 +3430,11 @@ def body_gap(points, centre, bearing_deg, radius, ratio):
 
 def monster_measure(lane):
     """A monster lane (MONSTER): cavcharge_measure's HP a second 0-13 s, men lost, the target's men shoved and how deep the
-    attacker went in; with a lone monster, the target's men round its body (within each MONSTER reach_m of its surface:
+    attacker went in; each side's HP a second 4-13 s after the contact (the steady fight, past the impact); with a lone
+    monster, the target's men round its body (within each MONSTER reach_m of its surface:
     body_gap) 1 / 2 / 5 / 10 s after the contact; the Horror's lanes: its HP a second standing alone after it left (the
-    regeneration: the slope of its health over the samples out of melee, not moving, 25 s or more after the contact).
+    regeneration: the slope of its health over the samples out of melee, not moving, 25 s or more after the contact,
+    below its whole health).
     The archers' lanes: the arrows shot (the ammunition's drop), the Horror's HP lost and HP an arrow, the swordsmen's HP
     lost (the friendly fire)."""
     spec, smp = lane["spec"], lane["samples"]
@@ -3440,6 +3454,11 @@ def monster_measure(lane):
         return out
     out = cavcharge_measure(lane)
     c = lane["contacts"].get(1)
+    if c is not None:
+        # the steady fight: HP a second each side 4-13 s after the contact (past the impact and the first blows)
+        for who in ("tg", "a"):
+            hp_ = series(smp, who, "hp")
+            out[f"{who}_hp_s_4_13"] = round((at(t, hp_, c + 4) - at(t, hp_, c + 13)) / 9, 1)
     p = passport(spec["a_key"]) or {}
     if c is None or p.get("men") != 1:
         return out
@@ -3458,86 +3477,189 @@ def monster_measure(lane):
         out[f"round_{sec}s"] = [int((gap <= r).sum()) for r in MONSTER["reach_m"]]
     if kind == "horror":
         hp, m, mv = series(smp, "a", "hp"), series(smp, "a", "m"), series(smp, "a", "mv")
-        alone = (t >= c + 25) & np.isfinite(hp) & (np.nan_to_num(m) == 0) & (np.nan_to_num(mv) == 0)
+        # (below its whole health, the passport's: a body healed whole stops - the twin's Horror, which lost less, got there)
+        full = float(p.get("hp_total") or np.inf)
+        alone = ((t >= c + 25) & np.isfinite(hp) & (np.nan_to_num(m) == 0) & (np.nan_to_num(mv) == 0)
+                 & (np.nan_to_num(hp, nan=np.inf) < full - 1.0))
         if alone.sum() >= 8:
             slope = np.polyfit(t[alone], hp[alone], 1)[0]
             out.update(regen_hp_s=round(float(slope), 2), regen_window_s=round(float(t[alone][-1] - t[alone][0]), 1))
     return out
 
 
+def dead_by_order(b0, b1, move):
+    """[len(b0)] bool: the men of frame b0 [n, 2] missing from the next frame b1 [m, 2] (m <= n) - the game lists a
+    unit's men in a stable order and drops the dead, so the dead are the deletions of the cheapest order-keeping
+    alignment of b0 (shifted by the block's move [2]) onto b1 (each kept man paired with the next frame's in turn; the
+    old 'no man within 0.6 m next frame' test counted the living of a walking block as dead: 710 of 131)."""
+    b0, b1 = np.asarray(b0, float), np.asarray(b1, float)
+    n0, n1 = len(b0), len(b1)
+    k = n0 - n1
+    if k <= 0:
+        return np.zeros(n0, bool)
+    p = b0 + np.asarray(move, float)
+    big = 1e18
+    dp = np.full((n0 + 1, k + 1), big)
+    dp[0, 0] = 0.0
+    how = np.zeros((n0 + 1, k + 1), np.int8)
+    for i in range(1, n0 + 1):
+        for d in range(0, min(i, k) + 1):
+            j = i - d
+            best, h = big, 0
+            if d > 0 and dp[i - 1, d - 1] < best:
+                best, h = dp[i - 1, d - 1], 1                  # b0[i - 1] died
+            if 1 <= j <= n1 and dp[i - 1, d] < big:
+                c_ = dp[i - 1, d] + float(np.hypot(*(p[i - 1] - b1[j - 1])))
+                if c_ < best:
+                    best, h = c_, 2
+            dp[i, d], how[i, d] = best, h
+    dead = np.zeros(n0, bool)
+    i, d = n0, k
+    while i > 0:
+        if how[i, d] == 1:
+            dead[i - 1] = True
+            d -= 1
+        i -= 1
+    return dead
+
+
+def glue(times, gap_s):
+    """[[t, ...], ...]: the times grouped where each is within gap_s of the one before (a volley of guns firing out of
+    step: the ammunition drops 1-4 balls at a time)."""
+    out = []
+    for x in times:
+        if out and x - out[-1][-1] <= gap_s:
+            out[-1].append(x)
+        else:
+            out.append([x])
+    return out
+
+
 def artillery_measure(lane):
-    """An artillery lane (ARTILLERY). Guns at a block: the shots (the ammunition's drops: the time of each volley), the
-    target's men and HP lost from each volley to the next (or 8 s), the men killed by depth in the block (from its front
-    along the line of fire, 2 m bands: how deep a ball goes) and, for the bursts, by distance from the centre of their
-    cluster (the dead of one interval within 2 x the burst radius of each other: one shell), the friends' HP lost (the
-    guns' own swordsmen beside the block). The crew lane: the gun's shots and crew each 10 s (how many guns fire)."""
+    """An artillery lane (ARTILLERY). Guns at a block: the volleys (the ammunition's drops glued within volley_glue_s:
+    the Empire's 4 guns fire out of step), the shells, the target's HP and men lost over the lane and in each volley's
+    window (its first drop to the next volley, at most volley_window_s), kills a shell, a lone shell's kills (a volley
+    of one ball: the Great Cannon), the first two volleys' HP, the friends' HP lost (the guns' own swordsmen beside the
+    block). From the soldiers' places (the game's: every 0.5 s at any distance, men_all_tg; the dead by order
+    alignment, dead_by_order): the dead by depth in the block (2 m bands from its front along the line of fire: how deep
+    a ball goes), for the bursts by distance from their cluster's centre (the dead of one frame within 2 x the burst
+    radius of each other: one shell) and the clusters' place in the block along the line (0 its front, 1 its back) for
+    a walking and a standing block. The crew lane: the gun's shells and crew each 10 s, the gun unit's HP lost."""
     spec, smp = lane["spec"], lane["samples"]
     kind = spec.get("kind") or ""
+    c = ARTILLERY
     t = np.array([x[0] for x in smp])
     out = {"run": lane["run"], "lane": spec["name"], "kind": kind}
     if kind == "crew":
-        ammo, men = series(smp, "tg", "ammo"), series(smp, "tg", "men")
-        edges = np.arange(0.0, float(t[-1]) + 10, 10.0)
+        ammo, men, hp = series(smp, "tg", "ammo"), series(smp, "tg", "men"), series(smp, "tg", "hp")
+        edges = np.arange(float(t[0]), float(t[-1]) + 10, 10.0)
         out["shots_10s"] = [float(np.nansum(np.clip(-np.diff(ammo[(t >= a) & (t <= a + 10)]), 0, None)))
                             for a in edges[:-1]]
         out["crew_10s"] = [at(t, men, a) for a in edges[:-1]]
+        if np.isfinite(hp).any():
+            out["gun_hp_lost"] = round(float(np.nanmax(hp) - hp[np.isfinite(hp)][-1]), 1)
         return out
     ammo, men, hp = series(smp, "a", "ammo"), series(smp, "tg", "men"), series(smp, "tg", "hp")
     drop = np.r_[0.0, np.clip(-np.diff(np.nan_to_num(ammo, nan=np.nanmax(ammo))), 0, None)]
-    shots_t = t[drop > 0]
-    out["volleys"] = len(shots_t)
-    out["shells"] = float(drop.sum())
+    vols = glue(list(t[drop > 0]), c["volley_glue_s"])
+    shells = [float(drop[np.isin(t, v)].sum()) for v in vols]
+    out["volleys"] = len(vols)
+    out["shells"] = float(sum(shells))
+    ok = np.isfinite(hp) & np.isfinite(men)
+    t_go = float(t[ok][0]) if ok.any() else float(t[0])
+    t_end = float(t[ok][-1]) if ok.any() else float(t[-1])
+    out["hp_lost"] = round(at(t, hp, t_go) - at(t, hp, t_end), 1)
+    out["men_lost"] = round(at(t, men, t_go) - at(t, men, t_end), 1)
+    out["kills_a_shell"] = round(out["men_lost"] / out["shells"], 2) if out["shells"] else None
     per = []
-    for j, s0 in enumerate(shots_t):
-        s1 = shots_t[j + 1] if j + 1 < len(shots_t) else s0 + 8.0
-        per.append((round(at(t, men, s0) - at(t, men, s1), 1), round(at(t, hp, s0) - at(t, hp, s1), 1)))
-    out["men_hp_a_volley"] = per
+    for j, v in enumerate(vols):
+        # from the sample before the drop (the simulator's direct shot strikes in the step it is fired)
+        k0 = int(np.searchsorted(t, v[0]))
+        s0 = float(t[max(k0 - 1, 0)])
+        s1 = min(vols[j + 1][0] if j + 1 < len(vols) else t_end, v[0] + c["volley_window_s"], t_end)
+        per.append((shells[j], round(at(t, men, s0) - at(t, men, s1), 1), round(at(t, hp, s0) - at(t, hp, s1), 1)))
+    out["volley_shells_men_hp"] = per
+    if per:
+        out["first2_hp"] = round(float(sum(x[2] for x in per[:2])), 1)
+        one = [x[1] for x in per if x[0] == 1 and np.isfinite(x[1])]
+        if one:
+            out["one_shell_kills"] = round(float(np.mean(one)), 2)
+            hit = [x for x in one if x > 0]
+            out["one_shell_hit_kills"] = round(float(np.mean(hit)), 2) if hit else 0.0
+            out["one_shell_misses"] = len(one) - len(hit)
     ex = lane.get("extras") or []
     if ex:
         e_hp = [float((row[0] or {}).get("hp") or np.nan) for _, row in ex]
         out["friends_hp_lost"] = round(np.nanmax(e_hp) - e_hp[-1], 1) if np.isfinite(e_hp).any() else None
     p = passport(spec["a_key"]) or {}
     blast = ((p.get("missile") or {}).get("blast") or {}).get("radius_m")
-    depth_bins, dist_bins = {}, {}
     frames = [(tm, np.asarray(a, float).reshape(-1, 2) / 10, np.asarray(b_, float).reshape(-1, 2) / 10)
               for tm, a, b_ in lane.get("men", []) if len(a) >= 2 and len(b_) >= 4]
+    if len(frames) < 4:
+        return out
+    depth_bins, dist_bins, rel = {}, {}, {"walk": [], "stand": []}
+    tx, tz = series(smp, "tg", "x"), series(smp, "tg", "z")
     for (t0, a0, b0), (t1, _, b1) in zip(frames, frames[1:]):
         if len(b1) >= len(b0):
             continue
-        near = np.sqrt(((b0[:, None, :] - b1[None, :, :]) ** 2).sum(-1)).min(1) if len(b1) else np.full(len(b0), 9.0)
-        dead = b0[near > 0.6]
+        move = np.median(b1, 0) - np.median(b0, 0)
+        dead = b0[dead_by_order(b0, b1, move)]
         if not len(dead):
             continue
-        way = b0.mean(0) - a0.mean(0)
+        way = np.median(b0, 0) - a0.mean(0)
         way = way / max(1e-6, float(np.hypot(*way)))
-        front = float(np.percentile(b0 @ way, 2))
+        proj = b0 @ way
+        front, back = float(np.percentile(proj, 2)), float(np.percentile(proj, 98))
         for d in dead @ way - front:
             k = int(max(0.0, d) // 2) * 2
             depth_bins[k] = depth_bins.get(k, 0) + 1
-        if blast:
-            left = list(range(len(dead)))
-            while left:
-                seed = dead[left[0]]
-                grp = [i for i in left if np.hypot(*(dead[i] - seed)) <= 2 * blast]
-                centre = dead[grp].mean(0)
-                for i in grp:
-                    k = int(np.hypot(*(dead[i] - centre)))
-                    dist_bins[k] = dist_bins.get(k, 0) + 1
-                left = [i for i in left if i not in grp]
+        if not blast:
+            continue
+        v = np.hypot(at(t, tx, t1) - at(t, tx, t0 - 1.0), at(t, tz, t1) - at(t, tz, t0 - 1.0)) / max(t1 - t0 + 1.0, 1e-6)
+        left = list(range(len(dead)))
+        while left:
+            seed = dead[left[0]]
+            grp = [i for i in left if np.hypot(*(dead[i] - seed)) <= 2 * blast]
+            centre = dead[grp].mean(0)
+            for i in grp:
+                k = int(np.hypot(*(dead[i] - centre)))
+                dist_bins[k] = dist_bins.get(k, 0) + 1
+            rel["walk" if v >= 0.5 else "stand"] += [float((centre @ way - front) / max(1e-6, back - front))] * len(grp)
+            left = [i for i in left if i not in grp]
     out["dead_by_depth_2m"] = dict(sorted(depth_bins.items()))
-    if blast:
+    if blast and dist_bins:
         out["dead_by_burst_m"] = dict(sorted(dist_bins.items()))
+        n = sum(dist_bins.values())
+        out["dead_within_blast"] = round(sum(v for k, v in dist_bins.items() if k < blast) / n, 2)
+        for w, xs in rel.items():
+            if xs:
+                out[f"burst_place_{w}"] = round(float(np.mean(xs)), 2)
     return out
 
 
-def plan_report(plan, measure, run_dirs, out=None):
+def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copies=4):
     """The rows of a plan's lanes (measure) and the means of each kind over its copies: prints them, writes
-    build/charge-probe/<plan>.json (not in Git)."""
+    build/charge-probe/<plan>.json (not in Git). With sim, the simulator's twin on the same lanes too (the new units'
+    passports from data/units/probe-units.json; copies per lane): its rows src "sim", its means under "<kind>/sim"."""
+    import dataclasses
     lanes = [ln for d in run_dirs for ln in load_run(d) if ln.get("plan") == plan]
     rows = [dict(measure(ln), src="game") for ln in lanes]
+    if sim and lanes:
+        from tools.nn.sim.params import load
+        params = load()
+        params = dataclasses.replace(params, units={**_passports(), **params.units})
+        twins = [ln for ln in lanes if ln["samples"]]
+        # (each copy cut at its game lane's length: the twin runs to the longest lane's end)
+        ends = [ln["samples"][-1][0] - ln["samples"][0][0] for ln in twins for _ in range(copies)]
+
+        def cut(sm, end):
+            keep = lambda xs: [x for x in xs if x[0] <= end + 1e-6]
+            return dict(sm, samples=keep(sm["samples"]), **({"extras": keep(sm["extras"])} if sm.get("extras") else {}))
+        rows += [dict(measure(cut(sm, end)), src="sim")
+                 for sm, end in zip(sim_lanes(twins, params=params, device=device, copies=copies), ends)]
     kinds = {}
     for r in rows:
-        kinds.setdefault(r.get("kind"), []).append(r)
+        kinds.setdefault(r.get("kind") if r["src"] == "game" else f"{r.get('kind')}/sim", []).append(r)
     summ = {}
     for kind, rs in kinds.items():
         num = {k for r in rs for k, v in r.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
@@ -3740,10 +3862,12 @@ def main(argv=None):
                         out=None if args.out == OUT else args.out)
         return 0
     if args.command == "monster":
-        plan_report("monster", monster_measure, args.runs or runs(), out=None if args.out == OUT else args.out)
+        plan_report("monster", monster_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
+                    sim=args.sim, device=args.device, copies=min(args.copies, 4))
         return 0
     if args.command == "artillery":
-        plan_report("artillery", artillery_measure, args.runs or runs(), out=None if args.out == OUT else args.out)
+        plan_report("artillery", artillery_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
+                    sim=args.sim, device=args.device, copies=min(args.copies, 4))
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),

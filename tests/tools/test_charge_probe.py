@@ -1133,7 +1133,7 @@ def test_the_artillery_plan_two_copies_of_each_lane_on_a_grid():
     assert len({tuple(l["place"]) for l in b}) == 14
     for l in b:
         if l["kind"] == "crew":
-            assert l["target"] == cp.WARP_CANNON and l["target_mode"] == "skirmish" and l["gap_m"] == 100
+            assert l["target"] == cp.WARP_CANNON and l["target_mode"] == "skirmish" and l["gap_m"] == 80
             continue
         assert l["mode"] == "shoot" and l["gap_m"] == 150
         walk = l["kind"].endswith("_walk")
@@ -1143,8 +1143,45 @@ def test_the_artillery_plan_two_copies_of_each_lane_on_a_grid():
         assert not walk or l["gap_m"] - l["push_m"] > 60
     lanes, _, _ = cp.layout(b)
     assert all(cp.FACTION[l["a_key"]] != cp.FACTION[l["t_key"]] for l in lanes)
+    # a battery is one rank of its guns deep (the template's 81 / 285 m put the guns 50-150 m off on 30.10): the centres
+    # gap_m + the depths' halves apart, the archers within their range of the gun from the go
+    for l in lanes:
+        gun = l["a_key"] if l["kind"] != "crew" else l["t_key"]
+        assert (l["a_depth"] if l["kind"] != "crew" else l["t_depth"]) == cp.spacing(gun)[1] <= 15
+        assert l["men_all_s"] == cp.ARTILLERY["fire_s"] and l["men_all_tg"]   # the soldiers' places at any distance
     config, _, _ = cp.run_config("artillery", 1)
     assert config["men_near_m"] >= 150 + 20 and config["men_after_s"] >= cp.ARTILLERY["fire_s"]
+
+
+def test_dead_by_order_finds_the_dead_of_a_walking_block():
+    # 6 men walking 1.4 m between frames, the 2nd and the 5th die: the old 'no man within 0.6 m' took the walking men
+    # for dead; the order-keeping alignment finds exactly the two
+    b0 = np.array([[x, 0.0] for x in range(6)], float)
+    b1 = np.delete(b0, [1, 4], axis=0) + [0.0, 1.4]
+    dead = cp.dead_by_order(b0, b1, [0.0, 1.4])
+    assert dead.tolist() == [False, True, False, False, True, False]
+    assert not cp.dead_by_order(b0, b0 + 1.4, [1.4, 0.0]).any()
+
+
+def test_glue_joins_the_drops_of_guns_firing_out_of_step():
+    assert cp.glue([1.0, 2.5, 4.0, 30.0, 31.0, 60.0], 4.0) == [[1.0, 2.5, 4.0], [30.0, 31.0], [60.0]]
+
+
+def test_artillery_measure_counts_a_volley_as_its_glued_drops():
+    # 4 guns out of step: ammunition 88 -> 85 at 2 s, -> 84 at 3 s (one volley of 4 balls), 25 s later one ball; the
+    # target loses 7 men (60 HP each) 2 s after the first volley, 5 after the second
+    samples = []
+    for k in range(240):
+        t = k / 4
+        ammo = 88 - (3 if t >= 2 else 0) - (1 if t >= 3 else 0) - (1 if t >= 28 else 0)
+        men = 160 - (7 if t >= 4 else 0) - (5 if t >= 30 else 0)
+        samples.append((t, {"x": 0.0, "z": 0.0, "ammo": ammo, "men": 44}, {"x": 0.0, "z": 200.0, "men": men,
+                                                                          "hp": men * 60.0}, None))
+    spec = {"name": "L1", "kind": "cannon", "a_key": cp.GREAT_CANNON, "t_key": "wh2_main_skv_inf_clanrat_spearmen_0"}
+    out = cp.artillery_measure({"run": "x", "spec": spec, "samples": samples, "men": [], "contacts": {}})
+    assert out["volleys"] == 2 and out["shells"] == 5.0
+    assert out["volley_shells_men_hp"] == [(4.0, 7.0, 420.0), (1.0, 5.0, 300.0)]
+    assert out["men_lost"] == 12.0 and out["kills_a_shell"] == 2.4 and out["one_shell_kills"] == 5.0
 
 
 def test_body_gap_measures_to_the_capsules_surface():

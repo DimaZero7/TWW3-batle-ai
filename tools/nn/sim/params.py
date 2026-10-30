@@ -327,7 +327,7 @@ def artillery_static(units, sim, effects_index, key):
     m = u.get("missile") or {}
     out = {"eng0": 0.0, "eng_hp": 0.0, "crew_k": 0.0, "fix_el": 0.0, "min_range": 0.0, "m_bvl": 0.0, "ex_r": 0.0,
            "ex_d": 0.0, "ex_ap": 0.0, "ex_f": 0.0, "ex_v": 0.0, "ex_allies": False, "ex_magic": False, "ex_fx": -1,
-           "c_rad": 0.0, "c_mom": 0.0}
+           "c_rad": 0.0, "c_mom": 0.0, "p_magic": False}
     if not (sim.get("artillery") or {}).get("on") or not eng.get("n"):
         return out
     out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1))
@@ -336,7 +336,8 @@ def artillery_static(units, sim, effects_index, key):
         out.update(fix_el=float(m.get("fixed_elevation") or 0.0) if m.get("trajectory") == "fixed" else 0.0,
                    min_range=float(m.get("min_range_m") or 0.0), m_bvl=float(m.get("bonus_v_large") or 0.0),
                    c_rad=float(m.get("collision_radius_m") or 0.0),
-                   c_mom=float(m.get("mass") or 0.0) * float(m.get("muzzle_velocity") or 0.0))
+                   c_mom=float(m.get("mass") or 0.0) * float(m.get("muzzle_velocity") or 0.0),
+                   p_magic=bool(m.get("magic")))
         if bl and bl.get("type") == "shockwave":
             out.update(ex_r=float(bl["radius_m"]), ex_d=float(bl["damage"]), ex_ap=float(bl["ap_damage"]),
                        ex_f=float(bl["force"]), ex_v=float(bl["speed"]), ex_allies=bool(bl.get("allies")),
