@@ -178,6 +178,10 @@ FIELDS = {
     "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on "
                "whom (the phase's targets)",
     "attributes": "special_ability_phase_attribute_effects of the phases (attribute, attribute_type: positive/negative)",
+    "heal": "only an ability whose phases heal (special_ability_phases heal_amount != 0: Regeneration): share - "
+            "heal_amount, the share of the unit's largest health healed each tick; every_s - hp_change_frequency, the tick, "
+            "s (Regeneration 0.001 every 1.0 s: the Brood Horror's 6009 HP heal 6 HP/s - the game's program, "
+            "build/diag_skv_mon/mechanic.md M11: round(heal_amount x the power x the largest health) a tick)",
     "delay_s": "only a passive of several phases whose first phases lay nothing (Blackpowder Discipline: phase i 10 s, "
                "no stats, then phase ii): the special_ability_phases durations of those first phases, in the junctions' "
                "order - its effects come on once its conditions have held that long (ours: the phases run in order)",
@@ -248,6 +252,11 @@ def passport(key, rows, t):
             delay += max(0.0, float(durations.get(ph["phase"], 0.0)))
         if delay > 0:
             extra["delay_s"] = round(delay, 6)
+    heals = t.get("phase_heal") or {}
+    healing = [heals[ph["phase"]] for ph in phases if (heals.get(ph["phase"]) or (0, 0))[0]]
+    if healing:
+        # (FIELDS heal) the phase's heal_amount and hp_change_frequency
+        extra["heal"] = {"share": healing[0][0], "every_s": healing[0][1]}
     return {
         "active_s": p["active_time"], "recharge_s": p["recharge_time"],
         "initial_s": max(0.0, p.get("initial_recharge", 0.0)),
@@ -315,7 +324,10 @@ def build(tables, keys, units, roster=ROSTER):
         names = sorted({r["phase"] for k in keys
                         for r in phases_of(k, tables["special_ability_to_special_ability_phase_junctions"])})
         tables = dict(tables, phase_fatigue=phase_fatigue(tables[PHASES], names),
-                      phase_duration={r["id"]: r.get("duration", -1.0) for r in tables[PHASES] if r["id"] in names})
+                      phase_duration={r["id"]: r.get("duration", -1.0) for r in tables[PHASES] if r["id"] in names},
+                      phase_heal={r["id"]: (round(float(r.get("heal_amount") or 0.0), 6),
+                                            round(float(r.get("hp_change_frequency") or 0.0), 6))
+                                  for r in tables[PHASES] if r["id"] in names})
     out = {k: passport(k, rows, tables) for k in keys}
     bad = check_cards(out, units, roster)
     assert not bad, "passports differ from the cards:\n" + "\n".join(bad)

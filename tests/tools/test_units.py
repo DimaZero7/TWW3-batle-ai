@@ -97,8 +97,9 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
     # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026), nor the
     # third wave (07.10.2026).
-    # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10 (no cards)
-    assert checked >= 9 and len(units.UNITS) == 48
+    # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10, the 3 Skaven
+    # monsters of 29.10 (no cards)
+    assert checked >= 9 and len(units.UNITS) == 51
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():

@@ -47,7 +47,10 @@ def dims(u, spacing, melee_depth=0.0):
     front = files * h
     depth = ranks * v
     lord = 2 * u["radius"]
-    return torch.where(single, lord, front), torch.where(single, lord, depth)
+    # a lone body's box: its length along its facing, its width across (the Brood Horror's capsule 7.6 x 2.74 m: radius x
+    # radii_ratio across, build/diag_skv_mon/units.md 4.1); a circle (every lord: ratio 1) 2 r both ways
+    across = lord * u["body_ratio"].clamp(0.05, 1.0) if "body_ratio" in u else lord
+    return torch.where(single, across, front), torch.where(single, lord, depth)
 
 
 def wrap(angle):

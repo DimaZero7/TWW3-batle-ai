@@ -56,7 +56,9 @@ def test_contact_effects_come_from_the_weapons_with_the_database_numbers():
                         "wh2_main_skv_inf_gutter_runner_slingers_1": [POISON],
                         "wh2_dlc12_skv_inf_warplock_jezzails_0": ["wh2_dlc09_unit_contact_shieldbreaker"],
                         # artillery step 1 (29.10.2026): the Plagueclaw Catapult's shell (its projectile and its blast)
-                        "wh2_main_skv_art_plagueclaw_catapult": [CENSER]}
+                        "wh2_main_skv_art_plagueclaw_catapult": [CENSER],
+                        # the Skaven monsters (29.10.2026): the Brood Horror's claws poison as the Giant Rats' bites
+                        "wh2_dlc16_skv_mon_brood_horror_0": [POISON]}
     # nobody owns a contact effect (it lies on the enemy it hits)
     assert not any(k in v for v in links.values() for k in (POISON, CENSER, SUPPRESS))
     for k in (POISON, CENSER, SUPPRESS):

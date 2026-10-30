@@ -330,6 +330,21 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           them at a run from 40 m - the charge on routers; (flank) a charge at their right flank from 80 m (a_side 90) -
           1 battle of 3 lanes; health every 0.25 s, the soldiers' places every 0.25 s to 15 s after a contact. Table:
           cavcheck [runs] [--sim] (each pass's HP a second, the exit from melee).
+  monster  the Skaven monsters (build/diag_skv_mon/sim_gap.md 1-5, mechanic.md M2, M6, M11; MONSTER), 2 copies a lane:
+          (horror) the Brood Horror charges held Empire spearmen from 80 m, 13 s after the contact it leaves 150 m at a run
+          and stands alone (mode withdraw) - the men round its body, its HP a second 0-13 s and the spearmen's, then its
+          regeneration (HP a second standing alone); (mutant) the Rat Ogre Mutant charges held swordsmen; (ogres) 16 Rat
+          Ogres (39 m: 6 files) charge held spearmen - HP 0-13 s, the spearmen shoved, how deep the ogres go in;
+          (archers_held) archers shoot the Horror 100 m off while swordsmen of theirs attack it at a walk (the shots at a
+          monster in melee); (archers_alone) the same without the swordsmen (the control) - 1 battle of 10 lanes on a
+          5 x 2 grid. Table: monster [runs];
+  artillery  the guns (build/diag_arty/empire.md, skaven.md; ARTILLERY), 2 copies a lane: (cannon) the Great Cannon at
+          held clanrat spearmen 150 m off, (warp) the Warp Lightning Cannon at held Empire spearmen - the men killed a
+          shot and how deep in the block; (mortar_stand / mortar_walk, rockets_stand / rockets_walk) the Mortar and the
+          Helstorm rockets at clanrat spearmen standing or walking 80 m towards the guns (target_mode push), Empire
+          swordsmen of the guns' side standing 10 m beside the standing block - the men killed by distance from the
+          burst, the damage to their own; (crew) archers 100 m off shoot the crew of a Warp Lightning Cannon that shoots back - how
+          many guns fire as the crew falls - 1 battle of 14 lanes on a 4 x 4 grid. Table: artillery [runs].
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -356,6 +371,10 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe cavalry [runs...] [--sim]           # their table (+ the simulator's twin, torch)
     python -m tools.nn.charge_probe run --plan cavcheck                 # the cavalry check (flank, recharge, chase)
     python -m tools.nn.charge_probe cavcheck [runs...] [--sim]          # its table (+ the twin, torch)
+    python -m tools.nn.charge_probe run --plan monster --speed 20       # the Skaven monsters (build/diag_skv_mon/probes.md)
+    python -m tools.nn.charge_probe monster [runs...]                   # its table
+    python -m tools.nn.charge_probe run --plan artillery --speed 20     # the guns (build/diag_skv_mon/probes.md)
+    python -m tools.nn.charge_probe artillery [runs...]                 # its table
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -484,7 +503,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "monster", "artillery") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -730,6 +749,30 @@ CAVCHARGE = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "m
 CAVCHECK = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "men_after_s": 15,
             "recharge": {"recharge_after_s": 10, "back_m": 80, "pause_s": 0, "recharge_max_s": 40, "after2_s": 20},
             "chase_gap_m": 40, "chase_after_rout_s": 60, "kinds": ("recharge", "chase", "flank")}
+
+# the Skaven monsters' plan (build/diag_skv_mon/probes.md): kinds (attacker, target, mode, the lane's extra fields), each
+# twice, on a 5 x 2 grid (x 240 m apart, rows 500 m apart); the Horror's lanes leave the fight withdraw_s after the contact
+# (back_m at a run) and stand alone to max_s: its regeneration; reach_m: a target man within this of the monster's body
+# (from his centre to its surface: a spearman's radius 0.65 + a blow's reach) counts as round it
+HORROR, MUTANT, OGRES = ("wh2_dlc16_skv_mon_brood_horror_0", "wh2_dlc16_skv_mon_rat_ogre_mutant",
+                         "wh2_main_skv_mon_rat_ogres")
+MONSTER = {"gap_m": 80, "fight_s": 20, "decay_s": 13, "men_after_s": 15, "withdraw_s": 13, "back_m": 150, "stand_s": 60,
+           "archers_gap_m": 100, "archers_s": 60, "reach_m": (1.0, 1.5, 2.5), "copies": 2,
+           "kinds": ("horror", "mutant", "ogres", "archers_held", "archers_alone"),
+           "places": tuple((x, z) for z in (-250.0, 250.0) for x in (-480.0, -240.0, 0.0, 240.0, 480.0))}
+# the artillery plan (build/diag_skv_mon/probes.md): kinds (gun, target, target mode), each twice, on a 4 x 4 grid (240 m
+# apart); the guns 150 m off their targets (the archers 100 m off the gun); push_m: the walking block's way towards the guns
+# (it stops 70 m off: beyond the Mortar's minimum range 60); friend: the guns' own swordsmen 10 m beside the block (their
+# damage from the bursts); fire_s: the lane's length
+GREAT_CANNON, MORTAR, ROCKETS = ("wh_main_emp_art_great_cannon", "wh_main_emp_art_mortar",
+                                 "wh_main_emp_art_helstorm_rocket_battery")
+WARP_CANNON = "wh2_main_skv_art_warp_lightning_cannon"
+ARTILLERY = {"gap_m": 150, "crew_gap_m": 100, "fire_s": 120, "push_m": 80, "friend_gap_m": 10, "t_w": 30, "copies": 2,
+             "kinds": (("cannon", GREAT_CANNON, "cspear", "hold"), ("warp", WARP_CANNON, "spear", "hold"),
+                       ("mortar_stand", MORTAR, "cspear", "hold"), ("mortar_walk", MORTAR, "cspear", "push"),
+                       ("rockets_stand", ROCKETS, "cspear", "hold"), ("rockets_walk", ROCKETS, "cspear", "push"),
+                       ("crew", "archer", WARP_CANNON, "skirmish")),
+             "places": tuple((x, z) for z in (-450.0, -150.0, 150.0, 450.0) for x in (-360.0, -120.0, 120.0, 360.0))}
 
 
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
@@ -1028,6 +1071,10 @@ def battles(plan):
             return lane(KNIGHTS, "clanrat", "attack_run", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], kind=kind,
                         a_side=90, **common)
         out.append([cc(k) for k in c["kinds"]])
+    elif plan == "monster":
+        out.append(monster_lanes())
+    elif plan == "artillery":
+        out.append(artillery_lanes())
     elif plan == "manfields":
         # what the game answers for one soldier (CCO ManList.At(i).<name>; the documentation lists only Position, Key,
         # IsAlive, IsMan, IsEngine, reload, EntityRecordContext, UnitContext): a facing, a target? - 1 short fight
@@ -1447,6 +1494,62 @@ def battles(plan):
     return out
 
 
+def monster_lanes():
+    """The monster plan's one battle (MONSTER; build/diag_skv_mon/probes.md): each kind twice, on the grid."""
+    c = MONSTER
+    sw_depth = depth(UNITS["swords"][0], UNITS["swords"][1])
+    horror = passport(HORROR) or {}
+    half = float(horror.get("radius_m") or 3.8)                     # the Horror faces +z: its length along z
+
+    def one(kind, k):
+        common = dict(kind=kind, copy=k, place=None)
+        if kind == "horror":
+            # the charge, withdraw_s in it a run back_m away, then alone: the regeneration
+            return lane(HORROR, "spear", "withdraw", "hold", gap_m=c["gap_m"], fight_s=10 ** 4, answer=False, t_w=30,
+                        recharge_after_s=c["withdraw_s"], back_m=c["back_m"], recharge_max_s=10 ** 6,
+                        max_s=round(c["gap_m"] / 9.5 + c["withdraw_s"] + c["back_m"] / 9.5 + c["stand_s"] + 10), **common)
+        if kind == "mutant":
+            return lane(MUTANT, "swords", "attack_run", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], answer=False,
+                        t_w=30, **common)
+        if kind == "ogres":
+            return lane(OGRES, "spear", "attack_run", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], answer=False,
+                        a_w=39, t_w=30, **common)
+        extras = ([{"short": "swords", "dx": 0.0, "dz": round(half + sw_depth / 2 + 0.5, 1), "attack": True,
+                    "width": 30}] if kind == "archers_held" else [])
+        return lane("archer", HORROR, "shoot", "hold", gap_m=c["archers_gap_m"], fight_s=c["archers_s"],
+                    max_s=c["archers_s"], answer=False, a_w=30, **common, **({"extras": extras} if extras else {}))
+    out = [one(kind, k) for kind in c["kinds"] for k in range(c["copies"])]
+    for spec, place in zip(out, c["places"]):
+        spec["place"] = place
+    return out
+
+
+def artillery_lanes():
+    """The artillery plan's one battle (ARTILLERY; build/diag_skv_mon/probes.md): each kind twice, on the grid."""
+    c = ARTILLERY
+    sw = UNITS["swords"]
+
+    def one(kind, gun, target, mode, k):
+        common = dict(kind=kind, copy=k, answer=False, t_w=c["t_w"], max_s=c["fire_s"])
+        if kind == "crew":
+            # archers at the gun's crew; the gun shoots back at them (skirmish target: fire at will, a ranged attack)
+            return lane(gun, target, "shoot", mode, gap_m=c["crew_gap_m"], fight_s=c["fire_s"], a_w=30, t_skirmish=False,
+                        **common)
+        extra = {}
+        if kind in ("mortar_stand", "rockets_stand"):
+            # the guns' own swordsmen standing 10 m beside the standing block (+x): the bursts' damage to their side (the
+            # walking lanes have none: the block walks away from them; and the Empire's side holds 20 units at most)
+            extra["extras"] = [{"short": "swords", "dx": round(c["t_w"] / 2 + c["friend_gap_m"] + 15, 1), "dz": 0.0,
+                                "b": 0, "width": 30}]
+        if mode == "push":
+            extra["push_m"] = c["push_m"]
+        return lane(gun, target, "shoot", mode, gap_m=c["gap_m"], fight_s=c["fire_s"], **common, **extra)
+    out = [one(kind, gun, target, mode, k) for kind, gun, target, mode in c["kinds"] for k in range(c["copies"])]
+    for spec, place in zip(out, c["places"]):
+        spec["place"] = place
+    return out
+
+
 def spacing(key):
     sp = passport(key)["spacing"]
     return float(sp["h"]), float(sp["v"])
@@ -1581,6 +1684,13 @@ def run_config(plan, index):
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
     if plan == "cavcheck":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHECK["men_after_s"], men_near_m=60)
+    if plan == "monster":
+        # health every 0.25 s; the soldiers' places every 0.25 s to 15 s after a contact (the archers' lanes: no contact
+        # of their own - while within 120 m, all the lane)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=MONSTER["men_after_s"], men_near_m=120)
+    if plan == "artillery":
+        # health every 0.25 s (a shot's kills); the soldiers' places every 0.5 s all the lane (no contact: within 200 m)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=ARTILLERY["fire_s"], men_near_m=200)
     if plan in ("terrain", "terrain2", "ground", "cover"):
         # battle 1: the bridge's height grid timed (2 m over 512 x 512 m) and fine lines (0.25 m) for the engine's grid
         config.update(men_ms=500, men_after_s=75, men_near_m=60)
@@ -3295,6 +3405,155 @@ def cavalry_report(run_dirs, sim=False, device="cpu", copies=4, out=None):
     return rows
 
 
+def body_gap(points, centre, bearing_deg, radius, ratio):
+    """[n] each point's distance (m) to the surface of a lone body at centre facing bearing_deg: a capsule radius long
+    with radius x ratio across (a circle at ratio 1) - its straight core 2 radius (1 - ratio) long along its facing."""
+    d = np.radians(bearing_deg)
+    axis = np.array([np.sin(d), np.cos(d)])
+    rel = np.asarray(points, float) - np.asarray(centre, float)
+    half = radius * (1 - ratio)
+    s_ = np.clip(rel @ axis, -half, half)
+    return np.hypot(*(rel - s_[:, None] * axis).T) - radius * ratio
+
+
+def monster_measure(lane):
+    """A monster lane (MONSTER): cavcharge_measure's HP a second 0-13 s, men lost, the target's men shoved and how deep the
+    attacker went in; with a lone monster, the target's men round its body (within each MONSTER reach_m of its surface:
+    body_gap) 1 / 2 / 5 / 10 s after the contact; the Horror's lanes: its HP a second standing alone after it left (the
+    regeneration: the slope of its health over the samples out of melee, not moving, 25 s or more after the contact).
+    The archers' lanes: the arrows shot (the ammunition's drop), the Horror's HP lost and HP an arrow, the swordsmen's HP
+    lost (the friendly fire)."""
+    spec, smp = lane["spec"], lane["samples"]
+    kind = spec.get("kind") or ""
+    t = np.array([x[0] for x in smp])
+    if kind.startswith("archers"):
+        out = {"run": lane["run"], "lane": spec["name"], "kind": kind}
+        ammo, hp = series(smp, "a", "ammo"), series(smp, "tg", "hp")
+        ok = np.isfinite(ammo)
+        shots = float(np.nansum(np.clip(-np.diff(ammo[ok]), 0, None))) if ok.sum() > 1 else 0.0
+        lost = float(np.nanmax(hp) - hp[np.isfinite(hp)][-1]) if np.isfinite(hp).any() else None
+        out.update(arrows=shots, horror_hp_lost=lost, hp_an_arrow=round(lost / shots, 2) if shots and lost else None)
+        ex = lane.get("extras") or []
+        if ex:
+            e_hp = [float((row[0] or {}).get("hp") or np.nan) for _, row in ex]
+            out["swords_hp_lost"] = round(np.nanmax(e_hp) - e_hp[-1], 1) if np.isfinite(e_hp).any() else None
+        return out
+    out = cavcharge_measure(lane)
+    c = lane["contacts"].get(1)
+    p = passport(spec["a_key"]) or {}
+    if c is None or p.get("men") != 1:
+        return out
+    radius, ratio = float(p.get("radius_m") or 1.0), float(p.get("radii_ratio") or 1.0)
+    b = series(smp, "a", "b")
+    for sec in (1, 2, 5, 10):
+        k = int(np.argmin([abs(m[0] - (c + sec)) for m in lane["men"]])) if lane["men"] else None
+        if k is None or abs(lane["men"][k][0] - (c + sec)) > 0.3:
+            continue
+        _, a_xz, tg_xz = lane["men"][k]
+        a_p = np.asarray(a_xz, float).reshape(-1, 2) / 10
+        tg_p = np.asarray(tg_xz, float).reshape(-1, 2) / 10
+        if not len(a_p) or not len(tg_p):
+            continue
+        gap = body_gap(tg_p, a_p[0], at(t, b, c + sec), radius, ratio)
+        out[f"round_{sec}s"] = [int((gap <= r).sum()) for r in MONSTER["reach_m"]]
+    if kind == "horror":
+        hp, m, mv = series(smp, "a", "hp"), series(smp, "a", "m"), series(smp, "a", "mv")
+        alone = (t >= c + 25) & np.isfinite(hp) & (np.nan_to_num(m) == 0) & (np.nan_to_num(mv) == 0)
+        if alone.sum() >= 8:
+            slope = np.polyfit(t[alone], hp[alone], 1)[0]
+            out.update(regen_hp_s=round(float(slope), 2), regen_window_s=round(float(t[alone][-1] - t[alone][0]), 1))
+    return out
+
+
+def artillery_measure(lane):
+    """An artillery lane (ARTILLERY). Guns at a block: the shots (the ammunition's drops: the time of each volley), the
+    target's men and HP lost from each volley to the next (or 8 s), the men killed by depth in the block (from its front
+    along the line of fire, 2 m bands: how deep a ball goes) and, for the bursts, by distance from the centre of their
+    cluster (the dead of one interval within 2 x the burst radius of each other: one shell), the friends' HP lost (the
+    guns' own swordsmen beside the block). The crew lane: the gun's shots and crew each 10 s (how many guns fire)."""
+    spec, smp = lane["spec"], lane["samples"]
+    kind = spec.get("kind") or ""
+    t = np.array([x[0] for x in smp])
+    out = {"run": lane["run"], "lane": spec["name"], "kind": kind}
+    if kind == "crew":
+        ammo, men = series(smp, "tg", "ammo"), series(smp, "tg", "men")
+        edges = np.arange(0.0, float(t[-1]) + 10, 10.0)
+        out["shots_10s"] = [float(np.nansum(np.clip(-np.diff(ammo[(t >= a) & (t <= a + 10)]), 0, None)))
+                            for a in edges[:-1]]
+        out["crew_10s"] = [at(t, men, a) for a in edges[:-1]]
+        return out
+    ammo, men, hp = series(smp, "a", "ammo"), series(smp, "tg", "men"), series(smp, "tg", "hp")
+    drop = np.r_[0.0, np.clip(-np.diff(np.nan_to_num(ammo, nan=np.nanmax(ammo))), 0, None)]
+    shots_t = t[drop > 0]
+    out["volleys"] = len(shots_t)
+    out["shells"] = float(drop.sum())
+    per = []
+    for j, s0 in enumerate(shots_t):
+        s1 = shots_t[j + 1] if j + 1 < len(shots_t) else s0 + 8.0
+        per.append((round(at(t, men, s0) - at(t, men, s1), 1), round(at(t, hp, s0) - at(t, hp, s1), 1)))
+    out["men_hp_a_volley"] = per
+    ex = lane.get("extras") or []
+    if ex:
+        e_hp = [float((row[0] or {}).get("hp") or np.nan) for _, row in ex]
+        out["friends_hp_lost"] = round(np.nanmax(e_hp) - e_hp[-1], 1) if np.isfinite(e_hp).any() else None
+    p = passport(spec["a_key"]) or {}
+    blast = ((p.get("missile") or {}).get("blast") or {}).get("radius_m")
+    depth_bins, dist_bins = {}, {}
+    frames = [(tm, np.asarray(a, float).reshape(-1, 2) / 10, np.asarray(b_, float).reshape(-1, 2) / 10)
+              for tm, a, b_ in lane.get("men", []) if len(a) >= 2 and len(b_) >= 4]
+    for (t0, a0, b0), (t1, _, b1) in zip(frames, frames[1:]):
+        if len(b1) >= len(b0):
+            continue
+        near = np.sqrt(((b0[:, None, :] - b1[None, :, :]) ** 2).sum(-1)).min(1) if len(b1) else np.full(len(b0), 9.0)
+        dead = b0[near > 0.6]
+        if not len(dead):
+            continue
+        way = b0.mean(0) - a0.mean(0)
+        way = way / max(1e-6, float(np.hypot(*way)))
+        front = float(np.percentile(b0 @ way, 2))
+        for d in dead @ way - front:
+            k = int(max(0.0, d) // 2) * 2
+            depth_bins[k] = depth_bins.get(k, 0) + 1
+        if blast:
+            left = list(range(len(dead)))
+            while left:
+                seed = dead[left[0]]
+                grp = [i for i in left if np.hypot(*(dead[i] - seed)) <= 2 * blast]
+                centre = dead[grp].mean(0)
+                for i in grp:
+                    k = int(np.hypot(*(dead[i] - centre)))
+                    dist_bins[k] = dist_bins.get(k, 0) + 1
+                left = [i for i in left if i not in grp]
+    out["dead_by_depth_2m"] = dict(sorted(depth_bins.items()))
+    if blast:
+        out["dead_by_burst_m"] = dict(sorted(dist_bins.items()))
+    return out
+
+
+def plan_report(plan, measure, run_dirs, out=None):
+    """The rows of a plan's lanes (measure) and the means of each kind over its copies: prints them, writes
+    build/charge-probe/<plan>.json (not in Git)."""
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln.get("plan") == plan]
+    rows = [dict(measure(ln), src="game") for ln in lanes]
+    kinds = {}
+    for r in rows:
+        kinds.setdefault(r.get("kind"), []).append(r)
+    summ = {}
+    for kind, rs in kinds.items():
+        num = {k for r in rs for k, v in r.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        summ[kind] = {k: round(float(np.nanmean([r[k] for r in rs if isinstance(r.get(k), (int, float))])), 2)
+                      for k in sorted(num)}
+        summ[kind]["copies"] = len(rs)
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    print(json.dumps(summ, ensure_ascii=False, indent=1))
+    path = out or ROOT / f"{plan}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"rows": rows, "summary": summ}, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("written", path)
+    return rows, summ
+
+
 def _pass(t, smp, c, c0, n, run_sim, stop=None):
     """HP and men each side lost from a contact c (c0: the window's start - the game's sample before it) each second for
     n seconds (to stop at most) and over 0-1, 0-2, 0-n s: {who_hp_by_s, who_hp_0_1, who_hp_0_2, who_hp_0_n, who_men_0_n}."""
@@ -3425,7 +3684,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
                                                      "shootcontact", "recontact", "pursuit", "cavalry",
-                                                     "cavcheck"),
+                                                     "cavcheck", "monster", "artillery"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -3479,6 +3738,12 @@ def main(argv=None):
     if args.command == "cavcheck":
         cavcheck_report(args.runs or runs(), sim=args.sim, device=args.device, copies=args.copies,
                         out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "monster":
+        plan_report("monster", monster_measure, args.runs or runs(), out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "artillery":
+        plan_report("artillery", artillery_measure, args.runs or runs(), out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),

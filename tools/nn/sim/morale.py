@@ -421,6 +421,17 @@ def step(u, ctx, params, dt):
         u["rally_ok_s"] = torch.where(rally, u["rally_ok_s"] + dt, torch.zeros_like(u["rally_ok_s"]))
         rally = rally & (u["rally_ok_s"] >= wait_s - 1e-6)
         u["rally_ok_s"] = torch.where(rally, torch.zeros_like(u["rally_ok_s"]), u["rally_ok_s"])
+    ter = cal.get("terror") or {}
+    terror_on = bool(ter.get("on")) and "ter_s" in u and ctx.get("terror") is not None
+    if terror_on:
+        # (morale.terror) a flight from terror is no rout: no rally ends it, its own clock does (below)
+        fleeing = u["ter_s"] > 0
+        rally = rally & ~fleeing
+        u["ter_s"] = (u["ter_s"] - dt).clamp(min=0)
+        u["ter_imm"] = (u["ter_imm"] - dt).clamp(min=0)
+        # its 14 s over: it stops running, in the morale state it had (the game's program changes neither the state nor
+        # the rout count); routing for its own morale it can start right after (below)
+        u["r"] = u["r"] & ~(fleeing & (u["ter_s"] <= 0))
     u["r"] = u["r"] & ~rally
     u["rally_s"] = torch.where(rally, torch.zeros_like(u["rally_s"]), u["rally_s"])
 
@@ -447,6 +458,20 @@ def step(u, ctx, params, dt):
     u["r"] = u["r"] | start
     u["rout_count"] = u["rout_count"] + start.float()
     u["s"] = u["s"] | (start & (u["rout_count"] >= R["shatter_after_rout_count"]))
+    if terror_on:
+        # Terror (morale.terror; the database's causes_terror, build/diag_skv_mon/mechanic.md M17): a unit with an enemy that
+        # causes terror within terror_effect_range 5 m of its edge (battle.py ctx terror), below
+        # morale_shock_terror_morale_threshold 13 points, standing, not immune (immune to psychology - frenzy -,
+        # unbreakable, causing terror itself, or within morale_shock_rout_immunity_timer 85 s of its last flight from it),
+        # runs morale_shock_rout_timer 14 s as a router - no rout counted, no shatter by it
+        scared = (alive & ~u["r"] & ctx["terror"] & ~u["itp"] & ~u["unbreakable"] & ~u["terror"]
+                  & (u["ter_imm"] <= 0) & (M < float(R["morale_shock_terror_morale_threshold_short"])))
+        t_run = float(R["morale_shock_rout_timer_short"])
+        u["ter_s"] = torch.where(scared, torch.full_like(u["ter_s"], t_run), u["ter_s"])
+        u["ter_imm"] = torch.where(scared, torch.full_like(u["ter_imm"], t_run + float(R["morale_shock_rout_immunity_timer"])),
+                                   u["ter_imm"])
+        u["r"] = u["r"] | scared
+        start = start | scared
     if (cal.get("collapse") or {}).get("shatter_below_broken"):
         # The lower edge of the DB's broken band is -50 points. In the CCO recordings,
         # all 274 army-loss shatters before a third rout have crossed this edge.

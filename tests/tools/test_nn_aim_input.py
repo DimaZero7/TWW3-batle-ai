@@ -12,7 +12,7 @@ GUN, ARCHERS, HANDGUNS = "wh2_dlc12_skv_inf_ratling_gun_0", "wh2_dlc13_emp_inf_a
 SLINGS, SWORD = "wh2_main_skv_inf_skavenslave_slingers_0", "wh_main_emp_inf_swordsmen"
 KEYS = [GUN, ARCHERS, HANDGUNS, SLINGS, SWORD]
 OLD = (ob.TOKEN - len(ob.AIM) - len(ob.RECEIVED) - len(ob.MAGIC) - len(ob.SHAPE) - len(ob.FX_STATS) - len(ob.FIGHT)
-       - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT) - len(ob.FX_CAV))   # the token before AIM
+       - len(ob.FX_NEW) - len(ob.FX_STATS2) - len(ob.SIGHT) - len(ob.FX_LAST))   # the token before AIM
 
 
 def test_the_aim_columns_by_unit():
@@ -20,7 +20,7 @@ def test_the_aim_columns_by_unit():
     assert a[:, 0].tolist() == pytest.approx([0.45, 0.33, 0.2, 0.43, 0, 0])       # aim_s / 10
     assert a[:, 1].tolist() == pytest.approx([0.45, 0.85, 0, 0.85, 0, 0])         # silence after a new target / 10
     T = (len(ob.RECEIVED) + len(ob.MAGIC) + len(ob.SHAPE) + len(ob.FX_STATS) + len(ob.FIGHT) + len(ob.FX_NEW)
-         + len(ob.FX_STATS2) + len(ob.SIGHT) + len(ob.FX_CAV))
+         + len(ob.FX_STATS2) + len(ob.SIGHT) + len(ob.FX_LAST))
     assert ob.NAMES[-len(ob.AIM) - T:-T] == ob.AIM
 
 

@@ -22,6 +22,7 @@
   "targets": "the phases' target_self / target_friends / target_enemies (self-only abilities have 1 0 0, auras 1 1 0, hexes 0 0 1)",
   "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on whom (the phase's targets)",
   "attributes": "special_ability_phase_attribute_effects of the phases (attribute, attribute_type: positive/negative)",
+  "heal": "only an ability whose phases heal (special_ability_phases heal_amount != 0: Regeneration): share - heal_amount, the share of the unit's largest health healed each tick; every_s - hp_change_frequency, the tick, s (Regeneration 0.001 every 1.0 s: the Brood Horror's 6009 HP heal 6 HP/s - the game's program, build/diag_skv_mon/mechanic.md M11: round(heal_amount x the power x the largest health) a tick)",
   "delay_s": "only a passive of several phases whose first phases lay nothing (Blackpowder Discipline: phase i 10 s, no stats, then phase ii): the special_ability_phases durations of those first phases, in the junctions' order - its effects come on once its conditions have held that long (ours: the phases run in order)"
  },
  "_missing": {
@@ -737,6 +738,51 @@
      "phase": "wh_main_unit_passive_frenzy"
     }
    ]
+  },
+  "wh_main_unit_passive_regeneration": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    35,
+    35
+   ],
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "update_targets": false,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [
+    "wh_main_unit_passive_regeneration"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_weakness_flame",
+     "how": "add",
+     "value": -20.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_unit_passive_regeneration"
+    }
+   ],
+   "attributes": [],
+   "heal": {
+    "share": 0.001,
+    "every_s": 1.0
+   }
   }
  },
  "_spell_fields": {

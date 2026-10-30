@@ -239,6 +239,22 @@ STATIC = {
     "c_rad": ("f", "the projectile's collision radius, m (a fixed shell's own hit: the men within it + their radius)"),
     "c_mom": ("f", "the projectile's momentum, mass x muzzle velocity (a fixed shell's own hit knocks a man down at "
                    "momentum / his mass >= collision_speed_delta_threshold_knocked_down)"),
+    # (29.10.2026, the Skaven monsters: build/diag_skv_mon; every field 0 / False for a unit of the pools before them)
+    "knock_ign": ("f", "the chance a man stays on his feet when a blow or a body would knock him (the database's "
+                       "knock_interrupts_ignore_chance / 100: the Brood Horror 0.6, the Mutant 0.65, Rat Ogres 0.2, the lords "
+                       "0.4-0.75, infantry 0; impact.py, contact.impact knock_ignore)"),
+    "flaming": ("b", "its blows are flaming (the passport's melee.flaming: the Knights of the Blazing Sun): the target's "
+                     "fire resistance adds to the physical, a regenerating target heals half for 10 s (regen.py)"),
+    "mmagic": ("b", "its blows are magical (the passport's melee.magic: the Mutant's claws, the censer): the target's "
+                    "physical resistance does not cut them, its magic one does (melee.magic_scope)"),
+    "resist_flame": ("f", "fire resistance, 0-1 (the database's damage_mod_flame + the effects' stat_resistance_flame / "
+                          "stat_weakness_flame: Regeneration's -0.2 - a flaming blow x1.2)"),
+    "regen": ("f", "its regeneration, a share of its starting health a second (an innate effect's heal: Regeneration's "
+                   "0.001 every 1 s - the Brood Horror's 6 HP/s; regen.py); 0 none"),
+    "heal_cap": ("f", "the share of its starting health it may heal in a battle (sim.json regen.cap 0.75: the database's "
+                      "healing_percentage_cap; 0 without regen)"),
+    "terror": ("b", "attribute causes_terror: an enemy within terror_effect_range 5 m of it below 13 morale points runs "
+                    "14 s (morale.py terror)"),
     "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
                  "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
                  "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),
@@ -437,6 +453,14 @@ INTERNAL = {
     "sh_n": ("f", "the shells of that volley"),
     "sh_R": ("f", "the radius of the disc they land uniformly over, m (the spread and the target's box, artillery.py)"),
     "art_kd": ("f", "bookkeeping: men its shells have knocked down so far"),
+    # (the Skaven monsters: regen.py, morale.py terror)
+    "burn_s": ("f", "seconds left of the fire's cut of its regeneration (a flaming blow's damage starts it at regen.burn_s "
+                    "10: the program's 100 ticks; regen.py)"),
+    "healed": ("f", "HP it has healed so far in the battle (regen.py: at most heal_cap x hp0, the game's pool of healing "
+                    "never refills)"),
+    "ter_s": ("f", "seconds left of its flight from terror (morale.py terror: 14 s; it runs as a router, no rout "
+                   "counted, its morale state kept)"),
+    "ter_imm": ("f", "seconds left of its immunity to terror after a flight from it (85 s)"),
     "hid_d": ("b", "deployed, not stepped yet: a hide_forest unit in the woods at the first step starts hidden "
                    "(stealth.start_hidden)"),
 }

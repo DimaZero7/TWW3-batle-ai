@@ -1339,6 +1339,12 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         # ... but the shooters of missile.single_in_melee_projectiles (the Ratling Gun: lone_hit) hit a lone man in
         # melee as out of it: the spread model's hits, his whole share (config/nn/sim.json single_in_melee_projectiles_why)
         as_out = (u["lone_hit"][:, :, None] & lone_melee) if "lone_hit" in u else torch.zeros_like(lone_melee)
+        if ms.get("big_single_in_melee"):
+            # ... and a lone LARGE body (a monster: size large and above, melee.big_lone) in melee is hit as out of it by
+            # every shooter (missile.big_single_in_melee; build/diag_skv_mon/sim_gap.md 3): the 0 of single_entity_in_melee
+            # was measured on a lord - a man's body among his own and the enemy's; a monster's (2-3.8 m wide, 3-4 m tall)
+            # stands above the crowd and takes the spread model's hits on its body, less the friendly fire share
+            as_out = as_out | (melee.big_lone(u)[:, None, :] & lone_melee)
         aimed = torch.where(lone_melee & ~as_out, aimed_old, aimed)
         # A lone man among them (a lord) is hit as a lone target is: single_entity_factor of his
         # share (without it a lord in melee with shot enemies took the whole friendly fire).

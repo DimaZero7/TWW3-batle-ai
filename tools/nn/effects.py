@@ -71,7 +71,10 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              # Blackpowder Discipline's accuracy (added to land_units accuracy + marksmanship: the spread) and reload
              # skill (the reload max(4 s, base x (100 - skill) %)); tools/nn/sim/effects.py
              ("stat_missile_block_chance", "add"): "shield", ("stat_accuracy", "add"): "accuracy",
-             ("stat_reloading", "add"): "reloading"}
+             ("stat_reloading", "add"): "reloading",
+             # 29.10.2026 (the Skaven monsters): the fire's resistance - Regeneration's weakness -20 (a flaming blow x1.2;
+             # the game's program sums the resistances, build/diag_skv_mon/mechanic.md M14, M20; tools/nn/sim/regen.py)
+             ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame"}
 # Rules the simulator acts on (tools/nn/sim/effects.py RULES): rule -> what the simulator does.
 SIM_RULES = {
     "unbreakable": "morale points never below leadership: never wavers or routs (morale.py)",
@@ -88,7 +91,12 @@ SIM_RULES = {
                       "config/nn/sim.json contact.charge_defence)",
     "causes_fear": "-8 morale points (ume_concerned_unit_frightened) to the enemies within fear_effect_range 20 m of its "
                    "formation's edge, not stacking (morale.py; config/nn/sim.json morale.fear)",
-    "immune_to_psychology": "no fear (morale.py; config/nn/sim.json morale.fear); terror is not modelled",
+    "immune_to_psychology": "no fear, no terror (morale.py; config/nn/sim.json morale.fear, morale.terror)",
+    "causes_terror": "an enemy within terror_effect_range 5 m of its formation's edge with morale points below "
+                     "morale_shock_terror_morale_threshold 13 runs for morale_shock_rout_timer 14 s (no rout counted), then "
+                     "is immune to it for morale_shock_rout_immunity_timer 85 s; not one immune to psychology, unbreakable or "
+                     "causing terror itself (morale.py terror; config/nn/sim.json morale.terror; build/diag_skv_mon/"
+                     "mechanic.md M17)",
 }
 # Unit attributes: the database gives the key only (unit_attributes_tables); the engine's rule, its
 # numbers and where they come from. `rules`: the flags the attribute sets; `schema_why`: why the
@@ -132,8 +140,9 @@ ATTRIBUTES = {
     "causes_fear": {"name": "Causes Fear", "rules": ["causes_fear"],
                     "does": "-8 leadership to enemies within 20 m (fear_effect_range)", "kb": KB + "morale.md"},
     "causes_terror": {"name": "Causes Terror", "rules": ["causes_terror"],
-                      "does": "a melee hit routs an enemy within 5 m at 13 morale points or less for 14 s",
-                      "kb": KB + "morale.md", "schema_why": "terror is not modelled"},
+                      "does": "an enemy within 5 m (terror_effect_range) below 13 morale points runs for 14 s, then is "
+                              "immune to it for 85 s (the game's program: build/diag_skv_mon/mechanic.md M17)",
+                      "kb": KB + "morale.md"},
     "fatigue_immune": {"name": "Perfect Vigour", "rules": ["fatigue_immune"], "does": "never tires",
                        "kb": KB + "fatigue.md"},
     "ignore_trees": {"name": "Ignore Trees", "rules": ["ignore_trees"], "does": "shoots through trees",
@@ -278,9 +287,16 @@ def ability_effect(key, p):
         why.append("rules with nothing to act on: " + ", ".join(schema_rules))
     modelled = not unknown and not bad
     parts = [f"{s['stat']} {s['how']} {s['value']:g}" for s in stats if s["sim"]] + [f"rule {r}" for r in sim_rules]
+    heal = None
+    if p.get("heal"):
+        # (the ability passport's heal: Regeneration's 0.001 of the largest health every 1 s; tools/nn/sim/regen.py)
+        h = p["heal"]
+        heal = {"share": float(h["share"]), "every_s": float(h["every_s"])}
+        parts.append(f"heals {h['share']:g} of its largest health every {h['every_s']:g} s")
     return {"kind": "timed" if timed else "passive", "name": name_of(key), "rules": rules, "stats": stats,
             "range_m": float(p.get("range_m") or 0.0), "needs": needs, "off_when": off, "timed": timed,
             **({"delay_s": delay} if delay > 0 and not timed else {}),
+            **({"heal": heal} if heal else {}),
             "when": when, "source": "db: " + ", ".join(sources) + f" ({key}); config/nn/abilities.json",
             "kb": KB_ABILITIES.get(tail), "does": None,
             "modelled": modelled, "sim": ("; ".join(parts) + f" ({when})") if modelled else None,

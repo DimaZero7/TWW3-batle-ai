@@ -56,11 +56,14 @@ from tools.nn.sim.abilities import MULT, SIM_STATS, SLOTS, STATS
 # how the game adds it is not described: an assumption), the accuracy (Blackpowder Discipline's +40, added to land_units
 # accuracy + marksmanship, at most 100) and the reload skill (its +10: the reload is max(4 s, base x (100 - skill) %), the
 # game's rule, base the database's reload_s; the measured cycle scales with it)
-E_STATS = STATS + ("m_damage", "m_ap", "shield", "accuracy", "reloading")
+E_STATS = STATS + ("m_damage", "m_ap", "shield", "accuracy", "reloading", "resist_flame")
 E_MULT = MULT + ("m_damage", "m_ap")
 E_SIM_STATS = {**SIM_STATS, ("scalar_missile_damage_base", "mult"): "m_damage",
                ("scalar_missile_damage_ap", "mult"): "m_ap", ("stat_missile_block_chance", "add"): "shield",
-               ("stat_accuracy", "add"): "accuracy", ("stat_reloading", "add"): "reloading"}
+               ("stat_accuracy", "add"): "accuracy", ("stat_reloading", "add"): "reloading",
+               # (29.10.2026, the Skaven monsters) the fire's resistance, % (Regeneration's weakness -20: a flaming blow
+               # x1.2 - the game sums the resistances, build/diag_skv_mon/mechanic.md M14, M20; melee.py)
+               ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame"}
 RELOAD_MIN_S = 4.0  # the game's floor of a reload cut by the reload skill (max(4 s, base x (100 - skill) %))
 CONTACT_SLOTS = 4   # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx3_s)
 
@@ -70,7 +73,7 @@ PREDICATES =("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "n
 RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
          "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
          "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd", "causes_fear": "fear",
-         "immune_to_psychology": "itp"}
+         "immune_to_psychology": "itp", "causes_terror": "terror"}
 TIMERS = 2          # timed effects a unit can carry (fxt0, fxt1)
 MAX_EFFECTS = 62    # the bitmask is an int64
 # self: the owner; friends: an aura's (range_m); enemies (25.10.2026, the Snare Net): the enemies whose centre is within
@@ -162,7 +165,21 @@ def static(params, key):
     delayed = [idx[k] for k in own if float((eff.get(k) or {}).get("delay_s") or 0.0) > 0 and modelled(params, k)]
     assert len(delayed) <= 1, f"{key}: {len(delayed)} delayed effects, the state holds 1"
     return {"fx": bits, **{f"fxt{j}": t for j, t in enumerate(timed)}, **rules, "mfx": mfx, "sfx": sfx,
-            "fxd": delayed[0] if delayed else -1}
+            "fxd": delayed[0] if delayed else -1, "regen": heal_of(params, key)}
+
+
+def heal_of(params, key):
+    """A unit's regeneration, a share of its starting health a second (STATIC regen; tools/nn/sim/regen.py): the heal
+    (share every every_s, the catalogue's from the ability passport) of its modelled innate effects that hold always - no
+    needs, no off_when, not timed (Regeneration: 0.001 every 1 s); 0 none."""
+    eff = params.effects.get("effects") or {}
+    out = 0.0
+    for k in unit_effects(params, key):
+        e = eff.get(k) or {}
+        h = e.get("heal")
+        if h and modelled(params, k) and not e.get("timed") and not e.get("needs") and not e.get("off_when"):
+            out += float(h["share"]) / max(float(h["every_s"]), 1e-6)
+    return out
 
 
 def row(params, key):
@@ -383,7 +400,7 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
                 add[s] = add[s] + got_i * v
     fields = ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack", "defence",
               "morale_bonus", "resist_physical", "m_damage", "m_ap") + tuple(RULES.values()) + tuple(
-        f for f in ("shield", "acc", "reload") if f in u)
+        f for f in ("shield", "acc", "reload", "resist_flame") if f in u)
     old = {k: u[k] for k in fields}
     mult = lambda s: (torch.exp(log[s]) + hexm[s]).clamp(min=0.05)
     u["m_damage"] = u["m_damage"] * mult("m_damage")
@@ -414,6 +431,11 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     u["morale_bonus"] = u["morale_bonus"] + add["leadership"]
     # resistances add up to a 90 % cap (docs/en/game/mechanics/missiles.md)
     u["resist_physical"] = (u["resist_physical"] + add["resist_physical"] / 100).clamp(max=0.9)
+    if "resist_flame" in u:
+        # the fire's (Regeneration's weakness -20 %): only where an effect gives one (the rest keep theirs to the bit); the
+        # sum with the physical is capped where a blow lands (melee.py)
+        u["resist_flame"] = torch.where(add["resist_flame"] != 0, u["resist_flame"] + add["resist_flame"] / 100,
+                                        u["resist_flame"])
     for r, f in RULES.items():
         u[f] = torch.einsum("bne,e->bn", onf, c(f"rule_{r}")) > 0
     if rx is not None:

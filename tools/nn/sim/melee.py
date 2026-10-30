@@ -276,6 +276,57 @@ def target_face_cap(F, used, side_j, pw, single_i, single_j, w=None):
     return F
 
 
+def ring(u, single_j):
+    """[B, i, j] how many men of i strike a lone large body j at once (contact.ring_big; build/diag_skv_mon/mechanic.md M2,
+    sim_gap.md 1): the game has no cap on the men striking one - every man whose body touches the target's strikes -, so
+    it is the men that stand round its body: the ring of their centres at their radius r_i off the body's edge, over a
+    man's place 2 r_i. The body (the database's battle_entities): a circle of radius R, or a capsule R long with radius
+    R x radii_ratio across (its straight sides 2 R (1 - ratio) long; an ellipse taken the same way):
+        n = (2 x 2 R (1 - q) + 2 pi (R q + r_i)) / (2 r_i)
+    The lord (R 0.7, q 1) and a spearman (r 0.65): 6.52 - the lord swarm probe's measured 6.5 (contact.lord_max_attackers);
+    the Rat Ogre Mutant (R 2.0): 12.8; the Brood Horror (capsule 3.8 x 0.36: 7.6 x 2.74 m): 17.2 (a circle 7.6 m across
+    would give 21.5)."""
+    R = u["radius"][:, None, :]
+    q = u["body_ratio"][:, None, :].clamp(0.05, 1.0) if "body_ratio" in u else torch.ones_like(R)
+    r = u["radius"][:, :, None].clamp(min=0.2)
+    n = (4 * R * (1 - q) + 2 * torch.pi * (R * q + r)) / (2 * r)
+    return torch.where(single_j, n, torch.zeros_like(n))
+
+
+def big_lone(u):
+    """[B, N] a lone body of size large or above (a monster: the Brood Horror, the Mutant; size_k >= 3), the targets of
+    contact.ring_big and missile.big_single_in_melee; False for the lords and every unit of the pools before them."""
+    if "size_k" not in u:
+        return torch.zeros_like(u["men0"], dtype=torch.bool)
+    return (u["men0"] <= 1) & (u["size_k"] >= 3)
+
+
+def resist_of(u, cal):
+    """[B, i, j] the resistance i's blows meet on j (melee.resist_sum; build/diag_skv_mon/mechanic.md M20-M22): the game sums
+    the target's resistances that apply to the blow and caps the sum at ward_save_max_value 90 % (at least
+    ward_save_min_value -100 %) - the fire's (resist_flame: Regeneration's -20 %) for a flaming blow (flaming: the Blazing Sun),
+    the physical unless the blow is magical, the magic one (spell resistance) if it is (mmagic: the Mutant's claws, the
+    censer, the plain Giant Rats). The magic rule for the strikers of melee.magic_scope ("all": every one, the game's rule -
+    the censer bearers' blows on the Knights of the Blazing Sun x0.75; "large": the monsters only). Everywhere else the
+    physical alone, as before (bit for bit)."""
+    rp = u["resist_physical"][:, None, :]
+    if not cal.get("resist_sum") or "resist_flame" not in u:
+        return rp
+    rp = rp.expand(u["men"].shape[0], u["men"].shape[1], u["men"].shape[1])
+    scope = cal.get("magic_scope")
+    if scope == "all":
+        magic = u["mmagic"][:, :, None]
+    elif scope == "large":
+        magic = (u["mmagic"] & (u["size_k"] >= 3))[:, :, None]
+    else:
+        magic = torch.zeros_like(u["mmagic"])[:, :, None]
+    rf = u["resist_flame"][:, None, :]
+    fire = u["flaming"][:, :, None] & (rf != 0)
+    base = torch.where(magic, u["resist_magic"][:, None, :].expand_as(rp), rp)
+    out = torch.where(fire, base + rf, base).clamp(-1.0, 0.9)
+    return torch.where(magic | fire, out, rp)
+
+
 def cycle_on(cal):
     """melee.cycle on (config/nn/sim.json melee.cycle_why): the blow cycle by the game's program - every swing an interval
     from its start, a miss costs no time; men striking = cycle.reach_files of the files in contact (the men within reach)."""
@@ -460,6 +511,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         F = torch.where(single_i, F, F * fill)
     lord_max = knobs.get(u, "lord_max_attackers", float(cc["lord_max_attackers"]), 3)
     F = torch.where(single_j, torch.minimum(men_i, knobs.full_like(F, lord_max)), F)
+    ring_on = bool((cc.get("ring_big") or {}).get("on"))
+    if ring_on:
+        # (contact.ring_big) a lone large body (a monster) is struck by the men round its body, not the lord's 6.5
+        big_j = big_lone(u)[:, None, :] & ~single_i
+        n_ring = ring(u, single_j)
+        F = torch.where(big_j, torch.minimum(men_i, n_ring), F)
     F = torch.where(single_i, torch.ones_like(F), F)
     # Fewer men left, fewer bring their weapons to bear (and fewer can be reached).
     share_i = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, :, None]
@@ -476,6 +533,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     # between his opponents. (Men on a flank turn to fight: measured, a unit already fighting hits a
     # newcomer on its flank as hard as a free unit does.)
     side_of = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
+    if ring_on:
+        # (contact.ring_big) the men round a monster leave their formation's side to stand round its body: they do not
+        # count against the side they came from (its ring caps them below)
+        side_of = torch.where(big_j, torch.full_like(side_of, -1), side_of)
     for g in range(4):
         in_g = side_of == g
         hold = ff * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
@@ -616,10 +677,23 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     lone = (single_i & (F > 0)).float().sum(dim=1, keepdim=True)
     around = torch.where(single_i, torch.zeros_like(F), F).sum(dim=1, keepdim=True)
     cap = (lord_max - lone).clamp(min=0)
-    F = torch.where(single_j & ~single_i & (around > cap), F * cap / around.clamp(min=1e-6), F)
+    small_j = single_j & ~big_lone(u)[:, None, :] if ring_on else single_j
+    F = torch.where(small_j & ~single_i & (around > cap), F * cap / around.clamp(min=1e-6), F)
     if F0 is not None:
         around0 = torch.where(single_i, torch.zeros_like(F0), F0).sum(dim=1, keepdim=True)
-        F0 = torch.where(single_j & ~single_i & (around0 > cap), F0 * cap / around0.clamp(min=1e-6), F0)
+        F0 = torch.where(small_j & ~single_i & (around0 > cap), F0 * cap / around0.clamp(min=1e-6), F0)
+    if ring_on:
+        # (contact.ring_big) round a lone large body the men of every unit share its ring: each takes F / n_ring of it
+        # (n_ring by its own men's radius), a lone attacker (an enemy lord) 1 / n_ring; together no more than the ring
+        big = big_lone(u)[:, None, :] & single_j
+        n_r = n_ring.clamp(min=1e-6)
+        lone_occ = torch.where(single_i & (F > 0), 1.0 / n_r, torch.zeros_like(F)).sum(dim=1, keepdim=True)
+        occ = torch.where(single_i, torch.zeros_like(F), F / n_r).sum(dim=1, keepdim=True)
+        room = (1 - lone_occ).clamp(min=0)
+        F = torch.where(big & ~single_i & (occ > room), F * room / occ.clamp(min=1e-6), F)
+        if F0 is not None:
+            occ0 = torch.where(single_i, torch.zeros_like(F0), F0 / n_r).sum(dim=1, keepdim=True)
+            F0 = torch.where(big & ~single_i & (occ0 > room), F0 * room / occ0.clamp(min=1e-6), F0)
 
     sector = geometry.sector(pw["rel_j"], cc["front_deg"], cc["rear_deg"])
     routing_j = u["r"][:, None, :]
@@ -731,7 +805,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         hf = terrain.melee_factor(u, pw, params)
         dmg, ap, extra = dmg * hf, ap * hf, extra * hf
     hit = per_hit((dmg + extra * share) * reflect / div, (ap + extra * (1 - share)) * reflect / div,
-                  u["armour"][:, None, :], u["hp_man"][:, None, :], u["resist_physical"][:, None, :],
+                  u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal),
                   single=single_j)
     # Blows a second a fighting man: the interval runs after a hit, a miss costs melee.miss_s (build/hitchance);
     # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).

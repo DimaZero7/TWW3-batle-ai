@@ -10,6 +10,8 @@ tensors, one unit = one object (men, health, place, facing, morale, fatigue, amm
     melee.py     blows in melee
     missile.py   shooting
     artillery.py guns and their crew, shells, blasts
+    impact.py    a large body's charge and blows on smaller men (cavalry, monsters)
+    regen.py     regeneration and the fire that cuts it (the Brood Horror)
     morale.py    morale, wavering, rout, rally
     fatigue.py   fatigue
     battle.py    one step of all battles, the end of a battle

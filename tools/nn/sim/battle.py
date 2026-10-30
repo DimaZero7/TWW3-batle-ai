@@ -12,7 +12,7 @@ import torch
 
 from tools.nn.sim import abilities, artillery, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale
 from tools.nn.sim import movement
-from tools.nn.sim import ground, impact, reform, skirmish, stealth, terrain
+from tools.nn.sim import ground, impact, reform, regen, skirmish, stealth, terrain
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -914,6 +914,12 @@ def step(st, orders, params=None, dt=None):
         left = (u["stk_n"] - drop).clamp(min=0) * math.exp(-dt / float(stuck_cal["escape_s"]))
         u["stk_n"] = torch.where(left >= float(stuck_cal.get("min_men", 0.5)), torch.minimum(left, men_new),
                                  torch.zeros_like(left))
+    if regen.on(params):
+        # regeneration (regen.py: the Brood Horror's 6 HP/s, half for 10 s after a flaming blow, 75 % of its health a battle
+        # at most); a battle without a regenerating unit heals nobody
+        regen.burn(u, params, dt, hp_melee * scale[:, None, :], pw["enemy"].float())
+        regen.heal(u, params, dt)
+        hp_new = u["hp_abs"]
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
     # seconds since its health first fell below a quarter (never back: the Wounds, effects.py)
     if "low_s" in u:
@@ -1142,6 +1148,10 @@ def step(st, orders, params=None, dt=None):
         # fear itself (docs/ru/game/mechanics/monsters.md); several do not stack
         ctx["fear"] = ((foes & u["fear"][:, None, :] & (pw["gap"] <= float(M["fear_effect_range"]))).any(2)
                        & ~u["itp"] & ~u["fear"])
+    if (mcal.get("terror") or {}).get("on") and "terror" in u:
+        # Terror (morale.terror; the database's causes_terror: terror_effect_range 5 m): an enemy that causes terror with its
+        # edge within that range of the unit's (pw gap, as fear's); who runs and for how long: morale.py
+        ctx["terror"] = (foes & u["terror"][:, None, :] & (pw["gap"] <= float(M["terror_effect_range"]))).any(2)
     began = morale.step(u, ctx, params, dt)
     standing = alive & ~u["r"]
     pin_s = float(cal["contact"].get("rout_pin_s") or 0.0)

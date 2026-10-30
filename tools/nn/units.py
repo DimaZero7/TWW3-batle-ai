@@ -72,7 +72,13 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # (config/nn/pools.json units_v3): units.md "Artillery"
          "wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
          "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
-         "wh2_main_skv_art_warp_lightning_cannon")
+         "wh2_main_skv_art_warp_lightning_cannon",
+         # 29.10.2026, the Skaven monsters (build/diag_skv_mon/units.md, mechanic.md, sim_gap.md; the simulator's very large
+         # bodies: the ring of attackers, regeneration, terror - docs/ru/training/simulator.md "Монстры"): Rat Ogres (16
+         # large men, brace), the Brood Horror (one very large body: poison, regeneration, terror) and the Rat Ogre Mutant
+         # (one very large body: magical attacks, 20 % physical resistance). Only the v3 army scheme fields them
+         # (config/nn/pools.json units_v3): units.md "Монстры скавенов"
+         "wh2_main_skv_mon_rat_ogres", "wh2_dlc16_skv_mon_brood_horror_0", "wh2_dlc16_skv_mon_rat_ogre_mutant")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
@@ -136,8 +142,19 @@ FIELDS = {
     "height_m": ("battle_entities.height; a mounted unit the taller of the rider and the mount (the warhorse 2.0, the "
                  "demigryph 2.3; the rider 1.8)", None),
     "radius_m": ("battle_entities.radius", None),
-    "radii_ratio": ("battle_entities.radii_ratio: an ellipse body (shape 'ellipse') is radius long and radius x this "
-                    "across; 1 a circle (every man)", None),
+    "radii_ratio": ("battle_entities.radii_ratio: an ellipse or a capsule body (shape 'ellipse', 'capsule') is radius long "
+                    "and radius x this across (the Brood Horror's capsule 3.8 x 0.36: 7.6 m long, 2.74 m across); 1 a circle "
+                    "(every man)", None),
+    "body_shape": ("battle_entities.shape (a mounted unit its mount's): circle, ellipse or capsule (a capsule: two half "
+                   "circles of radius x radii_ratio joined by straight sides 2 radius (1 - radii_ratio) long)", None),
+    "knock_ignore": ("battle_entities.knock_interrupts_ignore_chance, % (a mounted unit its mount's): the chance a man stays "
+                     "on his feet when a blow or a body would knock him back, down or flying (the game's program, "
+                     "build/diag_skv_mon/mechanic.md M5: a roll 0-100 below it; the Brood Horror 60, the Rat Ogre Mutant 65, "
+                     "Rat Ogres 20, infantry 0)", None),
+    "hit_reaction_ignore": ("battle_entities.hit_reactions_ignore_chance, %: the chance a man takes no hit reaction (the "
+                            "Brood Horror 70, the Mutant 65, Rat Ogres 20; the simulator has no hit reactions)", None),
+    "melee.weapon_length": ("melee_weapons.weapon_length, m (the Brood Horror's 7, the Mutant's 6, Rat Ogres' 2, a spear 1): "
+                            "no rule of the simulator reads it (build/diag_skv_mon/units.md 4.9)", None),
     "speed.walk": ("battle_entities.walk_speed, m/s (a mounted unit its mount's, an artillery unit its gun's: 2.0, run 2.0 - "
                    "the attribute cant_run; the speed.* and turn_deg_s alike)", "card slow_speed"),
     "speed.run": ("battle_entities.run_speed, m/s", "card fast_speed; scalar_speed = run x 10"),
@@ -261,15 +278,17 @@ PHASE_FIELDS = {
 }
 # Asked for, but not in the tables read (or not decoded): why (docs/*/training/units.md).
 MISSING = {
-    "mount knock resistance": "battle_entities.hit_reactions_ignore_chance / knock_interrupts_ignore_chance of the mount "
-                              "(the demigryph 20 %, the warhorse 0): the simulator has no knock-downs in melee yet "
-                              "(build/diag_cav/units.md 4.5)",
+    "collision attack": "melee_weapons.collision_attack_max_targets (0 for every unit of the pool; the Hell Pit Abomination "
+                        "5): not read",
+    "projectile intersection": "battle_entities.projectile_intersection_radius_ratio (Rat Ogres 0.8, the Brood Horror 1.25, "
+                               "the Mutant 1.0): whether the program's projectile hit reads it is not known (build/diag_skv_mon/"
+                               "sim_gap.md 21)",
     "mount turning": "battle_entities.min_turning_speed (the warhorse 1.0 m/s, infantry 0) and strafe_speed (3.0): what "
                      "they do in numbers is not known (build/diag_cav/units.md 4.6)",
     "charge target pick": "battle_entities.charge_distance_pick_target (35 m the warhorse, 30 the demigryph): no reader "
                           "found in the game's program (build/diag_cav/mechanic.md 8)",
-    "melee weapon type": "melee_weapons.melee_weapon_type (lance / sword) and weapon_length (1.0 for all six cavalry): no "
-                         "mechanic known to depend on them for our units",
+    "melee weapon type": "melee_weapons.melee_weapon_type (lance / sword): no mechanic known to depend on it for our units "
+                         "(weapon_length is in the passport, melee.weapon_length, unread)",
     "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit "
                                         "cannot; the others arc over friends (knowledge base, not measured)",
     "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global "
@@ -342,7 +361,11 @@ def passport(key, t):
         "hp_per_man": hp, "hp_total": hp * main["num_men"] + (engines["n"] * engines["hp"] if engines else 0),
         "mass": body["mass"], "size": size,
         "height_m": height, "radius_m": body["radius"],
-        "radii_ratio": body["radii_ratio"] if body["shape"] == "ellipse" else 1.0,
+        # (a capsule too: the Brood Horror's body 7.6 x 2.74 m, not a circle 7.6 m across - build/diag_skv_mon/units.md 4.1)
+        "radii_ratio": body["radii_ratio"] if body["shape"] in ("ellipse", "capsule") else 1.0,
+        "body_shape": body["shape"],
+        "knock_ignore": body.get("knock_interrupts_ignore_chance") or 0,
+        "hit_reaction_ignore": body.get("hit_reactions_ignore_chance") or 0,
         "speed": {"walk": mover["walk_speed"], "run": mover["run_speed"], "charge": mover["charge_speed"],
                   "charge_distance": mover["charge_distance_commence_run"],
                   "charge_pose_distance": mover["charge_distance_adopt_charge_pose"],
@@ -357,7 +380,7 @@ def passport(key, t):
                   "splash_max_attacks": weapon["splash_attack_max_attacks"],
                   "splash_power_multiplier": weapon["splash_attack_power_multiplier"],
                   "magic": weapon["is_magical"], "flaming": (weapon.get("ignition_amount") or 0) > 0,
-                  "contact_phase": weapon["contact_phase"]},
+                  "contact_phase": weapon["contact_phase"], "weapon_length": weapon.get("weapon_length") or 0},
         "armour": armour["armour_value"], "armour_material": armour["audio_type"],
         "shield": {"key": shield["key"], "missile_block_chance": shield["missile_block_chance"]},
         "leadership": land["morale"],

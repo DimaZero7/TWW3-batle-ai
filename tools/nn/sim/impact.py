@@ -1,7 +1,10 @@
 """A large body's blows on smaller men: the impact of its charge and the knock of its weapon (docs/ru/game/mechanics/
 cavalry.md; the game's program: build/diag_cav/mechanic.md M1-M11, R-work charge_module.md 3 and 5). Every number is the
 database's (config/nn/game_rules.json battle); config/nn/sim.json contact.impact switches it (impact_why). Only a unit of
-size above small (the cavalry: medium) striking a smaller one: a battle without such a unit is unchanged bit for bit.
+size above small (the cavalry: medium; the Skaven monsters: large, very large) striking a smaller one: a battle without such
+a unit is unchanged bit for bit. A struck man keeps his feet with his body's knock_interrupts_ignore_chance
+(ignore(), contact.impact knock_ignore: the lords 40 / 75 %, the monsters 20-65 %, infantry 0); a man who keeps his feet
+takes no collision damage of a large / very large charger either (it lands on the men it knocks down alone).
 
 The impact (land(): a large charger's charge lands this step - battle.py `fire`; a new charge lands it again):
   bracing     B of a target man: a unit that can brace (the database's can_brace, or charge_defense(_vs_large),
@@ -12,7 +15,8 @@ The impact (land(): a large charger's charge lands this step - battle.py `fire`;
   speed       a man the charger meets: dv = (1 + e) M / (m B + M) v (e: collision_restitution_coefficient 0.3; M, m the
               masses, v the pair's speed difference); the charger loses (1 + e) m B / (m B + M) v x k(the size
               difference: 1 -> 0.8, 2 -> 0.2, 3 -> 0.1, 4 -> 0) on each man it meets
-  ranks       a charger meets h_charger / h_target men of a rank (its file's lane in the formation templates); where they go
+  ranks       a charger meets h_charger / h_target men of a rank (its file's lane in the formation templates; a monster - size
+              large and above - its body's width across: per_rank, contact.impact lane_body); where they go
               down (dv over collision_speed_delta_threshold_knocked_down 7 m/s; the flight past 10.5 is a knock-down too) it
               rides on into the next rank at its speed less its loss a man met, and stops at the first rank that stays up
               (a target man landing his own charge now: his dv halved - the program's dv^2 x 0.25)
@@ -77,6 +81,41 @@ def ridden(u, params):
     R = params.battle
     up = (float(R["knockdown_getting_up_delay_min"]) + float(R["knockdown_getting_up_delay_max"])) / 2
     return (u["ride"] >= 0.5) & (u["kd_t"] >= up)
+
+
+def lane_place(u, params):
+    """[B, N] the width of a charger's lane, m: its place across its front (h, the formation template's). With
+    contact.impact lane_body (build/diag_skv_mon/sim_gap.md 5) a charger of size large and above (the monsters) runs into
+    the men its BODY covers, not its place in the template: its width across (2 r x radii_ratio: the Brood Horror's 2.74 m,
+    the Mutant's 4.0, a Rat Ogre's 2.0), at most its place; the cavalry (medium) keeps the template's (3.0 m against a
+    horse's 2.8: bit for bit)."""
+    h, _ = melee.spacing_of(u, params.sim["formation"]["spacing_m"])
+    if not _cal(params).get("lane_body"):
+        return h
+    body = 2 * u["radius"] * (u["body_ratio"].clamp(0.05, 1.0) if "body_ratio" in u else 1.0)
+    return torch.where(u["size_k"] >= 3, torch.minimum(body, h), h)
+
+
+def per_rank(u, params):
+    """[B, i, j] the men of a rank of j a charger i meets in its lane: its lane's width (lane_place) over j's file
+    spacing, at least 1 - the Horror's template 18 m gave 12 Empire spearmen a rank (its body: 1.85), the Rat Ogres' 6.5 m
+    4.4 a man (1.35)."""
+    h, _ = melee.spacing_of(u, params.sim["formation"]["spacing_m"])
+    return (lane_place(u, params)[:, :, None] / h[:, None, :]).clamp(min=1.0)
+
+
+def ignore(u, params):
+    """[B, N] a struck man's chance to stay on his feet when a larger body would knock him (the database's
+    knock_interrupts_ignore_chance, STATIC knock_ign; the game's program: a roll 0-100 below it, build/diag_skv_mon/
+    mechanic.md M5), for the targets contact.impact knock_ignore names: "large" - of size large and above (the monsters:
+    the Brood Horror 0.6, the Mutant 0.65, Rat Ogres 0.2), "all" - every unit (the game's rule, on: the lords 0.4 / 0.75
+    against the cavalry's and the monsters' knocks, infantry 0); None: off."""
+    scope = _cal(params).get("knock_ignore")
+    if not scope or "knock_ign" not in u:
+        return None
+    if scope == "large":
+        return torch.where(u["size_k"] >= 3, u["knock_ign"], torch.zeros_like(u["knock_ign"]))
+    return u["knock_ign"]
 
 
 def bigger(u):
@@ -176,10 +215,13 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
     k = size_factor(u["size_k"][:, :, None] - u["size_k"][:, None, :])
     loss = ((1 + e) * mB / (mB + M) * k).clamp(max=1.0)              # the charger's speed lost a man met, a share
     h, _ = melee.spacing_of(u, sp)
-    c = (h[:, :, None] / h[:, None, :]).clamp(min=1.0)                # men of a rank in a charger's lane
+    c = per_rank(u, params)                                           # men of a rank in a charger's lane
     files, ranks = ranks_of(u, sp)
     length = torch.minimum(pw["face_i"], pw["face_j"])
-    horses = torch.minimum(torch.minimum(length / h[:, :, None], files[:, :, None]), u["men"][:, :, None])
+    # the chargers in the contact's length: its lanes side by side (a monster's lane its body: 16 Rat Ogres on 30 m of
+    # spearmen - all 6 files of their front, 8.1 men met in the first rank, not 20; the lone Horror's box 2.74 m - one)
+    place = lane_place(u, params)
+    horses = torch.minimum(torch.minimum(length / place[:, :, None], files[:, :, None]), u["men"][:, :, None])
     lane = torch.minimum(horses * c, files[:, None, :])               # target men met a rank
     half = torch.where(fire[:, None, :], torch.full_like(v, 0.5), torch.ones_like(v))
     big = u["size_k"][:, :, None] >= 3                                # large / very large: damage only on the down, x0.5
@@ -191,6 +233,10 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
     reach = pair.clone()                                              # the charger still rides on into this rank
     first_down = torch.zeros_like(pair)
     left_men = u["men"][:, None, :].expand_as(v)
+    stay = ignore(u, params)
+    # (contact.impact knock_ignore) the share of a target's men a down would knock that do fall: a large charger's
+    # collision damage lands on them alone (a man who keeps his feet is not knocked: no damage either)
+    falls = (1 - stay)[:, None, :] if stay is not None else torch.ones_like(v)
     for r in range(int(cal.get("max_ranks", 8))):
         met = reach & (r < ranks[:, None, :]) & (left_men > 0)
         dv = gain * v * half
@@ -201,6 +247,7 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
         per = melee.per_hit(d * (1 - ap_r), d * ap_r, u["armour"][:, None, :], u["hp_man"][:, None, :],
                             u["resist_physical"][:, None, :])
         per = torch.minimum(per, d.clamp(min=0))                      # (per_hit floors a blow at 1 HP)
+        per = torch.where(big, per * falls, per)                      # (a large charger's: on the men that fall)
         hp = hp + torch.where(met, men_r * per, torch.zeros_like(hp))
         down_men = down_men + torch.where(down, men_r, torch.zeros_like(down_men))
         if r == 0:
@@ -210,6 +257,10 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
         reach = down
     # the target's front share down: its first rank in the chargers' lanes (the lanes cover the contact's length: 1)
     q = first_down.to(v.dtype).amax(dim=1)
+    if stay is not None:
+        # (contact.impact knock_ignore) a man of the target stays on his feet with his body's knock_interrupts_ignore_chance
+        q = q * (1 - stay)
+        down_men = down_men * (1 - stay)[:, None, :]
     hit = pair.any(dim=1)
     if cal.get("ride_in"):
         # (module doc, the ride-in) the first rank down: the horses ride in among the men; no larger enemy touching: 0
@@ -232,6 +283,10 @@ def knock(u, params, dt, rate, swing, mhit, F, charge_now):
     p = float(R["melee_on_damage_effect_knockdown_chance"]) * r * (
         1 + float(R["melee_on_damage_effect_knock_chance_charging_bonus"]) * charge_now[:, :, None])
     p = torch.where(r > float(R["interrupt_mass_ratio_clamp_knockdown"]), p.clamp(max=1.0), torch.zeros_like(p))
+    stay = ignore(u, params)
+    if stay is not None:
+        # (contact.impact knock_ignore) less the struck man's chance to stay on his feet
+        p = p * (1 - stay)[:, None, :]
     kill = (mhit / u["hp_man"][:, None, :].clamp(min=1e-6)).clamp(0, 1)       # a hit's chance to kill
     hits = torch.where(mhit > 0, (rate * dt + swing) / mhit.clamp(min=1e-6), torch.zeros_like(rate))
     knocks = torch.where(big, hits * p * (1 - kill), torch.zeros_like(hits)).sum(1)               # [B, N] men down

@@ -491,6 +491,24 @@
       "group": "wh3_default_land_artillery_long_range",
       "quality": "tier_2_step_5_units"
      }
+    ],
+    "wh2_main_skv_mon_rat_ogres": [
+     {
+      "group": "wh3_default_land_monsters_flanking_strong",
+      "quality": "tier_2_step_3_units"
+     }
+    ],
+    "wh2_dlc16_skv_mon_brood_horror_0": [
+     {
+      "group": "wh3_default_land_monsters_flanking_strong",
+      "quality": "tier_3_step_2_units"
+     }
+    ],
+    "wh2_dlc16_skv_mon_rat_ogre_mutant": [
+     {
+      "group": "wh3_default_land_monsters_flanking_strong",
+      "quality": "tier_3_step_3_units"
+     }
     ]
    }
   }

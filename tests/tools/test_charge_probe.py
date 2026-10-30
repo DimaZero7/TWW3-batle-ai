@@ -69,7 +69,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
             # (ratlord: one General a battle - the army has one)
-            assert (1 if plan == "ratlord" else 2) <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "walkpass2": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6, "busycharge": 6, "ratcover": 7, "ratlone": 8, "ratform": 7, "ratshape": 6, "hitchance": 6, "brace": 6, "meleeturn": 6, "meleeturn2": 12, "meleewidth": 10, "terrain": 8, "terrain2": 14, "wrap": 6, "ground": 8, "ranks": 6, "cover": 9}.get(plan, 5)
+            assert (1 if plan == "ratlord" else 2) <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "walkpass2": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6, "busycharge": 6, "ratcover": 7, "ratlone": 8, "ratform": 7, "ratshape": 6, "hitchance": 6, "brace": 6, "meleeturn": 6, "meleeturn2": 12, "meleewidth": 10, "terrain": 8, "terrain2": 14, "wrap": 6, "ground": 8, "ranks": 6, "cover": 9, "monster": 10, "artillery": 14}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -1103,3 +1103,69 @@ def test_build_takes_the_probe_plans_from_the_probe(capsys):
     with pytest.raises(SystemExit) as e:
         build.main(["charge-probe", "--probe-plan", "no_such_plan", "--help"])
     assert e.value.code == 2
+
+
+def test_the_monster_plan_two_copies_of_each_lane_on_a_grid():
+    (b,) = cp.battles("monster")
+    kinds = [l["kind"] for l in b]
+    assert kinds == [k for k in cp.MONSTER["kinds"] for _ in range(2)] and len(b) == 10
+    assert len({tuple(l["place"]) for l in b}) == 10
+    by = {l["kind"]: l for l in b}
+    h = by["horror"]
+    assert h["attacker"] == cp.HORROR and h["mode"] == "withdraw" and h["target_mode"] == "hold"
+    assert (h["recharge_after_s"], h["back_m"]) == (13, 150) and h["fight_s"] > h["max_s"]       # the lane ends by max_s
+    assert h["max_s"] >= 80 / 9.5 + 13 + 150 / 9.5 + 60
+    assert by["mutant"]["attacker"] == cp.MUTANT and cp.UNITS[by["mutant"]["target"]][0] == "wh_main_emp_inf_swordsmen"
+    assert by["ogres"]["attacker"] == cp.OGRES and by["ogres"]["a_w"] == 39
+    held, alone = by["archers_held"], by["archers_alone"]
+    assert held["target"] == alone["target"] == cp.HORROR and held["mode"] == alone["mode"] == "shoot"
+    (e,) = held["extras"]
+    assert e["short"] == "swords" and e["attack"] and e["dz"] > 3.8 and "extras" not in alone
+    lanes, _, _ = cp.layout(b)
+    assert {l["a_key"] for l in lanes} >= {cp.HORROR, cp.MUTANT, cp.OGRES}
+    config, _, _ = cp.run_config("monster", 1)
+    assert config["tick_ms"] == 250 and config["men_ms"] == 250 and config["men_after_s"] == 15
+
+
+def test_the_artillery_plan_two_copies_of_each_lane_on_a_grid():
+    (b,) = cp.battles("artillery")
+    assert [l["kind"] for l in b] == [k for k, *_ in cp.ARTILLERY["kinds"] for _ in range(2)] and len(b) == 14
+    assert len({tuple(l["place"]) for l in b}) == 14
+    for l in b:
+        if l["kind"] == "crew":
+            assert l["target"] == cp.WARP_CANNON and l["target_mode"] == "skirmish" and l["gap_m"] == 100
+            continue
+        assert l["mode"] == "shoot" and l["gap_m"] == 150
+        walk = l["kind"].endswith("_walk")
+        assert (l["target_mode"] == "push") is walk and (l.get("push_m") == 80) is walk
+        assert bool(l.get("extras")) is (l["kind"] in ("mortar_stand", "rockets_stand"))
+        # the walking block stops beyond the Mortar's minimum range (60 m)
+        assert not walk or l["gap_m"] - l["push_m"] > 60
+    lanes, _, _ = cp.layout(b)
+    assert all(cp.FACTION[l["a_key"]] != cp.FACTION[l["t_key"]] for l in lanes)
+    config, _, _ = cp.run_config("artillery", 1)
+    assert config["men_near_m"] >= 150 + 20 and config["men_after_s"] >= cp.ARTILLERY["fire_s"]
+
+
+def test_body_gap_measures_to_the_capsules_surface():
+    pts = np.array([[0.0, 0.0], [0.0, 3.8 + 1.0], [1.368 + 1.0, 0.0], [5.0, 0.0]])
+    gap = cp.body_gap(pts, (0.0, 0.0), 0.0, 3.8, 0.36)          # facing +z: 7.6 m along z, 2.74 m across
+    assert gap[0] == pytest.approx(-1.368) and gap[1] == pytest.approx(1.0) and gap[2] == pytest.approx(1.0)
+    assert gap[3] == pytest.approx(5.0 - 1.368)
+
+
+def test_monster_measure_counts_the_men_round_the_horror_and_its_regeneration():
+    samples = []
+    for k in range(400):
+        t = k / 4
+        hp = 3000.0 + (6.0 * (t - 30) if t >= 30 else 0.0)
+        out_m = t >= 30
+        samples.append((t, {"x": 0.0, "z": 0.0, "hp": hp, "men": 1, "b": 0, "m": not out_m, "mv": False},
+                        {"x": 0.0, "z": -20.0, "hp": 9000.0, "men": 120}, None))
+    ring = [(0.0, 3.8 + 0.5), (0.0, -3.8 - 0.5), (1.368 + 0.5, 0.0), (-1.368 - 2.0, 0.0), (9.0, 9.0)]
+    men = [(10.0 + s, [0, 0], [int(round(v * 10)) for p in ring for v in p]) for s in (1, 2, 5, 10)]
+    spec = {"name": "L1", "kind": "horror", "a_key": cp.HORROR, "t_key": "wh_main_emp_inf_spearmen_0"}
+    lane = {"run": "x", "spec": spec, "samples": samples, "contacts": {1: 10.0}, "men": men, "phases": []}
+    out = cp.monster_measure(lane)
+    assert out["round_1s"] == [3, 3, 4]                       # within 1.0 / 1.5 / 2.5 m of its surface
+    assert out["regen_hp_s"] == pytest.approx(6.0, abs=0.05)

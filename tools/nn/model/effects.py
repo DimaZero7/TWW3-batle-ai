@@ -128,7 +128,11 @@ FX_STAT_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS)
 FX_STATS2 = (("scalar_charge_speed", "mult"), ("stat_missile_block_chance", "add"), ("stat_accuracy", "add"),
              ("stat_reloading", "add"))
 FX_STAT2_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS2)
-FX_ALL = FX_STATS + FX_STATS2
+# Then (29.10.2026, the Skaven monsters; the token's FX_STATS3 after FX_CAV: older checkpoints load with zero weights) the
+# fire's resistance: Regeneration's weakness -20 (a flaming blow x1.2) and a resistance to fire an effect may give.
+FX_STATS3 = (("stat_weakness_flame", "add"), ("stat_resistance_flame", "add"))
+FX_STAT3_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS3)
+FX_ALL = FX_STATS + FX_STATS2 + FX_STATS3
 FX_MULT = np.array([h == "mult" for _, h in FX_ALL])
 _TORCH = {}
 
@@ -136,7 +140,7 @@ _TORCH = {}
 @lru_cache(maxsize=1)
 def stat_table():
     """[E, len(FX_ALL)] float32: per effect of the catalogue (keys() order) the log of each multiplier and each
-    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note), FX_STATS then FX_STATS2."""
+    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note), FX_STATS, FX_STATS2, FX_STATS3."""
     from tools.nn.model import abilities
     doc = load()
     scale = {(s, h): float(k) for s, h, k in abilities.STATS}

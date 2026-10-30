@@ -22,7 +22,7 @@ def shape_state(**kw):
 
 
 def test_the_shape_columns_are_the_tokens_last():
-    assert ob.NAMES[S0:S1] == ob.SHAPE and ob.NAMES[S1:] == ob.FX_STATS + ob.FIGHT + ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT + ob.FX_CAV and len(ob.SHAPE) == 1 + F
+    assert ob.NAMES[S0:S1] == ob.SHAPE and ob.NAMES[S1:] == ob.FX_STATS + ob.FIGHT + ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT + ob.FX_LAST and len(ob.SHAPE) == 1 + F
     assert ob.SHAPE_FEATURES == tuple(__import__("tools.nn.fighters.shape", fromlist=["x"]).FEATURES)
     assert len(ob.SHAPE_SCALE) == F
 

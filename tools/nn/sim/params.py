@@ -223,6 +223,11 @@ class Params:
             # spell resistance and the ward cut a magical projectile (magic.py; docs/en/game/mechanics/magic.md)
             "resist_magic": min(0.9, (resist.get("magic", 0) + resist.get("all", 0)) / 100),
             "large": u.get("size", "small") != "small",
+            # (29.10.2026, the Skaven monsters; state.py) the knock resistance of its body, its blows' fire and magic, its
+            # own fire resistance (the effects add Regeneration's weakness, effects.py) and its regeneration's pool
+            "knock_ign": float(u.get("knock_ignore") or 0) / 100,
+            "flaming": bool(m.get("flaming")), "mmagic": bool(m.get("magic")),
+            "resist_flame": float(resist.get("flame", 0)) / 100,
             # its men brace (the database's can_brace; impact.py) and its run's fatigue (_kv_fatigue: running_cavalry for
             # the category cavalry, else running; fatigue.py)
             "brace_ok": bool(u.get("can_brace")),
@@ -231,6 +236,8 @@ class Params:
             # rule flags (expendable, encourages, reflect, unbreakable, fire_move, fatigue_immune), the
             # effects bitmask and the timed effects: from the unit's innate effects (config/nn/effects.json)
             **innate.static(self, key),
+            # (regen.py) the share of its starting health it may heal in a battle: sim.json regen.cap with a regeneration
+            "heal_cap": float((self.sim.get("regen") or {}).get("cap", 0.0)) if innate.heal_of(self, key) > 0 else 0.0,
             "direct": bool(missile.get("direct")) if missile else False,
             # a volley of several shots a man (the database's shots_per_volley) fired as a burst at the measured rate
             # (missile.burst_rate_s by projectile; missile.py, battle.py)

@@ -201,22 +201,28 @@ SIGHT = ("hidden", "pierce_men", "spotting")
 # snipe, ignore_trees, the shield breaker, Snare Net, Blackpowder Discipline) are the tail group FX_NEW after FIGHT - so
 # every older token is a beginning of today's (old_columns, encoder.pad_inputs). The next effects of the catalogue need a
 # group of their own at the end (test_nn_g43_input: FX_MID + FX_G43 + the later groups' pairs = the catalogue's): the
-# cavalry's (29.10.2026: causes_fear, immune_to_psychology) and the artillery's (29.10.2026: cant_run) are FX_CAV, the
-# token's last.
+# cavalry's (29.10.2026: causes_fear, immune_to_psychology) and the artillery's (29.10.2026: cant_run) are FX_CAV (FX_CAVN
+# effects); then FX_STATS3 (29.10.2026, the Skaven monsters: the fire's resistance, effects.FX_STATS3) and the effects
+# after the artillery's - the monsters' causes_terror and Regeneration, and the catalogue's next ones - FX_MON, the
+# token's last (it grows with the catalogue).
 FX_MID = 19
 FX_G43 = 6
+FX_CAVN = 3
 FX_NEW = effects.NAMES[2 * FX_MID:2 * (FX_MID + FX_G43)]
-FX_CAV = effects.NAMES[2 * (FX_MID + FX_G43):]
+FX_CAV = effects.NAMES[2 * (FX_MID + FX_G43):2 * (FX_MID + FX_G43 + FX_CAVN)]
+FX_STATS3 = effects.FX_STAT3_NAMES
+FX_MON = effects.NAMES[2 * (FX_MID + FX_G43 + FX_CAVN):]
+FX_LAST = FX_CAV + FX_STATS3 + FX_MON         # the token's columns after SIGHT
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE))
          + effects.NAMES[:2 * FX_MID] + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE + FX_STATS + FIGHT
-         + FX_NEW + FX_STATS2 + SIGHT + FX_CAV)
+         + FX_NEW + FX_STATS2 + SIGHT + FX_CAV + FX_STATS3 + FX_MON)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT, FX_NEW, FX_STATS2, SIGHT, FX_CAV)
+TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT, FX_NEW, FX_STATS2, SIGHT, FX_CAV, FX_STATS3, FX_MON)
 
 
 def old_columns(width):
@@ -539,14 +545,14 @@ def observe(state, setup, side, memory=None, full=False):
     magic = m.stack([m.where(shown, _f(m, _field(state, k, xs) > 0), xs * 0) for k in ("cast_now", "bm_hit")], -1)
     form = _shape(m, state, shown, xs)
     fxs_all = _f(m, effects.stats_on(m, fx_on & shown[..., None]))
-    nfx = len(FX_STATS)
-    fxs, fxs2 = fxs_all[..., :nfx], fxs_all[..., nfx:]
+    nfx, nfx2 = len(FX_STATS), len(FX_STATS) + len(FX_STATS2)
+    fxs, fxs2, fxs3 = fxs_all[..., :nfx], fxs_all[..., nfx:nfx2], fxs_all[..., nfx2:]
     fight, melee_t0 = _fight(m, state, S, memory, tn, alive, sees, shown, xs)
     sight = _sight(m, state, S, shown, xs)
-    g43 = 2 * (FX_MID + FX_G43)
-    fx_mid, fx_new, fx_cav = fx[..., :2 * FX_MID], fx[..., 2 * FX_MID:g43], fx[..., g43:]
+    g43, cav = 2 * (FX_MID + FX_G43), 2 * (FX_MID + FX_G43 + FX_CAVN)
+    fx_mid, fx_new, fx_cav, fx_mon = fx[..., :2 * FX_MID], fx[..., 2 * FX_MID:g43], fx[..., g43:cav], fx[..., cav:]
     tokens = (_cat(m, [dyn, _f(m, S.passport), fx_mid, late, arc[..., None], order, weapon, aim, rx, magic, form, fxs,
-                       fight, fx_new, fxs2, sight, fx_cav], -1) * _f(m, S.present)[..., None])
+                       fight, fx_new, fxs2, sight, fx_cav, fxs3, fx_mon], -1) * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)
