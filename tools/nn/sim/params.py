@@ -180,8 +180,11 @@ class Params:
         if own is not None:
             reload_s = float(own)
         elif missile and cat in (ms.get("reload_db_categories") or ()):
-            # (missile.reload_db_why) artillery: the database's reload, unmeasured (no fitted scale)
-            reload_s = float(missile.get("reload_s") or 0.0)
+            # (missile.reload_db_why) artillery: the database's reload (no fitted scale) + the gun's measured animations
+            # (artillery.cycle_add_s by projectile: a gun's cycle is reload + aim + fire animation, mechanic.md 4)
+            reload_s = float(missile.get("reload_s") or 0.0) + float(
+                ((self.sim.get("artillery") or {}).get("cycle_add_s") or {}).get(missile.get("projectile"), 0.0)
+                if u.get("engines") and (self.sim.get("artillery") or {}).get("on") else 0.0)
         elif missile:
             ref = (ms.get("reload_ref_s") or {}).get(cat)
             reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
@@ -327,7 +330,7 @@ def artillery_static(units, sim, effects_index, key):
     m = u.get("missile") or {}
     out = {"eng0": 0.0, "eng_hp": 0.0, "crew_k": 0.0, "fix_el": 0.0, "min_range": 0.0, "m_bvl": 0.0, "ex_r": 0.0,
            "ex_d": 0.0, "ex_ap": 0.0, "ex_f": 0.0, "ex_v": 0.0, "ex_allies": False, "ex_magic": False, "ex_fx": -1,
-           "c_rad": 0.0, "c_mom": 0.0, "p_magic": False}
+           "c_rad": 0.0, "c_mom": 0.0, "p_magic": False, "central": False, "rl_add": 0.0}
     if not (sim.get("artillery") or {}).get("on") or not eng.get("n"):
         return out
     out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1))
@@ -337,7 +340,11 @@ def artillery_static(units, sim, effects_index, key):
                    min_range=float(m.get("min_range_m") or 0.0), m_bvl=float(m.get("bonus_v_large") or 0.0),
                    c_rad=float(m.get("collision_radius_m") or 0.0),
                    c_mom=float(m.get("mass") or 0.0) * float(m.get("muzzle_velocity") or 0.0),
-                   p_magic=bool(m.get("magic")))
+                   p_magic=bool(m.get("magic")),
+                   # (build/diag_arty/mechanic.md 1) the aim: the most central man (prefer_central_targets) or the nearest
+                   central=bool(m.get("prefer_central")),
+                   # (artillery.cycle_add_s, measured: the aim and fire animations a gun's cycle adds to its reload)
+                   rl_add=float(((sim.get("artillery") or {}).get("cycle_add_s") or {}).get(m.get("projectile"), 0.0)))
         if bl and bl.get("type") == "shockwave":
             out.update(ex_r=float(bl["radius_m"]), ex_d=float(bl["damage"]), ex_ap=float(bl["ap_damage"]),
                        ex_f=float(bl["force"]), ex_v=float(bl["speed"]), ex_allies=bool(bl.get("allies")),

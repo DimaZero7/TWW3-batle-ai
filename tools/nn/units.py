@@ -264,6 +264,10 @@ FIELDS = {
     "missile.can_roll": ("projectiles.can_roll", None),
     "missile.mass": ("projectiles.mass, kg", None),
     "missile.collision_radius_m": ("projectiles.collision_radius, m", None),
+    "missile.prefer_central": ("projectiles.prefer_central_targets: the shooter's target man costs + 5 x his distance "
+                               "from his unit's centre - the guns aim at its most central man (build/diag_arty/"
+                               "mechanic.md 1; the Mortar, the cannons, the catapult), else at the man nearest them "
+                               "(the rockets, the Helblaster)", None),
     "missile.blast": ("projectiles_explosions of missile.explosion (null: none): radius_m detonation_radius, speed "
                       "detonation_speed (the ring's growth, m/s), damage / ap_damage detonation_damage / _ap, force "
                       "detonation_force, allies affects_allies, magic is_magical, contact_phase contact_phase_effect, "
@@ -421,7 +425,7 @@ def passport(key, t):
             "fixed_elevation": pr["fixed_elevation"], "magic": bool(pr["is_magical"]),
             "bonus_v_large": pr["bonus_v_large"], "bonus_v_infantry": pr["bonus_v_infantry"],
             "can_bounce": bool(pr["can_bounce"]), "can_roll": bool(pr["can_roll"]), "mass": pr["mass"],
-            "collision_radius_m": pr["collision_radius"],
+            "collision_radius_m": pr["collision_radius"], "prefer_central": bool(pr["prefer_central_targets"]),
             "blast": {"key": ex["key"], "type": ex["detonation_type"], "radius_m": ex["detonation_radius"],
                       "speed": ex["detonation_speed"], "damage": ex["detonation_damage"],
                       "ap_damage": ex["detonation_damage_ap"], "force": ex["detonation_force"],

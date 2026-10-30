@@ -377,12 +377,14 @@ def test_the_artillery_passports():
 
 
 def test_the_artillery_in_the_simulators_static_row():
-    """params.static: ammunition per gun, the database's reload (missile.reload_db_categories), one file a gun, the
+    """params.static: ammunition per gun, the database's reload (missile.reload_db_categories) + the gun's measured
+    animations (artillery.cycle_add_s; build/diag_arty/landing.md), the aim (prefer_central), one file a gun, the
     fixed elevation only for the Mortar, the blast's numbers; zeros for every other unit."""
     from tools.nn.sim.params import load
     P = load()
     mortar, volley, claw = (P.static(k) for k in (ART[0], ART[2], ART[4]))
-    assert mortar["ammo0"] == 88 and volley["ammo0"] == 4 * 198 and mortar["reload"] == 19.0
+    assert mortar["ammo0"] == 88 and volley["ammo0"] == 4 * 198 and mortar["reload"] == 19.0 + 6.5
+    assert mortar["rl_add"] == 6.5 and volley["reload"] == 10.0 and mortar["central"] and not P.static(ART[3])["central"]
     assert mortar["eng0"] == 4 and mortar["eng_hp"] == 473 and mortar["crew_k"] == 3 and mortar["hp0"] == 4356
     assert mortar["width"] == 4 * mortar["sp_h"] and mortar["fix_el"] == 50 and volley["fix_el"] == 0
     assert (mortar["min_range"], mortar["ex_r"], mortar["ex_d"], mortar["ex_ap"], mortar["ex_f"]) == (

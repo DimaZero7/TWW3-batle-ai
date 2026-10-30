@@ -425,7 +425,9 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     if "reload" in u and "reload_db" in u:
         base = u["reload_db"]
         cut = (base * (1 - add["reloading"] / 100)).clamp(min=RELOAD_MIN_S) / base.clamp(min=RELOAD_MIN_S)
-        u["reload"] = torch.where((add["reloading"] != 0) & (base > 0), u["reload"] * cut, u["reload"])
+        # (a gun's measured animations, rl_add, are not reloading: the skill cuts the reload alone)
+        extra = u["rl_add"] if "rl_add" in u else torch.zeros_like(u["reload"])
+        u["reload"] = torch.where((add["reloading"] != 0) & (base > 0), (u["reload"] - extra) * cut + extra, u["reload"])
     u["attack"] = u["attack"] + add["attack"]
     u["defence"] = u["defence"] + add["defence"]
     u["morale_bonus"] = u["morale_bonus"] + add["leadership"]

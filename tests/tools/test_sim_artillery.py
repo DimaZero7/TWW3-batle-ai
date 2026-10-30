@@ -162,48 +162,58 @@ class TestShells:
         T = float(artillery.flight(u, pw["dist"][:, :, H])[0, 0])
         assert float(u["sh_s"][0, 0]) == pytest.approx(T) and float(u["sh_n"][0, 0]) == 4
         assert float(u["sh_x"][0, 0]) == pytest.approx(float(u["x"][0, H]) + 1.5 * T, rel=1e-5)
-        assert float(u["sh_R"][0, 0]) > 5
+        assert float(u["sh_r"][0, 0]) > 5 and int(u["sh_t"][0, 0]) == H
 
-    def _land(self, gun, target_key, friend=None, gap=0.0, R=None):
-        """One volley of 4 shells landing on the target's centre now: (hp [B, i, j], hits, state, H)."""
-        side2 = [(target_key, 0, 250, 180)]
-        if friend:
-            side1 = [(gun, 0, 0, 0), (friend, 0, 250 - gap, 0)]
-        else:
-            side1 = [(gun, 0, 0, 0)]
-        st = build(side1, side2, f1="wh2_main_skv_skaven" if gun in (CLAW, WARP) else "wh_main_emp_empire",
-                   f2="wh_main_emp_empire" if gun in (CLAW, WARP) else "wh2_main_skv_skaven")
+    @staticmethod
+    def _shot(gun, target_key, dist=200.0, friend=None, gap=0.0, swap=False):
+        """One volley of 4 (rockets 12) at the target's men dist m off, launched and about to land: (state, H)."""
+        side2 = [(target_key, 0, dist, 180)]
+        side1 = [(gun, 0, 0, 0)] + ([(friend, 0, dist - gap, 0)] if friend else [])
+        skv = gun in (CLAW, WARP)
+        st = build(side1, side2, f1="wh2_main_skv_skaven" if skv else "wh_main_emp_empire",
+                   f2="wh_main_emp_empire" if skv else "wh2_main_skv_skaven")
         u, H = st.u, st.N // 2
-        u["sh_s"][0, 0], u["sh_n"][0, 0] = 0.1, 4
-        u["sh_x"][0, 0], u["sh_z"][0, 0] = float(u["x"][0, H]), float(u["z"][0, H])
-        u["sh_R"][0, 0] = R if R is not None else 10.0
+        pw = geometry.pairwise(u, SP)
+        shots = torch.zeros_like(u["men"])
+        shots[0, 0] = float(artillery.shooters(u)[0, 0])
+        target = torch.full_like(u["side"], -1)
+        target[0, 0] = H
+        artillery.launch(u, pw, P, shots, target)
+        u["sh_s"][0, 0] = 0.05
+        return st, H
+
+    def _land(self, gun, target_key, friend=None, gap=0.0, r=None, dist=250.0):
+        """The volley of _shot landing now: (hp [B, i, j], kills, hits, knocks, state, H); r: its spread's side."""
+        st, H = self._shot(gun, target_key, dist=dist, friend=friend, gap=gap)
+        u = st.u
+        if r is not None:
+            u["sh_r"][0, 0] = r
         front, depth = geometry.dims(u, SP)
         hp, kills, hits, knocks = artillery.land(u, P, P.dt, front, depth, torch.zeros_like(u["r"]))
         assert float(u["sh_s"][0, 0]) == -1.0
         return hp, kills, hits, knocks, st, H
 
     def test_the_blast_strikes_the_target_and_friends_near_it(self):
-        hp, kills, hits, knocks, st, H = self._land(MORTAR, CSPEAR, friend=SPEAR, gap=8.0)
+        hp, kills, hits, knocks, st, H = self._land(MORTAR, CSPEAR, friend=SPEAR, gap=12.0, r=60.0)
         assert float(hp[0, 0, H]) > 0 and float(kills[0, 0, H]) > 0
-        assert float(hp[0, 0, 1]) > 0                                   # the friends 8 m off: affects_allies
+        assert float(hp[0, 0, 1]) > 0                                   # the friends 12 m nearer: affects_allies
         assert float(knocks[0, 0, H]) > 0
         far = self._land(MORTAR, CSPEAR, friend=SPEAR, gap=80.0)
         assert float(far[0][0, 0, 1]) == 0.0
-        # a tighter landing disc puts more of the shells on the block
-        tight, _, _, _, _, H1 = self._land(MORTAR, CSPEAR, R=4.0)
-        wide = self._land(MORTAR, CSPEAR, R=30.0)[0]
+        # a tighter spread puts more of the shells on the block
+        tight, _, _, _, _, H1 = self._land(MORTAR, CSPEAR, r=4.0)
+        wide = self._land(MORTAR, CSPEAR, r=120.0)[0]
         assert float(tight[0, 0, H1]) > float(wide[0, 0, H1]) > 0
 
     def test_a_direct_shells_blast_has_no_own_hit_a_fixed_ones_has(self):
         # the rockets' own hit is the missile's (missile.volley): their landing is the blast alone; the Mortar's own hit
         # lands with its blast - remove the blast and the hit stays
-        rockets = self._land(ROCKETS, CSPEAR, R=4.0)[0]
+        rockets = self._land(ROCKETS, CSPEAR, r=4.0)[0]
         assert float(rockets.sum()) > 0
-        st = build([(MORTAR, 0, 0, 0)], [(CSPEAR, 0, 250, 180)])
-        u, H = st.u, st.N // 2
+        st, H = self._shot(MORTAR, CSPEAR, dist=250.0)
+        u = st.u
         u["ex_r"][0, 0] = 0.0
-        u["sh_s"][0, 0], u["sh_n"][0, 0], u["sh_R"][0, 0] = 0.1, 4, 4.0
-        u["sh_x"][0, 0], u["sh_z"][0, 0] = float(u["x"][0, H]), float(u["z"][0, H])
+        u["sh_r"][0, 0] = 4.0
         front, depth = geometry.dims(u, SP)
         hp = artillery.land(u, P, P.dt, front, depth, torch.zeros_like(u["r"]))[0]
         assert float(hp[0, 0, H]) > 0
@@ -261,3 +271,104 @@ class TestNoArtillery:
         for k, v in b.u.items():
             if torch.is_tensor(v):
                 assert torch.equal(a.u[k], v), k
+
+
+class TestTheMiss:
+    """Where a gun's shells burst (build/diag_arty/mechanic.md; R-work shooting_module.md 2.2-2.3): the aim, the
+    barrel's yaw and pitch, the arc's range, the first man, the zeroing-in."""
+
+    @staticmethod
+    def _bursts(gun, dist=200.0):
+        st, H = TestShells._shot(gun, CSPEAR, dist=dist)
+        u = st.u
+        front, depth = geometry.dims(u, SP)
+        b_, i_ = torch.tensor([0]), torch.tensor([0])
+        Pq = artillery.bursts(u, front, depth, b_, i_)[0]                       # [Q, 2]
+        # the line of fire runs along +z (the target dead ahead): along = z - the target's centre, across = x
+        return Pq[:, 1] - float(u["z"][0, H]), Pq[:, 0] - float(u["x"][0, H]), st, H, float(depth[0, H])
+
+    def test_the_mortar_aims_at_the_centre_the_rockets_at_the_near_edge(self):
+        assert bool(P.static(MORTAR)["central"]) and not bool(P.static(ROCKETS)["central"])
+        st, H = TestShells._shot(MORTAR, CSPEAR)
+        u = st.u
+        front, depth = geometry.dims(u, SP)
+        beyond = artillery.AIM_H * float(u["height"][0, H]) / math.tan(math.radians(50))
+        assert float(u["sh_z"][0, 0]) == pytest.approx(float(u["z"][0, H]) + beyond, abs=1e-3)
+        assert float(u["sh_aa"][0, 0]) == 0.0
+        st, H = TestShells._shot(ROCKETS, CSPEAR)
+        u = st.u
+        front, depth = geometry.dims(u, SP)
+        el = float(u["sh_el"][0, 0])
+        near = float(u["z"][0, H]) - float(depth[0, H]) / 2
+        assert float(u["sh_z"][0, 0]) == pytest.approx(near + artillery.AIM_H * float(u["height"][0, H]) / math.tan(el),
+                                                       abs=1e-3)
+        assert 0 < float(u["sh_aa"][0, 0]) <= float(front[0, H]) / 2
+
+    def test_the_spread_by_accuracy_distance_and_angle(self):
+        # the Mortar at 200 m: p = 0.2 x (300 / 200)^2 x (1 - 50 / 180) = 0.325, r = sqrt(380 / p) = 34.2 m
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        u = st.u
+        d = float(u["sh_d"][0, 0])
+        p = 0.2 * (300 / d) ** 2 * (1 - 50 / 180)
+        assert float(u["sh_r"][0, 0]) == pytest.approx(math.sqrt(380 / p), rel=1e-4)
+        assert 30 < float(u["sh_r"][0, 0]) < 38
+
+    def test_the_mortars_miss_is_across_the_rockets_along(self):
+        # the Mortar's 50 deg arc: the pitch moves its range little (-9..+3 m at 200 m), the yaw +-17 m across; the
+        # rockets' 11 deg arc: the pitch +-55 m along
+        along, across, st, H, depth = self._bursts(MORTAR)
+        assert 14 < float(across.abs().max()) < 18
+        assert -11 < float(along.min()) and float(along.max()) < 6
+        along_r, across_r, st, H, depth = self._bursts(ROCKETS)
+        free = along_r[(along_r > depth / 2 + 10) | (along_r < -depth / 2 - 1)]
+        assert float(along_r.max()) > 40 and float(along_r.min()) < -30 and len(free) > 0.5 * len(along_r)
+
+    def test_a_falling_shell_bursts_on_the_first_man(self):
+        # a rocket landing past the block's near edge within the shadow h / tan(angle) bursts on the block: none lands
+        # in the shadow's reach past its far edge across its span
+        along, across, st, H, depth = self._bursts(ROCKETS)
+        u = st.u
+        el = float(u["sh_el"][0, 0])
+        shadow = float(u["height"][0, H]) / math.tan(el)
+        front = float(geometry.dims(u, SP)[0][0, H])
+        lat = across.abs() <= front / 2 - 0.5
+        between = lat & (along > depth / 2 + 0.1) & (along < depth / 2 + shadow - 0.1)
+        assert int(between.sum()) == 0
+        on = lat & (along.abs() <= depth / 2 + 1e-3)
+        assert 0.05 < float(on.float().mean()) < 0.35            # build/diag_arty/mechanic.md: 12-17 %
+
+    def test_the_zeroing_in_narrows_the_spread_and_a_new_target_starts_it_again(self):
+        st = build([(MORTAR, 0, 0, 0)], [(CSPEAR, 0, 200, 180), (CSPEAR, 40, 200, 180)])
+        u, H = st.u, st.N // 2
+        pw = geometry.pairwise(u, SP)
+        shots = torch.zeros_like(u["men"])
+        shots[0, 0] = 4
+        target = torch.full_like(u["side"], -1)
+        target[0, 0] = H
+        artillery.launch(u, pw, P, shots, target)
+        r0 = float(u["sh_r"][0, 0])
+        for n in range(1, 8):
+            artillery.launch(u, pw, P, shots, target)
+            assert float(u["sh_r"][0, 0]) == pytest.approx(r0 * math.sqrt(max(1 - 0.1 * n, 0.5)), rel=1e-5), n
+        target[0, 0] = H + 1                     # a new target: the count starts again (its distance a little longer)
+        artillery.launch(u, pw, P, shots, target)
+        assert float(u["sh_r"][0, 0]) > r0
+
+    def test_the_blast_is_measured_from_the_body_s_edge(self):
+        # artillery_rules.md 1.1-1.2: a man whose body reaches the ring (d^2 - r^2 < R^2) takes 1 - (d - r) / R
+        Pq = torch.tensor([[[0.0, 0.0]]])
+        Cx = torch.tensor([[[[0.5, 0.0], [3.5, 0.0], [6.03, 0.0], [6.1, 0.0]]]])
+        rb, re = torch.tensor([[0.65]]), torch.tensor([6.0])
+        m1, m2, pk, pc = artillery.exposure(Pq, Cx, rb, re, 1.0)
+        assert [round(float(x), 3) for x in m1[0, 0]] == [1.0, round(1 - 2.85 / 6, 3), round(1 - 5.38 / 6, 3), 0.0]
+        assert [float(x) for x in pk[0, 0]] == [1.0, 1.0, 0.0, 0.0]
+
+
+class TestTheCycle:
+    def test_a_guns_cycle_is_its_reload_and_its_measured_animations(self):
+        # config/nn/sim.json artillery.cycle_add_s (the artillery probe: the Mortar every 25.5 s on reload 19)
+        add = P.sim["artillery"]["cycle_add_s"]
+        s = P.static(MORTAR)
+        assert s["reload"] == pytest.approx(19.0 + add["wh_emp_mortar_shell"]) and s["rl_add"] == add["wh_emp_mortar_shell"]
+        assert P.static(ROCKETS)["reload"] == pytest.approx(17.0 + add["wh_emp_rocket"])
+        assert P.static(ARCHERS)["rl_add"] == 0.0

@@ -233,6 +233,10 @@ STATIC = {
     "ex_f": ("f", "the blast's force (detonation_force)"),
     "ex_v": ("f", "the blast's ring speed, m/s (detonation_speed)"),
     "ex_allies": ("b", "the blast strikes its own side too (affects_allies)"),
+    "central": ("b", "its guns aim at the target's most central man (projectiles.prefer_central_targets), else at the "
+                     "man nearest each gun (artillery.launch; build/diag_arty/mechanic.md 1)"),
+    "rl_add": ("f", "seconds a gun's cycle adds to its reload (aim and fire animations: artillery.cycle_add_s, measured; "
+                    "0 for the others)"),
     "ex_magic": ("b", "the blast is magical (is_magical): spell resistance cuts it"),
     "p_magic": ("b", "a gun's projectile is magical (the passport's missile.magic: the Warp Lightning Cannon, the "
                      "Plagueclaw): its own hit meets the target's spell resistance, not the physical (missile.volley, "
@@ -451,10 +455,19 @@ INTERNAL = {
     "eng_w": ("f", "an artillery unit's guns' health left, HP: part of hp_abs (one number for the unit, as the game's); "
                    "the crew's is hp_abs - eng_w"),
     "sh_s": ("f", "seconds until its volley's shells in flight land (-1: none in flight; artillery.py)"),
-    "sh_x": ("f", "their landing point x, m (the target's centre + its velocity x the flight time at the shot)"),
-    "sh_z": ("f", "their landing point z, m"),
+    "sh_x": ("f", "their aim point x, m (the man aimed at - the target's centre or near edge - + its velocity x the "
+                  "flight time at the shot + the arc's way past his aim height: artillery.launch)"),
+    "sh_z": ("f", "their aim point z, m"),
     "sh_n": ("f", "the shells of that volley"),
-    "sh_R": ("f", "the radius of the disc they land uniformly over, m (the spread and the target's box, artillery.py)"),
+    "sh_wx": ("f", "the line of fire's direction x (unit; the miss across and along it: artillery.bursts)"),
+    "sh_wz": ("f", "the line of fire's direction z"),
+    "sh_aa": ("f", "the aim's spread across the line, m (half; the guns' nearest men: 0 for a central target)"),
+    "sh_r": ("f", "the side of the spread square, m (sqrt(calibration area x zeroing-in / p): artillery.spread_side)"),
+    "sh_d": ("f", "the distance to the aim point at the shot, m"),
+    "sh_el": ("f", "the launch angle, rad (the fixed elevation, else the low arc's)"),
+    "sh_t": ("f", "the target slot of the shells in flight (-1: none; its box stops a falling shell)"),
+    "sh_k": ("f", "the shots this gun has fired at sh_kt (the zeroing-in, artillery.spread_side)"),
+    "sh_kt": ("f", "the target sh_k counts (-1: none; a new target starts the count again)"),
     "art_kd": ("f", "bookkeeping: men its shells have knocked down so far"),
     "art_s": ("f", "seconds since an artillery projectile was fired at it, landed within 12 m of its box or hit its men "
                    "(morale: 'attacked by artillery' for artillery.morale.window_s; below 0: the shot's delay before it "
@@ -599,6 +612,8 @@ def empty(B, N, device="cpu", history=0):
     u["sfx"].fill_(-1)
     u["ex_fx"].fill_(-1)
     u["sh_s"].fill_(-1)
+    u["sh_t"].fill_(-1)
+    u["sh_kt"].fill_(-1)
     u["fxd"].fill_(-1)
     u["snap_ab"].fill_(-1)
     for name in ("sp0", "sp1", "cq_k", "cq_t", "cast_k", "cast_t", "bm0_s", "bm0_t", "bm1_s", "bm1_t"):

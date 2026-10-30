@@ -466,6 +466,10 @@
    "source": "projectiles.collision_radius, m",
    "checked": null
   },
+  "missile.prefer_central": {
+   "source": "projectiles.prefer_central_targets: the shooter's target man costs + 5 x his distance from his unit's centre - the guns aim at its most central man (build/diag_arty/mechanic.md 1; the Mortar, the cannons, the catapult), else at the man nearest them (the rockets, the Helblaster)",
+   "checked": null
+  },
   "missile.blast": {
    "source": "projectiles_explosions of missile.explosion (null: none): radius_m detonation_radius, speed detonation_speed (the ring's growth, m/s), damage / ap_damage detonation_damage / _ap, force detonation_force, allies affects_allies, magic is_magical, contact_phase contact_phase_effect, type detonation_type",
    "checked": null
@@ -869,6 +873,7 @@
     "can_roll": false,
     "mass": 3.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "equal"
@@ -1290,6 +1295,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "equal"
@@ -1979,6 +1985,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -2300,6 +2307,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -2428,6 +2436,7 @@
     "can_roll": false,
     "mass": 5.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "equal"
@@ -2556,6 +2565,7 @@
     "can_roll": false,
     "mass": 5.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "equal"
@@ -2973,6 +2983,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "equal"
@@ -3104,6 +3115,7 @@
     "can_roll": false,
     "mass": 5.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -3617,6 +3629,7 @@
     "can_roll": false,
     "mass": 3.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -3747,6 +3760,7 @@
     "can_roll": false,
     "mass": 5.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -3876,6 +3890,7 @@
     "can_roll": false,
     "mass": 6.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -4010,6 +4025,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -4144,6 +4160,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -4277,6 +4294,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -4410,6 +4428,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.1,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -4541,6 +4560,7 @@
     "can_roll": false,
     "mass": 6.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -5233,6 +5253,7 @@
     "can_roll": false,
     "mass": 50.0,
     "collision_radius_m": 0.16,
+    "prefer_central": true,
     "blast": {
      "key": "wh_main_emp_mortar_explosion",
      "type": "shockwave",
@@ -5387,6 +5408,7 @@
     "can_roll": true,
     "mass": 350.0,
     "collision_radius_m": 0.3,
+    "prefer_central": true,
     "blast": null
    },
    "card_check": "no card"
@@ -5530,6 +5552,7 @@
     "can_roll": false,
     "mass": 8.0,
     "collision_radius_m": 0.05,
+    "prefer_central": false,
     "blast": null
    },
    "card_check": "no card"
@@ -5673,6 +5696,7 @@
     "can_roll": false,
     "mass": 1.0,
     "collision_radius_m": 0.25,
+    "prefer_central": false,
     "blast": {
      "key": "wh_main_emp_rocket_explosion",
      "type": "shockwave",
@@ -5827,6 +5851,7 @@
     "can_roll": false,
     "mass": 50.0,
     "collision_radius_m": 0.2,
+    "prefer_central": true,
     "blast": {
      "key": "wh2_main_skv_plagueclaw",
      "type": "shockwave",
@@ -5981,6 +6006,7 @@
     "can_roll": false,
     "mass": 300.0,
     "collision_radius_m": 0.1,
+    "prefer_central": true,
     "blast": {
      "key": "wh2_main_skv_warp_lightning",
      "type": "shockwave",
