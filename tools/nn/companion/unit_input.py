@@ -53,7 +53,8 @@ _LOADED = {}
 
 
 def load_map(folder):
-    """The map's id in the simulator's registry (terrain.load_npz: heights, ground, trunks, its field), once a process."""
+    """The map's id in the simulator's registry (terrain.load_npz: heights, ground, trunks, 'cannot stand' - passable.npz,
+    not in the network's input yet: build/diag_g49/bridge_parity.md - its field), once a process."""
     from tools.nn.sim import terrain
     key = str(Path(folder).resolve())
     if key not in _LOADED:

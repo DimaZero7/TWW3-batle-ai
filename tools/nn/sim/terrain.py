@@ -101,6 +101,12 @@ def set_map(st, map_id, battles=None, place=None):
     if sel.dtype != torch.bool:
         sel = torch.zeros(st.B, dtype=torch.bool, device=st.device).index_fill_(0, sel.long(), True)
     u["terr"] = torch.where(sel[:, None], torch.full_like(u["terr"], mid), u["terr"])
+    from tools.nn.sim import ground
+    if mid >= 0 and ground.has_passable(mid) and "blk_s" not in u:
+        # the 'cannot stand' records (battle.py, terrain.passable): seconds a unit's step was not made (its centre would
+        # have stepped onto such a node) and its refused move orders - for the checks, no rule reads them
+        u["blk_s"] = torch.zeros_like(u["x"])
+        u["blk_o"] = torch.zeros_like(u["x"])
     if place is not None:
         for k, v in zip(PLACE, place):
             if k not in u:

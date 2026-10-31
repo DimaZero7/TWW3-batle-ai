@@ -13,6 +13,9 @@ game's 2 m ground cells have their edges on even metres, so on Kislev's 1 m capt
   top/base the highest trunk's top / the lowest trunk's base in the cell (world y): a path stops only between them
   s0/s1/s2 the trunks around a point for the men's way through them (count, sum r, sum r2 per m2 over a box of
            MOVE_BOX_M centred on the node)
+  blk      'a unit cannot stand here' (1; build/maps/<name>/passable.npz, map_grid.py layers: the node is not reachable
+           for the capture's units after deployment - the game's navigation, unit:can_reach_position; build/diag_map/
+           scan.md). A map without the file: none (0 everywhere), bit for bit
 
   points(u, front, depth, nf, nd)        [B, N, P] x, z of nf x nd points spread over each unit's box (its men)
   classes(u, x, z)                       [B, ...] ground class under points (0 without layers)
@@ -20,6 +23,8 @@ game's 2 m ground cells have their edges on even metres, so on Kislev's 1 m capt
   factors(u, share, params)              (speed, attack) [B, N] the database's ground multipliers, by the unit's men
   trunk_keep(u, pw, target, lob, params) [B, N] the share of shooter i's projectiles no trunk stops on the way
   trunk_speed(u, front, depth, params)   [B, N] the unit's speed through the trunks
+  passable_on(u, params)                 some battle's map has the 'cannot stand' layer and terrain.passable.on
+  blocked(u, x, z)                       [B, ...] bool: the points are on 'cannot stand' nodes (False without the layer)
 """
 import math
 
@@ -98,21 +103,25 @@ def trunk_grids(trunks, shape, x0, z0, step):
             box(sr2, MOVE_BOX_M) * per_m2)
 
 
-def register_layers(map_id, ground=None, names=None, trunks=None):
-    """Give map map_id (terrain.register's id) its ground codes [rows, columns] with their names and / or its trunks
-    (map_grid.tree_bodies' arrays); either may be None (no ground types / no trees)."""
+def register_layers(map_id, ground=None, names=None, trunks=None, blocked=None):
+    """Give map map_id (terrain.register's id) its ground codes [rows, columns] with their names, its trunks
+    (map_grid.tree_bodies' arrays) and / or its 'cannot stand' nodes (blocked [rows, columns], 1 = cannot stand:
+    passable.npz); any may be None (no ground types / no trees / no such layer)."""
     g, x0, z0, step = terrain._MAPS[map_id]
     cls = classes_of(ground, names) if ground is not None else np.zeros(g.shape, np.int8)
     assert cls.shape == g.shape, "the ground layer is on the height grid"
+    blk = np.zeros(g.shape, np.int8) if blocked is None else (np.asarray(blocked) > 0).astype(np.int8)
+    assert blk.shape == g.shape, "the 'cannot stand' layer is on the height grid"
     _LAYERS[map_id] = {"cls": cls, "trees": trunks is not None and len(trunks["x"]) > 0,
-                       "ground": ground is not None,
+                       "ground": ground is not None, "blk": blk, "passable": blocked is not None,
                        **dict(zip(("lam", "top", "base", "s0", "s1", "s2"), trunk_grids(trunks, g.shape, x0, z0, step)))}
     _DEV.clear()
 
 
 def load_layers(map_id, folder):
     """The layers of a map folder (build/maps/<name>/): heights.npz's ground codes with meta.json's names, trees.npz
-    when it is there. Returns (ground share, trunks) for the record."""
+    and passable.npz when they are there (passable.npz on the heights' grid: the same x0, z0, step and shape). Returns
+    (ground share, trunks) for the record."""
     import json
     from pathlib import Path
     folder = Path(folder)
@@ -120,9 +129,16 @@ def load_layers(map_id, folder):
     names = json.loads((folder / "meta.json").read_text(encoding="utf-8"))["ground_names"] \
         if (folder / "meta.json").exists() and "ground" in d.files else None
     trunks = dict(np.load(folder / "trees.npz")) if (folder / "trees.npz").exists() else None
-    if names is None and trunks is None:
+    blocked = None
+    if (folder / "passable.npz").exists():
+        pz = np.load(folder / "passable.npz")
+        assert pz["blocked"].shape == d["height"].shape and all(
+            abs(float(pz[k]) - float(d[k])) < 1e-6 for k in ("x0", "z0", "step")), \
+            f"{folder}: passable.npz is not on the heights' grid"
+        blocked = pz["blocked"]
+    if names is None and trunks is None and blocked is None:
         return None, 0                      # (heights alone: the map has no layers)
-    register_layers(map_id, d["ground"] if names is not None else None, names, trunks)
+    register_layers(map_id, d["ground"] if names is not None else None, names, trunks, blocked)
     return names, 0 if trunks is None else len(trunks["x"])
 
 
@@ -140,7 +156,7 @@ def _device(dev):
         out = {}
         for name, fill, dt in (("cls", 0, np.int8), ("lam", 0, np.float32), ("top", -1e9, np.float32),
                                ("base", 1e9, np.float32), ("s0", 0, np.float32), ("s1", 0, np.float32),
-                               ("s2", 0, np.float32)):
+                               ("s2", 0, np.float32), ("blk", 0, np.int8)):
             a = np.full((M, Rm, Cm), fill, dt)
             for k in range(M):
                 if k in _LAYERS:
@@ -170,6 +186,28 @@ def _at(u, name, x, z):
     v = out[name][((m.view(sh) * Rm + j) * Cm + i).reshape(-1)].view(x.shape)
     empty = {"cls": 0, "lam": 0, "top": -1e9, "base": 1e9}.get(name, 0)
     return torch.where(flat.view(sh), torch.full_like(v, empty), v)
+
+
+def has_passable(map_id=None):
+    """A map (map_id; None: any registered one) has the 'cannot stand' layer."""
+    if map_id is None:
+        return any(L.get("passable") for L in _LAYERS.values())
+    return bool(_LAYERS.get(int(map_id), {}).get("passable"))
+
+
+def passable_on(u, params):
+    """The 'cannot stand' rules run this step: terrain.passable.on (config/nn/sim.json) and some battle of the batch
+    is on a map while a map with the layer is registered. Off: the step as before, bit for bit."""
+    pc = params.sim["terrain"].get("passable") or {}
+    return bool(pc.get("on")) and on(u) and has_passable()
+
+
+def blocked(u, x, z):
+    """[B, ...] bool: the points x, z [B, ...] of each battle lie on 'cannot stand' nodes of its map (the node at floor,
+    as every layer); False on a flat battle and on a map without the layer."""
+    if not on(u):
+        return torch.zeros_like(x, dtype=torch.bool)
+    return _at(u, "blk", x, z) > 0
 
 
 def points(u, front, depth, nf, nd):

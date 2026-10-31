@@ -13,7 +13,6 @@ import math
 import numpy as np
 import torch
 
-from tools.nn.sim import terrain
 from tools.nn.train import opponents
 from tools.nn.unit import drill_go as DG
 from tools.nn.unit import drill_hold as DH
@@ -27,6 +26,7 @@ FROM = ("up", "down", "side")
 RELIEF_M = 4.0             # the ground's rise over the area at least (the user's 3-5 m)
 GRID = 7                   # the area's sample points a side (its ground's range, its slope)
 TRIES = 60
+MORE = 10                  # tries x MORE at most while none has its points free (the river map's closed wings)
 EDGE_M = 10.0
 MARGIN_M = 40.0
 LIMIT_S = DH.LIMIT_S
@@ -87,10 +87,12 @@ def area_points(pos, n=GRID):
     return x + S.ravel() * math.cos(t) + F.ravel() * math.sin(t), z - S.ravel() * math.sin(t) + F.ravel() * math.cos(t)
 
 
-def place(s, pos, foe_xz, gen):
-    """(px, pz, deg, relief m) of one skirmish on the active map: a point whose ground over the area rises RELIEF_M or
-    more, turned so that the enemy's start lies uphill / downhill / across the slope of the area (s['frm'])."""
-    a = realmap._ACTIVE
+def place(s, pos, foe_xz, gen, m=None):
+    """(px, pz, deg, relief m) of one skirmish on the map m (realmap's entry; None: the first active one): a point
+    whose ground over the area rises RELIEF_M or more, turned so that the enemy's start lies uphill / downhill / across
+    the slope of the area (s['frm']); our unit's and the enemy's start on free nodes, 90 % of the area too
+    (realmap.free_at: not 'cannot stand')."""
+    a = m or realmap._ACTIVE
     ax, az = area_points(pos)
     cx, cz = float(ax.mean()), float(az.mean())
     beta = math.degrees(math.atan2(foe_xz[0] - cx, foe_xz[1] - cz))           # the enemy's start seen from the area
@@ -99,12 +101,12 @@ def place(s, pos, foe_xz, gen):
     span_z = max(0.0, (a["hi_z"] - a["lo_z"]) / 2 - R - EDGE_M)
     mid_x, mid_z = (a["lo_x"] + a["hi_x"]) / 2, (a["lo_z"] + a["hi_z"]) / 2
     best = None
-    for _ in range(TRIES):
+    for k in range(TRIES * MORE):
         wx = mid_x + (float(torch.rand((), generator=gen)) * 2 - 1) * span_x
         wz = mid_z + (float(torch.rand((), generator=gen)) * 2 - 1) * span_z
         # the slope about the point (a plane through the area's ground, unturned): uphill's bearing
         dx, dz = ax - cx, az - cz
-        h = realmap.height_at(wx + dx, wz + dz).astype(float)
+        h = realmap.height_at(wx + dx, wz + dz, a).astype(float)
         A = np.stack([dx, dz, np.ones_like(dx)], 1)
         gx, gz, _ = np.linalg.lstsq(A, h, rcond=None)[0]
         if math.hypot(gx, gz) < 1e-4:
@@ -116,19 +118,22 @@ def place(s, pos, foe_xz, gen):
         px = wx - (cx * math.cos(t) + cz * math.sin(t))
         pz = wz - (-cx * math.sin(t) + cz * math.cos(t))
         wxa, wza = realmap.to_world(ax, az, px, pz, deg)
-        hh = realmap.height_at(wxa, wza)
+        hh = realmap.height_at(wxa, wza, a)
         relief = float(hh.max() - hh.min())
         ux, uz = realmap.to_world(np.array([0.0, foe_xz[0]]), np.array([0.0, foe_xz[1]]), px, pz, deg)
-        ok = bool(realmap._clear_at(ux, uz).all()) and bool(realmap._clear_at(wxa, wza).mean() > 0.9)
+        ok = bool(realmap.free_at(ux, uz, a).all()) and bool(realmap.free_at(wxa, wza, a).mean() > 0.9)
         if ok and (best is None or relief > best[3]):
             best = (px, pz, deg, relief)
         if ok and relief >= RELIEF_M:
             break
+        if k >= TRIES - 1 and best is not None:
+            break                   # (past TRIES: only while no try is free - a map with wide closed parts)
     return best if best is not None else (mid_x, mid_z, 0.0, 0.0)
 
 
 def build(sp, P, device, gen=None):
-    """The state (ours slot 0, the enemy slot H) laid on the active map at the drill's places, own [B, N], our area
+    """The state (ours slot 0, the enemy slot H) laid on the active maps at the drill's places (each skirmish's map:
+    realmap.pick - one map: it; several: in turn in the exam, random in training), own [B, N], our area
     {x, z, b, front, depth, on, sb, sw} [B, N] (sw 0: infantry), the enemies' goal {x, z, b, front, depth} [B, N] (the
     shooters' position) and the places {px, pz, deg, relief} (numpy [B])."""
     assert realmap.active(), "drill_height runs on a real map only (--map)"
@@ -143,10 +148,11 @@ def build(sp, P, device, gen=None):
     gl = {"x": col([(x[2] or x[1])[0] for x in loc]), "z": col([(x[2] or x[1])[1] for x in loc]),
           "b": col([0.0] * B), "front": col([DS.GOAL_M] * B), "depth": col([DS.GOAL_M] * B)}
     gen = gen if gen is not None and not realmap._ACTIVE.get("exam") else torch.Generator().manual_seed(realmap.EXAM_SEED)
-    pl = np.array([place(s, x[1], x[3], gen) for s, x in zip(sp, loc)])
-    t = lambda v: torch.tensor(v, dtype=torch.float32, device=device)       # noqa: E731
-    terrain.set_map(st, realmap._ACTIVE["mid"], place=(t(pl[:, 0]), t(pl[:, 1]), t(pl[:, 2])))
-    places = {"px": pl[:, 0], "pz": pl[:, 1], "deg": pl[:, 2], "relief": pl[:, 3]}
+    which = realmap.pick(B, gen)
+    ms = realmap.maps() or [realmap._ACTIVE]
+    pl = np.array([place(s, x[1], x[3], gen, ms[int(which[i])]) for i, (s, x) in enumerate(zip(sp, loc))])
+    realmap.lay(st, which, pl[:, 0], pl[:, 1], pl[:, 2])
+    places = {"px": pl[:, 0], "pz": pl[:, 1], "deg": pl[:, 2], "relief": pl[:, 3], "map": which}
     return st, own, area, gl, places
 
 

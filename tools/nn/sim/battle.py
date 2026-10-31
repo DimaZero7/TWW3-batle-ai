@@ -103,6 +103,16 @@ def step(st, orders, params=None, dt=None):
         drop = held & ((k_in == O.MOVE) | (k_in == O.WITHDRAW) | ((k_in == O.ATTACK) & ~in_reach(u["order_target"])))
         u["order_kind"] = torch.where(drop, torch.full_like(k_in, O.HOLD), k_in)
         u["order_target"] = torch.where(drop, torch.full_like(u["order_target"], -1), u["order_target"])
+    passable = ground.passable_on(u, params)
+    if passable:
+        # 'cannot stand' (ground.blocked, the map's passable.npz; config/nn/sim.json terrain.passable): the game refuses a
+        # move / withdraw order whose point (the formation's centre) is on such a node whole - the unit does not move, its
+        # ordered position stays (the probe 31.10, build/diag_map/scan.md: 5 of 5 on land, deep water and the river's
+        # closed wings). The order in force goes on (its face and width too: the order is not taken)
+        refused = take & ((orders.kind == O.MOVE) | (orders.kind == O.WITHDRAW)) & ground.blocked(u, orders.x, orders.z)
+        take = take & ~refused
+        if "blk_o" in u:
+            u["blk_o"] = u["blk_o"] + refused.float()
     kind = torch.where(take, orders.kind, u["order_kind"])
     tgt = torch.where(take, orders.target, u["order_target"])
     # A withdraw always runs, whatever the order's run flag: in the game the companion and the bridge give it at a run
@@ -1473,6 +1483,19 @@ def step(st, orders, params=None, dt=None):
         u["x"] = u["x"] + px
         u["z"] = u["z"] + pz
     movement.clamp_to_map(u, st.bounds)
+    if passable:
+        # 'cannot stand' (terrain.passable): a unit's centre does not step onto such a node - a step that would end on one
+        # (from a free node) is not made, the unit stays where the step began and stands this step (the game's men keep
+        # out of the navigation's closed areas: the lord stopped ~1.8 m short of the first closed node, scan.md; the
+        # game's path round the area is not modelled - terrain.passable.why). A unit already on one walks off freely
+        into = alive & ground.blocked(u, u["x"], u["z"]) & ~ground.blocked(u, old["x"], old["z"])
+        u["x"] = torch.where(into, old["x"], u["x"])
+        u["z"] = torch.where(into, old["z"], u["z"])
+        vx = torch.where(into, torch.zeros_like(vx), vx)
+        vz = torch.where(into, torch.zeros_like(vz), vz)
+        u["vx"], u["vz"] = vx, vz
+        if "blk_s" in u:
+            u["blk_s"] = u["blk_s"] + into.float() * dt
 
     # --- facing and the observed flags ---
     spd = torch.sqrt(vx * vx + vz * vz)

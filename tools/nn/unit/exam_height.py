@@ -1,4 +1,4 @@
-"""The exam of drill U10 'the height in my area' (drill_height.py; a real map only - --map, default ksl_plains_01): the
+"""The exam of drill U10 'the height in my area' (drill_height.py; a real map only - --map, default all the captured maps in turn): the
 fixed set drill_height.exam_specs() (240: hold / shoot x enemy from above / below / across, in turn) at the drill's fixed
 places, the network sampling with a fixed seed - or a script in its place (--script), the yardsticks:
 
@@ -30,7 +30,7 @@ from tools.nn.unit import realmap
 
 SEED = 4941
 SCRIPTS = ("stay", "high")
-MAP = "ksl_plains_01"
+MAP = "all"                # every captured map (realmap.names: build/maps/*), in turn
 ARRIVE_M = 3.0
 
 
@@ -206,7 +206,7 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default=None)
-    ap.add_argument("--map", default=MAP, help="the real map (build/maps/<name>): the drill runs on a map only")
+    ap.add_argument("--map", default=MAP, help="the real maps (a name, a,b or all - build/maps/<name>; several: in turn): the drill runs on a map only")
     a = ap.parse_args(argv)
     realmap.activate(a.map, exam=True)
     from tools.nn.unit import train as T

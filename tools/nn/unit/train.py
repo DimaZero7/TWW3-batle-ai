@@ -755,9 +755,10 @@ def main(argv=None):
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default="build/diag_g49/smoke")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--map", default=None, help="lay every skirmish at a random place and turn of this real map "
-                    "(build/maps/<name>: heights, ground, trunks; tools/nn/unit/realmap.py); the --exam at the end on "
-                    "its fixed places of the map")
+    ap.add_argument("--map", default=None, help="lay every skirmish at a random place and turn of a real map - a "
+                    "name, a,b or all (build/maps/<name>: heights, ground, trunks, cannot stand; several: a random one "
+                    "a skirmish, evenly; tools/nn/unit/realmap.py); the --exam at the end on its fixed places (several "
+                    "maps: in turn)")
     a = ap.parse_args(argv)
     if a.map:
         from tools.nn.unit import realmap

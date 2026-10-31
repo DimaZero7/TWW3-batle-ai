@@ -30,6 +30,9 @@ def ramp(tmp_path, ax=0.2, az=0.06):
     np.savez_compressed(folder / "heights.npz", height=H, clear=np.ones(H.shape, np.uint8),
                         ground=np.zeros(H.shape, np.uint8), x0=np.float64(-512), z0=np.float64(-512),
                         step=np.float64(1.0))
+    np.savez_compressed(folder / "passable.npz", blocked=np.zeros(H.shape, np.uint8), x0=np.float64(-512),
+                        z0=np.float64(-512), step=np.float64(1.0))
+    (folder / "meta.json").write_text('{"ground_names": ["grass"]}', encoding="utf-8")
     realmap.activate("ramp", exam=True, root=tmp_path)
 
 

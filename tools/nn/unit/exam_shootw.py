@@ -204,8 +204,8 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--gpu-duty", type=float, default=1.0)
     ap.add_argument("--out", default=None)
-    ap.add_argument("--map", default=None, help="lay the skirmishes on this map (build/maps/<name>, "
-                    "tools/nn/unit/realmap.py): the exam's fixed places")
+    ap.add_argument("--map", default=None, help="lay the skirmishes on these maps (a name, a,b or all - build/maps/<name>, "
+                    "tools/nn/unit/realmap.py; several: in turn): the exam's fixed places")
     a = ap.parse_args(argv)
     if a.map:
         from tools.nn.unit import realmap
