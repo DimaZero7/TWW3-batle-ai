@@ -1,0 +1,112 @@
+{
+ "name": "ksl_detour",
+ "units": [
+  "probe_spears",
+  "probe_cav"
+ ],
+ "description": "Kislev plains (ksl_plains_01): Empire spearmen and knights (width 30) run to a target behind the rock ridge x 130-170, z -120..15 (build/maps/ksl_plains_01/passable.npz): the straight line crosses the ridge, the target is free and reachable - how the engine routes a unit around a 'cannot stand' area (build/diag_map/pathing.md). Mid: 60 m from the ridge's south end; end: 25 m. A park leg moves the spearmen out of the knights' way.",
+ "monitor": {
+  "arrive_m": 5,
+  "stop_samples": 3,
+  "min_ms": 3000,
+  "stuck_window_ms": 12000,
+  "stuck_move_m": 1
+ },
+ "legs": [
+  {
+   "name": "S_mid",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 150,
+   "start": {
+    "x": 100,
+    "z": -60,
+    "facing": 90,
+    "width": 30
+   },
+   "target": {
+    "x": 200,
+    "z": -60,
+    "facing": 90,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_end",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 150,
+   "start": {
+    "x": 100,
+    "z": -95,
+    "facing": 90,
+    "width": 30
+   },
+   "target": {
+    "x": 200,
+    "z": -95,
+    "facing": 90,
+    "width": 30
+   }
+  },
+  {
+   "name": "P_park",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 20,
+   "start": {
+    "x": 300,
+    "z": -260,
+    "facing": 0,
+    "width": 30
+   },
+   "target": {
+    "x": 300,
+    "z": -255,
+    "facing": 0,
+    "width": 30
+   }
+  },
+  {
+   "name": "K_mid",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 100,
+   "start": {
+    "x": 100,
+    "z": -60,
+    "facing": 90,
+    "width": 30
+   },
+   "target": {
+    "x": 200,
+    "z": -60,
+    "facing": 90,
+    "width": 30
+   }
+  },
+  {
+   "name": "K_end",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 100,
+   "start": {
+    "x": 100,
+    "z": -95,
+    "facing": 90,
+    "width": 30
+   },
+   "target": {
+    "x": 200,
+    "z": -95,
+    "facing": 90,
+    "width": 30
+   }
+  }
+ ]
+}

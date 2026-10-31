@@ -8,8 +8,8 @@ from tools.docs import index_doc
 
 ROOT = architecture.ROOT
 DOCS = ROOT / "docs"
-# Research write-ups: Russian only.
-RU_ONLY = ("research/",)
+# Research write-ups and the pages made since the English docs stopped (CLAUDE.md rule 13, 23.10): Russian only.
+RU_ONLY = ("research/", "training/tactic.md")
 BACK = {"ru": "[← Назад](", "en": "[← Back]("}
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 

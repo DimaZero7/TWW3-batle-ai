@@ -17,7 +17,7 @@
 - **[Данные для обучения нейросети](training/README.md)** — арена, записи боёв ИИ игры,
   правила из базы данных игры, замеренные факты; как их собрать и прочитать.
 - [Модель сети](training/network.md) · [Вход и устройство сети](training/model.md) ·
-  [Обучение](training/training.md) · [Симулятор боя](training/simulator.md) ·
+  [Обучение](training/training.md) · [Симулятор боя](training/simulator.md) · [Тактик](training/tactic.md) ·
   [Случайные армии](training/armies.md) · [Паспорта отрядов](training/units.md) ·
   [Замеры](training/measurements.md) · [Проверка в игре](launch/gate.md)
 

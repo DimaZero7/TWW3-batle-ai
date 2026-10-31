@@ -1,0 +1,74 @@
+{
+ "name": "ksl_river_detour",
+ "units": [
+  "probe_spears",
+  "probe_cav"
+ ],
+ "description": "Kislev river map (ksl_river_01): a target on the far bank behind a closed wing (build/maps/ksl_river_01/passable.npz): the straight line crosses the wing (64-66 % of it 'cannot stand'), the only way is the ford corridor; and a diagonal crossing whose straight line clips the wing (21 %). How the engine routes a unit around closed areas (build/diag_map/pathing.md).",
+ "monitor": {
+  "arrive_m": 5,
+  "stop_samples": 3,
+  "min_ms": 3000,
+  "stuck_window_ms": 12000,
+  "stuck_move_m": 1
+ },
+ "legs": [
+  {
+   "name": "K_wing",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 300,
+   "start": {
+    "x": 300,
+    "z": -340,
+    "facing": 0,
+    "width": 30
+   },
+   "target": {
+    "x": 330,
+    "z": 400,
+    "facing": 0,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_wing",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 600,
+   "start": {
+    "x": 250,
+    "z": -330,
+    "facing": 0,
+    "width": 30
+   },
+   "target": {
+    "x": 250,
+    "z": 380,
+    "facing": 0,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_diag",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 500,
+   "start": {
+    "x": -150,
+    "z": -280,
+    "facing": 0,
+    "width": 30
+   },
+   "target": {
+    "x": 150,
+    "z": 380,
+    "facing": 0,
+    "width": 30
+   }
+  }
+ ]
+}
