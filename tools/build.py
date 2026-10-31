@@ -211,6 +211,9 @@ HUMAN_SOLDIERS_EVERY = 5
 ARENA_TARGETS = ("nn-arena", "human")
 # --kv (the game's rule rows changed in the pack, tools/pack/kvtable.py): probes only, never a battle for data.
 KV_TARGETS = ("charge-probe", "missile-probe", "morale-probe")
+# --mem (memreader Plus: the game's memory read in a probe; docs/ru/game/memreader.md): probes whose entry reads it.
+# Never the network's battles or exams.
+MEM_TARGETS = ("missile-probe",)
 # lord-fall: ms between samples (the moment's step is read at +1, +2 s).
 LORD_FALL_TICK_MS = 500
 
@@ -545,6 +548,10 @@ def main(argv=None):
                         default="flank",
                         help="morale-probe: the plan (tools/nn/morale_probe.py)")
     parser.add_argument("--morale-battle", type=int, default=1, help="morale-probe: the plan's battle, 1-based")
+    parser.add_argument("--mem", action="store_true",
+                        help="a probe only (" + ", ".join(MEM_TARGETS) + "): load memreader Plus (config/memreader.json) "
+                             "next to our pack and read the projectiles in flight from the game's memory; the code "
+                             "sites come from build/mem/sites.json (outside Git; docs/ru/game/memreader.md)")
     parser.add_argument("--kv", action="append", metavar="[SECTION.]KEY=VALUE|xN",
                         help="a probe only (charge-, missile-, morale-probe): a row of the game's rule tables "
                              "(_kv_morale/_kv_rules/_kv_fatigue: section morale/battle/fatigue) set to VALUE or N times "
@@ -627,6 +634,8 @@ def main(argv=None):
         parser.error("--timeout must be between 30 and 3600 seconds")
     if not 250 <= args.decide_ms <= 5000:
         parser.error("--decide-ms must be between 250 and 5000")
+    if args.mem and args.target not in MEM_TARGETS:
+        parser.error(f"--mem is for the probes: {', '.join(MEM_TARGETS)}")
     kv = None
     if args.kv:
         if args.target not in KV_TARGETS:
@@ -742,7 +751,14 @@ def main(argv=None):
         run_config["stall_ms"] = stall_ms
     if args.target in ARENA_TARGETS and scenario_file and not args.scenario:
         args.scenario = str(scenario_file)
-    manifest = build(args.target, run_config, scenario=args.scenario, **({"kv": kv} if kv else {}))
+    dependencies = None
+    if args.mem:
+        from tools import mem_sites
+        exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"
+        run_config["mem"] = mem_sites.lua_config(exe=exe if exe.is_file() else None)
+        dependencies = project.required_mods() + [mem_sites.dependency()]
+    manifest = build(args.target, run_config, scenario=args.scenario, **({"kv": kv} if kv else {}),
+                     **({"dependencies": dependencies} if dependencies else {}))
     print(json.dumps(manifest, indent=2))
     return 0
 

@@ -28,6 +28,11 @@
 -- when the shooter is out of ammo or the target dead (and settle_s more for the projectiles in the air), when
 -- the shooter has not shot for idle_s after its first shot, or after max_s; then both halt and the shooter
 -- stops firing. The battle ends when every lane is done.
+-- config.mem (a probe built with --mem only; docs/ru/game/memreader.md): the projectiles from the game's memory
+-- (apps.mem.projectiles) - 'mem_attach' once (the checks, hooked or why not); from the go the projectile list is
+-- polled every MEM_POLL_MS of battle; every tick 'mem_proj' (the spawns, state changes and removals since the last tick
+-- with the poll numbers, the projectiles flying now, the ammo_left hook's reads, the hooks' counters), the last one at
+-- the end; the hooks are removed before the battle ends.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -36,11 +41,14 @@ local orders = require('apps.orders.adapter')
 local facing = require('apps.orders.facing')
 local formation = require('apps.units.formation_adapter')
 local map = require('apps.map.adapter')
+local memproj = require('apps.mem.projectiles')
 
 local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_missile_probe_tick'
+local MEM_TIMER = 'tww3_bai_missile_probe_mem'
+local MEM_POLL_MS = 100
 M.MODES = {fire = true, attack = true, hold = true}
 M.TARGET_MODES = {stand = true, step = true, move = true}
 
@@ -90,6 +98,8 @@ function M.main(bm, config, globals)
     local function fail(err)
         state.active = false
         state.finished = true
+        pcall(function() bm:remove_process(MEM_TIMER) end)
+        if state.mem then pcall(state.mem.detach) end
         pcall(function() bm:remove_process(TIMER) end)
         pcall(emit, 'error', {message = tostring(err)})
         pcall(flush)
@@ -138,12 +148,31 @@ function M.main(bm, config, globals)
         orders.halt(it.uc)
     end
 
+    local function mem_tick(last)
+        if not state.mem then return end
+        local ok, d = pcall(state.mem.drain)
+        if ok then
+            local okh, h = pcall(state.mem.stats)
+            d.hook = okh and h or {error = tostring(h)}
+            d.last = last or nil
+            emit('mem_proj', d)
+        else
+            emit('mem_proj', {errors = {tostring(d)}})
+        end
+        if last then
+            state.mem.detach()
+            state.mem = nil
+        end
+    end
+
     local function finish(status)
         if state.finished then return end
         state.active = false
         state.finished = true
         pcall(function() bm:remove_process(TIMER) end)
         if state.cancel_deadline then state.cancel_deadline() end
+        pcall(function() bm:remove_process(MEM_TIMER) end)
+        pcall(mem_tick, true)
         emit('result', {status = status or 'completed', winner = 0})
         flush()
         bm:end_battle()
@@ -218,6 +247,7 @@ function M.main(bm, config, globals)
             end
         end
         if #rows > 0 then emit('probe_sample', {lanes = rows}) end
+        mem_tick(false)
         if busy and soldiers_on() and now - (state.soldiers_at or 0) >= config.soldiers_every_s * 1000 then
             state.soldiers_at = now
             soldiers('every')
@@ -254,6 +284,9 @@ function M.main(bm, config, globals)
         end
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
+        if state.mem then
+            bm:repeat_callback(function() if state.mem then pcall(state.mem.poll) end end, MEM_POLL_MS, MEM_TIMER)
+        end
         flush()
     end
 
@@ -332,6 +365,11 @@ function M.main(bm, config, globals)
         end
         state.batch = clock.batch_stamp() .. '-mprobe-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
         state.run_id = state.batch .. '-r1'
+        if config.mem then
+            local handle, status = memproj.attach(_G.memreader_plus, config.mem)
+            state.mem = handle
+            emit('mem_attach', {status = status})
+        end
         emit('ready', {lanes = #state.lanes})
         flush()
         bm:register_phase_change_callback('Deployed', guarded(start))

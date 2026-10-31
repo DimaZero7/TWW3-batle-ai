@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "policy": "probes only (tools/build.py --mem); never in the network's battles or exams; read and hook only; explicit review required for updates",
+  "workshop_id": "3811098873",
+  "title": "memreader Plus",
+  "author": "Druwski (PKozdra)",
+  "url": "https://github.com/PKozdra/memreader_plus",
+  "pack_name": "memreader_plus.pack",
+  "sha256": "d034ea466c29f6a75da92d43e6c8261d319d3d2710310c6b88ee88bed15b9a0b",
+  "release": "0_15_1",
+  "sites_file": "build/mem/sites.json"
+}

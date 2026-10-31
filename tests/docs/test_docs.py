@@ -9,7 +9,7 @@ from tools.docs import index_doc
 ROOT = architecture.ROOT
 DOCS = ROOT / "docs"
 # Research write-ups and the pages made since the English docs stopped (CLAUDE.md rule 13, 23.10): Russian only.
-RU_ONLY = ("research/", "training/tactic.md")
+RU_ONLY = ("research/", "training/tactic.md", "game/memreader.md", "apps/mem.md")
 BACK = {"ru": "[← Назад](", "en": "[← Back]("}
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 
@@ -64,5 +64,6 @@ def test_generated_blocks_match_the_code():
 
 def test_every_module_has_a_page_in_both_languages():
     apps = sorted(p.name for p in architecture.APPS.iterdir() if p.is_dir())
-    missing = [f"{lang}/apps/{a}.md" for a in apps for lang in ("ru", "en") if not (DOCS / lang / "apps" / f"{a}.md").exists()]
+    missing = [f"{lang}/apps/{a}.md" for a in apps for lang in ("ru", "en") if not (DOCS / lang / "apps" / f"{a}.md").exists()
+               and not (lang == "en" and f"apps/{a}.md".startswith(RU_ONLY))]
     assert not missing, missing

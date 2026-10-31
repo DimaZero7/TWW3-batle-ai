@@ -26,6 +26,7 @@
 | [orders](../apps/orders.md) | `adapter`, `planner_adapter`, `facing` | Проверенные в бою вызовы приказов, передача отрядов планировщику CA, 64 направления движка | [проверенные команды](../game/units/commands.md) |
 | [telemetry](../apps/telemetry.md) | `adapter`, `sampler_adapter` | JSONL-события, файлы состояния, послебоевые снимки обеих сторон | `runtime/post_battle_telemetry.lua` |
 | [bridge](../apps/bridge.md) | `adapter`, `exchange_adapter`, `services` | Мост к сети: файл состояния помощнику, его приказы нашим отрядам | новое |
+| [mem](../apps/mem.md) | `projectiles` | Только пробы (`--mem`): снаряды в полёте из памяти игры через memreader Plus (чтение и один перехват) | новое |
 
 ## Точки входа (`src/entries`)
 

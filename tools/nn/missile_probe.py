@@ -348,13 +348,13 @@ def write_scenario(plan, index, path=None):
     return path
 
 
-def run(plan, which=None, python=sys.executable, dry=False, deadline=900):
+def run(plan, which=None, python=sys.executable, dry=False, deadline=900, mem=False):
     """Builds and launches each battle in turn (tools/launcher/launch.ps1: Normal difficulty set and restored by
-    the launcher)."""
+    the launcher). mem: built with --mem (memreader Plus: the projectiles from the game's memory, tools/nn/mem_probe.py)."""
     done = []
     for i in which or range(1, len(battles(plan)) + 1):
         build = [python, "-m", "tools.build", "missile-probe", "--mprobe-plan", plan, "--mprobe-battle", str(i),
-                 "--deadline", str(deadline)]
+                 "--deadline", str(deadline)] + (["--mem"] if mem else [])
         launch = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER / "launch.ps1"),
                   "-Target", "missile-probe"]
         print(f"--- {plan} {i}", flush=True)
@@ -821,6 +821,8 @@ def main(argv=None):
     parser.add_argument("--copies", type=int, default=4)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--dry", action="store_true")
+    parser.add_argument("--mem", action="store_true", help="run: with memreader Plus (the projectiles from the game's memory; "
+                        "docs/ru/game/memreader.md)")
     parser.add_argument("--missile", help="report --sim: JSON over sim.json missile, e.g. "
                                           "'{\"accuracy\": {\"k\": 1.1, \"units\": \"rates\"}}'")
     args = parser.parse_args(argv)
@@ -844,7 +846,7 @@ def main(argv=None):
         return 0
     if args.command == "run":
         which = [int(x) for x in args.battles.split(",")] if args.battles else None
-        done = run(args.plan, which, dry=args.dry)
+        done = run(args.plan, which, dry=args.dry, mem=args.mem)
         print("done:", done)
         return 0 if all(d[-1] == 0 for d in done) else 1
     report(args.runs or runs(), sim=args.sim, out=args.out, device=args.device, copies=args.copies, label=args.label,
