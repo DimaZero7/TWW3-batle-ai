@@ -61,6 +61,15 @@ The second wave (contact.impact wave; build/diag_cav/mechanic.md M31-M34, the pr
               3 m of a clanrat 1.5-5 s after the impact) swings his first blow - none of them struck since the impact -,
               his intervals from the mean of it (3 s). Off (wave on 0): the front rank's first blow over 1.0-2.7 s, the
               ranks behind at once (bit for bit the old rule).
+The front rank first (contact.impact collide_down / strike_first; build/diag_cav/mechanic.md M35-M39, the program):
+              the collision damage lands only on a man the push knocks down or sends flying (dv over 7 m/s) with the
+              closing speed over 7 m/s (before the exchange), never on a man who keeps his feet, nor on one lying, flying or
+              getting up (collide_down); the front rank's lances land at the landing on men still standing - the attack
+              starts well before the bodies touch - and the men they kill meet no horse (lance_first); one attack timer a
+              man, not reset by a new target: the front rank strikes again an interval after the landing (once the men are
+              up); the ranks behind swing their first blow as the men get up with every man of them within reach
+              (F / fighting_files less the front rank: 37 knights at 3 s, the recording 36-37 within 4.55 m, M38), their
+              intervals from it (strike_first; melee.strikes, battle.py). Both off: the second wave above bit for bit.
 The knock of a blow (knock(): a large striker's hits on a smaller man, the 'decided' blow, charge_module 5.1):
   P(down) = melee_on_damage_effect_knockdown_chance 0.05 x r x (1 + knock_chance_charging_bonus 2 x f) for r above
   interrupt_mass_ratio_clamp_knockdown 0.5 (r: the striker's mass / the struck man's, f: the striker's charge left), of
@@ -91,6 +100,16 @@ def rise(params):
     at 0.3 s: 2.4 - 0.3 - 1.0 = 1.1 s; M33)."""
     w = _cal(params).get("wave") or {}
     return float(w.get("rise_s", 0.0)) if w.get("on") else 0.0
+
+
+def strike_first(params):
+    """contact.impact strike_first (with ride_in and wave on; build/diag_cav/mechanic.md M36-M37, M39 1, 3, 4): the front
+    rank of a large charger that rides in swings at the landing - its lance reaches the men before the bodies touch (the
+    attack starts with the target nearer than r1 + r2 + 3 s x the closing speed, within 15 deg) and they still stand -,
+    and its intervals run from that blow (one timer a man, not reset by a new target); only the ranks behind wait for the
+    men to get up (their first blow then, their intervals from it)."""
+    c = _cal(params)
+    return bool(c.get("strike_first")) and bool(c.get("ride_in")) and bool((c.get("wave") or {}).get("on"))
 
 
 def ridden(u, params):
@@ -209,16 +228,24 @@ def up_share(u, params, rate):
     return rate.mul_(torch.where(on_big, 1 - ly, torch.ones_like(ly)))
 
 
-def land(u, pw, contact, fire, params, dt, speed, charge_now):
+def land(u, pw, contact, fire, params, dt, speed, charge_now, parts=False):
     """The impact of the large chargers whose charge lands this step (fire [B, N]) on the smaller enemies they touch
     (contact [B, N, N], i on j): sets the targets' kd_q / kd_t (their front share knocked down, the clock) and counts
-    the men down in kd_n; returns hp [B, N, N] (the collision damage i deals j now). Module doc."""
+    the men down in kd_n; returns hp [B, N, N] (the collision damage i deals j now); with parts (hp, men0, per0): also
+    the men of j's first rank i meets and the collision HP each of them takes (lance_first). Module doc."""
     R = params.battle
     cal = _cal(params)
     e = float(R["collision_restitution_coefficient"])
     down_v = float(R["collision_speed_delta_threshold_knocked_down"])
     sp = params.sim["formation"]["spacing_m"]
     u["kd_t"] = u["kd_t"] + dt                                        # (a landing below sets it again)
+    # (contact.impact collide_down; build/diag_cav/mechanic.md M35, the program) the collision damage lands on a man the push
+    # knocks down or sends flying - his dv over collision_speed_delta_threshold_knocked_down 7 m/s with the closing speed
+    # over the same 7 m/s (the speeds before the exchange: after it the closing speed is e v, 3.2 m/s at a horse's 10.8 -
+    # no damage ever; which of the two the program takes is not read) -; a man who keeps his feet (knocked back, a step
+    # back, a knock ignored) takes none, and a man lying, flying or getting up neither (no reaction, no damage)
+    c_down = bool(cal.get("collide_down"))
+    ly_j = lying(u, params)[:, None, :] if c_down else None
     pair = contact & fire[:, :, None] & bigger(u) & (u["men"] > 0)[:, None, :]
     # (no branch on the data: the step is compiled - torch.compile, battle.stepper; the masks do the gating)
     B_j = bracing(u, params, speed, charge_now)[:, None, :]
@@ -266,14 +293,20 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
         men_r = torch.minimum(lane, left_men)
         d = (torch.pow((v * M / mB_dmg.clamp(min=1e-6)).clamp(min=0), norm) * mod).clamp(max=nmax)
         d = torch.where(big, torch.where(down, 0.5 * d, torch.zeros_like(d)), d)
+        if c_down:
+            d = torch.where(down & (v > down_v), d, torch.zeros_like(d))
         per = melee.per_hit(d * (1 - ap_r), d * ap_r, u["armour"][:, None, :], u["hp_man"][:, None, :],
                             u["resist_physical"][:, None, :])
         per = torch.minimum(per, d.clamp(min=0))                      # (per_hit floors a blow at 1 HP)
         per = torch.where(big, per * falls, per)                      # (a large charger's: on the men that fall)
+        if c_down:
+            per = torch.where(big, per, per * falls) * (1 - ly_j)     # (collide_down: the men that fall, not lying)
         hp = hp + torch.where(met, men_r * per, torch.zeros_like(hp))
         down_men = down_men + torch.where(down, men_r, torch.zeros_like(down_men))
         if r == 0:
             first_down = down
+            men0 = torch.where(met, men_r, torch.zeros_like(men_r))
+            per0 = torch.where(met, per, torch.zeros_like(per))
         left_men = left_men - torch.where(met, men_r, torch.zeros_like(men_r))
         v = v * (1 - loss) ** c                                       # past the rank's men in its lane
         reach = down
@@ -291,7 +324,18 @@ def land(u, pw, contact, fire, params, dt, speed, charge_now):
     u["kd_q"] = torch.where(hit, torch.maximum(q, lying(u, params)), u["kd_q"])
     u["kd_t"] = torch.where(hit, torch.zeros_like(u["kd_t"]), u["kd_t"])
     u["kd_n"] = u["kd_n"] + down_men.sum(1)
-    return hp
+    return (hp, men0, per0) if parts else hp
+
+
+def lance_first(u, hp, men0, per0, swing):
+    """(contact.impact strike_first; build/diag_cav/mechanic.md M36) the collision HP hp [B, N, N] of a landing less what
+    the men of the first rank that the charger's lances kill before the bodies touch would have taken: the attack starts
+    with the target's centre nearer than r1 + r2 + 3 s x the closing speed (on a charge ~34 m) and the lance reaches the
+    men at 3-4.5 m between centres, the bodies at 2.55 m - a man dead is no body to meet. swing [B, N, N]: the HP of the
+    landing's first blow (the front rank's), its kills swing / the man's health, at most the first rank's men met (men0;
+    a horse whose lane is emptied riding on into the next rank at full speed: not modelled)."""
+    killed = torch.minimum(swing / u["hp_man"][:, None, :].clamp(min=1e-6), men0)
+    return hp - killed * per0
 
 
 def knock(u, params, dt, rate, swing, mhit, F, charge_now):

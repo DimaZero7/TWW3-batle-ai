@@ -508,7 +508,12 @@ def step(st, orders, params=None, dt=None):
     # (fire; a new charge lands again) knocks down the smaller men it meets rank by rank and deals collision damage; the
     # men lying strike nobody (up_share below) ---
     big_on = impact.on(params)
-    hp_imp = impact.land(u, pw, strike, fire, params, dt, speed, charge_now) if big_on else None
+    lance = big_on and impact.strike_first(params)
+    if lance:
+        # (contact.impact strike_first: the first rank's men the lances kill before the bodies touch, below)
+        hp_imp, men0, per0 = impact.land(u, pw, strike, fire, params, dt, speed, charge_now, parts=True)
+    else:
+        hp_imp = impact.land(u, pw, strike, fire, params, dt, speed, charge_now) if big_on else None
 
     # --- melee ---
     late = d_pair = d_share = None
@@ -560,11 +565,19 @@ def step(st, orders, params=None, dt=None):
         first_pair = first_pair | (stand[:, :, None] & facing)
     swung = torch.where(first_pair, swing, torch.zeros_like(swing))
     if d_pair is not None:
-        swung = torch.where(d_pair, swing * d_share, swung)
+        # (contact.impact strike_first, impact.strike_first: the front rank's swing lands at the landing too - its lances
+        # reach the men before the bodies touch; the deferred share is the ranks behind's, melee.strikes)
+        if impact.strike_first(params):
+            swung = torch.where(d_pair, swing * d_share + torch.where(first_pair, swing, torch.zeros_like(swing)), swung)
+        else:
+            swung = torch.where(d_pair, swing * d_share, swung)
     hp_melee = rate * dt + swung
     if big_on:
         # the impact's collision damage, and the knock of a large striker's hits on smaller men (impact.knock: the front
         # share lying from blows, by the game's mass ratio rule)
+        if lance:
+            # (impact.lance_first; M36) the front rank's lances kill before the bodies touch: those men take no collision
+            hp_imp = impact.lance_first(u, hp_imp, men0, per0, torch.where(first_pair, swing, torch.zeros_like(swing)))
         hp_melee = hp_melee + hp_imp
         impact.knock(u, params, dt, rate, swung, mhit, F_men,
                      charge_now)

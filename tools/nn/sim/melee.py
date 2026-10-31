@@ -399,6 +399,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     # among are no target till its end; late's pairs swing every man in contact, below)
     imp_wave = bool(((cc.get("impact") or {}).get("wave") or {}).get("on")) and bool((cc.get("impact") or {}).get("ride_in"))
     rise_s = float((cc.get("impact") or {})["wave"].get("rise_s", 0.0)) if imp_wave else 0.0
+    # (contact.impact strike_first, impact.strike_first: the front rank swings at the landing, its intervals from then;
+    # only the ranks behind wait for the men to get up)
+    imp_first = imp_wave and bool((cc.get("impact") or {}).get("strike_first"))
+    s_rear = None
     ff = files_share(cal)                # (melee.cycle: the men within reach a file; else the fitted fighting_files)
     h_u, v_u = spacing_of(u, params.sim["formation"]["spacing_m"])
     # a man's place along a contact (melee.body_across): the formation's h, v for circles, the body's width for an ellipse
@@ -933,13 +937,32 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
                 # 0.3 + 0.4 k s, the recording) reach the men as the men down get up among the horses - every man of
                 # the charger in contact waits as the front rank does, his first blow (impact.deferred, swing of all
                 # F) as the men get up, his intervals from then
+                s_front = s_f
                 s_f = torch.ones_like(s_f)
             if recv is not None:
                 back2 = (t2 >= interval).to(p.dtype)
             else:
                 back2 = (torch.where(t2 >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p))
                          + torch.where(t2 >= interval, p, torch.zeros_like(p)))
-            back = torch.where(rp, s_f * back2 + (1 - s_f), back)
+            if imp_first:
+                # (contact.impact strike_first; build/diag_cav/mechanic.md M36-M37, the program) the front rank (s_front of
+                # the men in contact) swung its lances at the landing, on men still standing (the first strike's rank,
+                # battle.py), and its men's one timer runs from that blow - a new target does not reset it: they strike
+                # again an interval after the landing (back by t), and not before the men they rode among get up (no
+                # target till then: t2 >= 0); the ranks behind (1 - s_front) swing their first blow as the men get up
+                # (the deferred swing, below) and wait their interval from it (back2)
+                back = torch.where(rp, s_front * back * (t2 >= 0).to(p.dtype) + (1 - s_front) * back2, back)
+                # the ranks behind that swing as the men get up: every man of the charger within reach of them (the
+                # first strike's count - the men in contact without the fighting_files share, F / fighting_files, the
+                # bodies side by side and the opening wave: 37 knights at 3 s on the clanrats; the recordings 35-38
+                # within 4.55 m, the free fight's reach r1 + 2.5 s + r2 with the rider's record, M38) less the front
+                # rank - as a share of F (the swing below is F's)
+                reach = F / ff
+                if sp_k is not None:
+                    reach = torch.where(sp_k > 0, F, reach)                  # (contact.sparse: every body in reach)
+                s_rear = ((reach - front).clamp(min=0) / F.clamp(min=1e-6))
+            else:
+                back = torch.where(rp, s_f * back2 + (1 - s_f), back)
     else:
         back = None
     rate = F * struck * per_s * hit
@@ -1058,5 +1081,6 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         # are ready (CA Feature Focus #2), not the steady front's swing
         late_pair = (late[:, :, None] & (u["ride"] >= 0.5)[:, None, :] & u["large"][:, :, None]
                      & (u["size_k"][:, :, None] > u["size_k"][:, None, :]) & ~single_i & ~single_j)
-        swing_rate = torch.where(late_pair, swing_all, swing_rate)
+        # (contact.impact strike_first: the front rank swung at the landing - the ranks behind alone, s_rear of the men)
+        swing_rate = torch.where(late_pair, swing_all if s_rear is None else swing_all * s_rear, swing_rate)
     return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))

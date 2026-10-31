@@ -98,9 +98,14 @@ class TestBracing:
         assert float(impact.bracing(st2.u, P, still, charging)[0, H2]) == 1.0    # in its own charge: no bracing
 
 
+# the old collision damage: every man met takes it, knocked down or not (contact.impact collide_down 0)
+OLD = P.with_cal("contact", impact=dict(P.sim["contact"]["impact"], collide_down=0))
+
+
 class TestLanding:
-    def test_braced_spearmen_go_down_in_the_first_rank_only(self):
-        hp, st, H = landing(KNIGHTS, CSPEAR)
+    @pytest.mark.parametrize("params", [P, OLD])
+    def test_braced_spearmen_go_down_in_the_first_rank_only(self, params):
+        hp, st, H = landing(KNIGHTS, CSPEAR, params=params)
         B = float(impact.bracing(st.u, P, torch.zeros_like(st.u["men"]), torch.zeros_like(st.u["men"]))[0, H])
         mB = 100.0 * B
         dv = 1.3 * 1000 / (mB + 1000) * 10.8
@@ -112,25 +117,36 @@ class TestLanding:
         assert 1.3 * 1000 / (mB + 1000) * v2 < 7.0                               # the 2nd rank stays up
         assert float(st.u["kd_q"][0, H]) == 1.0 and float(st.u["kd_t"][0, H]) == 0.0
         assert float(st.u["kd_n"][0, H]) == pytest.approx(lane)
-        assert hp == pytest.approx(lane * (collision(10.8, 1000, mB, st, H) + collision(v2, 1000, mB, st, H)), rel=1e-4)
+        if params is OLD:
+            assert hp == pytest.approx(lane * (collision(10.8, 1000, mB, st, H) + collision(v2, 1000, mB, st, H)), rel=1e-4)
+        else:
+            # (collide_down, M35) only the first rank, knocked down, takes the collision damage; the second stays up
+            assert hp == pytest.approx(lane * collision(10.8, 1000, mB, st, H), rel=1e-4)
 
-    def test_braced_stormvermin_stay_up(self):
-        hp, st, H = landing(KNIGHTS, SVHALB)
+    @pytest.mark.parametrize("params", [P, OLD])
+    def test_braced_stormvermin_stay_up(self, params):
+        hp, st, H = landing(KNIGHTS, SVHALB, params=params)
         assert float(st.u["kd_q"][0, H]) == 0.0 and float(st.u["kd_n"][0, H]) == 0.0      # dv 6.4: knocked back only
         lane, _ = lane_of(st, H)
         B = float(impact.bracing(st.u, P, torch.zeros_like(st.u["men"]), torch.zeros_like(st.u["men"]))[0, H])
         assert 150.0 * B == pytest.approx(1200.0)                                # 8 ranks x 2: B 8
-        assert hp == pytest.approx(lane * collision(10.8, 1000, 1200.0, st, H), rel=1e-4)   # only the first rank met
+        if params is OLD:
+            assert hp == pytest.approx(lane * collision(10.8, 1000, 1200.0, st, H), rel=1e-4)   # only the first rank met
+        else:
+            assert hp == 0.0                     # (collide_down, M35) knocked back, on their feet: no collision damage
 
-    def test_an_unbraced_target_goes_down_rank_after_rank(self):
-        hp, st, H = landing(KNIGHTS, CLANRATS, v=10.8, target_v=-1.0)           # walking into the charge: no bracing
+    @pytest.mark.parametrize("params", [P, OLD])
+    def test_an_unbraced_target_goes_down_rank_after_rank(self, params):
+        hp, st, H = landing(KNIGHTS, CLANRATS, v=10.8, target_v=-1.0, params=params)   # walking into the charge: no bracing
         lane, ranks = lane_of(st, H)
         h, _ = melee.spacing_of(st.u, SP)
         c = float(h[0, 0] / h[0, H])
         v, down, total = 11.8, 0, 0.0
         for _ in range(int(ranks)):
-            total += lane * collision(v, 1000, 100.0, st, H)
-            if 1.3 * 1000 / 1100 * v <= 7.0:
+            knocked = 1.3 * 1000 / 1100 * v > 7.0
+            if params is OLD or (knocked and v > 7.0):            # (collide_down: knocked, closing faster than 7 m/s)
+                total += lane * collision(v, 1000, 100.0, st, H)
+            if not knocked:
                 break
             down += 1
             v *= (1 - 1.3 * 100 / 1100 * 0.8) ** c
@@ -144,14 +160,15 @@ class TestLanding:
 
     @pytest.mark.parametrize("t_bearing, deg, braced", [(0.0, 120, True), (350.0, 120, True), (0.0, 75, False),
                                                          (120.0, 120, False)])
-    def test_the_damage_keeps_the_brace_within_120_deg(self, t_bearing, deg, braced):
+    @pytest.mark.parametrize("down_only", [1, 0])
+    def test_the_damage_keeps_the_brace_within_120_deg(self, t_bearing, deg, braced, down_only):
         """damage_brace_deg (build/diag_cav/mechanic.md M30): the speed change takes B only within brace_deg 75 - from the
         flank B 1, the men go down rank after rank - while each man met takes the collision damage divided by his brace B
         (stormvermin 150 x 8) within damage_brace_deg 120 of his facing: the charger (from the west) 90 deg off a target
         facing north, 80 deg off one facing 350; from the rear cone (facing 120: 150 deg off) by 150."""
         imp = P.sim["contact"]["impact"]
         assert imp.get("damage_brace_deg") == 120
-        p = P.with_cal("contact", impact=dict(imp, damage_brace_deg=deg))
+        p = P.with_cal("contact", impact=dict(imp, damage_brace_deg=deg, collide_down=down_only))
         hp, st, H = landing(KNIGHTS, SVHALB, t_bearing=t_bearing, params=p)
         _, ranks = lane_of(st, H)
         h, _ = melee.spacing_of(st.u, SP)
@@ -165,8 +182,10 @@ class TestLanding:
         mB = 1200.0 if braced else 150.0
         v, total = 10.8, 0.0
         for _ in range(int(ranks)):
-            total += lane * collision(v, 1000, mB, st, H)
-            if 1.3 * 1000 / 1150 * v <= 7.0:
+            knocked = 1.3 * 1000 / 1150 * v > 7.0
+            if not down_only or (knocked and v > 7.0):
+                total += lane * collision(v, 1000, mB, st, H)
+            if not knocked:
                 break
             v *= (1 - 1.3 * 150 / 1150 * 0.8) ** c
         assert float(st.u["kd_q"][0, H]) == 1.0                                    # B 1 in the speed change: down
