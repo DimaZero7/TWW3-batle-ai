@@ -450,6 +450,12 @@ INTERNAL = {
     "fx_on": ("i", "the innate effects on in the last step: bitmask over config/nn/effects.json order"),
     "ab_rx": ("i", "the abilities of other units on it in the last step (a friend's aura or cast, an enemy's): bitmask "
                    "over the passports' order (abilities.keys); the network's effects from others"),
+    "ab_en": ("i", "the enemies' active abilities on enemies lying on it in the last step (31.10.2026, the Warp Grinders' "
+                   "Warp-Quake and Seismic Snare: within range_m of an owner, held to range_m + enemy_hold_m), bitmask over "
+                   "the passports' order: one record per ability whatever the owners (abilities.py)"),
+    "dq_t": ("f", "seconds to the next tick of an enemy ability's direct damage on it while one lies on it (0: a tick "
+                  "at once - the record's start; direct.py from_abilities)"),
+    "dq_sum": ("f", "bookkeeping: HP the enemies' abilities' direct damage has taken from it so far (direct.py)"),
     "fx_rx": ("i", "the innate auras of other units on it in the last step (Hold the Line): the same bitmask "
                    "(effects.py); State.observation() gives ab_rx | fx_rx"),
     "fxd_s": ("f", "seconds its delayed effect's conditions have held without a break (effects.py delayed: on at delay_s)"),

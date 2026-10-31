@@ -37,17 +37,21 @@ def tables():
             "special_ability_phase_attribute_effects": a}
 
 
-def ability(key, active, recharge, uses, rng, own, friendly, enemy, every_frame, cp=(0.0, 0.0)):
-    """A unit_special_abilities row by the schema's names (only the columns a passport reads)."""
+def ability(key, active, recharge, uses, rng, own, friendly, enemy, every_frame, cp=(0.0, 0.0), aim=()):
+    """A unit_special_abilities row by the schema's names (only the columns a passport reads); aim: the targets a player
+    chooses among (target_friends / target_enemies / target_ground)."""
     return {"key": key, "active_time": active, "recharge_time": recharge, "num_uses": uses, "effect_range": rng,
             "affect_self": own, "num_effected_friendly_units": friendly, "num_effected_enemy_units": enemy,
             "update_targets_every_frame": every_frame, "initial_recharge": 0.0,
-            "additional_melee_cp": cp[0], "additional_missile_cp": cp[1]}
+            "additional_melee_cp": cp[0], "additional_missile_cp": cp[1],
+            **{f"target_{k}": k in aim for k in ("friends", "enemies", "ground")}}
 
 
 class TestPassport:
     PREFIX = {"buff": ability("buff", 14.0, 60.0, -1, 35.0, True, -1, 0, False, (50.0, 25.5)),
-              "hex": ability("hex", 13.0, 0.0, 1, 35.0, False, 0, -1, False),
+              "hex": ability("hex", 13.0, 0.0, 1, 35.0, False, 0, -1, False, aim=("enemies",)),
+              # (31.10.2026, the Warp Grinders' Warp-Quake) on the enemies around its owner, no target to choose
+              "quake": ability("quake", 17.0, 90.0, -1, 35.0, False, 0, -1, True),
               "aura": ability("aura", -1.0, -1.0, -1, 35.0, True, -1, 0, True)}
 
     def test_the_phase_named_as_the_ability_wins_over_its_other_phases(self):
@@ -63,6 +67,14 @@ class TestPassport:
         assert hex_["phases"] == ["hex_phase"] and hex_["targets"]["enemies"] and not hex_["self_cast"]
         aura = abilities.passport("aura", self.PREFIX, tables())
         assert aura["passive"] and not aura["self_cast"] and aura["effects"] == []
+
+    def test_an_ability_around_its_owner_has_no_target_to_choose(self):
+        t = tables()
+        t["special_ability_to_special_ability_phase_junctions"] = t["special_ability_to_special_ability_phase_junctions"] + [
+            {"order": 1, "special_ability": "quake", "phase": "quake", "target_self": False, "target_friends": False,
+             "target_enemies": True}]
+        quake = abilities.passport("quake", self.PREFIX, t)
+        assert quake["self_cast"] and quake["targets"]["enemies"] and not quake["targets_own"]
 
     def test_cards_check_which_abilities_are_passive(self, tmp_path):
         card = {"card": {"profile": {"owned_non_passive_special_abilities": ["buff"],

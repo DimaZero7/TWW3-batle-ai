@@ -157,6 +157,11 @@ ATTRIBUTES = {
                         "does": "a mark for the campaign abilities of Clan Moulder's lords (Throt, the Packmaster); "
                                 "nothing in a battle by itself",
                         "kb": KB + "abilities.md#attributes-selection", "schema_why": "nothing to act on in battle"},
+    # (31.10.2026, the Warp Grinders: build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/units.md)
+    "wallbreaker": {"name": "Wallbreaker", "rules": ["wallbreaker"],
+                    "does": "damages walls and gates (building damage x1.5 on top of the weapon's own); sieges only",
+                    "kb": KB + "abilities.md#attributes-selection",
+                    "schema_why": "no walls or buildings in our battles"},
 }
 # Contact effects (fandom "Contact Effect"; docs/en/game/mechanics/abilities.md "Contact effects"): a weapon's blow
 # (melee_weapons.contact_phase) or projectile hit (projectiles.contact_stat_effect) lays its phase on the enemy it hits
@@ -190,9 +195,11 @@ MISSING = {
     "stubborn, hatred": "not in the WH3 database as unit attributes or passive abilities (WH2 had them)",
     "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of "
                    "our passives carry their effects in the stat and attribute tables",
-    "direct damage on others": "a phase's direct damage (the passport's direct) on friends or enemies (the Warp Grinder's "
-                               "Warp Tremor, the Cauldron's miasma: not in the pools) - the simulator acts on the one on "
-                               "the owner itself only (tools/nn/sim/direct.py)",
+    "direct damage on others": "an innate effect's direct damage (the passport's direct) on friends or enemies (the "
+                               "Cauldron's miasma: not in the pools) - the simulator acts on an innate one on the owner "
+                               "itself only (tools/nn/sim/direct.py); an ACTIVE ability's on the enemies within its range "
+                               "(the Warp Grinders' Warp-Quake, since 31.10.2026) is no innate effect: "
+                               "tools/nn/sim/abilities.py",
     "other vortices": "a vortex of another behaviour (vortex_per_entity, vortex_on_death), of an active ability or a spell, "
                       "a moving one, one striking its own side, several in a row or a subsequent one: the simulator acts on "
                       "a standing vortex at a man's death striking enemies only (tools/nn/sim/vortex.py)",

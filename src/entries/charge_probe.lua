@@ -47,6 +47,11 @@
 --                  key, tg (the unit's name), n (its index in casts), at_s, can (can_perform_special_ability before),
 --                  w (the caster's side's winds before), status given / failed}. No contact: the lane ends after max_s.
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
+-- lane.a_casts (optional, the grinder plan) {{key, at_s | at_m}}: the attacker uses each on himself once - at_s after
+-- the go, or once the two units' centres are within at_m before the contact (an ability without a target: the Warp
+-- Grinders' Warp-Quake and Seismic Snare); perform_special_ability(key, the unit), and if that call fails
+-- perform_special_ability(key); each try is probe_ability {who 'a', key, t, d (the centres' distance), n, status used /
+-- not_ready / used_no_target / failed}.
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns); with lane.men_all_tg the target's and the extras' too
 -- (the artillery plan: who dies where in a block 150 m off the guns).
@@ -838,6 +843,26 @@ function M.main(bm, config, globals)
                     orders.halt(lane.t.uc)
                     emit('probe_phase', {lane = lane.name, phase = 'stop_fire', t = now - lane.t0})
                 end
+                -- lane.a_casts (the grinder plan; module comment): the attacker's own abilities by time or distance
+                for i, c in ipairs(lane.a_casts or {}) do
+                    lane.a_cast_done = lane.a_cast_done or {}
+                    if not lane.a_cast_done[i] then
+                        local d = dist(lane.a.unit, lane.t.unit)
+                        local due = (c.at_s and now - lane.t0 >= c.at_s * 1000)
+                            or (c.at_m and not lane.contact and d and d <= c.at_m)
+                        if due then
+                            lane.a_cast_done[i] = true
+                            local ok, used = pcall(orders.use_ability_on_self, lane.a.uc, lane.a.unit, c.key)
+                            local status = ok and (used and 'used' or 'not_ready') or nil
+                            if not ok then
+                                local ok2 = pcall(function() lane.a.uc:perform_special_ability(c.key) end)
+                                status = ok2 and 'used_no_target' or 'failed'
+                            end
+                            emit('probe_ability', {lane = lane.name, who = 'a', key = c.key, n = i, t = now - lane.t0,
+                                d = d and round(d) or nil, status = status})
+                        end
+                    end
+                end
                 if lane.a_ability and lane.contact and not lane.a_ability_done
                         and now - lane.contact >= (lane.a_ability_after_s or 0) * 1000 then
                     lane.a_ability_done = true
@@ -1266,6 +1291,10 @@ function M.main(bm, config, globals)
             end
             if l.mode == 'laps' then
                 assert(type(l.run_s) == 'number' and type(l.laps_r) == 'number', 'a laps lane needs run_s and laps_r')
+            end
+            for _, c in ipairs(l.a_casts or {}) do
+                assert(type(c.key) == 'string' and (type(c.at_s) == 'number' or type(c.at_m) == 'number'),
+                    'an a_casts entry needs key and at_s or at_m')
             end
             if l.mode == 'cast' then
                 assert(type(l.casts) == 'table', 'a cast lane needs casts')

@@ -172,8 +172,19 @@ FIELDS = {
                       "frame, an aura that follows the caster (Rally, Hold the Line); 0 - it is laid once at the cast "
                       "on the units in range, and they keep it for active_s wherever they go, later arrivals get "
                       "nothing (Stand Your Ground; 142 recorded battles, build/effects/spec.md 3.2)",
-    "self_cast": "active, not auto, affect_self, friendly_units and enemy_units 0 or -1 (ours): used on the "
-                 "caster himself, no target to choose (perform_special_ability(key, the lord))",
+    "self_cast": "active, not auto, and no target to choose: affect_self with friendly_units and enemy_units 0 or -1 "
+                 "(the lords' own abilities), or none of the unit_special_abilities target_friends / target_enemies / "
+                 "target_ground (31.10.2026, the Warp Grinders' Warp-Quake and Seismic Snare: affect_self 0, they act "
+                 "on the enemies around the owner) - used on the caster himself (perform_special_ability(key, the "
+                 "unit); the bridge's 'ability <unit> <key>' without a target)",
+    "loop_stance": "only an ability with unit_special_abilities.use_loop_stance (the Warp Grinders' two: they turn their drills "
+                   "in place): while it is active its owner takes no order (the game's status 'unorderable') and stands; "
+                   "its melee goes on (the probe 'grinder', build/diag_grinder: a move order 2 s into Warp-Quake refused, "
+                   "not taken up after it)",
+    "cant_move": "only an ability with a phase flag cant_move (special_ability_phases.cant_move: the Warp Grinders' "
+                 "Seismic Snare on the enemies within its range): the units it lies on refuse every order to move, an "
+                 "attack only on a target already within reach, and do not walk; their melee goes on (the game's "
+                 "program, build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md T1-T3)",
     "recharge_when": "special_ability_to_recharge_contexts.recharge_context of the ability: its recharge runs only while "
                      "this holds (Strength of the Penitent: losing_melee_combat - 3 s while losing, CA hotfix 6.2.2; as the "
                      "game acts on it: while not winning its melee, out of melee too - build/effectsimpl; "
@@ -321,6 +332,12 @@ def passport(key, rows, t):
                            # magical (the program's damage flags 6): past armour and shields, the spell resistance and
                            # the ward cut it, the physical does not
                            "magical": True}
+    if p.get("use_loop_stance"):
+        # (FIELDS loop_stance) the owner stands and takes no order while it is active
+        extra["loop_stance"] = True
+    if any((t.get("phase_cant_move") or {}).get(ph["phase"]) for ph in phases):
+        # (FIELDS cant_move) a phase that forbids its targets to move
+        extra["cant_move"] = True
     if p.get("behaviour"):
         extra["behaviour"] = p["behaviour"]
     vx = (t.get("vortices") or {}).get(p.get("vortex") or "")
@@ -336,7 +353,10 @@ def passport(key, rows, t):
         "cp": [_number(p["additional_melee_cp"]), _number(p["additional_missile_cp"])],
         "range_m": p["effect_range"], "passive": passive, "targets_own": p["affect_self"],
         "friendly_units": friendly, "enemy_units": enemy,
-        "self_cast": (not passive) and not auto and p["affect_self"] and friendly in (0, -1) and enemy in (0, -1),
+        "self_cast": (not passive) and not auto and (
+            (p["affect_self"] and friendly in (0, -1) and enemy in (0, -1))
+            # (FIELDS self_cast) no target to choose: an ability around its owner (the Warp Grinders')
+            or not any(p.get(f"target_{k}") for k in ("friends", "enemies", "ground"))),
         "update_targets": bool(p["update_targets_every_frame"]),
         "auto": auto,
         "recharge_when": sorted(r["recharge_context"] for r in t.get("special_ability_to_recharge_contexts", ())
@@ -438,7 +458,9 @@ def build(tables, keys, units, roster=ROSTER):
                                   for r in tables[PHASES] if r["id"] in names},
                       phase_direct={r["id"]: (int(r.get("damage_amount") or 0), int(r.get("max_damaged_entities") or 0),
                                               round(float(r.get("hp_change_frequency") or 0.0), 6))
-                                    for r in tables[PHASES] if r["id"] in names})
+                                    for r in tables[PHASES] if r["id"] in names},
+                      # (31.10.2026, the Warp Grinders) the phase flag cant_move (FIELDS cant_move)
+                      phase_cant_move={r["id"]: bool(r.get("cant_move")) for r in tables[PHASES] if r["id"] in names})
     if "battle_vortexs" in tables:
         tables = dict(tables, vortices={r["vortex_key"]: r for r in tables["battle_vortexs"]})
     if "_kv_unit_ability_scaling_rules" in tables:

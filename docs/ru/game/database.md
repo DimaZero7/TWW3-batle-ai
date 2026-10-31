@@ -130,7 +130,7 @@ py -3.14 -m tools.nn.dbschema     # пересобрать config/db_schema.json
 | `special_ability_to_special_ability_phase_junctions`, 2-й и 3-й | способность, фаза | **фаза, способность** (перепутаны) | нет: у каждой нашей способности одна фаза с её же именем; строки «другой способности с той же фазой» мы считали «вариантами» |
 | `unit_armour_types.material` | материал брони | `audio_type` — звук удара (body, leather, chainmail…) | нет: `armour_material` только в паспорте |
 | `unit_shield_types.material` | материал щита | `audio_type` | нет: не читается |
-| `unit_special_abilities` 5-й (`targets_own`) | «применяется на себя или своих» | `affect_self` — действует и на владельца | нет: у всех наших 1; `self_cast` то же |
+| `unit_special_abilities` 5-й (`targets_own`) | «применяется на себя или своих» | `affect_self` — действует и на владельца | нет: у всех наших 1, кроме двух способностей Варп-дробилок (0: они действуют на врагов вокруг); `self_cast` — «цели выбирать не нужно»: `affect_self` или ни одного `target_friends / target_enemies / target_ground` |
 | пассивность способности | `active_time` и `recharge_time` оба −1 | в таблице есть свой столбец `passive` | нет: расходится только «Сила кающегося» (в таблице passive, у нас `auto` — тоже врождённая) |
 | `projectiles.trajectory` | траектория | `trajectory_sight` | нет: значения те же (`low` — прямой огонь) |
 | `projectiles` 21-й, 22-й (`f21`, `f22`) | float без смысла | `bonus_v_infantry`, `bonus_v_large` (int32) | нет: у снарядов наших отрядов оба 0 (раньше считали, что такого столбца нет) |

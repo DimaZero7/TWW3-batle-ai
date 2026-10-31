@@ -18,9 +18,20 @@ tools/nn/sim/effects.py - the Pathogen is off out of melee, its database flag ou
            (melee.shot_kills; the random men picked again every tick, the same may be struck again: the hits spread
            evenly), and a man it kills fires his vortex too (vortex.py)
 Its HP counts in the unit's casualties (morale's casualty windows: a loss of its health like any other, B5), not in the
-fight's balance, not as an enemy's kill. A battle without such a unit is unchanged bit for bit. Needs torch."""
+fight's balance, not as an enemy's kill. A battle without such a unit is unchanged bit for bit.
+
+On enemies (from_abilities; 31.10.2026, the Warp Grinders' Warp-Quake: build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/
+mechanic.md W1-W5): an ACTIVE ability on enemies (tools/nn/sim/abilities.py, its table's dd_* columns from the passport's
+direct: 5 HP, 18 men, every 0.5 s) strikes by the same formula every enemy unit it lies on this step (abilities.apply's
+records ab_en: centre within 35 m of an owner's centre, held to 40 m) - min(18, its living men) random men each tick,
+the first tick at once when the record begins (the clock dq_t is 0 off the record: a unit coming back is struck at
+once), magical (the spell resistance and the ward cut it, armour and shields do not); the same ability of two owners does
+not stack (one record a unit and ability). The HP and kills are the owners' (shared evenly among the owners reaching it):
+an enemy's damage for the struck unit's casualties and the owners' kills, not in the melee's fight balance. One such
+ability a unit at a time (the lowest index on it; today only Warp-Quake). Needs torch."""
 import torch
 
+from tools.nn.sim import abilities as sab
 from tools.nn.sim import effects as innate
 from tools.nn.sim import melee
 
@@ -84,3 +95,61 @@ def strike(u, params, dt):
     u["dd_t"] = torch.where(go, left.clamp(min=0), torch.zeros_like(u["dd_t"]))
     u["dd_sum"] = u["dd_sum"] + hp
     return hp, kills, hits
+
+
+def enemy_on(params):
+    """Is any modelled active ability's direct damage on enemies in the passports (only json)?"""
+    model = set(params.sim["abilities"]["model"])
+    return on(params) and any("enemies" in ((p.get("direct") or {}).get("on") or ()) and k in model and not p["passive"]
+                              for k, p in (params.abilities or {}).items())
+
+
+def enemy_top_base(params):
+    """The largest hit base of the passports' direct damage on enemies (abilities.json; the loop's bound of hit_mean)."""
+    import math
+    vs = [math.floor(max(1.0, float(d["amount"]) * float(d.get("scale", 1.0))))
+          for p in (params.abilities or {}).values() for d in [p.get("direct") or {}] if d and "enemies" in (d.get("on") or ())]
+    return int(max(vs + [1]))
+
+
+def from_abilities(u, params, dt, dist, same_side):
+    """(hp [B, i, j], kills [B, i, j]) or (None, None): this step's ticks of the enemies' active abilities' direct damage
+    (module doc "On enemies") on each unit j, given to its owners i; advances the clock dq_t and the bookkeeping dq_sum,
+    in place. Call after abilities.apply (its records ab_en and timers of this step)."""
+    if "ab_en" not in u or "dq_t" not in u or not enemy_on(params):
+        return None, None
+    T = sab.table(params, u["men"].device)
+    A = T.shape[0] - 1
+    col = lambda name: T[:A, sab.COL[name]]
+    dd = (col("dd_n") != 0) & (col("dd_s") > 0) & (col("modelled") > 0)                 # [A]
+    bit = (u["ab_en"][..., None] >> torch.arange(A, device=u["men"].device)) & 1        # [B, j, a]
+    on = (bit > 0) & dd                                                                  # [B, j, a]
+    has = on.any(-1)
+    # the ability struck with: the lowest index on the unit (one at a time: the module doc)
+    a = torch.where(has, on.float().argmax(-1), torch.full_like(u["dq_t"], A, dtype=torch.long))
+    r = T[a]                                                                             # [B, j, COLS]
+    n_cap, every = r[..., sab.COL["dd_n"]], r[..., sab.COL["dd_s"]]
+    alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    go = has & alive
+    tick = go & (u["dq_t"] <= 1e-4)
+    keep = 1 - u["resist_magic"].clamp(-1.0, 0.9)
+    hp_hit = hit_mean(r[..., sab.COL["dd_base"]], r[..., sab.COL["dd_low"]], keep, enemy_top_base(params))
+    men = u["men"].clamp(min=0)
+    n = torch.where(n_cap < 0, men, torch.minimum(n_cap, men))
+    hits = torch.where(tick, n, torch.zeros_like(n))
+    hp = (hits * hp_hit).clamp(max=u["hp_abs"].clamp(min=0))
+    kills = melee.shot_kills(hits, men, u["hp_man"], u["hp_abs"], hp_hit.clamp(min=1e-6))
+    kills = torch.where(tick & (hp_hit > 0) & (u["men0"] > 1), kills, torch.zeros_like(kills))
+    left = torch.where(tick, u["dq_t"] + every, u["dq_t"]) - dt
+    u["dq_t"] = torch.where(go, left.clamp(min=0), torch.zeros_like(u["dq_t"]))
+    u["dq_sum"] = u["dq_sum"] + hp
+    # the owners: an enemy i with an active slot of that ability whose centre is within its range + hold of j's
+    hold_m = float(params.sim["abilities"].get("enemy_hold_m", 0.0))
+    w = torch.zeros_like(dist)
+    for k in range(sab.SLOTS):
+        mine = u[f"ab{k}"][:, :, None] == a[:, None, :]                                  # [B, i, j]: i's slot k is j's
+        act = (u[f"ab{k}"] >= 0) & (u[f"ab{k}_on"] > 0) & alive                          # [B, i]
+        rng = T[u[f"ab{k}"], sab.COL["range_m"]]                                         # [B, i]
+        w = w + (mine & act[:, :, None] & ~same_side & (dist <= (rng + hold_m)[:, :, None])).float()
+    share = torch.where(w.sum(1, keepdim=True) > 0, w / w.sum(1, keepdim=True).clamp(min=1e-9), torch.zeros_like(w))
+    return share * hp[:, None, :], share * kills[:, None, :]

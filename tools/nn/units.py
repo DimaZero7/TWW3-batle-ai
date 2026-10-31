@@ -83,7 +83,12 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # body and weapon with poison, defence 5, 43 HP a man and two passives - Unshakable Pathogen (direct damage to
          # itself in melee: tools/nn/sim/direct.py) and Pestilent Perfection (a vortex at every man's death:
          # tools/nn/sim/vortex.py). Only the v3 army scheme fields them (config/nn/pools.json units_v3)
-         "wh3_dlc29_skv_inf_pusbags")
+         "wh3_dlc29_skv_inf_pusbags",
+         # 31.10.2026, the Warp Grinders (build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/units.md, mechanic.md): 24
+         # crews of 184 HP, armour 70, a magical drill 18 + 78 sweeping 4 men; two active abilities without a target -
+         # Warp-Quake (direct damage to every enemy within 35 m: tools/nn/sim/abilities.py, direct.py) and Seismic Snare
+         # (no movement for the enemies within 35 m). Only the v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh2_dlc14_skv_inf_warp_grinder_0")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in

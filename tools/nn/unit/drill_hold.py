@@ -43,8 +43,9 @@ def _passports():
 
 # Kept out of the unit drills (31.10.2026): the Pusbags joined the pool (config/nn/units.json) with their own disease in
 # melee and vortices at death; the drills' fixed exam (6 x 10 x 2 x 3 = 360 battles) stays as it was until it is decided
-# whether the unit level should learn them
-NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags",)
+# whether the unit level should learn them; the Warp Grinders the same (31.10.2026: two active abilities on every enemy
+# within 35 m - Warp-Quake's direct damage and Seismic Snare's no-move)
+NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags", "wh2_dlc14_skv_inf_warp_grinder_0")
 
 
 def roster():

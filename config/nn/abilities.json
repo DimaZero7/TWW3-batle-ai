@@ -14,7 +14,9 @@
   "friendly_units": "unit_special_abilities.num_effected_friendly_units: -1 all in range, n, 0 none",
   "enemy_units": "unit_special_abilities.num_effected_enemy_units: -1 all in range, n, 0 none",
   "update_targets": "unit_special_abilities.update_targets_every_frame: 1 - the ability picks its targets in range every frame, an aura that follows the caster (Rally, Hold the Line); 0 - it is laid once at the cast on the units in range, and they keep it for active_s wherever they go, later arrivals get nothing (Stand Your Ground; 142 recorded battles, build/effects/spec.md 3.2)",
-  "self_cast": "active, not auto, affect_self, friendly_units and enemy_units 0 or -1 (ours): used on the caster himself, no target to choose (perform_special_ability(key, the lord))",
+  "self_cast": "active, not auto, and no target to choose: affect_self with friendly_units and enemy_units 0 or -1 (the lords' own abilities), or none of the unit_special_abilities target_friends / target_enemies / target_ground (31.10.2026, the Warp Grinders' Warp-Quake and Seismic Snare: affect_self 0, they act on the enemies around the owner) - used on the caster himself (perform_special_ability(key, the unit); the bridge's 'ability <unit> <key>' without a target)",
+  "loop_stance": "only an ability with unit_special_abilities.use_loop_stance (the Warp Grinders' two: they turn their drills in place): while it is active its owner takes no order (the game's status 'unorderable') and stands; its melee goes on (the probe 'grinder', build/diag_grinder: a move order 2 s into Warp-Quake refused, not taken up after it)",
+  "cant_move": "only an ability with a phase flag cant_move (special_ability_phases.cant_move: the Warp Grinders' Seismic Snare on the enemies within its range): the units it lies on refuse every order to move, an attack only on a target already within reach, and do not walk; their melee goes on (the game's program, build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md T1-T3)",
   "recharge_when": "special_ability_to_recharge_contexts.recharge_context of the ability: its recharge runs only while this holds (Strength of the Penitent: losing_melee_combat - 3 s while losing, CA hotfix 6.2.2; as the game acts on it: while not winning its melee, out of melee too - build/effectsimpl; Wounds: health_below_25% - its 5 s initial recharge runs once below a quarter); a passive without an active time is on only once it has recharged so",
   "off_when": "special_ability_to_auto_deactivate_flags.deactivate_flag: the effect switches off while this holds (Frenzy: morale_is_lower_than_half_of_base_morale; Penitent: out_of_melee)",
   "auto": "a timed passive (ours): an active time, a key with '_passive_' (the game lists it among the passives, unit_abilities) - the game fires it by itself whenever it is ready and nothing holds it off (off_when; the recordings: Strength of the Penitent on at the contact, 53 of 54, without losses too); no player or network order",
@@ -34,6 +36,113 @@
   "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same"
  },
  "abilities": {
+  "wh2_dlc14_unit_abilities_seismic_snare": {
+   "active_s": 13.0,
+   "recharge_s": 60.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0,
+   "cp": [
+    100,
+    0
+   ],
+   "range_m": 35.0,
+   "passive": false,
+   "targets_own": false,
+   "friendly_units": 0,
+   "enemy_units": -1,
+   "self_cast": true,
+   "update_targets": true,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [
+    "wh2_dlc14_unit_abilities_seismic_snare"
+   ],
+   "targets": {
+    "self": false,
+    "friends": false,
+    "enemies": true
+   },
+   "effects": [],
+   "attributes": [],
+   "loop_stance": true,
+   "cant_move": true
+  },
+  "wh2_dlc14_unit_abilities_warp_quake": {
+   "active_s": 17.0,
+   "recharge_s": 90.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0,
+   "cp": [
+    50,
+    100
+   ],
+   "range_m": 35.0,
+   "passive": false,
+   "targets_own": false,
+   "friendly_units": 0,
+   "enemy_units": -1,
+   "self_cast": true,
+   "update_targets": true,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [
+    "wh2_dlc14_unit_abilities_warp_quake"
+   ],
+   "targets": {
+    "self": false,
+    "friends": false,
+    "enemies": true
+   },
+   "effects": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.75,
+     "on": [
+      "enemies"
+     ],
+     "phase": "wh2_dlc14_unit_abilities_warp_quake"
+    }
+   ],
+   "attributes": [],
+   "direct": {
+    "amount": 5,
+    "entities": 18,
+    "every_s": 0.5,
+    "on": [
+     "enemies"
+    ],
+    "scale": 1.0,
+    "min_unary": 0.5,
+    "hit_hp": 3.2,
+    "hit_dist": [
+     [
+      2,
+      0.2
+     ],
+     [
+      3,
+      0.4
+     ],
+     [
+      4,
+      0.4
+     ]
+    ],
+    "range_m": 35.0,
+    "hold_m": 40.0,
+    "n_enemy": -1,
+    "n_friend": 0,
+    "every_frame": true,
+    "duration_s": 17.0,
+    "magical": true
+   },
+   "loop_stance": true
+  },
   "wh2_main_character_abilities_verminous_valour": {
    "active_s": 17.0,
    "recharge_s": 60.0,

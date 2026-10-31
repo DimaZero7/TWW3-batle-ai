@@ -1904,6 +1904,104 @@
    },
    "missile": null,
    "card_check": "no card"
+  },
+  "wh2_dlc14_skv_inf_warp_grinder_0": {
+   "land_unit": "wh2_dlc14_skv_inf_warp_grinder_0",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 24,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 2,
+   "entity": "wh2_dlc14_skv_infantry_weaponteam_warp_grinder",
+   "spacing": {
+    "template": "wh2_main_skv_weaponteam_grinders",
+    "h": 5.2,
+    "v": 5.3,
+    "scatter": 1.0,
+    "chaotic": false
+   },
+   "hp_per_man": 184,
+   "hp_total": 4416,
+   "mass": 600.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 1.3,
+   "radii_ratio": 0.6,
+   "body_shape": "ellipse",
+   "knock_ignore": 0,
+   "hit_reaction_ignore": 0,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.8,
+    "charge": 4.5,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 3.0,
+    "deceleration": 5.0,
+    "turn_deg_s": 100.0
+   },
+   "melee": {
+    "attack": 20,
+    "defence": 18,
+    "charge_bonus": 8,
+    "weapon": "wh2_dlc14_skv_warp_grinder",
+    "damage": 18,
+    "ap_damage": 78,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 5.7,
+    "splash_target_size": "medium",
+    "splash_max_attacks": 4,
+    "splash_power_multiplier": 1.3,
+    "magic": true,
+    "flaming": false,
+    "contact_phase": null,
+    "weapon_length": 4.0
+   },
+   "armour": 70,
+   "armour_material": "heavy_metal",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 45,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 0.9,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "guerrilla_deploy",
+    "hide_forest",
+    "wallbreaker"
+   ],
+   "abilities": [
+    "wh2_dlc14_unit_abilities_seismic_snare",
+    "wh2_dlc14_unit_abilities_warp_quake",
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 600,
+   "combat_potential": {
+    "melee": 240.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
   }
  }
 }

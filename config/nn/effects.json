@@ -20,7 +20,7 @@
   "attribute numbers": "unit_attributes_tables holds the keys only: an attribute's rule and numbers are the engine's (_kv tables, game_rules.json) and the knowledge base's (ATTRIBUTES in tools/nn/effects.py)",
   "stubborn, hatred": "not in the WH3 database as unit attributes or passive abilities (WH2 had them)",
   "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of our passives carry their effects in the stat and attribute tables",
-  "direct damage on others": "a phase's direct damage (the passport's direct) on friends or enemies (the Warp Grinder's Warp Tremor, the Cauldron's miasma: not in the pools) - the simulator acts on the one on the owner itself only (tools/nn/sim/direct.py)",
+  "direct damage on others": "an innate effect's direct damage (the passport's direct) on friends or enemies (the Cauldron's miasma: not in the pools) - the simulator acts on an innate one on the owner itself only (tools/nn/sim/direct.py); an ACTIVE ability's on the enemies within its range (the Warp Grinders' Warp-Quake, since 31.10.2026) is no innate effect: tools/nn/sim/abilities.py",
   "other vortices": "a vortex of another behaviour (vortex_per_entity, vortex_on_death), of an active ability or a spell, a moving one, one striking its own side, several in a row or a subsequent one: the simulator acts on a standing vortex at a man's death striking enemies only (tools/nn/sim/vortex.py)"
  },
  "_inflicts": "contact effects (kind contact) a unit's weapons lay on the enemies they hit (the passport's melee.contact_phase, missile.contact_phase); the unit does not own them (units), the network sees them as its `owned` column of the effect, `on` while the unit itself is under one",
@@ -56,7 +56,8 @@
   "causes_terror",
   "wh_main_unit_passive_regeneration",
   "wh3_dlc29_unit_passive_pestilent_perfection",
-  "wh3_dlc29_unit_passive_unshakable_pathogen"
+  "wh3_dlc29_unit_passive_unshakable_pathogen",
+  "wallbreaker"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -995,6 +996,25 @@
    "modelled": true,
    "sim": "direct damage 5 x 1 to 3 random own men every 1 s (3.2 HP a man) (off while out of melee)",
    "why": null
+  },
+  "wallbreaker": {
+   "kind": "attribute",
+   "name": "Wallbreaker",
+   "rules": [
+    "wallbreaker"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (wallbreaker)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "damages walls and gates (building damage x1.5 on top of the weapon's own); sieges only",
+   "modelled": false,
+   "sim": null,
+   "why": "no walls or buildings in our battles"
   }
  },
  "units": {
@@ -1016,6 +1036,13 @@
    "ignore_trees",
    "mounted_fire_move",
    "stalk"
+  ],
+  "wh2_dlc14_skv_inf_warp_grinder_0": [
+   "guerrilla_deploy",
+   "hide_forest",
+   "wallbreaker",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
   ],
   "wh2_dlc16_skv_mon_brood_horror_0": [
    "causes_fear",

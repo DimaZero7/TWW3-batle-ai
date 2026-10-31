@@ -32,11 +32,22 @@ passives that reach other units, then the rest, each group by key); the simulato
 (slot_keys): every timed ability of every unit of our pools fits (tests/tools/test_nn_ability_slots.py), the passives
 are innate effects (effects.py) and need no slot here. The network's input (tools/nn/model/abilities.py) shows all of
 them, none dropped: its timed slot k is this module's slot k.
+On enemies (31.10.2026, the Warp Grinders' Warp-Quake and Seismic Snare: passport targets enemies, column t_en; the game's
+program build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md W1, W5, T1): an active one lies on every enemy
+unit whose centre is within range_m of its owner's centre, and stays on it while that centre is within range_m +
+enemy_hold_m (config/nn/sim.json abilities: 5 m) - the record of the last step, ab_en (INTERNAL, a bitmask over the
+passports' order); the targets are re-picked every step, one beyond that is dropped at once. Visibility plays no part.
+The same ability of two owners does not stack on one enemy (the game finds the record by the ability and the side): its
+stats count once. Its direct damage (the passport's direct, Warp-Quake) is tools/nn/sim/direct.py from_abilities; its
+cant_move (Seismic Snare) the movement's and the orders' (battle.py: snared()). The abilities without t_en (the lords')
+keep their old reach (their enemies' columns are neutral).
 Received (`ab_rx`, INTERNAL, the network's "effects on me from others"): a bitmask over the passports' order (keys())
 of the abilities of OTHER units on each unit in the last step - a friend's aura or cast laid on it (snap), an enemy's on
 it; effects.py adds the innate auras' (`fx_rx`: Hold the Line); State.observation() gives their union.
 Only json here and in slot_keys(); the tensors need torch.
 """
+import math
+
 try:
     import torch
 except ImportError:          # slots_of() is used without torch (params)
@@ -60,7 +71,14 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
 RECEIVED = None
 HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto", "friends_min",
         "vigour", "update") + tuple(
-    f"off_{f}" for f in OFF)
+    f"off_{f}" for f in OFF) + (
+    # (31.10.2026, the Warp Grinders) it lies on enemies (targets enemies: the module doc's "On enemies"); its direct
+    # damage on them - men a tick (dd_n, -1 all; 0 none), the hit's base and min_unary, the tick (s): direct.py; its
+    # phase forbids moving (cant_move)
+    "t_en", "dd_n", "dd_base", "dd_low", "dd_s", "cant_move",
+    # (the passport's loop_stance: the Grinders turn their drills in place) its owner takes no order and stands while
+    # it is active (busy())
+    "loop")
 COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
 
@@ -127,6 +145,13 @@ def row(params, key):
            float((cal.get("friends_min") or {}).get(key, 0)), float(p.get("vigour_per_s", 0.0)),
            float(p.get("update_targets", True))]
     out += [float(f in (p.get("off_when") or ())) for f in OFF]
+    d = p.get("direct") or {}
+    en = bool((p.get("targets") or {}).get("enemies")) and not p["passive"] and not auto
+    hit = en and "enemies" in (d.get("on") or ()) and float(d.get("every_s") or 0) > 0
+    out += [float(en), float(d["entities"]) if hit else 0.0,
+            float(math.floor(max(1.0, float(d["amount"]) * float(d.get("scale", 1.0))))) if hit else 0.0,
+            float(d.get("min_unary", 1.0)) if hit else 0.0, float(d["every_s"]) if hit else 0.0,
+            float(bool(p.get("cant_move")) and en), float(bool(p.get("loop_stance")) and not p["passive"])]
     for g in GROUPS:
         for s in STATS:
             out.append(eff.get((g, s), 1.0 if s in MULT else 0.0))
@@ -171,6 +196,12 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     use = torch.full_like(u["ab0"], -1) if use is None else use
     A = T.shape[0] - 1
     rx = zero[..., None].expand(-1, -1, A + 1).clone() if "ab_rx" in u else None     # [B, N, A + 1] received
+    # (the module doc's "On enemies") the abilities on enemies: the last step's records (ab_en) held to range + hold
+    hold_m = float(params.sim["abilities"].get("enemy_hold_m", 0.0))
+    t_en_any = on_enemies(params) and "ab_en" in u
+    if t_en_any:
+        en_cnt = zero[..., None].expand(-1, -1, A + 1).clone()                            # [B, j, a] owners reaching
+        en_prev = (u["ab_en"][..., None] >> torch.arange(A + 1, device=u["men"].device)) & 1    # [B, j, a]
     for k in range(SLOTS):
         r = T[u[f"ab{k}"]]                          # [B, N, COLS]; -1 picks the empty last row
         c = lambda name: r[..., COL[name]]
@@ -205,6 +236,18 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
         follow = c("update") > 0                    # an aura that follows the owner (update_targets)
         reach = {"self": eye & active[:, :, None], "friends": friends & (active & follow)[:, :, None],
                  "enemies": enemies & active[:, :, None]}
+        if t_en_any:
+            # an ability on enemies: within range_m, or held to range_m + hold_m by the last step's record; its stats
+            # once per enemy whatever the owners (below), not in the old reach
+            t_en = c("t_en") > 0
+            a_k = u[f"ab{k}"].clamp(min=0)
+            was = en_prev.gather(2, a_k[:, None, :].expand(-1, en_prev.shape[1], -1)).transpose(1, 2) > 0   # [B, i, j]
+            near = ~same_side & present[:, None, :] & (rng[:, :, None] > 0) & (
+                (dist <= rng[:, :, None]) | (was & (dist <= (rng + hold_m)[:, :, None])))
+            on_en = near & (active & t_en)[:, :, None]
+            oh_k = torch.nn.functional.one_hot(a_k, A + 1).float() * (u[f"ab{k}"] >= 0)[..., None]
+            en_cnt = en_cnt + torch.einsum("bij,bia->bja", on_en.float(), oh_k)
+            reach["enemies"] = torch.where(t_en[:, :, None], on_en, reach["enemies"])
         if snap is not None:
             # laid once at the cast on the friends in range (update_targets false): they keep it active_s
             cast = friends & (fire & ~follow & (c("modelled") > 0) & (c("active_s") > 0))[:, :, None]
@@ -225,12 +268,25 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
                     got[a] = got.get(a, torch.zeros_like(g)) | g
         for g in GROUPS:
             give = reach[g].float()
+            if g == "enemies" and t_en_any:
+                give = (reach[g] & ~(c("t_en") > 0)[:, :, None]).float()      # (t_en: once per enemy, below)
             for s in STATS:
                 v = c(f"{g}_{s}")
                 if s in MULT:
                     log[s] = log[s] + torch.einsum("bij,bi->bj", give, torch.log(v.clamp(min=1e-6)))
                 else:
                     add[s] = add[s] + torch.einsum("bij,bi->bj", give, v)
+    if t_en_any:
+        # the abilities on enemies: each one's stats once on every enemy it lies on (the game's one record per ability
+        # and side), and the records for the next step's hold (ab_en)
+        on_a = (en_cnt[..., :A] > 0) & present[..., None]                                # [B, j, a]
+        for s in STATS:
+            v = T[:A, COL[f"enemies_{s}"]]
+            if s in MULT:
+                log[s] = log[s] + (on_a.float() * torch.log(v.clamp(min=1e-6))).sum(-1)
+            else:
+                add[s] = add[s] + (on_a.float() * v).sum(-1)
+        u["ab_en"] = bits(on_a)
     if snap is not None:
         # the friends' stats of the ability laid on each unit at a cast (on a living unit)
         held = (snap > 0) & (snap_ab >= 0) & alive
@@ -271,6 +327,59 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     # resistances add up to a 90 % cap (docs/en/game/mechanics/missiles.md)
     u["resist_physical"] = (u["resist_physical"] + add["resist_physical"] / 100).clamp(max=0.9)
     return old
+
+
+def on_enemies(params):
+    """Is any ability of the passports an active one on enemies (the module doc's "On enemies"; only json - no tensor
+    read in the compiled step)?"""
+    return any((p.get("targets") or {}).get("enemies") and not p["passive"] and not p.get("auto")
+               for p in params.abilities.values())
+
+
+def busy(u, params):
+    """[B, N] bool or None (no such ability modelled): units with an own active ability of loop stance on (passport
+    loop_stance: the Warp Grinders' Warp-Quake and Seismic Snare) by their timers ab{k}_on - they take no order and stand
+    (battle.py; the probe 'grinder', build/diag_grinder: the game's status 'unorderable' all its 17 / 13 s, a move order
+    given 2 s into Warp-Quake refused and not taken up after it)."""
+    model = set(params.sim["abilities"]["model"])
+    if not any(p.get("loop_stance") and k in model for k, p in params.abilities.items()):
+        return None
+    T = table(params, u["men"].device)
+    out = torch.zeros_like(u["side"] > 0)
+    for k in range(SLOTS):
+        r = T[u[f"ab{k}"]]
+        out = out | ((u[f"ab{k}"] >= 0) & (r[..., COL["loop"]] > 0) & (r[..., COL["modelled"]] > 0)
+                     & (u[f"ab{k}_on"] > 0))
+    return out & (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+
+
+def snare_bits(params):
+    """The bitmask over keys() of the modelled abilities on enemies whose phase forbids moving (passport cant_move: the
+    Warp Grinders' Seismic Snare); 0 none. Only json."""
+    model = set(params.sim["abilities"]["model"])
+    out = 0
+    for a, k in enumerate(keys(params)):
+        p = params.abilities[k]
+        if p.get("cant_move") and (p.get("targets") or {}).get("enemies") and not p["passive"] and k in model:
+            out |= 1 << a
+    return out
+
+
+def snared(u, params):
+    """[B, N] bool or None (no such ability, or no records): the units an enemy's cant_move ability lies on by the records
+    ab_en (abilities.apply: the last step's, or this step's once apply ran) - they refuse an order to move or to attack
+    a target not within reach and do not walk (battle.py; build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md
+    T2: their melee goes on; the probe 'grinder': walking swordsmen stopped at once and stood after it - the order to move
+    is gone). A router is held too with config/nn/sim.json abilities.cant_move.routers (the probe: routers stood the 13 s
+    and ran on after it)."""
+    cm = params.sim["abilities"].get("cant_move") or {}
+    m = snare_bits(params)
+    if not m or not cm.get("on") or "ab_en" not in u:
+        return None
+    on = (u["ab_en"] & m) != 0
+    if not cm.get("routers"):
+        on = on & ~u["r"]
+    return on & (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
 
 
 def restore(u, old):

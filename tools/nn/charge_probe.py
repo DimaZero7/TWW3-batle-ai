@@ -352,6 +352,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           the vortices), the soldiers' places (the gap between the fronts: vortex.contact_m); the Unshakable Pathogen is
           the Pusbags' HP lost less the swordsmen's damage dealt, in melee and after leaving it; (alone) the Pusbags hold
           300 m from held swordsmen for 60 s (no melee: no disease) - 1 battle of 4 lanes. Table: pusbags [runs] [--sim].
+  grinder  the Warp Grinders' two actives without a target (build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md;
+          GRINDER), 2 copies a kind, the Grinders the attacker (lane.a_casts: pressed on themselves): (quake) Empire
+          swordsmen walk into the held Grinders (a move order), Warp-Quake once the centres are 30 m apart - the swordsmen's HP
+          each second from the press and their speed before / after it (x 0.75?); (snare) the same with Seismic Snare - do
+          they stand 13 s; (snare_melee) Seismic Snare 5 s into their melee - do the swordsmen still strike, do they stay;
+          (walk) Warp-Quake on held swordsmen 22 m off, then a move 16 m straight away (to 38 m: inside the 40 m hold, beyond
+          the 35 m reach) - do the Grinders walk, does the damage go on; (rout) the swordsmen routed by script 3 s after the go, Seismic Snare at 3.5 s - is a router held. 1 battle of
+          10 lanes. Table: grinder [runs] [--sim].
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -381,6 +389,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan monster --speed 20       # the Skaven monsters (build/diag_skv_mon/probes.md)
     python -m tools.nn.charge_probe monster [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe run --plan artillery --speed 20     # the guns (build/diag_skv_mon/probes.md)
+    python -m tools.nn.charge_probe run --plan grinder --speed 20       # the Warp Grinders (build/diag_grinder)
+    python -m tools.nn.charge_probe grinder [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe run --plan pusbags --speed 20       # the Pusbags (build/diag_pusbags)
     python -m tools.nn.charge_probe pusbags [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe artillery [runs...] [--sim]         # its table (--sim: + the twin, torch)
@@ -512,7 +522,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "monster", "artillery", "pusbags") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -1089,6 +1099,8 @@ def battles(plan):
         out.append(artillery_lanes())
     elif plan == "pusbags":
         out.append(pusbags_lanes())
+    elif plan == "grinder":
+        out.append(grinder_lanes())
     elif plan == "manfields":
         # what the game answers for one soldier (CCO ManList.At(i).<name>; the documentation lists only Position, Key,
         # IsAlive, IsMan, IsEngine, reload, EntityRecordContext, UnitContext): a facing, a target? - 1 short fight
@@ -1538,6 +1550,43 @@ def pusbags_lanes():
     return out
 
 
+# the Warp Grinders' plan (build/diag_grinder; module doc): kinds quake / snare / snare_melee / walk / rout, each twice,
+# on a 4 x 3 grid 240 m apart; the Grinders 60 m wide (their 2 ranks), the swordsmen 30 m
+GRINDER_KEY = "wh2_dlc14_skv_inf_warp_grinder_0"
+QUAKE, SNARE = "wh2_dlc14_unit_abilities_warp_quake", "wh2_dlc14_unit_abilities_seismic_snare"
+GRINDER = {"a_w": 60, "copies": 2, "kinds": ("quake", "snare", "snare_melee", "walk", "rout"), "at_m": 30,
+           "approach_gap_m": 40, "near_gap_m": 9, "melee_snare_s": 5, "walk_cast_s": 3, "walk_move_s": 5, "walk_dz": 16,
+           "rout_s": 3, "rout_snare_s": 3.5,
+           "places": tuple((x, z) for z in (-240.0, 0.0, 240.0) for x in (-360.0, -120.0, 120.0, 360.0))}
+
+
+def grinder_lanes():
+    """The grinder plan's one battle (GRINDER): each kind twice."""
+    c = GRINDER
+
+    def one(kind, k):
+        common = dict(kind=kind, copy=k, place=None, answer=False, a_w=c["a_w"], morale_rows=True)
+        if kind in ("quake", "snare"):
+            # (the swordsmen walk by a move order through the Grinders - push: an attack order runs its last 30 m)
+            return lane(GRINDER_KEY, "swords", "hold", "push", gap_m=c["approach_gap_m"], fight_s=8, push_m=120,
+                        a_casts=[{"key": QUAKE if kind == "quake" else SNARE, "at_m": c["at_m"]}], max_s=75, **common)
+        if kind == "snare_melee":
+            return lane(GRINDER_KEY, "swords", "hold", "both_walk", gap_m=10, fight_s=40, a_ability=SNARE,
+                        a_ability_after_s=c["melee_snare_s"], max_s=70, **common)
+        if kind == "walk":
+            return lane(GRINDER_KEY, "swords", "script", "hold", gap_m=c["near_gap_m"], fight_s=40,
+                        a_casts=[{"key": QUAKE, "at_s": c["walk_cast_s"]}],
+                        steps=[{"at_s": c["walk_move_s"], "kind": "move", "dx": 0, "dz": c["walk_dz"], "run": False}],
+                        max_s=28, **common)
+        return lane(GRINDER_KEY, "swords", "hold", "hold", gap_m=c["near_gap_m"], fight_s=40, t_morale=True,
+                    rout_at_go_s=c["rout_s"], at_rout="none", after_rout_s=16,
+                    a_casts=[{"key": SNARE, "at_s": c["rout_snare_s"]}], max_s=25, **common)
+    out = [one(kind, k) for kind in c["kinds"] for k in range(c["copies"])]
+    for spec, place in zip(out, c["places"]):
+        spec["place"] = place
+    return out
+
+
 def monster_lanes():
     """The monster plan's one battle (MONSTER; build/diag_skv_mon/probes.md): each kind twice, on the grid."""
     c = MONSTER
@@ -1737,6 +1786,9 @@ def run_config(plan, index):
         # health every 0.25 s; the soldiers' places every 0.25 s to 15 s after a contact (the archers' lanes: no contact
         # of their own - while within 120 m, all the lane)
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=MONSTER["men_after_s"], men_near_m=120)
+    if plan == "grinder":
+        # health every 0.25 s (Warp-Quake strikes every 0.5 s); no soldiers' places
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=0)
     if plan == "pusbags":
         # health every 0.5 s; the soldiers' places every 0.5 s to men_after_s after the contact (within 60 m)
         config.update(men_ms=500, men_after_s=PUSBAGS["men_after_s"], men_near_m=60)
@@ -2104,7 +2156,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         back_dt.append(ph_["back"] - ph_["out"] if ln.get("plan") == "cavcheck" and {"out", "back"} <= set(ph_) else None)
     rec = {"t": [], "rows": []}
     fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire", "mp", "fx_on", "run",
-              "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload", "morale", "dd_sum")
+              "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload", "morale", "dd_sum", "dq_sum",
+              "ab_en")
     from tools.nn.sim import effects as sim_effects
     fx_names = sim_effects.order(params)
     a_slot = {}
@@ -2112,6 +2165,20 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         if sp.get("a_ability") and sp["a_key"] not in a_slot:
             keys = sim_abilities.slot_keys(sp["a_key"], params.units, params.abilities)
             a_slot[sp["a_key"]] = keys.index(sp["a_ability"]) if sp["a_ability"] in keys else -1
+    # (the grinder plan) the attacker's own presses (lane.a_casts): at the game's recorded times when there are any (the
+    # game's probe_ability of who 'a', used, with its index n), else by the lane's rule (at_s after the go, at_m between
+    # the centres before the contact)
+    casts = []
+    for ln in meta:
+        sp = ln["spec"]
+        keys = sim_abilities.slot_keys(sp["a_key"], params.units, params.abilities)
+        rec_ = [(r_["t"] / 1000, r_["key"]) for r_ in ln.get("abilities") or ()
+                if r_.get("who") == "a" and str(r_.get("status", "")).startswith("used") and r_.get("n") is not None]
+        rule = [] if rec_ else [(c_.get("at_s"), c_.get("at_m"), c_["key"]) for c_ in sp.get("a_casts") or ()]
+        casts.append({"rec": [(t_, keys.index(k_), k_) for t_, k_ in rec_ if k_ in keys],
+                      "rule": [(a_s, a_m, keys.index(k_), k_) for a_s, a_m, k_ in rule if k_ in keys], "done": set(),
+                      "press": []})
+    ab_names = sim_abilities.keys(params)
 
     def policy(st):
         u = st.u
@@ -2147,6 +2214,21 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             c = st_["contact"][b]
             if st_["start"][b] is None:
                 st_["start"][b] = (float(ax[b]), float(az[b]))
+            # (the grinder plan) the attacker's own presses: recorded times, else the lane's rule (casts above)
+            for j, (tc_, k_, key_) in enumerate(casts[b]["rec"]):
+                if ("r", j) not in casts[b]["done"] and t + t_first[b] >= tc_ - 1e-6:
+                    casts[b]["done"].add(("r", j))
+                    ab[b, A] = k_
+                    casts[b]["press"].append({"who": "a", "key": key_, "n": j + 1, "t": t * 1000, "status": "used"})
+            for j, (a_s, a_m, k_, key_) in enumerate(casts[b]["rule"]):
+                if ("u", j) in casts[b]["done"]:
+                    continue
+                d_ = math.hypot(ax[b] - tx[b], az[b] - tz[b])
+                if (a_s is not None and t + t_first[b] >= a_s - 1e-6) or (a_m is not None and c is None and d_ <= a_m):
+                    casts[b]["done"].add(("u", j))
+                    ab[b, A] = k_
+                    casts[b]["press"].append({"who": "a", "key": key_, "n": j + 1, "t": t * 1000, "status": "used",
+                                              "d": round(d_, 1)})
             # the attacker's own ability (Foe-Seeker) a_ability_after_s after the contact, once
             if sp.get("a_ability") and c is not None and not st_["a_ability"][b]                     and t - c >= sp.get("a_ability_after_s", 0) and a_slot.get(sp["a_key"], -1) >= 0:
                 ab[b, A] = a_slot[sp["a_key"]]
@@ -2426,9 +2508,19 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 if "dd_sum" in r:
                     # its own direct damage so far (tools/nn/sim/direct.py: the Pusbags' disease)
                     out["dsum"] = float(r["dd_sum"][b, i])
+                if "dq_sum" in r:
+                    # the enemies' abilities' direct damage on it so far (direct.py from_abilities: Warp-Quake) and the
+                    # enemies' abilities lying on it (abilities.py ab_en)
+                    out["qsum"] = float(r["dq_sum"][b, i])
+                    out["ab_en"] = int(r["ab_en"][b, i])
                 if "fx_on" in r:
                     bits = int(r["fx_on"][b, i])
                     out["fx"] = ",".join(k for e, k in enumerate(fx_names) if (bits >> e) & 1)
+                    if "ab_en" in r and int(r["ab_en"][b, i]):
+                        # (the grinder plan) and the enemies' abilities on it, as the game's active effects list them
+                        en_bits = int(r["ab_en"][b, i])
+                        out["fx"] = ",".join([x_ for x_ in out["fx"].split(",") if x_] + [
+                            k for e, k in enumerate(ab_names) if (en_bits >> e) & 1])
                 c = r.get("card") or {}
                 if c and "run" in r:
                     # the unit card's values with the effects on (sim effects.card), as the game's cs
@@ -2455,7 +2547,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         if st_["contact2"][b] is not None:
             contacts[2] = st_["contact2"][b]
         out.append({"run": "sim", "spec": ln["spec"], "samples": samples, "men": [], "contacts": contacts,
-                    "end": None, "abilities": ln.get("abilities") and [{"status": "sim"}], "phases": st_["phases"][b],
+                    "end": None, "abilities": casts[b]["press"] or (ln.get("abilities") and [{"status": "sim"}]),
+                    "phases": st_["phases"][b],
                     **({"t2": t2_rows} if t2_rows else {}), **({"extras": ex_rows} if ex_rows else {})})
     return out
 
@@ -3798,6 +3891,106 @@ def pusbags_measure(lane):
     return out
 
 
+def _speed(t, x, z, lo, hi):
+    """The centre's mean speed over [lo, hi] (m/s; None where not recorded)."""
+    if hi <= lo:
+        return None
+    a = (at(t, x, lo), at(t, z, lo))
+    b = (at(t, x, hi), at(t, z, hi))
+    if not all(np.isfinite(v) for v in a + b):
+        return None
+    return round(math.hypot(b[0] - a[0], b[1] - a[1]) / (hi - lo), 3)
+
+
+def grinder_measure(lane):
+    """A grinder lane (GRINDER; module doc). The press tc (the game's probe_ability of the attacker, used; the twin: when
+    its own timer started, else the recorded one): quake - the swordsmen's HP lost each 0.5 s 0-17 s after the press
+    (tg_hp_by_half), their HP a second from the press to the contact or 17 s (tg_hp_s; the twin's own count qsum too),
+    the first 1 s, their speed 6-1 s before the press and 2-12 s after it (to the contact) and its ratio; snare - their
+    speed before, 1-12 s after the press (held: < 0.2 m/s), 14+ s after (walking again?), the seconds from the press
+    to their stop (stop_s: a second under 0.2 m/s) and to walking again (resume_s: a second over 0.4 m/s, None:
+    never); snare_melee - each side's HP a second 1 s after the contact to the press, 1-12 s after it and 14-30 s after
+    it, the swordsmen's speed under the snare; walk - the Grinders' speed 2-12 s after the
+    move order and the swordsmen's HP a second over the 17 s; rout - the swordsmen's speed 1-12 s after the press (a
+    held router stands), when they routed."""
+    spec, smp = lane["spec"], lane["samples"]
+    kind = spec.get("kind") or ""
+    t = np.array([x[0] for x in smp])
+    out = {"run": lane["run"], "lane": spec["name"], "kind": kind}
+    used = [r_ for r_ in lane.get("abilities") or () if str(r_.get("status", "")).startswith("used")
+            and r_.get("t") is not None]
+    out["press"] = [(r_.get("key", "")[-10:], r_.get("status"), round(r_["t"] / 1000, 2), r_.get("d")) for r_ in
+                    (lane.get("abilities") or ()) if r_.get("t") is not None]
+    tc = used[0]["t"] / 1000 if used else None
+    c = lane["contacts"].get(1)
+    out["contact_s"] = c
+    if kind == "snare_melee" and tc is None and c is not None:
+        tc = c + float(spec.get("a_ability_after_s") or 0)        # (the twin: its own press, a_ability after the contact)
+    out["tc"] = tc
+    if tc is None:
+        return out
+    a_hp, tg_hp = series(smp, "a", "hp"), series(smp, "tg", "hp")
+    ax, az, tx, tz = (series(smp, w, k) for w, k in (("a", "x"), ("a", "z"), ("tg", "x"), ("tg", "z")))
+    qsum = series(smp, "tg", "qsum")
+    if kind in ("quake", "walk"):
+        end = min(tc + 17, c) if (kind == "quake" and c is not None) else tc + 17
+        out["window_s"] = round(end - tc, 2)
+        out["tg_hp_by_half"] = [None if not np.isfinite(at(t, tg_hp, tc + 0.5 * k)) or not np.isfinite(
+            at(t, tg_hp, tc + 0.5 * k + 0.5)) else round(at(t, tg_hp, tc + 0.5 * k) - at(t, tg_hp, tc + 0.5 * k + 0.5), 1)
+            for k in range(34)]
+        hp0 = at(t, tg_hp, tc - 0.3)
+        out["tg_hp_first_1s"] = round(hp0 - at(t, tg_hp, tc + 1.0), 1) if np.isfinite(hp0) else None
+        out["tg_hp_s"] = _slope(t, tg_hp, tc - 0.3, end)
+        out["tg_hp_17s"] = round(hp0 - at(t, tg_hp, tc + 17), 1) if np.isfinite(hp0) and np.isfinite(
+            at(t, tg_hp, tc + 17)) else None
+        if np.isfinite(qsum).any():
+            out["tg_qsum_s"] = -_slope(t, qsum, tc - 0.3, end) if _slope(t, qsum, tc - 0.3, end) is not None else None
+            out["tg_qsum_17s"] = round(float(np.nanmax(qsum)), 1)
+        # the effect on the swordsmen (the game's ActiveEffectList; the twin's ab_en)
+        fx = [str((s_[2] or {}).get("fx") or "") for s_ in smp]
+        on_ = np.array([1.0 if "warp_quake" in f else 0.0 for f in fx])
+        w = (t >= tc + 0.5) & (t <= tc + 16.5)
+        out["tg_fx_quake_share"] = round(float(on_[w].mean()), 2) if w.any() else None
+    if kind == "quake":
+        out["tg_v_before"] = _speed(t, tx, tz, tc - 6, tc - 1)
+        hi = min(tc + 12, c - 1) if c is not None else tc + 12
+        out["tg_v_after"] = _speed(t, tx, tz, tc + 2, hi)
+        if out["tg_v_before"] and out["tg_v_after"] is not None:
+            out["tg_v_ratio"] = round(out["tg_v_after"] / out["tg_v_before"], 3)
+        out["contact_after_press_s"] = round(c - tc, 2) if c is not None else None
+    if kind == "snare":
+        out["tg_v_before"] = _speed(t, tx, tz, tc - 6, tc - 1)
+        out["tg_v_snared"] = _speed(t, tx, tz, tc + 1, tc + 12)
+        out["tg_v_after"] = _speed(t, tx, tz, tc + 14, (c - 0.5) if c is not None and c > tc + 15 else tc + 18)
+        v1 = [(k_, _speed(t, tx, tz, k_, k_ + 1)) for k_ in np.arange(tc, tc + 40, 0.25)]
+        stop = [k_ for k_, v_ in v1 if v_ is not None and v_ < 0.2]
+        out["stop_s"] = round(float(stop[0] - tc), 2) if stop else None
+        again = [k_ for k_, v_ in v1 if v_ is not None and v_ > 0.4 and k_ >= tc + 2]
+        out["resume_s"] = round(float(again[0] - tc), 2) if again else None
+        out["contact_after_press_s"] = round(c - tc, 2) if c is not None else None
+    if kind == "snare_melee" and c is not None:
+        for who, v in (("a", a_hp), ("tg", tg_hp)):
+            out[f"{who}_hp_s_before"] = _slope(t, v, c + 1, tc)
+            out[f"{who}_hp_s_snared"] = _slope(t, v, tc + 1, tc + 12)
+            out[f"{who}_hp_s_after"] = _slope(t, v, tc + 14, tc + 30)
+        out["tg_v_snared"] = _speed(t, tx, tz, tc + 1, tc + 12)
+        m_ = np.nan_to_num(series(smp, "tg", "m"))
+        w = (t >= tc + 1) & (t <= tc + 12)
+        out["tg_melee_share_snared"] = round(float(m_[w].mean()), 2) if w.any() else None
+    if kind == "walk":
+        mv = (spec.get("steps") or [{}])[0].get("at_s", tc)
+        out["a_v_walk"] = _speed(t, ax, az, mv + 2, mv + 12)
+        out["a_moved_m"] = round(math.hypot(at(t, ax, mv + 14) - at(t, ax, mv), at(t, az, mv + 14) - at(t, az, mv)), 1) \
+            if np.isfinite(at(t, ax, mv + 14)) else None
+    if kind == "rout":
+        rr = np.nan_to_num(series(smp, "tg", "r"))
+        rt = t[rr > 0]
+        out["rout_s"] = round(float(rt[0]), 2) if len(rt) else None
+        out["tg_v_snared"] = _speed(t, tx, tz, tc + 1, tc + 12)
+        out["tg_v_after"] = _speed(t, tx, tz, tc + 14, tc + 20)
+    return out
+
+
 def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copies=4, params=None):
     """The rows of a plan's lanes (measure) and the means of each kind over its copies: prints them, writes
     build/charge-probe/<plan>.json (not in Git). With sim, the simulator's twin on the same lanes too (the new units'
@@ -3967,7 +4160,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
                                                      "shootcontact", "recontact", "pursuit", "cavalry",
-                                                     "cavcheck", "monster", "artillery", "pusbags"),
+                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -4024,6 +4217,10 @@ def main(argv=None):
         return 0
     if args.command == "monster":
         plan_report("monster", monster_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
+                    sim=args.sim, device=args.device, copies=min(args.copies, 4))
+        return 0
+    if args.command == "grinder":
+        plan_report("grinder", grinder_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
                     sim=args.sim, device=args.device, copies=min(args.copies, 4))
         return 0
     if args.command == "pusbags":

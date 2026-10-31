@@ -72,6 +72,37 @@ def step(st, orders, params=None, dt=None):
         u["oz"] = torch.where(u["sk_shown"], u["sk_oz"], u["oz"])
     # --- orders --- (KEEP: the order in force goes on)
     take = standing & (orders.kind != O.KEEP)
+    snare, busy = abilities.snared(u, params), abilities.busy(u, params)
+    if snare is not None or busy is not None:
+        # (31.10.2026, the Warp Grinders; the last step's records and timers) a snared unit (abilities.snared: Seismic
+        # Snare - the game's program build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md T2) refuses an order
+        # to move and an attack on a target not within reach - in contact (hit_sec, else its melee flag) or, for a
+        # shooter, within its range; the owner of an active loop-stance ability (abilities.busy) refuses every order.
+        # The order in force of either is dropped to a halt the same way (the probe 'grinder', build/diag_grinder:
+        # snared swordsmen stopped at once and stood on after the 13 s; the Grinders did not take up a move given
+        # during Warp-Quake): an attack on a target within reach stays
+        def in_reach(tg):
+            ti0 = tg.clamp(min=0)
+            if "hit_sec" in u:
+                hs = u["hit_sec"].reshape(u["men"].shape[0], N, N)
+                touching = (hs.gather(2, ti0[:, :, None]).squeeze(2) > 0) | (
+                    hs.transpose(1, 2).gather(2, ti0[:, :, None]).squeeze(2) > 0)
+            else:
+                touching = u["m"].bool()
+            d_t = torch.sqrt((u["x"].gather(1, ti0) - u["x"]) ** 2 + (u["z"].gather(1, ti0) - u["z"]) ** 2)
+            return (tg >= 0) & (touching | ((u["range"] > 0) & (d_t <= u["range"])))
+        held = torch.zeros_like(take)
+        if snare is not None:
+            held = held | snare
+            take = take & ~(snare & ((orders.kind == O.MOVE) | (orders.kind == O.WITHDRAW)
+                                     | ((orders.kind == O.ATTACK) & ~in_reach(orders.target))))
+        if busy is not None:
+            held = held | busy
+            take = take & ~busy
+        k_in = u["order_kind"]
+        drop = held & ((k_in == O.MOVE) | (k_in == O.WITHDRAW) | ((k_in == O.ATTACK) & ~in_reach(u["order_target"])))
+        u["order_kind"] = torch.where(drop, torch.full_like(k_in, O.HOLD), k_in)
+        u["order_target"] = torch.where(drop, torch.full_like(u["order_target"], -1), u["order_target"])
     kind = torch.where(take, orders.kind, u["order_kind"])
     tgt = torch.where(take, orders.target, u["order_target"])
     # A withdraw always runs, whatever the order's run flag: in the game the companion and the bridge give it at a run
@@ -786,9 +817,15 @@ def step(st, orders, params=None, dt=None):
     # ticks while in melee) and the vortices of the men who died a delay ago (vortex.py: Pestilent Perfection) ---
     hp_fx = kills_fx = hits_vx = kn_vx = None
     dd_on = direct.on(params) and "dd_fx" in u
-    if dd_on or vx_on:
+    # (31.10.2026, the Warp Grinders' Warp-Quake: direct.from_abilities) the enemies' active abilities' direct damage
+    dq_on = direct.enemy_on(params) and "dq_t" in u
+    if dd_on or vx_on or dq_on:
         hp_fx = torch.zeros_like(hp_melee)
         kills_fx = torch.zeros_like(hp_melee)
+        if dq_on:
+            hp_dq, kills_dq = direct.from_abilities(u, params, dt, pw["dist"], same_side)
+            if hp_dq is not None:
+                hp_fx, kills_fx = hp_fx + hp_dq, kills_fx + kills_dq
         if dd_on:
             hp_dd, kills_dd, _ = direct.strike(u, params, dt)
             hp_fx = hp_fx + torch.diag_embed(hp_dd)
@@ -1387,6 +1424,14 @@ def step(st, orders, params=None, dt=None):
             want = want * ground.trunk_speed(u, pw["front"], pw["depth"], params)
     vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
     stop = locked | ~alive
+    snare_now, busy_now = abilities.snared(u, params), abilities.busy(u, params)
+    if snare_now is not None:
+        # (abilities.snared, this step's records: the Seismic Snare) a snared unit does not walk - its melee goes on in
+        # place (the game's program T2: its men do not reach for an enemy beyond their weapons); a router neither
+        stop = stop | snare_now
+    if busy_now is not None:
+        # (abilities.busy, this step's timers) the owner of an active loop-stance ability stands (the Grinders' drills)
+        stop = stop | busy_now
     vx = torch.where(stop, torch.zeros_like(vx), vx)
     vz = torch.where(stop, torch.zeros_like(vz), vz)
     if cal["contact"].get("chase"):

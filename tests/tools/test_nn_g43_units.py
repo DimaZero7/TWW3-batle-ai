@@ -98,7 +98,9 @@ def test_the_effects_catalogue():
                                                     "wh_main_unit_passive_regeneration",
                                                     # the Pusbags (31.10.2026)
                                                     "wh3_dlc29_unit_passive_pestilent_perfection",
-                                                    "wh3_dlc29_unit_passive_unshakable_pathogen"]
+                                                    "wh3_dlc29_unit_passive_unshakable_pathogen",
+                                                    # the Warp Grinders' attribute (31.10.2026)
+                                                    "wallbreaker"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():

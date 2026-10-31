@@ -138,6 +138,11 @@ def test_every_brick_declares_its_kind_and_stats():
 
 def test_our_abilities_are_data_with_every_stat_priced():
     a = abl.abilities(PASSPORTS, BRICKS)
+    # (31.10.2026) the Warp Grinders' two are pressable too (no target to choose): no brick prices an effect on enemies
+    # (Warp-Quake's x 0.75 is listed unpriced, Seismic Snare has no stat) - the training's branches price their presses
+    quake, snare = a.pop("wh2_dlc14_unit_abilities_warp_quake"), a.pop("wh2_dlc14_unit_abilities_seismic_snare")
+    assert not quake.parts and quake.unpriced == ("scalar_speed mult 0.75 on enemies",)
+    assert not snare.parts and not snare.unpriced
     assert set(a) == {"wh2_main_character_abilities_verminous_valour", "wh_main_character_abilities_deadly_onslaught",
                       "wh_main_character_abilities_foe_seeker", "wh_main_character_abilities_rally",
                       "wh_main_character_abilities_stand_your_ground"}
