@@ -567,7 +567,7 @@ def lively_lines(lv):
     band = (lambda w: "-" if w not in lv["band"] else "{:.2f} [{:.2f}, {:.2f}]".format(*[lv["band"][w][i] for i in (1, 0, 2)]))
     return [f"liveliness of our network in the game ({' / '.join(roles)}; per unit-minute): order changes "
             f"{cell('order_changes_per_min')}, attack-target switches {cell('target_switches_per_min')}, flips A-B-A "
-            f"{cell('flips_per_min', '{:.3f}')}, move jitter {cell('move_jitter_m', '{:.1f}')} m, out of melee "
+            f"{cell('flips_per_min', '{:.3f}')}, move jitter {cell('move_jitter_m', '{:.1f}')} m, order changes out of melee "
             f"{cell('free_changes_per_min')}, twitching units {cell('twitch_share', '{:.2f}')}",
             f"units' own target switches / unit-min (every second; median [min, max] of the battles): ours "
             f"{band('net')}, the game's AI {band('game_ai')} (flips {f(lv['game_ai'].get('engine_flips_per_min'), '{:.3f}')})"]

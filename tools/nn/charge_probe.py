@@ -345,6 +345,13 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           swordsmen of the guns' side standing 10 m beside the standing block - the men killed by distance from the
           burst, the damage to their own; (crew) archers 100 m off shoot the crew of a Warp Lightning Cannon that shoots back - how
           many guns fire as the crew falls - 1 battle of 14 lanes on a 4 x 4 grid. Table: artillery [runs].
+  pusbags  the Pusbags' two passives (build/diag_roster/wh3_dlc29_skv_inf_pusbags/mechanic.md; PUSBAGS), 2 copies a lane:
+          (fight) the Pusbags attack held Empire swordsmen (who keep their morale: t_morale) from 30 m at a run, 60 s after
+          the contact they leave 100 m at a run (mode withdraw) and the lane goes on 20 s more - each side's HP a second
+          and damage dealt (CCO DamageDealt, both rows), the swordsmen's morale and active effects (the censer's -10 from
+          the vortices), the soldiers' places (the gap between the fronts: vortex.contact_m); the Unshakable Pathogen is
+          the Pusbags' HP lost less the swordsmen's damage dealt, in melee and after leaving it; (alone) the Pusbags hold
+          300 m from held swordsmen for 60 s (no melee: no disease) - 1 battle of 4 lanes. Table: pusbags [runs] [--sim].
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -374,6 +381,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan monster --speed 20       # the Skaven monsters (build/diag_skv_mon/probes.md)
     python -m tools.nn.charge_probe monster [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe run --plan artillery --speed 20     # the guns (build/diag_skv_mon/probes.md)
+    python -m tools.nn.charge_probe run --plan pusbags --speed 20       # the Pusbags (build/diag_pusbags)
+    python -m tools.nn.charge_probe pusbags [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe artillery [runs...] [--sim]         # its table (--sim: + the twin, torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
@@ -503,7 +512,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "monster", "artillery") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "monster", "artillery", "pusbags") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -1078,6 +1087,8 @@ def battles(plan):
         out.append(monster_lanes())
     elif plan == "artillery":
         out.append(artillery_lanes())
+    elif plan == "pusbags":
+        out.append(pusbags_lanes())
     elif plan == "manfields":
         # what the game answers for one soldier (CCO ManList.At(i).<name>; the documentation lists only Position, Key,
         # IsAlive, IsMan, IsEngine, reload, EntityRecordContext, UnitContext): a facing, a target? - 1 short fight
@@ -1497,6 +1508,36 @@ def battles(plan):
     return out
 
 
+# the Pusbags' plan (build/diag_pusbags): kinds fight / alone, each twice, on a 4 x 1 row 240 m apart; fight: the Pusbags
+# attack held swordsmen from gap_m at a run, fight_s after the contact a move back_m away at a run (mode withdraw), the
+# lane ends after_s after that (max_s: the way in at the run speed + fight_s + after_s + a margin); alone: the Pusbags
+# hold alone_gap_m from held swordsmen for alone_s. The soldiers' places every 0.5 s to men_after_s after the contact.
+PUSBAGS_KEY = "wh3_dlc29_skv_inf_pusbags"
+PUSBAGS = {"gap_m": 30, "fight_s": 60, "back_m": 100, "after_s": 20, "alone_gap_m": 300, "alone_s": 60, "copies": 2,
+           "men_after_s": 65, "kinds": ("fight", "alone"),
+           "places": ((-360.0, 0.0), (-120.0, 0.0), (120.0, 0.0), (360.0, 0.0))}
+
+
+def pusbags_lanes():
+    """The pusbags plan's one battle (PUSBAGS): each kind twice."""
+    c = PUSBAGS
+
+    def one(kind, k):
+        common = dict(kind=kind, copy=k, place=None, answer=False)
+        if kind == "fight":
+            run_s = float((passport(PUSBAGS_KEY) or {}).get("speed", {}).get("run") or 4.2)
+            return lane(PUSBAGS_KEY, "swords", "withdraw", "hold", gap_m=c["gap_m"], fight_s=10 ** 4, t_morale=True,
+                        at_rout="none", after_rout_s=c["after_s"] + 10, recharge_after_s=c["fight_s"], back_m=c["back_m"],
+                        recharge_max_s=10 ** 6, dd_rows="both",
+                        max_s=round(c["gap_m"] / run_s + 5 + c["fight_s"] + c["after_s"] + 5), **common)
+        return lane(PUSBAGS_KEY, "swords", "hold", "hold", gap_m=c["alone_gap_m"], fight_s=c["alone_s"],
+                    max_s=c["alone_s"], dd_rows="both", **common)
+    out = [one(kind, k) for kind in c["kinds"] for k in range(c["copies"])]
+    for spec, place in zip(out, c["places"]):
+        spec["place"] = place
+    return out
+
+
 def monster_lanes():
     """The monster plan's one battle (MONSTER; build/diag_skv_mon/probes.md): each kind twice, on the grid."""
     c = MONSTER
@@ -1696,6 +1737,9 @@ def run_config(plan, index):
         # health every 0.25 s; the soldiers' places every 0.25 s to 15 s after a contact (the archers' lanes: no contact
         # of their own - while within 120 m, all the lane)
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=MONSTER["men_after_s"], men_near_m=120)
+    if plan == "pusbags":
+        # health every 0.5 s; the soldiers' places every 0.5 s to men_after_s after the contact (within 60 m)
+        config.update(men_ms=500, men_after_s=PUSBAGS["men_after_s"], men_near_m=60)
     if plan == "artillery":
         # health every 0.25 s (a shot's kills); the soldiers' places every 0.5 s all the lane (no contact: within 200 m)
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=ARTILLERY["fire_s"], men_near_m=200)
@@ -2060,7 +2104,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         back_dt.append(ph_["back"] - ph_["out"] if ln.get("plan") == "cavcheck" and {"out", "back"} <= set(ph_) else None)
     rec = {"t": [], "rows": []}
     fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire", "mp", "fx_on", "run",
-              "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload")
+              "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload", "morale", "dd_sum")
     from tools.nn.sim import effects as sim_effects
     fx_names = sim_effects.order(params)
     a_slot = {}
@@ -2376,6 +2420,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     out["fire"] = float(r["fire"][b, i])
                 if "mp" in r:
                     out["mp"] = float(r["mp"][b, i])
+                if "morale" in r:
+                    # the morale points (the pusbags plan's measure; the game's: MoralePercent x leadership)
+                    out["mpts"] = float(r["morale"][b, i])
+                if "dd_sum" in r:
+                    # its own direct damage so far (tools/nn/sim/direct.py: the Pusbags' disease)
+                    out["dsum"] = float(r["dd_sum"][b, i])
                 if "fx_on" in r:
                     bits = int(r["fx_on"][b, i])
                     out["fx"] = ",".join(k for e, k in enumerate(fx_names) if (bits >> e) & 1)
@@ -3637,7 +3687,118 @@ def artillery_measure(lane):
     return out
 
 
-def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copies=4):
+def _by_s(t, v, c, n):
+    """v's drop each second k (c + k .. c + k + 1) for k < n (None where not recorded)."""
+    out = []
+    for k in range(n):
+        a, b = at(t, v, c + k), at(t, v, c + k + 1)
+        out.append(round(a - b, 1) if np.isfinite(a) and np.isfinite(b) else None)
+    return out
+
+
+def _slope(t, v, lo, hi):
+    """v's mean drop a second over [lo, hi] (NaN where not recorded)."""
+    a, b = at(t, v, lo), at(t, v, hi)
+    return round((a - b) / (hi - lo), 2) if np.isfinite(a) and np.isfinite(b) and hi > lo else None
+
+
+def pusbags_measure(lane):
+    """A pusbags lane (PUSBAGS). fight, from the contact c: each side's HP lost and damage dealt each second 0-60 s
+    (a_hp_by_s, tg_hp_by_s, a_dd_by_s, tg_dd_by_s), the swordsmen's morale points (MoralePercent x their passport's
+    leadership; the twin's morale points) each second and the share of the samples with the censer's effect on them; over
+    the steady fight 5-55 s: the Pusbags' HP a second (a_hp_s), the swordsmen's damage dealt a second (tg_dd_s), the
+    disease a second = a_hp_s - tg_dd_s (the twin: its own count dd_sum, disease_twin_s, too), the swordsmen's HP a
+    second (tg_hp_s), the Pusbags' damage dealt (a_dd_s); after the Pusbags leave melee (their melee flag off after the
+    phase 'out'): their HP a second 2-18 s later (the disease off?) and when the flag went; the men lost; the morale
+    before the contact, its mean 20-55 s and the lowest; from the soldiers' places 10-50 s after the contact: the
+    swordsmen's front - the median distance of a swordsman within 3 m of a Pusbag to the nearest one (the vortex's
+    contact_m), and the swordsmen within 2 m of a Pusbag (the men a vortex may reach). alone: the Pusbags' HP lost."""
+    spec, smp = lane["spec"], lane["samples"]
+    kind = spec.get("kind") or ""
+    t = np.array([x[0] for x in smp])
+    out = {"run": lane["run"], "lane": spec["name"], "kind": kind}
+    a_hp, tg_hp = series(smp, "a", "hp"), series(smp, "tg", "hp")
+    if kind == "alone":
+        ok = np.isfinite(a_hp)
+        out["a_hp_lost"] = round(float(a_hp[ok][0] - a_hp[ok][-1]), 1) if ok.sum() > 1 else None
+        out["window_s"] = round(float(t[ok][-1] - t[ok][0]), 1) if ok.sum() > 1 else None
+        return out
+    c = lane["contacts"].get(1)
+    out["contact_s"] = c
+    if c is None:
+        return out
+    n = PUSBAGS["fight_s"]
+    a_dd, tg_dd = series(smp, "a", "dd"), series(smp, "tg", "dd")
+    lead = float((passport(spec["t_key"]) or {}).get("leadership") or 1.0)
+    mp = series(smp, "tg", "mp")
+    pts = series(smp, "tg", "mpts")
+    pts = np.where(np.isfinite(pts), pts, mp * lead)
+    fx = [str((s[2] or {}).get("fx") or "") for s in smp]
+    censer = np.array([1.0 if "censer_morale" in f else 0.0 for f in fx])
+    out.update(a_hp_by_s=_by_s(t, a_hp, c, n), tg_hp_by_s=_by_s(t, tg_hp, c, n))
+    if np.isfinite(tg_dd).any():
+        out["tg_dd_by_s"] = [None if x is None else -x for x in _by_s(t, tg_dd, c, n)]
+        out["a_dd_by_s"] = [None if x is None else -x for x in _by_s(t, a_dd, c, n)]
+    out["tg_morale_by_s"] = [None if not np.isfinite(at(t, pts, c + k)) else round(at(t, pts, c + k), 1)
+                             for k in range(n)]
+    lo, hi = c + 5, c + 55
+    out["a_hp_s"], out["tg_hp_s"] = _slope(t, a_hp, lo, hi), _slope(t, tg_hp, lo, hi)
+    dds = _slope(t, tg_dd, lo, hi)
+    out["tg_dd_s"] = -dds if dds is not None else None
+    add = _slope(t, a_dd, lo, hi)
+    out["a_dd_s"] = -add if add is not None else None
+    if out["a_hp_s"] is not None and out["tg_dd_s"] is not None:
+        out["disease_s"] = round(out["a_hp_s"] - out["tg_dd_s"], 2)
+    # the disease alone (the game: no damage dealt is recorded - CCO DamageDealt answered nothing in this plan): the seconds
+    # 5-55 s in which the Pusbags lost under 15 HP - no swordsman's blow (a blow takes 20+ HP of a Pusbag), the disease's
+    # tick alone (3 men x 2-4 HP: 6-12) - their mean and share
+    quiet = [x for x in out["a_hp_by_s"][5:55] if x is not None and x < 15]
+    if quiet:
+        out["disease_floor_s"] = round(float(np.mean(quiet)), 2)
+        out["quiet_share"] = round(len(quiet) / 50, 2)
+    dsum = series(smp, "a", "dsum")
+    if np.isfinite(dsum).any():
+        d = _slope(t, dsum, lo, hi)
+        out["disease_twin_s"] = -d if d is not None else None
+    w = (t >= lo) & (t <= hi)
+    out["censer_share"] = round(float(censer[w].mean()), 3) if w.any() else None
+    before = pts[(t < c) & np.isfinite(pts)]
+    out["tg_morale_before"] = round(float(before[-1]), 1) if len(before) else None
+    mid = pts[(t >= c + 20) & (t <= hi) & np.isfinite(pts)]
+    out["tg_morale_20_55"] = round(float(mid.mean()), 1) if len(mid) else None
+    out["tg_morale_min"] = round(float(np.nanmin(pts[t >= c])), 1) if np.isfinite(pts[t >= c]).any() else None
+    if out["tg_morale_before"] is not None and out["tg_morale_20_55"] is not None:
+        out["tg_morale_drop"] = round(out["tg_morale_before"] - out["tg_morale_20_55"], 1)
+    for who in ("a", "tg"):
+        men = series(smp, who, "men")
+        out[f"{who}_men_0_{n}"] = round(at(t, men, c) - at(t, men, c + n), 1)
+    # after leaving: the Pusbags' melee flag off after the phase 'out'
+    ph = {p_["phase"]: p_["t"] / 1000 for p_ in lane.get("phases", [])}
+    if "out" in ph:
+        m = np.nan_to_num(series(smp, "a", "m"))
+        off = t[(t >= ph["out"]) & (m == 0)]
+        if len(off):
+            t_off = float(off[0])
+            out["out_s"], out["melee_off_s"] = round(ph["out"] - c, 1), round(t_off - c, 1)
+            out["a_hp_s_after"] = _slope(t, a_hp, t_off + 2, min(t_off + 18, float(t[-1])))
+            out["tg_hp_s_after"] = _slope(t, tg_hp, t_off + 2, min(t_off + 18, float(t[-1])))
+    gaps, near2 = [], []
+    for tm, a_xz, tg_xz in lane.get("men", []):
+        if not (c + 10 <= tm <= c + 50) or len(a_xz) < 4 or len(tg_xz) < 4:
+            continue
+        a_p = np.asarray(a_xz, float).reshape(-1, 2) / 10
+        g_p = np.asarray(tg_xz, float).reshape(-1, 2) / 10
+        d = np.sqrt(((g_p[:, None, :] - a_p[None, :, :]) ** 2).sum(-1)).min(1)
+        if (d < 3).any():
+            gaps.append(float(np.median(d[d < 3])))
+        near2.append(int((d < 2).sum()))
+    if gaps:
+        out["front_gap_m"] = round(float(np.median(gaps)), 2)
+        out["tg_within_2m"] = round(float(np.mean(near2)), 1)
+    return out
+
+
+def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copies=4, params=None):
     """The rows of a plan's lanes (measure) and the means of each kind over its copies: prints them, writes
     build/charge-probe/<plan>.json (not in Git). With sim, the simulator's twin on the same lanes too (the new units'
     passports from data/units/probe-units.json; copies per lane): its rows src "sim", its means under "<kind>/sim"."""
@@ -3646,7 +3807,7 @@ def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copi
     rows = [dict(measure(ln), src="game") for ln in lanes]
     if sim and lanes:
         from tools.nn.sim.params import load
-        params = load()
+        params = params or load()
         params = dataclasses.replace(params, units={**_passports(), **params.units})
         twins = [ln for ln in lanes if ln["samples"]]
         # (each copy cut at its game lane's length: the twin runs to the longest lane's end)
@@ -3806,7 +3967,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
                                                      "shootcontact", "recontact", "pursuit", "cavalry",
-                                                     "cavcheck", "monster", "artillery"),
+                                                     "cavcheck", "monster", "artillery", "pusbags"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -3863,6 +4024,10 @@ def main(argv=None):
         return 0
     if args.command == "monster":
         plan_report("monster", monster_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
+                    sim=args.sim, device=args.device, copies=min(args.copies, 4))
+        return 0
+    if args.command == "pusbags":
+        plan_report("pusbags", pusbags_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
                     sim=args.sim, device=args.device, copies=min(args.copies, 4))
         return 0
     if args.command == "artillery":

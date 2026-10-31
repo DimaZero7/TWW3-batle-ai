@@ -509,6 +509,12 @@
       "group": "wh3_default_land_monsters_flanking_strong",
       "quality": "tier_3_step_3_units"
      }
+    ],
+    "wh3_dlc29_skv_inf_pusbags": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_swords",
+      "quality": "tier_1_step_2_units"
+     }
     ]
    }
   }

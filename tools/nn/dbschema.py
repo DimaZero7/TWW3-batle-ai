@@ -40,6 +40,9 @@ TABLES = (
     "special_ability_phase_attribute_effects", "special_ability_to_recharge_contexts",
     "special_ability_to_auto_deactivate_flags", "unit_abilities", "projectile_bombardments", "projectiles_explosions",
     "projectile_penetration_junctions", "battlefield_engines",
+    # (31.10.2026, the Pusbags: abilities.py) the vortices of the abilities (vortex_on_entity_death, ...) and the
+    # direct damage of the phases by the battle's unit size (direct_damage_<size>, direct_damage_damage_scale_min_unary)
+    "battle_vortexs", "_kv_unit_ability_scaling_rules",
     "cdir_military_generator_template_priorities", "cdir_military_generator_template_ratios",
     "cdir_military_generator_unit_group_overrides", "cdir_military_generator_unit_qualities",
 )

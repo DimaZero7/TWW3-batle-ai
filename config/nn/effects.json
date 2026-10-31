@@ -19,7 +19,9 @@
   "effect bundles": "effect_bundles / effect_bonus_value_*: campaign effects (skills, techs, the contexts of battle_context_unit_attribute_junctions such as causes_fear vs a culture); custom battles have none",
   "attribute numbers": "unit_attributes_tables holds the keys only: an attribute's rule and numbers are the engine's (_kv tables, game_rules.json) and the knowledge base's (ATTRIBUTES in tools/nn/effects.py)",
   "stubborn, hatred": "not in the WH3 database as unit attributes or passive abilities (WH2 had them)",
-  "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of our passives carry their effects in the stat and attribute tables"
+  "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of our passives carry their effects in the stat and attribute tables",
+  "direct damage on others": "a phase's direct damage (the passport's direct) on friends or enemies (the Warp Grinder's Warp Tremor, the Cauldron's miasma: not in the pools) - the simulator acts on the one on the owner itself only (tools/nn/sim/direct.py)",
+  "other vortices": "a vortex of another behaviour (vortex_per_entity, vortex_on_death), of an active ability or a spell, a moving one, one striking its own side, several in a row or a subsequent one: the simulator acts on a standing vortex at a man's death striking enemies only (tools/nn/sim/vortex.py)"
  },
  "_inflicts": "contact effects (kind contact) a unit's weapons lay on the enemies they hit (the passport's melee.contact_phase, missile.contact_phase); the unit does not own them (units), the network sees them as its `owned` column of the effect, `on` while the unit itself is under one",
  "order": [
@@ -52,7 +54,9 @@
   "immune_to_psychology",
   "cant_run",
   "causes_terror",
-  "wh_main_unit_passive_regeneration"
+  "wh_main_unit_passive_regeneration",
+  "wh3_dlc29_unit_passive_pestilent_perfection",
+  "wh3_dlc29_unit_passive_unshakable_pathogen"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -898,6 +902,99 @@
    "modelled": true,
    "sim": "stat_weakness_flame add -20; heals 0.001 of its largest health every 1 s (always)",
    "why": null
+  },
+  "wh3_dlc29_unit_passive_pestilent_perfection": {
+   "kind": "passive",
+   "name": "Pestilent Perfection",
+   "rules": [],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "vortex": {
+    "delay_s": 1.0,
+    "n": 1,
+    "between_s": 1.0,
+    "duration_s": 1.0,
+    "start_radius_m": 1.0,
+    "goal_radius_m": 2.0,
+    "expansion_speed": 30.0,
+    "damage": 5,
+    "damage_ap": 0,
+    "magical": true,
+    "spell": false,
+    "flaming": false,
+    "force": 25.0,
+    "contact": "wh2_main_unit_contact_plague_monk_censer_morale",
+    "allies": false,
+    "enemies": true,
+    "move_m_s": 0.0,
+    "launch": "target_centre",
+    "follow": false,
+    "next": null,
+    "key": "wh3_dlc29_unit_passive_pestilent_perfection",
+    "behaviour": "vortex_on_entity_death"
+   },
+   "when": "always",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, battle_vortexs (wh3_dlc29_unit_passive_pestilent_perfection); config/nn/abilities.json",
+   "kb": "docs/ru/training/units.md",
+   "does": null,
+   "modelled": true,
+   "sim": "at every own man's death a vortex 1 s later: 2 m, 5 + 0 once a man, force 25, lays wh2_main_unit_contact_plague_monk_censer_morale (always)",
+   "why": null
+  },
+  "wh3_dlc29_unit_passive_unshakable_pathogen": {
+   "kind": "passive",
+   "name": "Unshakable Pathogen",
+   "rules": [],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [
+    "out_of_melee"
+   ],
+   "timed": null,
+   "direct": {
+    "amount": 5,
+    "entities": 3,
+    "every_s": 1.0,
+    "on": [
+     "self"
+    ],
+    "scale": 1.0,
+    "min_unary": 0.5,
+    "hit_hp": 3.2,
+    "hit_dist": [
+     [
+      2,
+      0.2
+     ],
+     [
+      3,
+      0.4
+     ],
+     [
+      4,
+      0.4
+     ]
+    ],
+    "range_m": 0.0,
+    "hold_m": 5.0,
+    "n_enemy": 0,
+    "n_friend": 0,
+    "every_frame": false,
+    "duration_s": -1.0,
+    "magical": true,
+    "melee_only": true
+   },
+   "when": "off while out of melee",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_auto_deactivate_flags, special_ability_phases, _kv_unit_ability_scaling_rules (wh3_dlc29_unit_passive_unshakable_pathogen); config/nn/abilities.json",
+   "kb": "docs/ru/training/units.md",
+   "does": null,
+   "modelled": true,
+   "sim": "direct damage 5 x 1 to 3 random own men every 1 s (3.2 HP a man) (off while out of melee)",
+   "why": null
   }
  },
  "units": {
@@ -1092,6 +1189,14 @@
    "hide_forest",
    "wh3_dlc25_unit_passive_blackpowder_discipline"
   ],
+  "wh3_dlc29_skv_inf_pusbags": [
+   "expendable",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers",
+   "wh3_dlc29_unit_passive_pestilent_perfection",
+   "wh3_dlc29_unit_passive_unshakable_pathogen"
+  ],
   "wh_dlc04_emp_cav_knights_blazing_sun_0": [
    "hide_forest"
   ],
@@ -1190,6 +1295,10 @@
   ],
   "wh2_main_skv_inf_plague_monk_censer_bearer": [
    "wh2_main_unit_contact_plague_monk_censer_morale"
+  ],
+  "wh3_dlc29_skv_inf_pusbags": [
+   "wh2_main_unit_contact_plague_monk_censer_morale",
+   "wh_main_unit_contact_poison"
   ]
  }
 }

@@ -95,7 +95,10 @@ def test_the_effects_catalogue():
     # ... and the artillery's cant_run (29.10.2026: catalogued, no rule - its run speed is its walk's)
     # ... the Skaven monsters' terror and regeneration (29.10.2026)
     assert doc["order"][ob.FX_MID + ob.FX_G43:] == ["causes_fear", "immune_to_psychology", "cant_run", "causes_terror",
-                                                    "wh_main_unit_passive_regeneration"]
+                                                    "wh_main_unit_passive_regeneration",
+                                                    # the Pusbags (31.10.2026)
+                                                    "wh3_dlc29_unit_passive_pestilent_perfection",
+                                                    "wh3_dlc29_unit_passive_unshakable_pathogen"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():

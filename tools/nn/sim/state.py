@@ -262,6 +262,14 @@ STATIC = {
                       "healing_percentage_cap; 0 without regen)"),
     "terror": ("b", "attribute causes_terror: an enemy within terror_effect_range 5 m of it below 13 morale points runs "
                     "14 s (morale.py terror)"),
+    # (31.10.2026, the Pusbags: tools/nn/sim/direct.py, vortex.py; -1 / 0 for every other unit)
+    "dd_fx": ("i", "its innate effect of direct damage on itself (the catalogue's direct: Unshakable Pathogen), index in "
+                   "config/nn/effects.json order, -1 none: while it is on (fx_on) a tick strikes random own men "
+                   "(direct.py)"),
+    "vx_fx": ("i", "its innate effect of a vortex at every own man's death (the catalogue's vortex: Pestilent "
+                   "Perfection), index in that order, -1 none (vortex.py)"),
+    "resist_all": ("f", "the ward, 0-1 (the database's damage_mod_all): the only resistance a magical vortex that is no "
+                        "spell meets (vortex.py; mechanic.md P6)"),
     "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
                  "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
                  "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),
@@ -487,6 +495,14 @@ INTERNAL = {
     "ter_imm": ("f", "seconds left of its immunity to terror after a flight from it (85 s)"),
     "hid_d": ("b", "deployed, not stepped yet: a hide_forest unit in the woods at the first step starts hidden "
                    "(stealth.start_hidden)"),
+    # (31.10.2026, the Pusbags: tools/nn/sim/direct.py, vortex.py)
+    "dd_t": ("f", "seconds to the next tick of its direct damage on itself while it is on (0: a tick at once - the phase "
+                  "strikes at its start, so at every new melee; direct.py)"),
+    "dd_sum": ("f", "bookkeeping: HP its direct damage on itself has taken so far"),
+    "vk_p": ("f", "the share of its front men lying from the knocks of enemy vortices (vortex.py: in at the knocks a front "
+                  "man, out at 1 / the mean getting-up delay 1.85 s); its blows are x (1 - vk_p)"),
+    "vx_hits": ("f", "bookkeeping: enemy men struck by the vortices of its dead so far (vortex.py)"),
+    "vx_kn": ("f", "bookkeeping: enemy men the vortices of its dead have knocked down so far (vortex.py)"),
 }
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
@@ -504,6 +520,11 @@ PAIRS = {
     "hit_sec": "the side of i that j's contact began on, + 1 (1 front, 2 flank, 3 rear; 0: no contact): held while the "
                "pair stays in contact (morale.attacked_first: the database's 'attacked in the flank / rear' is the "
                "first contact's side)",
+    # (31.10.2026, the Pusbags: tools/nn/sim/vortex.py; here row: the vortex's owner p, column: the enemy j) the men of p
+    # who died k steps ago next to j - their vortices strike after the vortex's delay (k = round(delay / dt), at most
+    # vortex.QUEUE)
+    "vx_q1": "dead men of p next to enemy j 1 step ago (vortex.py)",
+    "vx_q2": "... 2 steps ago",
 }
 
 # Per unit and cell of its box, [B, N * HOLE_CELLS] (2-D for the same reason; artillery.CELLS' 6 x 3 cells, across x
@@ -624,6 +645,8 @@ def empty(B, N, device="cpu", history=0):
     u["mfx"].fill_(-1)
     u["sfx"].fill_(-1)
     u["ex_fx"].fill_(-1)
+    u["dd_fx"].fill_(-1)
+    u["vx_fx"].fill_(-1)
     u["sh_s"].fill_(-1)
     u["sh_t"].fill_(-1)
     u["sh_kt"].fill_(-1)

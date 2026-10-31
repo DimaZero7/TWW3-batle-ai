@@ -180,7 +180,8 @@ KB_ABILITIES = {"strength_in_numbers": KB + "abilities.md#attributes-selection",
                 "strength_of_the_penitent": "docs/en/training/units.md#flagellants-greatswords-free-company-militia",
                 "single_entity": KB + "single-entities.md",
                 "snare_net": KB + "abilities.md#attributes-selection",
-                "blackpowder_discipline": KB + "abilities.md#attributes-selection"}
+                "blackpowder_discipline": KB + "abilities.md#attributes-selection",
+                "unshakable_pathogen": "docs/ru/training/units.md", "pestilent_perfection": "docs/ru/training/units.md"}
 MISSING = {
     "effect bundles": "effect_bundles / effect_bonus_value_*: campaign effects (skills, techs, the contexts of "
                       "battle_context_unit_attribute_junctions such as causes_fear vs a culture); custom battles have none",
@@ -189,7 +190,16 @@ MISSING = {
     "stubborn, hatred": "not in the WH3 database as unit attributes or passive abilities (WH2 had them)",
     "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of "
                    "our passives carry their effects in the stat and attribute tables",
+    "direct damage on others": "a phase's direct damage (the passport's direct) on friends or enemies (the Warp Grinder's "
+                               "Warp Tremor, the Cauldron's miasma: not in the pools) - the simulator acts on the one on "
+                               "the owner itself only (tools/nn/sim/direct.py)",
+    "other vortices": "a vortex of another behaviour (vortex_per_entity, vortex_on_death), of an active ability or a spell, "
+                      "a moving one, one striking its own side, several in a row or a subsequent one: the simulator acts on "
+                      "a standing vortex at a man's death striking enemies only (tools/nn/sim/vortex.py)",
 }
+# (31.10.2026, the Pusbags) the vortex at a man's death the simulator acts on (tools/nn/sim/vortex.py;
+# build/diag_roster/wh3_dlc29_skv_inf_pusbags/mechanic.md P1-P8): what else such a vortex must be
+VORTEX_BEHAVIOURS = ("vortex_on_entity_death",)
 
 
 def name_of(key):
@@ -276,6 +286,10 @@ def ability_effect(key, p):
         sources.append("special_ability_to_auto_deactivate_flags")
     if contexts:
         sources.append("special_ability_to_recharge_contexts")
+    if p.get("direct"):
+        sources += ["special_ability_phases", "_kv_unit_ability_scaling_rules"]
+    if p.get("vortex"):
+        sources.append("battle_vortexs")
     sim_rules = [r for r in rules if r in SIM_RULES]
     schema_rules = [r for r in rules if r not in SIM_RULES]
     why = []
@@ -287,6 +301,20 @@ def ability_effect(key, p):
         why.append("rules with nothing to act on: " + ", ".join(schema_rules))
     modelled = not unknown and not bad
     parts = [f"{s['stat']} {s['how']} {s['value']:g}" for s in stats if s["sim"]] + [f"rule {r}" for r in sim_rules]
+    direct, direct_why = direct_of(p)
+    if direct:
+        parts.append(f"direct damage {direct['amount']} x {direct['scale']:g} to {direct['entities']} random own men every "
+                     f"{direct['every_s']:g} s ({direct['hit_hp']:g} HP a man)")
+        if direct_why:
+            why.append(direct_why)
+    vortex, vortex_why = vortex_of(p)
+    if vortex:
+        parts.append(f"at every own man's death a vortex {vortex['delay_s']:g} s later: {vortex['goal_radius_m']:g} m, "
+                     f"{vortex['damage']} + {vortex['damage_ap']} once a man, force {vortex['force']:g}"
+                     + (f", lays {vortex['contact']}" if vortex.get("contact") else ""))
+        if vortex_why:
+            why.append(vortex_why)
+    modelled = modelled and not direct_why and not vortex_why
     heal = None
     if p.get("heal"):
         # (the ability passport's heal: Regeneration's 0.001 of the largest health every 1 s; tools/nn/sim/regen.py)
@@ -297,10 +325,48 @@ def ability_effect(key, p):
             "range_m": float(p.get("range_m") or 0.0), "needs": needs, "off_when": off, "timed": timed,
             **({"delay_s": delay} if delay > 0 and not timed else {}),
             **({"heal": heal} if heal else {}),
+            **({"direct": direct} if direct else {}),
+            **({"vortex": vortex} if vortex else {}),
             "when": when, "source": "db: " + ", ".join(sources) + f" ({key}); config/nn/abilities.json",
             "kb": KB_ABILITIES.get(tail), "does": None,
             "modelled": modelled, "sim": ("; ".join(parts) + f" ({when})") if modelled else None,
             "why": "; ".join(why) or None}
+
+
+def direct_of(p):
+    """(direct, why not) of a passport's direct damage (abilities.py FIELDS direct): the simulator acts on the one on the
+    owner itself (tools/nn/sim/direct.py); None, None without one."""
+    d = p.get("direct")
+    if not d:
+        return None, None
+    out = {k: d[k] for k in ("amount", "entities", "every_s", "on", "scale", "min_unary", "hit_hp", "hit_dist",
+                             "range_m", "hold_m", "n_enemy", "n_friend", "every_frame", "duration_s", "magical") if k in d}
+    # (the ability's auto-deactivate flag out_of_melee: only in melee - the Pusbags' Pathogen)
+    out["melee_only"] = "out_of_melee" in (p.get("off_when") or ())
+    if list(d.get("on") or ()) != ["self"]:
+        return out, "direct damage on " + ", ".join(d.get("on") or ["nobody"]) + " (the owner itself only is modelled)"
+    if float(d.get("every_s") or 0) <= 0 or int(d.get("entities") or 0) == 0:
+        return out, "direct damage without a tick or men"
+    return out, None
+
+
+def vortex_of(p):
+    """(vortex, why not) of a passport's vortex (abilities.py FIELDS vortex): the simulator acts on a standing vortex at a
+    man's death that strikes enemies only, once, without a next one (tools/nn/sim/vortex.py); None, None without one."""
+    v = p.get("vortex")
+    if not v:
+        return None, None
+    out = dict(v, behaviour=p.get("behaviour"))
+    bad = []
+    if p.get("behaviour") not in VORTEX_BEHAVIOURS:
+        bad.append(f"behaviour {p.get('behaviour')}")
+    if float(v.get("move_m_s") or 0) != 0 or v.get("follow"):
+        bad.append("a moving vortex")
+    if v.get("allies") or not v.get("enemies"):
+        bad.append("a vortex striking its own side")
+    if int(v.get("n") or 1) != 1 or v.get("next"):
+        bad.append("several vortices")
+    return out, ("vortex not modelled: " + ", ".join(bad)) if bad else None
 
 
 def innate(passport):
@@ -352,7 +418,10 @@ def build(units, abilities, previous_order=(), phases=None):
                 effects.setdefault(a, ability_effect(a, p))
                 own.append(a)
         links[ukey] = sorted(own)
-        lays = [k for k in inflicted(u) if k in phases]
+        # (31.10.2026) and the contact effects its men's vortices lay (the passport's vortex.contact: the Pusbags' -10
+        # morale of the censer)
+        vx = sorted({(abilities.get(a) or {}).get("vortex", {}).get("contact") for a in u.get("abilities") or ()} - {None})
+        lays = sorted(set(k for k in inflicted(u) + vx if k in phases))
         for k in lays:
             effects.setdefault(k, contact_effect(k, phases[k]))
         if lays:

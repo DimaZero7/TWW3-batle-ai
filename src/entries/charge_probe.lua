@@ -91,7 +91,7 @@
 -- e.attack attacks the target at a walk at the go (the anvil: with lane.t_attack_extra both fight); lane.a_go_s holds the
 -- attacker's order (its mode's) until that long after the go (probe_phase 'a_go'); lane.contact_a_only: the lane's
 -- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
--- attacker's row carries dd (CCO DamageDealt).
+-- attacker's row carries dd (CCO DamageDealt); lane.dd_rows 'both' (the pusbags plan): the target's row too.
 -- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
 -- (MoraleGreatestEffect, the strongest effect's text), fx (CCO ActiveEffectList keys) and w (wavering).
 -- lane.morale_rows (optional): both units' sample rows carry those morale fields (fearless or not; the dmgmelee plan).
@@ -427,7 +427,9 @@ function M.main(bm, config, globals)
         local row = shooter and shooter_row(u) or unit_row(u)
         if lane.morale_rows or (who == 'tg' and lane.t_morale) then add_morale(row, u) end
         if lane.card_rows then row.cs = card_stats(u) end
-        if lane.dd_rows and who == 'a' then row.dd = round(read(cco, u, 'DamageDealt'), 0) end
+        if lane.dd_rows and (who == 'a' or lane.dd_rows == 'both') then
+            row.dd = round(read(cco, u, 'DamageDealt'), 0)
+        end
         return row
     end
 

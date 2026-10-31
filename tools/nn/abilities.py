@@ -29,7 +29,21 @@ UNITS = project.CONFIG_DIR / "nn" / "units.json"
 ROSTER = project.ROOT / "data" / "roster"
 TABLES = ("unit_special_abilities", "special_ability_to_special_ability_phase_junctions",
           "special_ability_phase_stat_effects", "special_ability_phase_attribute_effects",
-          "special_ability_to_recharge_contexts", "special_ability_to_auto_deactivate_flags")
+          "special_ability_to_recharge_contexts", "special_ability_to_auto_deactivate_flags",
+          # (31.10.2026, the Pusbags) the vortices (unit_special_abilities.vortex) and the direct damage's scale by the
+          # battle's unit size (passport `vortex`, `direct`)
+          "battle_vortexs", "_kv_unit_ability_scaling_rules")
+# The battle's unit size of our battles (the pools' men: 180 skavenslaves, 120 swordsmen - the game's 'ultra'): the
+# direct damage's scale direct_damage_<size> of _kv_unit_ability_scaling_rules (build/diag_roster/wh3_dlc29_skv_inf_pusbags/
+# mechanic.md B2: small 0.25, medium 0.5, large 0.75, ultra 1.0)
+UNIT_SIZE = "ultra"
+# The behaviours (unit_special_abilities.behaviour) whose vortex the death of the owner's men fires (mechanic.md P1: bit
+# 14 of the ability's behaviours, at every man's death of any cause) - such an ability is innate, whatever its active time
+DEATH_VORTEX = ("vortex_on_entity_death",)
+# The direct damage's hold of its targets: an enemy struck stays a target until it is this far beyond the ability's
+# effect_range (the game's program, build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md 1, 5: the Warp Grinder's
+# 35 + 5 m)
+DIRECT_HOLD_M = 5.0
 PHASES = "special_ability_phases"      # read with floats as written (fatigue_change_ratio to 6 digits)
 # the spells' own tables (spell_passport): the ability's kind, the bombardment, its projectile, explosion and penetration
 SPELL_TABLES = ("unit_abilities", "projectile_bombardments", "projectiles", "projectiles_explosions",
@@ -182,15 +196,40 @@ FIELDS = {
             "heal_amount, the share of the unit's largest health healed each tick; every_s - hp_change_frequency, the tick, "
             "s (Regeneration 0.001 every 1.0 s: the Brood Horror's 6009 HP heal 6 HP/s - the game's program, "
             "build/diag_skv_mon/mechanic.md M11: round(heal_amount x the power x the largest health) a tick)",
+    "direct": "only an ability whose phase deals direct damage (special_ability_phases damage_amount != 0: the Pusbags' "
+              "Unshakable Pathogen): amount - damage_amount, entities - max_damaged_entities (-1: all its men), every_s - "
+              "hp_change_frequency (the tick: at the phase's start and every every_s), on - the phase's targets, scale - "
+              "_kv_unit_ability_scaling_rules direct_damage_<UNIT_SIZE> (ultra 1.0), min_unary - "
+              "direct_damage_damage_scale_min_unary (0.5): a tick strikes min(entities, alive) different random men, each "
+              "trunc(trunc(max(1, amount x scale)) x U[min_unary, 1]), at least 1 HP, past armour and shields (the game's "
+              "program, build/diag_roster/wh3_dlc29_skv_inf_pusbags/mechanic.md B1-B4); hit_hp - the mean of that (3.2), "
+              "hit_dist - [[HP, share]]; magical - the hit is magical (past armour and shields, the spell resistance and the "
+              "ward cut it: round(HP x (100 - resistance) / 100), the physical does not); range_m - effect_range (0: the "
+              "owner itself), hold_m - range_m + DIRECT_HOLD_M 5 (a target stays one to there), n_enemy / n_friend - "
+              "num_effected_enemy_units / _friendly_units (-1 all), every_frame - update_targets_every_frame (the targets "
+              "re-picked every tick, one out of range dropped at once, back in: a tick at once), duration_s - the phase's "
+              "duration, else the ability's active_time (-1: while on); the random men are picked again at every tick "
+              "(build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md W2-W5, 5)",
+    "behaviour": "unit_special_abilities.behaviour when set (vortex_on_entity_death: a vortex at every man's death; such "
+                 "an ability without a recharge is passive whatever its active time)",
+    "vortex": "battle_vortexs of unit_special_abilities.vortex: delay_s - delay (+ i x between_s for the i-th of n - "
+              "num_vortexes / delay_between_vortexes), duration_s - max(duration, goal_radius / expansion_speed), "
+              "start_radius_m / goal_radius_m / expansion_speed - the circle growing, damage / damage_ap - one strike of a "
+              "man (at most once a second a vortex: once in its 1 s), magical - is_magical (the physical resistance off), "
+              "spell - is_spell (the spell resistance on), flaming - ignition_amount != 0, force - detonation_force (the "
+              "knock: dv = 1.3 F S / (F + m), S the expansion speed), contact - contact_effect (laid on the whole unit of a "
+              "man struck), allies / enemies - affects_allies / affects_enemies, move_m_s - movement_speed, launch - "
+              "launch_source, follow - follow_target, next - subsequent_vortex (mechanic.md P1-P8)",
     "delay_s": "only a passive of several phases whose first phases lay nothing (Blackpowder Discipline: phase i 10 s, "
                "no stats, then phase ii): the special_ability_phases durations of those first phases, in the junctions' "
                "order - its effects come on once its conditions have held that long (ours: the phases run in order)",
 }
 MISSING = {
-    "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet "
-                   "(Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode; it throws the "
-                   "men around the Warlord back: probe T-E3, 2 s after the cast no swordsman within 6 m, the nearest "
-                   "6.5-8.6 m away, in contact again after ~8 s - its force is not decoded, the simulator has no knockback)",
+    "area damage": "battle_vortexs decoded since 31.10.2026 (the passport's `vortex`); the simulator acts on the vortex "
+                   "at a man's death only (tools/nn/sim/vortex.py). Verminous Valour's vortex (25 m, 1 s, damage 0, force "
+                   "200) throws the men around the Warlord back: probe T-E3, 2 s after the cast no swordsman within 6 m, "
+                   "the nearest 6.5-8.6 m away, in contact again after ~8 s - no knockback of an active ability's vortex "
+                   "in the simulator",
     "conditions": "decoded: recharge_when (special_ability_to_recharge_contexts) and off_when "
                   "(special_ability_to_auto_deactivate_flags); a passive's effects are what it gives while on; "
                   "passive and auto abilities are innate effects (config/nn/effects.json, python -m tools.nn.effects)",
@@ -238,7 +277,10 @@ def passport(key, rows, t):
             if r["phase"] == ph["phase"]:
                 attributes.append({"attribute": r["attribute"], "effect": r["attribute_type"], "on": on,
                                    "phase": ph["phase"]})
-    passive = p["active_time"] < 0 and p["recharge_time"] < 0
+    # (DEATH_VORTEX) an ability the death of the owner's men fires is innate: the Pusbags' Pestilent Perfection has
+    # active_time 1 (the vortex's life) and no recharge
+    passive = (p["active_time"] < 0 and p["recharge_time"] < 0) or (p.get("behaviour") in DEATH_VORTEX
+                                                                    and p["recharge_time"] < 0)
     auto = not passive and "_passive_" in key
     friendly, enemy = p["num_effected_friendly_units"], p["num_effected_enemy_units"]
     extra = {}
@@ -257,6 +299,33 @@ def passport(key, rows, t):
     if healing:
         # (FIELDS heal) the phase's heal_amount and hp_change_frequency
         extra["heal"] = {"share": healing[0][0], "every_s": healing[0][1]}
+    direct = [(ph, (t.get("phase_direct") or {}).get(ph["phase"])) for ph in phases]
+    direct = [(ph, d) for ph, d in direct if d and d[0]]
+    if direct:
+        # (FIELDS direct) the phase's damage_amount, max_damaged_entities, hp_change_frequency and the unit size's scale
+        ph, (amount, entities, every) = direct[0]
+        kv = t.get("ability_scaling") or {}
+        scale = float(kv.get(f"direct_damage_{UNIT_SIZE}", 1.0))
+        low = float(kv.get("direct_damage_damage_scale_min_unary", 1.0))
+        dur = float((t.get("phase_duration") or {}).get(ph["phase"], -1.0))
+        extra["direct"] = {"amount": amount, "entities": entities, "every_s": every,
+                           "on": [k for k in ("self", "friends", "enemies") if ph[f"target_{k}"]],
+                           "scale": scale, "min_unary": low, "hit_hp": direct_hit_mean(amount, scale, low),
+                           "hit_dist": direct_hit_dist(amount, scale, low),
+                           # who: the owner itself, or the units within range_m of its centre (held to range_m + hold),
+                           # at most n_enemy / n_friend of them (-1 all), re-picked every tick (every_frame)
+                           "range_m": float(p["effect_range"]), "hold_m": float(p["effect_range"]) + DIRECT_HOLD_M,
+                           "n_enemy": int(p["num_effected_enemy_units"]), "n_friend": int(p["num_effected_friendly_units"]),
+                           "every_frame": bool(p["update_targets_every_frame"]),
+                           "duration_s": dur if dur > 0 else float(p["active_time"]),
+                           # magical (the program's damage flags 6): past armour and shields, the spell resistance and
+                           # the ward cut it, the physical does not
+                           "magical": True}
+    if p.get("behaviour"):
+        extra["behaviour"] = p["behaviour"]
+    vx = (t.get("vortices") or {}).get(p.get("vortex") or "")
+    if vx:
+        extra["vortex"] = vortex_passport(vx)
     return {
         "active_s": p["active_time"], "recharge_s": p["recharge_time"],
         "initial_s": max(0.0, p.get("initial_recharge", 0.0)),
@@ -279,6 +348,45 @@ def passport(key, rows, t):
         "attributes": sorted(attributes, key=lambda a: (a["phase"], a["attribute"])),
         **extra,
     }
+
+
+def direct_hit_mean(amount, scale, low):
+    """The mean HP of one man's hit of a direct-damage tick (FIELDS direct): max(1, trunc(base x U[low, 1])), base =
+    trunc(max(1, amount x scale)) - 5, 1.0, 0.5: 2 (0.2), 3 (0.4), 4 (0.4) -> 3.2."""
+    base = math.floor(max(1.0, float(amount) * float(scale)))
+    lo, hi = base * float(low), float(base)
+    if hi <= lo:
+        return float(max(1, math.floor(hi)))
+    # E[max(1, floor X)], X ~ U[lo, hi]: 1 + the sum over k >= 2 of P(X >= k)
+    return round(1.0 + sum(min(1.0, max(0.0, (hi - k) / (hi - lo))) for k in range(2, base + 1)), 6)
+
+
+def direct_hit_dist(amount, scale, low):
+    """[[HP, share]] of one man's hit of a direct-damage tick (FIELDS direct): max(1, trunc(base x U[low, 1])) - 5, 1.0,
+    0.5: [[2, 0.2], [3, 0.4], [4, 0.4]]."""
+    base = math.floor(max(1.0, float(amount) * float(scale)))
+    lo, hi = base * float(low), float(base)
+    if hi <= lo:
+        return [[max(1, math.floor(hi)), 1.0]]
+    out = {}
+    for k in range(math.floor(lo), base + 1):
+        share = (min(hi, k + 1) - max(lo, k)) / (hi - lo)
+        if share > 1e-9:
+            out[max(1, k)] = out.get(max(1, k), 0.0) + share
+    return [[k, round(v, 6)] for k, v in sorted(out.items())]
+
+
+def vortex_passport(r):
+    """A vortex's passport (FIELDS vortex) from its battle_vortexs row."""
+    exp = float(r["expansion_speed"])
+    return {"delay_s": float(r["delay"]), "n": int(r["num_vortexes"]), "between_s": float(r["delay_between_vortexes"]),
+            "duration_s": max(float(r["duration"]), float(r["goal_radius"]) / exp if exp > 0 else 0.0),
+            "start_radius_m": float(r["start_radius"]), "goal_radius_m": float(r["goal_radius"]), "expansion_speed": exp,
+            "damage": int(r["damage"]), "damage_ap": int(r["damage_ap"]), "magical": bool(r["is_magical"]),
+            "spell": bool(r["is_spell"]), "flaming": float(r["ignition_amount"]) != 0,
+            "force": float(r["detonation_force"]), "contact": r.get("contact_effect"), "allies": bool(r["affects_allies"]),
+            "enemies": bool(r["affects_enemies"]), "move_m_s": float(r["movement_speed"]), "launch": r["launch_source"],
+            "follow": bool(r["follow_target"]), "next": r.get("subsequent_vortex"), "key": r["vortex_key"]}
 
 
 def card_passives(unit_key, roster=ROSTER):
@@ -327,7 +435,15 @@ def build(tables, keys, units, roster=ROSTER):
                       phase_duration={r["id"]: r.get("duration", -1.0) for r in tables[PHASES] if r["id"] in names},
                       phase_heal={r["id"]: (round(float(r.get("heal_amount") or 0.0), 6),
                                             round(float(r.get("hp_change_frequency") or 0.0), 6))
-                                  for r in tables[PHASES] if r["id"] in names})
+                                  for r in tables[PHASES] if r["id"] in names},
+                      phase_direct={r["id"]: (int(r.get("damage_amount") or 0), int(r.get("max_damaged_entities") or 0),
+                                              round(float(r.get("hp_change_frequency") or 0.0), 6))
+                                    for r in tables[PHASES] if r["id"] in names})
+    if "battle_vortexs" in tables:
+        tables = dict(tables, vortices={r["vortex_key"]: r for r in tables["battle_vortexs"]})
+    if "_kv_unit_ability_scaling_rules" in tables:
+        tables = dict(tables, ability_scaling={r["key"]: round(float(r["value"]), 6)
+                                               for r in tables["_kv_unit_ability_scaling_rules"]})
     out = {k: passport(k, rows, tables) for k in keys}
     bad = check_cards(out, units, roster)
     assert not bad, "passports differ from the cards:\n" + "\n".join(bad)

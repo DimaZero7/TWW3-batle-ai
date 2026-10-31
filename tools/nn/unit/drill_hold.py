@@ -41,11 +41,17 @@ def _passports():
     return json.loads((ROOT / "config/nn/units.json").read_text(encoding="utf-8"))["units"]
 
 
+# Kept out of the unit drills (31.10.2026): the Pusbags joined the pool (config/nn/units.json) with their own disease in
+# melee and vortices at death; the drills' fixed exam (6 x 10 x 2 x 3 = 360 battles) stays as it was until it is decided
+# whether the unit level should learn them
+NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags",)
+
+
 def roster():
-    """{"emp": [keys], "skv": [keys]}: the melee infantry of each faction."""
+    """{"emp": [keys], "skv": [keys]}: the melee infantry of each faction (but NOT_IN_DRILLS)."""
     out = {"emp": [], "skv": []}
     for k, v in _passports().items():
-        if v.get("caste") != "melee_infantry" or v.get("missile") or v["men"] <= 1:
+        if v.get("caste") != "melee_infantry" or v.get("missile") or v["men"] <= 1 or k in NOT_IN_DRILLS:
             continue
         side = "skv" if "_skv_" in k else "emp" if "_emp_" in k else None
         if side:

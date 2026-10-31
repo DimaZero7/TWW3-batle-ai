@@ -78,7 +78,12 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # large men, brace), the Brood Horror (one very large body: poison, regeneration, terror) and the Rat Ogre Mutant
          # (one very large body: magical attacks, 20 % physical resistance). Only the v3 army scheme fields them
          # (config/nn/pools.json units_v3): units.md "Монстры скавенов"
-         "wh2_main_skv_mon_rat_ogres", "wh2_dlc16_skv_mon_brood_horror_0", "wh2_dlc16_skv_mon_rat_ogre_mutant")
+         "wh2_main_skv_mon_rat_ogres", "wh2_dlc16_skv_mon_brood_horror_0", "wh2_dlc16_skv_mon_rat_ogre_mutant",
+         # 31.10.2026, the Pusbags (build/diag_roster/wh3_dlc29_skv_inf_pusbags/units.md, mechanic.md): the skavenslaves'
+         # body and weapon with poison, defence 5, 43 HP a man and two passives - Unshakable Pathogen (direct damage to
+         # itself in melee: tools/nn/sim/direct.py) and Pestilent Perfection (a vortex at every man's death:
+         # tools/nn/sim/vortex.py). Only the v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh3_dlc29_skv_inf_pusbags")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in

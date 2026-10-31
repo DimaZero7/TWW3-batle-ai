@@ -23,10 +23,13 @@
   "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on whom (the phase's targets)",
   "attributes": "special_ability_phase_attribute_effects of the phases (attribute, attribute_type: positive/negative)",
   "heal": "only an ability whose phases heal (special_ability_phases heal_amount != 0: Regeneration): share - heal_amount, the share of the unit's largest health healed each tick; every_s - hp_change_frequency, the tick, s (Regeneration 0.001 every 1.0 s: the Brood Horror's 6009 HP heal 6 HP/s - the game's program, build/diag_skv_mon/mechanic.md M11: round(heal_amount x the power x the largest health) a tick)",
+  "direct": "only an ability whose phase deals direct damage (special_ability_phases damage_amount != 0: the Pusbags' Unshakable Pathogen): amount - damage_amount, entities - max_damaged_entities (-1: all its men), every_s - hp_change_frequency (the tick: at the phase's start and every every_s), on - the phase's targets, scale - _kv_unit_ability_scaling_rules direct_damage_<UNIT_SIZE> (ultra 1.0), min_unary - direct_damage_damage_scale_min_unary (0.5): a tick strikes min(entities, alive) different random men, each trunc(trunc(max(1, amount x scale)) x U[min_unary, 1]), at least 1 HP, past armour and shields (the game's program, build/diag_roster/wh3_dlc29_skv_inf_pusbags/mechanic.md B1-B4); hit_hp - the mean of that (3.2), hit_dist - [[HP, share]]; magical - the hit is magical (past armour and shields, the spell resistance and the ward cut it: round(HP x (100 - resistance) / 100), the physical does not); range_m - effect_range (0: the owner itself), hold_m - range_m + DIRECT_HOLD_M 5 (a target stays one to there), n_enemy / n_friend - num_effected_enemy_units / _friendly_units (-1 all), every_frame - update_targets_every_frame (the targets re-picked every tick, one out of range dropped at once, back in: a tick at once), duration_s - the phase's duration, else the ability's active_time (-1: while on); the random men are picked again at every tick (build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md W2-W5, 5)",
+  "behaviour": "unit_special_abilities.behaviour when set (vortex_on_entity_death: a vortex at every man's death; such an ability without a recharge is passive whatever its active time)",
+  "vortex": "battle_vortexs of unit_special_abilities.vortex: delay_s - delay (+ i x between_s for the i-th of n - num_vortexes / delay_between_vortexes), duration_s - max(duration, goal_radius / expansion_speed), start_radius_m / goal_radius_m / expansion_speed - the circle growing, damage / damage_ap - one strike of a man (at most once a second a vortex: once in its 1 s), magical - is_magical (the physical resistance off), spell - is_spell (the spell resistance on), flaming - ignition_amount != 0, force - detonation_force (the knock: dv = 1.3 F S / (F + m), S the expansion speed), contact - contact_effect (laid on the whole unit of a man struck), allies / enemies - affects_allies / affects_enemies, move_m_s - movement_speed, launch - launch_source, follow - follow_target, next - subsequent_vortex (mechanic.md P1-P8)",
   "delay_s": "only a passive of several phases whose first phases lay nothing (Blackpowder Discipline: phase i 10 s, no stats, then phase ii): the special_ability_phases durations of those first phases, in the junctions' order - its effects come on once its conditions have held that long (ours: the phases run in order)"
  },
  "_missing": {
-  "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet (Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode; it throws the men around the Warlord back: probe T-E3, 2 s after the cast no swordsman within 6 m, the nearest 6.5-8.6 m away, in contact again after ~8 s - its force is not decoded, the simulator has no knockback)",
+  "area damage": "battle_vortexs decoded since 31.10.2026 (the passport's `vortex`); the simulator acts on the vortex at a man's death only (tools/nn/sim/vortex.py). Verminous Valour's vortex (25 m, 1 s, damage 0, force 200) throws the men around the Warlord back: probe T-E3, 2 s after the cast no swordsman within 6 m, the nearest 6.5-8.6 m away, in contact again after ~8 s - no knockback of an active ability's vortex in the simulator",
   "conditions": "decoded: recharge_when (special_ability_to_recharge_contexts) and off_when (special_ability_to_auto_deactivate_flags); a passive's effects are what it gives while on; passive and auto abilities are innate effects (config/nn/effects.json, python -m tools.nn.effects)",
   "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same"
  },
@@ -79,7 +82,30 @@
      "phase": "wh2_main_character_abilities_verminous_valour"
     }
    ],
-   "attributes": []
+   "attributes": [],
+   "vortex": {
+    "delay_s": 0.0,
+    "n": 1,
+    "between_s": 1.0,
+    "duration_s": 1.0,
+    "start_radius_m": 1.0,
+    "goal_radius_m": 25.0,
+    "expansion_speed": 25.0,
+    "damage": 0,
+    "damage_ap": 0,
+    "magical": false,
+    "spell": false,
+    "flaming": false,
+    "force": 200.0,
+    "contact": null,
+    "allies": false,
+    "enemies": true,
+    "move_m_s": 0.0,
+    "launch": "target_centre",
+    "follow": false,
+    "next": null,
+    "key": "wh2_main_character_abilities_verminous_valour"
+   }
   },
   "wh2_main_unit_passive_scurry_away": {
    "active_s": -1.0,
@@ -289,6 +315,124 @@
    ],
    "attributes": [],
    "delay_s": 10.0
+  },
+  "wh3_dlc29_unit_passive_pestilent_perfection": {
+   "active_s": 1.0,
+   "recharge_s": -1.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0,
+   "cp": [
+    100,
+    100
+   ],
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "update_targets": false,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [],
+   "targets": {
+    "self": false,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [],
+   "attributes": [],
+   "behaviour": "vortex_on_entity_death",
+   "vortex": {
+    "delay_s": 1.0,
+    "n": 1,
+    "between_s": 1.0,
+    "duration_s": 1.0,
+    "start_radius_m": 1.0,
+    "goal_radius_m": 2.0,
+    "expansion_speed": 30.0,
+    "damage": 5,
+    "damage_ap": 0,
+    "magical": true,
+    "spell": false,
+    "flaming": false,
+    "force": 25.0,
+    "contact": "wh2_main_unit_contact_plague_monk_censer_morale",
+    "allies": false,
+    "enemies": true,
+    "move_m_s": 0.0,
+    "launch": "target_centre",
+    "follow": false,
+    "next": null,
+    "key": "wh3_dlc29_unit_passive_pestilent_perfection"
+   }
+  },
+  "wh3_dlc29_unit_passive_unshakable_pathogen": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "initial_s": 0.0,
+   "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    0,
+    0
+   ],
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "update_targets": false,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [
+    "out_of_melee"
+   ],
+   "phases": [
+    "wh3_dlc29_unit_passive_unshakable_pathogen"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [],
+   "attributes": [],
+   "direct": {
+    "amount": 5,
+    "entities": 3,
+    "every_s": 1.0,
+    "on": [
+     "self"
+    ],
+    "scale": 1.0,
+    "min_unary": 0.5,
+    "hit_hp": 3.2,
+    "hit_dist": [
+     [
+      2,
+      0.2
+     ],
+     [
+      3,
+      0.4
+     ],
+     [
+      4,
+      0.4
+     ]
+    ],
+    "range_m": 0.0,
+    "hold_m": 5.0,
+    "n_enemy": 0,
+    "n_friend": 0,
+    "every_frame": false,
+    "duration_s": -1.0,
+    "magical": true
+   }
   },
   "wh3_main_unit_passive_single_entity": {
    "active_s": -1.0,

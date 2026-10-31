@@ -85,6 +85,11 @@ GROUPS = ("self", "friends", "enemies")
 # (training: off); the probes' simulator twins read it (tools/nn/morale_probe.py).
 RECEIVED = None
 HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability", "contact", "duration_s", "delay_s")
+# (31.10.2026, the Pusbags) the numbers of an effect's direct damage on its owner (the catalogue's direct: tools/nn/sim/
+# direct.py) and of the vortex at its owner's men's deaths (the catalogue's vortex: tools/nn/sim/vortex.py); 0 none
+DIRECT = ("dd_n", "dd_hp", "dd_s", "dd_base", "dd_low")
+VORTEX = ("vx_delay", "vx_r", "vx_d", "vx_ap", "vx_f", "vx_v", "vx_magic", "vx_spell", "vx_fire", "vx_ct")
+HEAD = HEAD + DIRECT + VORTEX
 COLS = HEAD + tuple(f"{w}_{p}" for w in ("need", "off", "fire", "rcg") for p in PREDICATES) + tuple(
     f"rule_{r}" for r in RULES) + tuple(f"{g}_{s}" for g in GROUPS for s in E_STATS)
 COL = {c: i for i, c in enumerate(COLS)}
@@ -161,11 +166,16 @@ def static(params, key):
     assert len(timed) <= TIMERS, f"{key}: {len(timed)} timed effects, the state holds {TIMERS}"
     timed += [-1] * (TIMERS - len(timed))
     mfx, sfx = laid_by(params, key)
+    # (31.10.2026, the Pusbags) its effect of direct damage on itself and its effect of a vortex at its men's deaths (the
+    # first modelled one of each; -1 none): tools/nn/sim/direct.py, vortex.py
+    direct = [idx[k] for k in own if (eff.get(k) or {}).get("direct") and modelled(params, k)]
+    vortex = [idx[k] for k in own if (eff.get(k) or {}).get("vortex") and modelled(params, k)]
     # a delayed effect (delay_s: its first phases lay nothing - Blackpowder Discipline): one a unit, its clock fxd_s
     delayed = [idx[k] for k in own if float((eff.get(k) or {}).get("delay_s") or 0.0) > 0 and modelled(params, k)]
     assert len(delayed) <= 1, f"{key}: {len(delayed)} delayed effects, the state holds 1"
     return {"fx": bits, **{f"fxt{j}": t for j, t in enumerate(timed)}, **rules, "mfx": mfx, "sfx": sfx,
-            "fxd": delayed[0] if delayed else -1, "regen": heal_of(params, key)}
+            "fxd": delayed[0] if delayed else -1, "regen": heal_of(params, key),
+            "dd_fx": direct[0] if direct else -1, "vx_fx": vortex[0] if vortex else -1}
 
 
 def heal_of(params, key):
@@ -195,6 +205,22 @@ def row(params, key):
                ability=float(ab_keys.index(key)) if key in ab_keys else -1.0,
                contact=float(contact), duration_s=float(e.get("duration_s") or 0.0),
                delay_s=float(e.get("delay_s") or 0.0))
+    d = e.get("direct") or {}
+    if d:
+        # dd_n: men a tick (-1: all of them), dd_hp: the mean HP of a man's hit, dd_s: the tick; dd_base, dd_low: a
+        # hit's trunc(max(1, amount x scale)) and min_unary (the hit trunc(base x U[low, 1]) at least 1: direct.py)
+        import math
+        out.update(dd_n=float(d["entities"]), dd_hp=float(d["hit_hp"]), dd_s=float(d["every_s"]),
+                   dd_base=float(math.floor(max(1.0, float(d["amount"]) * float(d.get("scale", 1.0))))),
+                   dd_low=float(d.get("min_unary", 1.0)))
+    v = e.get("vortex") or {}
+    if v:
+        idx = index(params)
+        out.update(vx_delay=float(v["delay_s"]), vx_r=float(v["goal_radius_m"]), vx_d=float(v["damage"]),
+                   vx_ap=float(v["damage_ap"]), vx_f=float(v["force"]), vx_v=float(v["expansion_speed"]),
+                   vx_magic=float(bool(v.get("magical"))), vx_spell=float(bool(v.get("spell"))),
+                   vx_fire=float(bool(v.get("flaming"))),
+                   vx_ct=float(idx[v["contact"]]) if v.get("contact") in idx and modelled(params, v["contact"]) else -1.0)
     for w, preds in (("need", e.get("needs") or ()), ("off", e.get("off_when") or ()),
                      ("fire", t.get("fires_when") or ()), ("rcg", t.get("recharge_needs") or ())):
         for p in preds:
@@ -229,6 +255,7 @@ def table(params, device):
         for s in E_MULT:
             empty[COL[f"{g}_{s}"]] = 1.0
     empty[COL["ability"]] = -1.0
+    empty[COL["vx_ct"]] = -1.0
     # an effect in the order that no unit owns any more (the order is append-only) has an empty row
     rows = [row(params, k) if k in params.effects["effects"] else empty for k in order(params)]
     return torch.tensor(rows + [empty], device=device)
@@ -526,13 +553,15 @@ def contact_on(u, params, E, alive):
     return on
 
 
-def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None):
+def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None, vortex=None):
     """The contact effects laid this step (module doc), in place: each timer cfx{j}_s runs down by dt, then starts at
     the effect's duration_s on every unit an enemy weapon of it hit this step. hp_melee / hp_missile [B, i, j]: HP i's
     blows / projectiles took from j this step, mhit / shit [B, i, j] the HP a hit; enemy [B, i, j]. Hits land as
     Poisson counts of the expected ones: at least one with 1 - exp(-hits) (a hash draw per battle, unit and step,
     morale._hash_uniform, so a replay draws the same). blast [B, i, j]: the hits of i's shells' blasts on j (artillery.land),
-    which lay i's blast's contact effect (STATIC ex_fx: the Plagueclaw's -10 morale); None: none."""
+    which lay i's blast's contact effect (STATIC ex_fx: the Plagueclaw's -10 morale); None: none. vortex [B, i, j]: the
+    men of j struck by the vortices of i's dead (tools/nn/sim/vortex.py), which lay the vortex's contact effect on the whole
+    unit (the catalogue's vortex.contact, table column vx_ct: the Pusbags' -10 morale; mechanic.md P8); None: none."""
     keys = contact_keys(params)
     if not keys or "cfx0_s" not in u:
         return
@@ -548,6 +577,9 @@ def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None):
         hits = ((u["mfx"] == i).float()[:, :, None] * n_m).sum(1) + ((u["sfx"] == i).float()[:, :, None] * n_s).sum(1)
         if blast is not None and "ex_fx" in u:
             hits = hits + ((u["ex_fx"] == i).float()[:, :, None] * blast * enemy).sum(1)
+        if vortex is not None and "vx_fx" in u:
+            ct = torch.where(u["vx_fx"] >= 0, T[u["vx_fx"], COL["vx_ct"]], torch.full_like(u["men"], -1.0))
+            hits = hits + ((ct == float(i)).float()[:, :, None] * vortex * enemy).sum(1)
         draw = morale._hash_uniform(B, N, k, u["men"].device, salt=52817 + 131 * j, ids=ids)
         hit = (hits > 0) & (draw < 1 - torch.exp(-hits))
         left = (u[f"cfx{j}_s"] - dt).clamp(min=0)

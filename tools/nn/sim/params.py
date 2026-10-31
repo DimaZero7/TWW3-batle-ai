@@ -225,6 +225,8 @@ class Params:
             "resist_physical": (resist.get("physical", 0) + resist.get("all", 0)) / 100,
             # spell resistance and the ward cut a magical projectile (magic.py; docs/en/game/mechanics/magic.md)
             "resist_magic": min(0.9, (resist.get("magic", 0) + resist.get("all", 0)) / 100),
+            # the ward alone: what a magical vortex that is no spell meets (vortex.py; 0 for every unit today)
+            "resist_all": min(0.9, resist.get("all", 0) / 100),
             "large": u.get("size", "small") != "small",
             # (29.10.2026, the Skaven monsters; state.py) the knock resistance of its body, its blows' fire and magic, its
             # own fire resistance (the effects add Regeneration's weakness, effects.py) and its regeneration's pool

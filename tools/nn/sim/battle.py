@@ -12,7 +12,7 @@ import torch
 
 from tools.nn.sim import abilities, artillery, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale
 from tools.nn.sim import movement
-from tools.nn.sim import ground, impact, reform, regen, skirmish, stealth, terrain
+from tools.nn.sim import direct, ground, impact, reform, regen, skirmish, stealth, terrain, vortex
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -491,6 +491,10 @@ def step(st, orders, params=None, dt=None):
     if big_on:
         # (impact.up_share) the front men of a unit knocked down by a large enemy do not strike it while they lie
         rate, swing = impact.up_share(u, params, rate), impact.up_share(u, params, swing)
+    vx_on = vortex.on(params) and "vx_fx" in u
+    if vx_on:
+        # (vortex.up_share) the front men an enemy vortex knocked down strike nobody while they lie (x 1 elsewhere)
+        rate, swing = vortex.up_share(u, rate), vortex.up_share(u, swing)
     if stuck_cal.get("on") and "stk_n" in u:
         # A router running into a standing enemy formation (its boxes touching by their own edges - not the rout's exit
         # contact - with the router moving towards it, not a formation chasing it by order) leaves among its men as many
@@ -776,6 +780,21 @@ def step(st, orders, params=None, dt=None):
     else:
         shown, shown_tgt = firing, m_target
 
+    # --- the Pusbags' class (31.10.2026): an effect's direct damage on its owner (direct.py: the Unshakable Pathogen's
+    # ticks while in melee) and the vortices of the men who died a delay ago (vortex.py: Pestilent Perfection) ---
+    hp_fx = kills_fx = hits_vx = kn_vx = None
+    dd_on = direct.on(params) and "dd_fx" in u
+    if dd_on or vx_on:
+        hp_fx = torch.zeros_like(hp_melee)
+        kills_fx = torch.zeros_like(hp_melee)
+        if dd_on:
+            hp_dd, kills_dd, _ = direct.strike(u, params, dt)
+            hp_fx = hp_fx + torch.diag_embed(hp_dd)
+            kills_fx = kills_fx + torch.diag_embed(kills_dd)
+        if vx_on:
+            hp_vx, kills_vx, hits_vx, kn_vx = vortex.strike(u, params, dt, touch | touch.transpose(1, 2))
+            hp_fx, kills_fx = hp_fx + hp_vx, kills_fx + kills_vx
+
     # --- damage, men, kills ---
     if (params.sim.get("noise") or {}).get("blows"):
         # noise.blows: a Poisson number of blows / hits of the pair's mean HP a blow (the game rolls each; the probes'
@@ -799,6 +818,9 @@ def step(st, orders, params=None, dt=None):
             gun_hp = gun_hp + hp_bomb.sum(1)
             hp_bomb, kills_bomb = hp_bomb * keep_c, kills_bomb * keep_c
         gun_hp = gun_hp + hp_art.sum(1)
+        if hp_fx is not None:
+            gun_hp = gun_hp + hp_fx.sum(1)
+            hp_fx, kills_fx = hp_fx * keep_c, kills_fx * keep_c
         hp_art, kills_art, hits_art = hp_art * keep_c, kills_art * keep_c, hits_art * keep_c
         gun_hp = gun_hp * gs
         u["hp_abs"] = u["hp_abs"] - u["eng_w"]
@@ -807,6 +829,8 @@ def step(st, orders, params=None, dt=None):
         dmg = dmg + hp_bomb
     if hp_art is not None:
         dmg = dmg + hp_art
+    if hp_fx is not None:
+        dmg = dmg + hp_fx
     hit = torch.where(hp_missile > 0, shit, mhit)
     taken = dmg.sum(1)
     scale = torch.where(taken > u["hp_abs"], u["hp_abs"] / taken.clamp(min=1e-9), torch.ones_like(taken))
@@ -827,7 +851,9 @@ def step(st, orders, params=None, dt=None):
         u["bm_gold_e"] = u["bm_gold_e"] + (db * pw["enemy"] * per_hp).sum(2)
         u["bm_gold_f"] = u["bm_gold_f"] + (db * friend * per_hp).sum(2)
         u["bm_knock"] = u["bm_knock"] + (bomb_extra["knock"] * pw["enemy"]).sum(2)
-    kills = (dmg - db) / u["hp_man"][:, None, :].clamp(min=1e-6) * share
+    # (the direct damage's and the vortices' HP have their own kills, as the bombardments': direct.py, vortex.py)
+    db_k = db if hp_fx is None else db + hp_fx * scale[:, None, :]
+    kills = (dmg - db_k) / u["hp_man"][:, None, :].clamp(min=1e-6) * share
     if cal["kills"].get("wound_pool"):
         # The wounded pool (kills.wound_pool; build/open_melee/spec.md R7): the game keeps every man's health and the
         # blows beyond a man's health are lost (CA), so the wounded among the living - W = men x HP a man - the unit's
@@ -845,12 +871,12 @@ def step(st, orders, params=None, dt=None):
         W_cap = own * (u["hp_man"] - hit_m).clamp(min=0)
         k_m = torch.minimum((W + D - W_cap).clamp(min=0), D) / hm
         pool_k = dm / D.clamp(min=1e-9)[:, None, :] * k_m[:, None, :]
-        shot_k = (dmg - dm - db) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit,
+        shot_k = (dmg - dm - db_k) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit,
                                                                      cal["kills"]["exponent"])
         if cal["kills"].get("missile_uniform"):
             # kills.missile_uniform (build/open2): projectile hits spread evenly over the living men, each with his
             # own health (melee.shot_kills: Poisson hits a man, tau from the unit's wounded); per pair by its hits
-            h_pair = (dmg - dm - db).clamp(min=0) / shit.clamp(min=1e-6)
+            h_pair = (dmg - dm - db_k).clamp(min=0) / shit.clamp(min=1e-6)
             H = h_pair.sum(1)
             # the hits' mean HP (HP a man / their hits-weighted E[N] to kill)
             K_t = (h_pair * hm[:, None, :] / shit.clamp(min=1e-6)).sum(1) / H.clamp(min=1e-9)
@@ -873,7 +899,7 @@ def step(st, orders, params=None, dt=None):
                 # the lost hits' health back out of the taken (each pair by its hits)
                 lost_hp = torch.where(many, lost * eff_t, torch.zeros_like(lost))
                 cut = h_pair / H.clamp(min=1e-9)[:, None, :] * lost_hp[:, None, :]
-                cut = torch.minimum(cut, (dmg - dm - db).clamp(min=0))
+                cut = torch.minimum(cut, (dmg - dm - db_k).clamp(min=0))
                 dmg = dmg - cut
                 taken = dmg.sum(1)
             else:
@@ -882,6 +908,8 @@ def step(st, orders, params=None, dt=None):
         kills = torch.where((u["men0"] > 1)[:, None, :], pool_k + shot_k, kills)
     if kills_bomb is not None:
         kills = kills + torch.where((u["men0"] > 1)[:, None, :], kills_bomb * scale[:, None, :], torch.zeros_like(kills))
+    if kills_fx is not None:
+        kills = kills + torch.where((u["men0"] > 1)[:, None, :], kills_fx * scale[:, None, :], torch.zeros_like(kills))
     if kills_art is not None:
         kills = kills + torch.where((u["men0"] > 1)[:, None, :], kills_art * scale[:, None, :], torch.zeros_like(kills))
     hp_new = (u["hp_abs"] - taken).clamp(min=0)
@@ -912,6 +940,16 @@ def step(st, orders, params=None, dt=None):
         u["bst_p"] = torch.where(on, 1 - (1 - u["bst_p"]) * (1 - front), u["bst_p"])
     want = kills.sum(1)
     credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
+    if vx_on:
+        # (vortex.py) this step's dead of the vortex owners next to each enemy, into the queue: their vortices strike
+        # after the delay; the men the vortices knocked down lie (vk_p)
+        deaths = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :]
+        m_share = torch.where(dmg > 0, (hp_melee * scale[:, None, :]) / dmg.clamp(min=1e-9), torch.zeros_like(dmg))
+        near = vortex.dead_near(u, params, vortex.owners(u, params, None), drop, deaths, m_share, F_men, u["men"],
+                                pw["enemy"])
+        vortex.queue(u, params, near)
+        own_f = F_men.sum(2)
+        vortex.lie(u, params, dt, kn_vx * scale, torch.where(own_f > 0, own_f, F_men.sum(1)))
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
     if gun_hp is not None:
@@ -952,7 +990,8 @@ def step(st, orders, params=None, dt=None):
     # contact effects (poison, the censer's contagion, suppressing fire): a hit of a weapon that lays one starts it on
     # the enemy hit (effects.lay; friendly fire lays none); it acts from the next step
     effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t,
-                blast=None if hits_art is None else hits_art * scale[:, None, :])
+                blast=None if hits_art is None else hits_art * scale[:, None, :],
+                vortex=None if hits_vx is None else hits_vx * scale[:, None, :])
     # the slowing from hits of gunpowder (missile.hit_slow): a hit starts its timer on the enemy hit; it acts in this
     # step's movement (below)
     missile.hit_slow_lay(u, params, dt, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)

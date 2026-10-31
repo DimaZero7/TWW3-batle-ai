@@ -146,7 +146,7 @@ def gate_reference(role, army, gates=gate.OUT, runs=project.BUILD / "nn-arena" /
 
 COLUMNS = (("order_changes_per_min", "order changes", "{:.2f}"), ("target_switches_per_min", "attack-target switches", "{:.2f}"),
            ("flips_per_min", "flips A-B-A", "{:.3f}"), ("move_jitter_m", "move jitter, m", "{:.1f}"),
-           ("move_repoints_per_min", "move repoints", "{:.2f}"), ("free_changes_per_min", "out of melee", "{:.2f}"),
+           ("move_repoints_per_min", "move repoints", "{:.2f}"), ("free_changes_per_min", "order changes out of melee", "{:.2f}"),
            ("twitch_share", "twitching units", "{:.2f}"), ("engine_switches_per_min", "own target switches", "{:.2f}"),
            ("engine_flips_per_min", "own target flips", "{:.3f}"))
 

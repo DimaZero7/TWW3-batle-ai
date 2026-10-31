@@ -27,8 +27,9 @@ F = len(runtime.BEH)
 def nets(seed=0):
     # (seed 9 since 29.10.2026: the token grew by the cavalry's 4 columns and the random nets of seed 0 made no group that
     # counts - the bonus tests need one; build/diag_cav/seeds/try.py: seeds 0-9, only 9 gives all four; seed 0 again since
-    # the artillery's 2 columns, 29.10.2026: build/diag_arty/seeds_try.py, seeds 0-15 - 0, 3 and 11 give all four, 9 one)
-    torch.manual_seed(seed)
+    # the artillery's 2 columns, 29.10.2026: build/diag_arty/seeds_try.py, seeds 0-15 - 0, 3 and 11 give all four, 9 one;
+    # seed 2 since the Pusbags' 4 columns, 31.10.2026: build/diag_pusbags/seeds/try.log - 2, 3, 6, 7, 8 give all four)
+    torch.manual_seed(2 if seed == 0 else seed)
     return executor.wrap(policy.Actor(TINY).eval(), GCFG).eval(), mcritic.Critic(TINY).eval()
 
 
