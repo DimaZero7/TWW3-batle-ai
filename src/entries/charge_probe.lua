@@ -123,6 +123,13 @@
 -- other and up to men_after_s after a contact: both units' soldier places ('probe_men', decimetres;
 -- CCO ManList, full view: research telemetry). A lane ends fight_s after its first contact, after
 -- max_s, or when a unit is dead; then both halt. The battle ends when every lane is done.
+-- config.mem (a probe built with --mem only; docs/ru/game/memreader.md): the men of every lane's attacker and target from
+-- the game's memory (apps.mem.entities) - 'mem_attach' once (the checks, each unit bound or why not); from the go every
+-- MEM_POLL_MS of battle 'mem_men' {c, tick, cost, units = {name = {n, rows, sn, sx, sz}}, new}: the men of the lanes
+-- near their contact (within men_near_m before it, up to men_after_s after it) every poll, the others' every
+-- MEM_SPARSE-th poll; sn / sx, sz: the script's men alive and unit place read in the same callback (the check). At the
+-- lane's contact + MEM_DISCOVER_S 'mem_men_discover' {lane, s, hits}: the pointers from 12 men of one unit to the other's
+-- (apps.mem.entities discover: where a man keeps his target).
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -132,12 +139,16 @@ local facing = require('apps.orders.facing')
 local map = require('apps.map.adapter')
 local services = require('apps.bridge.services')
 local winds = require('apps.battle.winds')
+local memmen = require('apps.mem.entities')
 
 local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 local WINDS_TIMER = 'tww3_bai_charge_probe_winds'
+local MEM_TIMER = 'tww3_bai_charge_probe_mem'
+local MEM_POLL_MS, MEM_SPARSE = 100, 5
+M.MEM_DISCOVER_S = {1, 3, 5}
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true,
     cast = true, laps = true, shuttle = true}
@@ -310,6 +321,8 @@ function M.main(bm, config, globals)
         pcall(function() bm:remove_process(TIMER) end)
         pcall(function() bm:remove_process(MEN_TIMER) end)
         pcall(function() bm:remove_process(WINDS_TIMER) end)
+        pcall(function() bm:remove_process(MEM_TIMER) end)
+        if state.mem then pcall(state.mem.unhook) end
     end
     local function fail(err)
         state.active = false
@@ -952,6 +965,54 @@ function M.main(bm, config, globals)
         if not busy then finish('completed') end
     end
 
+    -- (config.mem) the men from memory every MEM_POLL_MS (module comment).
+    local function mem_poll()
+        if not (state.active and state.mem) then return end
+        state.mem_c = (state.mem_c or 0) + 1
+        local now = now_ms()
+        local names = {}
+        for _, lane in ipairs(state.lanes) do
+            if lane.running then
+                local last = lane.contact2 or lane.contact
+                local dense = false
+                if last then
+                    dense = now - last <= config.men_after_s * 1000
+                else
+                    local d = dist(lane.a.unit, lane.t.unit)
+                    dense = d ~= nil and d <= config.men_near_m
+                end
+                if dense or state.mem_c % MEM_SPARSE == 1 then
+                    names[#names + 1] = lane.a.name
+                    names[#names + 1] = lane.t.name
+                end
+                if lane.contact then
+                    lane.mem_disc = lane.mem_disc or 1
+                    local at = M.MEM_DISCOVER_S[lane.mem_disc]
+                    if at and now - lane.contact >= at * 1000 then
+                        lane.mem_disc = lane.mem_disc + 1
+                        local hits = {a = state.mem.discover(lane.a.name, lane.t.name, 12),
+                            t = state.mem.discover(lane.t.name, lane.a.name, 12)}
+                        emit('mem_men_discover', {lane = lane.name, s = at, hits = hits})
+                    end
+                end
+            end
+        end
+        if #names == 0 then return end
+        local d = state.mem.poll(names)
+        d.t = now
+        for name, row in pairs(d.units) do
+            local u = state.units[name] and state.units[name].unit
+            if u then
+                row.sn = read(function() return u:number_of_men_alive() end)
+                local p = read(function() return u:position() end)
+                if p then row.sx, row.sz = round(p:get_x(), 1), round(p:get_z(), 1) end
+            end
+        end
+        local e = state.mem.errors()
+        if #e > 0 then d.errors = e end
+        emit('mem_men', d)
+    end
+
     local function men_sample()
         if not state.active then return end
         local rows, now = {}, now_ms()
@@ -1079,6 +1140,10 @@ function M.main(bm, config, globals)
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         bm:repeat_callback(guarded(men_sample), config.men_ms, MEN_TIMER)
+        if state.mem then
+            mem_poll()
+            bm:repeat_callback(guarded(mem_poll), MEM_POLL_MS, MEM_TIMER)
+        end
         if config.winds_ms then
             winds_sample()
             bm:repeat_callback(guarded(winds_sample), config.winds_ms, WINDS_TIMER)
@@ -1314,6 +1379,23 @@ function M.main(bm, config, globals)
         end
         state.batch = clock.batch_stamp() .. '-probe-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
         state.run_id = state.batch .. '-r1'
+        if config.mem then
+            local handle, status = memmen.attach(_G.memreader_plus, config.mem)
+            local bound = {}
+            if handle then
+                for _, lane in ipairs(state.lanes) do
+                    for _, it in ipairs({lane.a, lane.t}) do
+                        if bound[it.name] == nil then
+                            local ok, info = handle.bind(it.name, it.unit)
+                            bound[it.name] = ok and info or {why = info}
+                        end
+                    end
+                end
+                handle.unhook()
+            end
+            state.mem = handle
+            emit('mem_attach', {status = status, bound = bound})
+        end
         emit('ready', {lanes = #state.lanes})
         flush()
         bm:register_phase_change_callback('Deployed', guarded(start))

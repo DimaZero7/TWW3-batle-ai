@@ -1,7 +1,15 @@
 """The projectiles from the game's memory in a missile probe run (memreader Plus; docs/ru/game/memreader.md) against
-what the game's script shows of the same battle: each lane's ammo (the projectiles it fired) and its units' places.
+what the game's script shows of the same battle: each lane's ammo (the projectiles it fired) and its units' places;
+and (--men) the men of a charge probe run's units from memory against the script.
 
     python -m tools.nn.mem_probe [run folders...]      # default: the newest build/missile-probe/runs/* with mem rows
+    python -m tools.nn.mem_probe --men [run folders...]   # default: the newest build/charge-probe/runs/* with men rows
+
+A charge probe run built with --mem has mem_attach {status, bound} and every poll (0.1 s of battle) mem_men {c, tick,
+tick_end, cost, t, units = {name = {n, rows (MAN fields a man, flat), sn, sx, sz}}, new = [[id, unit, address]]}
+(src/apps/mem/entities.lua); men_check: in each poll and unit, the men alive from memory (the men vector: the dead
+leave it) against the script's number_of_men_alive, and the script's unit:position against the men's places (the game
+puts the unit at one of its men: the nearest man is 0.00 m off), with the share of (poll, unit) matching both.
 
 A run built with `tools.build missile-probe --mem` has, besides the probe's rows (tools/nn/missile_probe.py):
   mem_attach  {status}: memreader's version, each code site's check, hooked or why not
@@ -31,7 +39,17 @@ import numpy as np
 from tools import config as project
 
 RUNS = project.BUILD / "missile-probe" / "runs"
+MEN_RUNS = project.BUILD / "charge-probe" / "runs"
 OUT = project.BUILD / "mem" / "projectiles.json"
+MEN_OUT = project.BUILD / "mem" / "men.json"
+# a man's row from memory (src/apps/mem/entities.lua M.ROW)
+MAN = ("id", "live", "x", "z", "y", "vx", "vz", "face", "hp", "anim", "mode", "react", "mark", "fit", "flags", "brace",
+       "speed", "tgt", "tgt2", "carried", "chg")
+COL = {k: i for i, k in enumerate(MAN)}
+# reaction states (build/diag_cav/mechanic.md M8, M31; R-work notes/mem/entities.md)
+REACT = {0xd: "step_back", 0xe: "knocked_back", 0xf: "down", 0x10: "flying", 0x11: "getting_up", 0x12: "getting_up_b"}
+NOT_TARGET = (4, 6, 7, 0xc, 0xe, 0xf, 0x10, 0x11)
+PLACE_EPS = 0.05
 ATTRIB_M = 40.0
 BIN_S = 0.5
 LYING, DONE = (5, 6), 7
@@ -233,12 +251,93 @@ def compare(run):
     return out
 
 
+def facing(face):
+    """The facing vector (x, z) of a man's facing number: the game's table gives (sin, cos) of face / 65536 turns
+    (read at the attach: 0 -> (0, 1), 16384 -> (1, 0))."""
+    a = np.asarray(face, float) / 65536 * 2 * np.pi
+    return np.sin(a), np.cos(a)
+
+
+def load_men(run_dir):
+    """{run, attach, bound, polls [{c, tick, tick_end, cost, t (model s), units {name: {n, sn, sx, sz, m [men, MAN]}}}],
+    ids {id: (unit, address)}, discover [rows], errors} of one charge probe run."""
+    run_dir = Path(run_dir)
+    out = {"run": run_dir.name, "attach": None, "bound": None, "polls": [], "ids": {}, "discover": [], "errors": []}
+    for r in rows(run_dir):
+        ev = r.get("event")
+        if ev == "mem_attach":
+            out["attach"], out["bound"] = r.get("status"), r.get("bound")
+        elif ev == "mem_men":
+            units = {}
+            for name, u in (r.get("units") or {}).items():
+                m = np.asarray(u.get("rows") or [], float)
+                w = len(m) // u["n"] if u.get("n") else len(MAN)
+                m = m.reshape(-1, w)
+                if w < len(MAN):                # (a run of an older row: the fields it had, nan for the rest)
+                    m = np.concatenate([m, np.full((len(m), len(MAN) - w), np.nan)], 1)
+                units[name] = {"n": u.get("n"), "sn": u.get("sn"), "sx": u.get("sx"), "sz": u.get("sz"), "m": m}
+            out["polls"].append({"c": r.get("c"), "tick": r.get("tick"), "tick_end": r.get("tick_end"),
+                                 "cost": r.get("cost"), "t": float(r.get("t", r["model_ms"])) / 1000, "units": units})
+            for i, name, addr in r.get("new") or []:
+                out["ids"][int(i)] = (name, addr)
+            out["errors"] += list(r.get("errors") or [])
+        elif ev == "mem_men_discover":
+            out["discover"].append({k: r.get(k) for k in ("lane", "s", "hits")})
+    return out
+
+
+def men_check(men):
+    """The men from memory against the script (module doc): per unit and overall."""
+    per, all_ok = {}, []
+    for p in men["polls"]:
+        for name, u in p["units"].items():
+            m = u["m"]
+            row = per.setdefault(name, {"polls": 0, "alive_equal": 0, "place_on_a_man": 0, "both": 0, "d": []})
+            row["polls"] += 1
+            alive = int((m[:, COL["live"]] == 1).sum()) if len(m) else 0
+            eq = u["sn"] is not None and alive == u["sn"]
+            d = (float(np.hypot(m[:, COL["x"]] - u["sx"], m[:, COL["z"]] - u["sz"]).min())
+                 if len(m) and u["sx"] is not None else math.inf)
+            on = d <= PLACE_EPS + 0.1           # rows are rounded to 0.1 m
+            row["alive_equal"] += eq
+            row["place_on_a_man"] += on
+            row["both"] += eq and on
+            row["d"].append(d)
+            all_ok.append(eq and on)
+    for row in per.values():
+        d = np.asarray(row.pop("d"))
+        row["place_d_median"], row["place_d_max"] = float(np.median(d)), float(d.max())
+        row["share"] = row["both"] / max(1, row["polls"])
+    cost = [p["cost"] for p in men["polls"] if p["cost"] is not None]
+    drift = sum(1 for p in men["polls"] if p["tick_end"] is not None and p["tick_end"] != p["tick"])
+    return {"run": men["run"], "attach_ok": bool((men["attach"] or {}).get("ok")), "bound": men["bound"],
+            "polls": len(men["polls"]), "share": float(np.mean(all_ok)) if all_ok else None, "units": per,
+            "cost_ms_median": float(np.median(cost)) if cost else None, "cost_ms_max": max(cost) if cost else None,
+            "polls_spanning_ticks": drift, "errors": men["errors"][:10], "discover": men["discover"]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runs", nargs="*", type=Path)
-    parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--men", action="store_true", help="the men of a charge probe run (module doc)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
+    if args.men:
+        runs = args.runs or [p for p in sorted(MEN_RUNS.glob("*")) if has_mem(p)][-1:]
+        res = [men_check(load_men(r)) for r in runs]
+        for r in res:
+            print(f"{r['run']}: attach {r['attach_ok']}, polls {r['polls']}, share {r['share']}, cost ms median "
+                  f"{r['cost_ms_median']} max {r['cost_ms_max']}, polls over a tick {r['polls_spanning_ticks']}, "
+                  f"errors {r['errors']}")
+            for name, row in r["units"].items():
+                print("  ", name, row)
+        out = args.out or MEN_OUT
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(res, indent=1, default=float), encoding="utf-8")
+        print(out)
+        return 0
+    args.out = args.out or OUT
     runs = args.runs or [p for p in sorted(RUNS.glob("*")) if has_mem(p)][-1:]
     res = [compare(load(r)) for r in runs]
     for r in res:

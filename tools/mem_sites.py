@@ -3,7 +3,8 @@
 or the environment variable BAI_MEM_SITES) - the repository keeps only their names.
 
     dependency()           {pack, workshop_id, sha256}: the pack the launcher copies next to ours
-    lua_config(path=None)  {sites = {name: {hi, lo, sig, expect, pattern}}, layout = {name: offset}, snapshot_max}:
+    lua_config(path=None)  {sites = {name: {hi, lo, sig, expect, pattern}}, layout = {name: offset}, snapshot_max}
+                           (the men's layout - src/apps/mem/entities.lua - when the file has it):
                            the probe's config.mem (a relative address split hi * 2^20 + lo: the game's Lua numbers are
                            32-bit floats, exact only to 2^24)
 """
@@ -18,6 +19,12 @@ PIN = project.CONFIG_DIR / "memreader.json"
 SITES = ("proj_update", "ammo_left", "battle_ref", "battle_global")
 LAYOUT = ("mgr_active", "p_shooter", "p_record", "p_state", "p_prev", "p_pos", "p_vel", "p_time", "s_feet",
           "r_category", "b_world", "w_battle", "w_proj", "i_unit", "u_ammo", "u_battle")
+# the men of a unit (src/apps/mem/entities.lua): all of MEN_LAYOUT or none (a sites file without u_men: no men);
+# MEN_OPTIONAL (the target's path) and the site dir_table (the facing vectors) only when the file has them
+MEN_LAYOUT = ("u_men", "w_tick", "m_unit", "m_live", "m_pos", "m_vel", "m_face", "m_hp", "m_anim",
+              "m_mode", "m_react", "m_mark", "m_fit", "m_flags", "m_brace", "m_speed")
+MEN_OPTIONAL = ("m_target", "m_target_b", "m_carrier", "m_charge")
+OPTIONAL_SITES = ("dir_table",)
 SNAPSHOT_MAX = 300
 
 
@@ -61,10 +68,13 @@ def lua_config(path=None, exe=None):
         if h.hexdigest() != raw["exe_sha256"]:
             raise ValueError(f"{exe}: another game build than the sites file's (exe_sha256) - redo the sites")
     sites = {}
-    for name in SITES:
+    for name in SITES + tuple(n for n in OPTIONAL_SITES if n in raw["sites"]):
         s = raw["sites"][name]
         hi, lo = split(s["rva"])
         sites[name] = {"hi": hi, "lo": lo, "sig": s["sig"], "expect": s.get("expect", ""),
                        **({"pattern": s["pattern"]} if s.get("pattern") else {})}
     layout = {name: _int(raw["layout"][name]) for name in LAYOUT}
+    if "u_men" in raw["layout"]:
+        layout.update({name: _int(raw["layout"][name]) for name in MEN_LAYOUT})
+        layout.update({name: _int(raw["layout"][name]) for name in MEN_OPTIONAL if name in raw["layout"]})
     return {"sites": sites, "layout": layout, "snapshot_max": int(raw.get("snapshot_max", SNAPSHOT_MAX))}

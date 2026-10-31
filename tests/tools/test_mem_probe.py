@@ -79,3 +79,41 @@ def test_projectiles_the_script_did_not_count_lower_the_share(tmp_path):
     r = mem_probe.compare(mem_probe.load(_run(tmp_path, spawn_lane2=5)))
     assert r["lanes"]["L2"]["memory"] == 5 and r["lanes"]["L2"]["script"] == 0 and r["lanes"]["L2"]["share"] == 0
     assert r["matched_share"] == pytest.approx(20 / 25)
+
+
+def test_lua_config_takes_the_mens_layout_all_or_none(tmp_path):
+    sites = {name: {"rva": hex(0x1000 * (i + 1)), "sig": "", "expect": ""} for i, name in enumerate(mem_sites.SITES)}
+    layout = {name: hex(8 * i) for i, name in enumerate(mem_sites.LAYOUT)}
+    path = tmp_path / "sites.json"
+    path.write_text(json.dumps({"sites": sites, "layout": layout}), encoding="utf-8")
+    assert "u_men" not in mem_sites.lua_config(path)["layout"]               # no men: the projectiles' probe alone
+    men = {name: hex(0x400 + 8 * i) for i, name in enumerate(mem_sites.MEN_LAYOUT)}
+    path.write_text(json.dumps({"sites": dict(sites, dir_table={"rva": "0x10", "sig": "", "expect": ""}),
+                                "layout": dict(layout, **men, m_target="0x368")}), encoding="utf-8")
+    cfg = mem_sites.lua_config(path)
+    assert cfg["layout"]["u_men"] == 0x400 and cfg["layout"]["m_target"] == 0x368 and "dir_table" in cfg["sites"]
+    path.write_text(json.dumps({"sites": sites, "layout": dict(layout, u_men="0x180")}), encoding="utf-8")
+    with pytest.raises(KeyError):
+        mem_sites.lua_config(path)                                             # a part of the men's layout: refused
+
+
+def test_men_check_counts_the_alive_and_the_place_on_a_man(tmp_path):
+    def man(i, x, live=1):
+        row = [0.0] * len(mem_probe.MAN)
+        row[mem_probe.COL["id"]], row[mem_probe.COL["live"]], row[mem_probe.COL["x"]] = i, live, x
+        return row
+    rows = [{"event": "mem_attach", "status": {"ok": True}, "bound": {"a": {"n": 2}}, "model_ms": 0},
+            {"event": "mem_men", "model_ms": 100, "c": 1, "tick": 1, "tick_end": 1, "cost": 3, "t": 100,
+             "units": {"a": {"n": 2, "rows": man(1, 5) + man(2, 7), "sn": 2, "sx": 7.0, "sz": 0.0}},
+             "new": [[1, "a", "x1"], [2, "a", "x2"]]},
+            {"event": "mem_men", "model_ms": 200, "c": 2, "tick": 2, "tick_end": 2, "cost": 4, "t": 200,
+             "units": {"a": {"n": 1, "rows": man(1, 5), "sn": 2, "sx": 6.0, "sz": 0.0}}}]
+    (tmp_path / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    r = mem_probe.men_check(mem_probe.load_men(tmp_path))
+    a = r["units"]["a"]
+    assert r["polls"] == 2 and a["alive_equal"] == 1 and a["place_on_a_man"] == 1 and r["share"] == 0.5
+    # an older run's shorter row: its fields, nan for the rest
+    rows[1]["units"]["a"]["rows"] = [x for m in (man(1, 5), man(2, 7)) for x in m[:19]]
+    (tmp_path / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    m = mem_probe.load_men(tmp_path)["polls"][0]["units"]["a"]["m"]
+    assert m.shape == (2, len(mem_probe.MAN)) and m[0, mem_probe.COL["x"]] == 5

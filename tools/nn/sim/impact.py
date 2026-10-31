@@ -61,6 +61,12 @@ The second wave (contact.impact wave; build/diag_cav/mechanic.md M31-M34, the pr
               3 m of a clanrat 1.5-5 s after the impact) swings his first blow - none of them struck since the impact -,
               his intervals from the mean of it (3 s). Off (wave on 0): the front rank's first blow over 1.0-2.7 s, the
               ranks behind at once (bit for bit the old rule).
+The comb (contact.impact wave comb, fall_s, rank_s, comb_blows, charge_hold_s; OFF in config/nn/sim.json, impact_comb_why:
+              the game's memory - every man every 0.1 s, docs/ru/game/memreader.md): a man knocked down lies max(fall 2.0,
+              U(1.0, 2.7)) and gets up 3.2 s; the ranks behind's first blows from the landing + 2.0 s (the lying stop being
+              bodies) + 0.4 s a rank, by the men within the strike's reach (F); each cohort - the front rank, the ranks
+              behind - strikes again together an interval later; a horse's charge holds 2.5 s, then decays (comb(),
+              rear_window(), deferred(), charge_hold()).
 The front rank first (contact.impact collide_down / strike_first; build/diag_cav/mechanic.md M35-M39, the program):
               the collision damage lands only on a man the push knocks down or sends flying (dv over 7 m/s) with the
               closing speed over 7 m/s (before the exchange), never on a man who keeps his feet, nor on one lying, flying or
@@ -96,10 +102,92 @@ def rise(params):
     """The getting-up animation's length, s, with contact.impact wave on (else 0): a man knocked down lies
     U(knockdown_getting_up_delay_min, _max) s and then gets up (state 0x11 'встаёт' till the animation's end) - no target
     for a blow or a swing all that time (build/diag_cav/mechanic.md M31-M32, the program). Its length is in the animations'
-    data, not the program: MEASURED from the cavcharge recording (the first strong blows 2.4 s after the first knock-downs
-    at 0.3 s: 2.4 - 0.3 - 1.0 = 1.1 s; M33)."""
+    data, not the program: MEASURED from the game's memory (docs/ru/game/memreader.md, the men of a unit: every man's
+    reaction state each 0.1 s in the cavcharge probe - the state 0x11 lasts 3.2 s, 92 men of 2 battles). The config's
+    1.1 s (read off the recording: the first strong blows 2.4 s after the first knock-downs) is not the rise: with the
+    old window it times the ranks behind reaching the standing men behind the lying ones (comb, rear_window: 2.4-4.0 s) -
+    the measured 3.2 goes with the comb (config/nn/sim.json impact_comb_why)."""
     w = _cal(params).get("wave") or {}
     return float(w.get("rise_s", 0.0)) if w.get("on") else 0.0
+
+
+def fall(params):
+    """The fall's length, s (contact.impact wave fall_s; absent: 0): a man knocked down starts getting up no sooner than
+    the fall animation's end, so he lies max(fall_s, U(knockdown_getting_up_delay_min, _max)) - MEASURED from the game's
+    memory (the state 0xf 'сбит' lasts 2.0-2.1 s in 59 % of 46 men, longer up to 2.7 s in the rest: the program's
+    U(1.0, 2.7) cut below at 2.0)."""
+    w = _cal(params).get("wave") or {}
+    return float(w.get("fall_s", 0.0)) if w.get("on") else 0.0
+
+
+def up_cdf(params, t):
+    """The share of the men a landing knocked down who are up again (a target, striking) t s after it: their getting-up
+    time max(fall, U(lo, hi)) + rise (module doc), as a distribution."""
+    R = params.battle
+    lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
+    r, f = rise(params), fall(params)
+    g = ((t - r - lo) / max(hi - lo, 1e-6)).clamp(0, 1)
+    if f > lo:
+        g = torch.where(t >= f + r, g, torch.zeros_like(g))
+    return g
+
+
+def up_mean(params):
+    """The mean getting-up time after a landing, s: E[max(fall, U(lo, hi))] + rise."""
+    R = params.battle
+    lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
+    f = fall(params)
+    if f <= lo:
+        m = (lo + hi) / 2
+    elif f >= hi:
+        m = f
+    else:
+        m = f * (f - lo) / (hi - lo) + (hi * hi - f * f) / (2 * (hi - lo))
+    return m + rise(params)
+
+
+def comb(params):
+    """contact.impact wave comb (with strike_first): the blows of a charger that rode in come in cohorts - each man's one
+    timer (+0xa30) runs from his blow and a miss does not bring it back sooner (the program, build/diag_cav/mechanic.md
+    M37), so the front rank that struck at the landing strikes again together an interval later, and the ranks behind,
+    whose first blows came as they reached standing men, together an interval after those (the game's memory: 6 of 9
+    front knights' second blow 4.6-5.0 s after the contact flag, the lance at -0.7 .. -0.2 s; their third at 10.0-11.3 s)."""
+    w = _cal(params).get("wave") or {}
+    return bool(w.get("comb")) and strike_first(params)
+
+
+def rear_window(u, params):
+    """(lo, hi) [B, N] of a charger's ranks behind's first blows after a ride-in landing (comb): the men knocked down stop
+    being bodies to the enemy collision_disable_delay_knocked_down_vs_enemies (2.0 s) after it (the program, M26), the
+    horses then walk through them onto the standing men behind, rank k of the charger reaching them rank_s k s after the
+    first (wave rank_s; M29: a rank 4.1 m behind at the charge's 10.8 m/s, 0.4 s; the game's memory: rank 1 at +0.6 s,
+    rank 2 at +0.9 s), k = 1 .. ranks - 1. The game's memory: the rear knights' first blows p10 / 50 / 90 1.5-2.0 / 2.3-3.6
+    / 6.5-6.8 s after the contact flag (the tail: the men knocked down, up at 5.3 s)."""
+    w = _cal(params).get("wave") or {}
+    d = float(params.battle["collision_disable_delay_knocked_down_vs_enemies"])
+    step = float(w.get("rank_s", 0.4))
+    _, ranks = ranks_of(u, params.sim["formation"]["spacing_m"])
+    lo = torch.full_like(ranks, d + step)
+    hi = d + step * (ranks - 1).clamp(min=1)
+    return lo, hi
+
+
+def charge_hold(params):
+    """contact.impact wave charge_hold_s (with wave on; absent: 0): a cavalry charger's charge multiplier stays whole that
+    long after its landing, then decays over charge_decay_duration (battle.py). The program (R-work charge_module.md,
+    14308cee8 / 14305e9c0): a man's multiplier is clamp((deadline - now) / 13 s, 0, 1), the deadline set to now + 13 s
+    every tick he is in his charge - so it falls only from the end of HIS charge, not from the landing. MEASURED from the
+    game's memory (each knight's deadline, +0xa3c of the root entity, every 0.1 s; the cavcharge probe, 180 knights of 3
+    lanes): it stops moving 1.4 / 2.5 / 4.1 s (p10 / 50 / 90) after the contact flag - by lane 3.65 / 2.1 / 2.3 s on
+    clanrats / braced spearmen / stormvermin; the knights' strikes at 4-7 s came at a multiplier of 0.72-0.88 (the decay
+    from the landing: 0.46-0.69)."""
+    w = _cal(params).get("wave") or {}
+    return float(w.get("charge_hold_s", 0.0)) if (w.get("on") and on(params)) else 0.0
+
+
+def comb_blows(params):
+    """The cohort's blows the comb keeps together before the steady rate takes over (contact.impact wave comb_blows)."""
+    return int((_cal(params).get("wave") or {}).get("comb_blows", 3))
 
 
 def strike_first(params):
@@ -118,9 +206,7 @@ def ridden(u, params):
     keeps the brace he had (M26: a reaction freezes it)."""
     if not _cal(params).get("ride_in"):
         return torch.zeros_like(u["r"])
-    R = params.battle
-    up = (float(R["knockdown_getting_up_delay_min"]) + float(R["knockdown_getting_up_delay_max"])) / 2 + rise(params)
-    return (u["ride"] >= 0.5) & (u["kd_t"] >= up)
+    return (u["ride"] >= 0.5) & (u["kd_t"] >= up_mean(params))
 
 
 def lane_place(u, params):
@@ -199,7 +285,26 @@ def deferred(u, params, contact, dt):
     """(pairs [B, N, N], share [B, N, N]) of the ride-in's delayed first blow (module doc): i large and bigger than j, in
     contact, j ridden into (ride) - the front rank's first blow of i does not land at the landing (the men it met lie: a
     lying man is no target for a new blow, M11) but as they get up, U(knockdown_getting_up_delay_min, _max) s after it:
-    the share of that blow landing over this step [kd_t - dt, kd_t) (kd_t: since the landing, after this step's)."""
+    the share of that blow landing over this step [kd_t - dt, kd_t) (kd_t: since the landing, after this step's).
+    With comb (pairs, rear [B, N, N], front [B, N, N]): the share of the ranks behind's blows landing over this step - their
+    first over rear_window, then each comb_blows - 1 times an interval later - and the front rank's (1 at the steps holding
+    its k-th interval after the landing, k = 1 .. comb_blows - 1)."""
+    if comb(params):
+        pair = contact & bigger(u) & (u["ride"] >= 0.5)[:, None, :]
+        t1 = u["kd_t"][:, None, :]
+        I = u["interval"][:, :, None].clamp(min=1e-6)
+        lo, hi = rear_window(u, params)
+        lo, hi = lo[:, :, None], hi[:, :, None]
+        w = (hi - lo).clamp(min=1e-6)
+        rear = torch.zeros_like(pair, dtype=t1.dtype)
+        front = torch.zeros_like(rear)
+        for k in range(comb_blows(params)):
+            a, b = lo + k * I, hi + k * I
+            rear = rear + (torch.minimum(t1, b) - torch.maximum(t1 - dt, a)).clamp(min=0) / w
+            if k >= 1:
+                front = front + ((t1 >= k * I) & (t1 - dt < k * I)).to(t1.dtype)
+        zero = torch.zeros_like(rear)
+        return pair, torch.where(pair, rear, zero), torch.where(pair, front, zero)
     R = params.battle
     lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
     lo, hi = lo + rise(params), hi + rise(params)                    # (wave: no target till the animation's end too)
@@ -213,7 +318,10 @@ def lying(u, params):
     """[B, N] the share of a unit's front men lying now (the impact's kd_q by its clock, the blows' pool kd_p)."""
     R = params.battle
     lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
-    q = u["kd_q"] * ((hi + rise(params) - u["kd_t"]) / max(hi - lo, 1e-6)).clamp(0, 1)
+    if fall(params) > lo:
+        q = u["kd_q"] * (1 - up_cdf(params, u["kd_t"]))
+    else:
+        q = u["kd_q"] * ((hi + rise(params) - u["kd_t"]) / max(hi - lo, 1e-6)).clamp(0, 1)
     return (q + u["kd_p"] * (1 - q)).clamp(0, 1)
 
 

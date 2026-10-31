@@ -1823,13 +1823,14 @@ def write_scenario(plan, index, path=None):
     return path
 
 
-def run(plan, which=None, python=sys.executable, dry=False, deadline=900, speed=None):
+def run(plan, which=None, python=sys.executable, dry=False, deadline=900, speed=None, mem=False):
     """Builds and launches each battle in turn (tools/launcher/launch.ps1: Normal difficulty set and
-    restored by the launcher; speed: tools.build --speed, None its default)."""
+    restored by the launcher; speed: tools.build --speed, None its default; mem: built with --mem - the lanes' men from
+    the game's memory, memreader Plus, tools/nn/mem_probe.py men)."""
     done = []
     for i in which or range(1, len(battles(plan)) + 1):
         build = [python, "-m", "tools.build", "charge-probe", "--probe-plan", plan, "--probe-battle", str(i),
-                 "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else [])
+                 "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else []) + (["--mem"] if mem else [])
         launch = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER / "launch.ps1"),
                   "-Target", "charge-probe"]
         print(f"--- {plan} {i}", flush=True)
@@ -4174,6 +4175,8 @@ def main(argv=None):
                         help="recontact: the simulator alone on the plan's own places (no game run needed; torch)")
     parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20),
                         help="run: the battle speed (tools.build --speed; default: its own, 20)")
+    parser.add_argument("--mem", action="store_true", help="run: with memreader Plus (the lanes' men from the game's "
+                        "memory; docs/ru/game/memreader.md)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     if args.command == "plan":
@@ -4182,7 +4185,7 @@ def main(argv=None):
         return 0
     if args.command == "run":
         which = [int(x) for x in args.battles.split(",")] if args.battles else None
-        done = run(args.plan, which, dry=args.dry, speed=args.speed)
+        done = run(args.plan, which, dry=args.dry, speed=args.speed, mem=args.mem)
         print("done:", done)
         return 0 if all(d[-1] == 0 for d in done) else 1
     if args.command == "exits":

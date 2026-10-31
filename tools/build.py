@@ -213,7 +213,7 @@ ARENA_TARGETS = ("nn-arena", "human")
 KV_TARGETS = ("charge-probe", "missile-probe", "morale-probe")
 # --mem (memreader Plus: the game's memory read in a probe; docs/ru/game/memreader.md): probes whose entry reads it.
 # Never the network's battles or exams.
-MEM_TARGETS = ("missile-probe",)
+MEM_TARGETS = ("missile-probe", "charge-probe")
 # lord-fall: ms between samples (the moment's step is read at +1, +2 s).
 LORD_FALL_TICK_MS = 500
 
@@ -550,7 +550,8 @@ def main(argv=None):
     parser.add_argument("--morale-battle", type=int, default=1, help="morale-probe: the plan's battle, 1-based")
     parser.add_argument("--mem", action="store_true",
                         help="a probe only (" + ", ".join(MEM_TARGETS) + "): load memreader Plus (config/memreader.json) "
-                             "next to our pack and read the projectiles in flight from the game's memory; the code "
+                             "next to our pack and read the projectiles in flight (missile-probe) or the men of the lanes' units "
+                             "(charge-probe) from the game's memory; the code "
                              "sites come from build/mem/sites.json (outside Git; docs/ru/game/memreader.md)")
     parser.add_argument("--kv", action="append", metavar="[SECTION.]KEY=VALUE|xN",
                         help="a probe only (charge-, missile-, morale-probe): a row of the game's rule tables "

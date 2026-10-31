@@ -357,3 +357,78 @@ class TestNoLargeUnitNoChange:
             if k.startswith("kd_"):
                 continue
             assert torch.equal(v, b.u[k]), k
+
+
+# ---- the men from the game's memory (docs/ru/game/memreader.md, the men of a unit): the getting-up, the comb, the hold
+
+def _wave(**kw):
+    imp = dict(P.sim["contact"]["impact"])
+    imp["wave"] = dict(imp.get("wave") or {}, on=1, **kw)
+    return P.with_cal("contact", impact=imp)
+
+
+def test_the_getting_up_is_the_fall_or_the_lying_then_the_rise():
+    p = _wave(rise_s=3.2, fall_s=2.0)
+    lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
+    t = torch.tensor([5.1, 5.2, 5.5, 5.9, 6.0])
+    g = impact.up_cdf(p, t)
+    # max(2.0, U(1.0, 2.7)) + 3.2: none before 5.2, P(U <= 2.0) = 0.588 at once at 5.2, all by 5.9
+    assert float(g[0]) == 0.0
+    assert float(g[1]) == pytest.approx((2.0 - lo) / (hi - lo), abs=1e-5)
+    assert float(g[2]) == pytest.approx((2.3 - lo) / (hi - lo), abs=1e-5)
+    assert float(g[3]) == pytest.approx(1.0) and float(g[4]) == 1.0
+    m = 2.0 * (2.0 - lo) / (hi - lo) + (hi ** 2 - 4.0) / (2 * (hi - lo))
+    assert impact.up_mean(p) == pytest.approx(m + 3.2)
+    # without fall_s: the old uniform lying, mean (lo + hi) / 2 + rise
+    assert impact.up_mean(_wave(rise_s=1.1)) == pytest.approx((lo + hi) / 2 + 1.1)
+
+
+def test_the_comb_lands_each_cohort_together_an_interval_later():
+    p = _wave(rise_s=3.2, fall_s=2.0, comb=1, rank_s=0.4, comb_blows=3)
+    assert impact.comb(p)
+    st, H = touching(KNIGHTS, CLANRATS)
+    u = st.u
+    u["ride"][0, H] = 1.0
+    I = float(u["interval"][0, 0])
+    lo, hi = impact.rear_window(u, p)
+    _, ranks = impact.ranks_of(u, SP)
+    d = float(R["collision_disable_delay_knocked_down_vs_enemies"])
+    assert float(lo[0, 0]) == pytest.approx(d + 0.4)
+    assert float(hi[0, 0]) == pytest.approx(d + 0.4 * (float(ranks[0, 0]) - 1))
+    contact = torch.zeros(st.B, st.N, st.N, dtype=torch.bool)
+    contact[0, 0, H] = True
+    dt = 0.1
+    rear, front = [], []
+    for k in range(int(16 / dt)):
+        u["kd_t"][0, H] = (k + 1) * dt
+        _, r, f = impact.deferred(u, p, contact, dt)
+        rear.append(float(r[0, 0, H]))
+        front.append(float(f[0, 0, H]))
+    # the ranks behind: one whole blow over the window and again an interval later (twice); the front rank: one blow at
+    # I and one at 2 I
+    w0 = sum(x for k, x in enumerate(rear) if (k + 1) * dt <= float(hi[0, 0]) + 1e-6)
+    assert w0 == pytest.approx(1.0, abs=1e-4) and sum(rear) == pytest.approx(3.0, abs=1e-3)
+    hits = [round((k + 1) * dt, 1) for k, x in enumerate(front) if x > 0]
+    assert sum(front) == 2.0 and abs(hits[0] - I) <= dt and abs(hits[1] - 2 * I) <= dt
+    # off: deferred keeps its old two values
+    assert len(impact.deferred(u, P, contact, dt)) == 2
+
+
+def test_a_horse_keeps_its_charge_whole_while_it_still_rides_in():
+    p = _wave(rise_s=3.2, fall_s=2.0, charge_hold_s=2.5)
+    assert impact.charge_hold(p) == 2.5 and impact.charge_hold(P) == 0.0
+    out = {}
+    for name, params in (("hold", p), ("off", P)):
+        st, H = touching(KNIGHTS, CLANRATS, params=params)
+        st.u["charge"][0, 0] = 1.0
+        with torch.no_grad():
+            for _ in range(40):
+                battle.step(st, keep(st), params, params.dt)
+                if float(st.u["contact_s"][0, 0]) <= 0:
+                    st.u["charge"][0, 0] = 1.0                      # (the clock from the contact)
+                if float(st.u["contact_s"][0, 0]) >= 2.0:
+                    break
+        out[name] = (float(st.u["charge"][0, 0]), float(st.u["contact_s"][0, 0]))
+    # 2 s in contact: whole with the hold (2.5 s), down without it
+    assert 2.0 <= out["hold"][1] < 2.5 and out["hold"][0] == pytest.approx(1.0)
+    assert out["off"][0] < 1.0 - 1.0 / 13

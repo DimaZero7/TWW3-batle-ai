@@ -456,7 +456,15 @@ def step(st, orders, params=None, dt=None):
     # linear to 0 over charge_decay_duration from the first blow, in contact or out of it; a new charge restarts it.
     ccal = cal["charge"]
     decay = R["charge_decay_duration"]
-    u["charge"] = (u["charge"] - dt / decay).clamp(min=0)
+    hold_s = impact.charge_hold(params)
+    if hold_s > 0 and "size_k" in u:
+        # (contact.impact wave charge_hold_s; impact.charge_hold) a horse's charge multiplier holds while he still rides in
+        # his charge after the landing - the program refreshes each man's deadline (now + decay) every tick of his
+        # charge - and decays from then (the cavalry: size medium)
+        keep = engaged & (u["size_k"] == 2) & (u["contact_s"] < hold_s)
+        u["charge"] = torch.where(keep, u["charge"], u["charge"] - dt / decay).clamp(min=0)
+    else:
+        u["charge"] = (u["charge"] - dt / decay).clamp(min=0)
     # The attack target is already fighting another of our units (charge.free_target_only; build/open_battle/spec.md
     # 5): the way in is blocked by our own men - no charge sprint and no charge (CA: no charge when the path is blocked
     # by one's own unit; the recordings: 2 s before contact 1.09-1.12 of the run speed into a free target, 0.79-0.86
@@ -526,16 +534,24 @@ def step(st, orders, params=None, dt=None):
         hp_imp = impact.land(u, pw, strike, fire, params, dt, speed, charge_now) if big_on else None
 
     # --- melee ---
-    late = d_pair = d_share = None
+    late = d_pair = d_share = d_front = None
+    parts = None
     if big_on and (cal["contact"].get("impact") or {}).get("ride_in"):
         # (impact.deferred) a large charger that rode in: its front rank's first blow lands as the men it knocked down
         # get up, not at the landing
-        d_pair, d_share = impact.deferred(u, params, strike, dt)
-        # (contact.impact wave: the deferred blow is every man's in contact - the ranks behind wait too, melee.strikes -
-        # not the front rank's alone)
-        late = (d_share > 0).any(dim=2)
+        if impact.comb(params):
+            # (contact.impact wave comb) the cohorts' blows: the ranks behind's (d_share) and the front rank's (d_front)
+            d_pair, d_share, d_front = impact.deferred(u, params, strike, dt)
+            late = ((d_share + d_front) > 0).any(dim=2)
+            parts = {}
+        else:
+            d_pair, d_share = impact.deferred(u, params, strike, dt)
+            # (contact.impact wave: the deferred blow is every man's in contact - the ranks behind wait too,
+            # melee.strikes - not the front rank's alone)
+            late = (d_share > 0).any(dim=2)
+    # (parts only with the comb: a hook in place of melee.strikes - the fighters lab - keeps the old call)
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire,
-                                                     late=late)
+                                                     late=late, **({"parts": parts} if parts is not None else {}))
     if big_on:
         # (impact.up_share) the front men of a unit knocked down by a large enemy do not strike it while they lie
         rate, swing = impact.up_share(u, params, rate), impact.up_share(u, params, swing)
@@ -577,7 +593,11 @@ def step(st, orders, params=None, dt=None):
     if d_pair is not None:
         # (contact.impact strike_first, impact.strike_first: the front rank's swing lands at the landing too - its lances
         # reach the men before the bodies touch; the deferred share is the ranks behind's, melee.strikes)
-        if impact.strike_first(params):
+        if d_front is not None and parts:
+            # (comb) each cohort's share of every man's blow (melee.strikes parts)
+            cohort = parts["s_rear"] * d_share + parts["s_front"] * d_front
+            swung = torch.where(d_pair, swing * cohort + torch.where(first_pair, swing, torch.zeros_like(swing)), swung)
+        elif impact.strike_first(params):
             swung = torch.where(d_pair, swing * d_share + torch.where(first_pair, swing, torch.zeros_like(swing)), swung)
         else:
             swung = torch.where(d_pair, swing * d_share, swung)

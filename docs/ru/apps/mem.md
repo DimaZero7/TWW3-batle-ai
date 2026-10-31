@@ -19,5 +19,16 @@
 | `scanner(mr, L, max)` | разбор списка за один опрос (без игры — для тестов на поддельной памяти); ушёл — после `MISS_POLLS` (3) опросов без него |
 | `address(mr, site)` | адрес места: `base + hi × 2²⁰ + lo` (числа Lua в игре 32-битные) |
 
+## entities — бойцы отряда
+
+| Функция | Что делает |
+|---|---|
+| `attach(mr, cfg)` | проверки (`projectiles.check`), префикс на `ammo_left`; `handle, status` или `nil, status`; в `status.dir_table` — векторы взгляда из таблицы игры |
+| `handle.bind(name, unit)` | привязать скриптовый отряд: зовёт `unit:ammo_left()`, префикс видит боевой отряд; проверка: каждый боец вектора — этого отряда |
+| `handle.unhook()` | снять перехват (после привязки) |
+| `handle.poll(names)` | один опрос бойцов названных отрядов: `{c, tick, tick_end, cost, units = {name = {n, rows}}, new}`; строка — поля `ROW` |
+| `handle.discover(from, to, n)` | смещения (шаг 8) у n бойцов `from`, где лежит указатель на бойца `to`: `{смещение = раз}` (только поля самого бойца) |
+| `reader(mr, L)` | то же без игры — для тестов на поддельной памяти |
+
 `cfg` — `config.mem` пробы: места и смещения из `build/mem/sites.json` (вне git), в коде только имена. Тесты:
-`tests/apps/mem/test_projectiles.py`.
+`tests/apps/mem/test_projectiles.py`, `tests/apps/mem/test_entities.py`.

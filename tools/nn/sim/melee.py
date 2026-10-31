@@ -384,14 +384,16 @@ def cycle_rate(p, interval, hit, hp_man, single_j, recv, cyc):
     return base * busy * unbroken
 
 
-def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None):
+def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None, parts=None):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
     HP of one blow of every man in contact at once (the first strike, battle.py). charge_now [B, N]: the striker's
     charge left (0-1, battle.py: its own clock from the charge's first blow). ran [B, N] (with first): the strikers
     whose charge lands now (battle.py: the first strike of a charge), whose swing is their front rank
     (contact.first_strike_rank); late [B, N] (with first): large chargers whose front rank's first blow comes later, when
-    the men they knocked down get up (impact.deferred, contact.impact ride_in) - their swing is their front rank too."""
+    the men they knocked down get up (impact.deferred, contact.impact ride_in) - their swing is their front rank too.
+    parts (a dict, contact.impact wave comb): filled with s_front / s_rear [B, N, N], the shares of F of a ride-in
+    charger's front rank and ranks behind (late's swing is then every man's in contact: battle.py weighs the cohorts)."""
     B = params.battle
     cal = params.sim["melee"]
     cc = params.sim["contact"]
@@ -402,6 +404,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     # (contact.impact strike_first, impact.strike_first: the front rank swings at the landing, its intervals from then;
     # only the ranks behind wait for the men to get up)
     imp_first = imp_wave and bool((cc.get("impact") or {}).get("strike_first"))
+    imp_comb = imp_first and bool(((cc.get("impact") or {}).get("wave") or {}).get("comb"))
     s_rear = None
     ff = files_share(cal)                # (melee.cycle: the men within reach a file; else the fitted fighting_files)
     h_u, v_u = spacing_of(u, params.sim["formation"]["spacing_m"])
@@ -785,7 +788,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         ride = u["ride"] >= 0.5
         # (lying, a man keeps the brace he had - a reaction freezes it, M26: out of it from the mean getting-up time;
         # contact.impact wave: and the getting-up animation, impact.rise)
-        up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2 + rise_s
+        from tools.nn.sim import impact as _impact      # (impact imports this module)
+        up = _impact.up_mean(params) if imp_wave else (
+            (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2)
         unbraced = ride & (u["kd_t"] >= up)
     cdef = cc.get("charge_defence") or {}
     if cdef.get("on") and "cdl" in u and "cd" in u:
@@ -916,7 +921,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         if ride is not None and "size_k" in u:
             # (contact.impact ride_in, impact.deferred) a large charger that rode in swung its front rank's first blow when
             # the men it knocked down got up - the mean getting-up time after the landing -, its intervals run from then
-            up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2 + rise_s
+            from tools.nn.sim import impact as _impact
+            up = _impact.up_mean(params) if imp_wave else (
+                (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2)
             rp = (ride[:, None, :] & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
                   & swung)
             t2 = t - up
@@ -944,7 +951,25 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             else:
                 back2 = (torch.where(t2 >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p))
                          + torch.where(t2 >= interval, p, torch.zeros_like(p)))
-            if imp_first:
+            if imp_comb:
+                # (contact.impact wave comb, impact.comb; build/diag_cav/mechanic.md M37, the program, and the game's memory)
+                # one timer a man, set at each attack's start, a miss no sooner back: the front rank that struck at the
+                # landing and the ranks behind that struck as they reached standing men strike again together, an interval
+                # later, comb_blows times (impact.deferred's cohorts, battle.py) - no steady rate for the pair till then
+                lo_r, hi_r = _impact.rear_window(u, params)
+                K = _impact.comb_blows(params)
+                h_front = K * interval
+                h_rear = hi_r[:, :, None] + (K - 1) * interval
+                back = torch.where(rp, s_front * (t >= h_front).to(p.dtype) + (1 - s_front) * (t >= h_rear).to(p.dtype),
+                                   back)
+                # the ranks behind that strike: the men of the charger in contact within the strike's reach - F, with the
+                # fighting_files share (the game's memory: a rear knight strikes his target 1.9-3.3 m off, p90 3.2-3.3 m,
+                # and 15-21 knights stand within 3 m of a man fit as a target 2-5 s after the impact, against 25-38
+                # within 4.55 m - F / fighting_files counted those), less the front rank
+                s_rear = ((F - front).clamp(min=0) / F.clamp(min=1e-6))
+                if parts is not None:
+                    parts["s_front"], parts["s_rear"] = s_front, s_rear
+            elif imp_first:
                 # (contact.impact strike_first; build/diag_cav/mechanic.md M36-M37, the program) the front rank (s_front of
                 # the men in contact) swung its lances at the landing, on men still standing (the first strike's rank,
                 # battle.py), and its men's one timer runs from that blow - a new target does not reset it: they strike
@@ -1082,5 +1107,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         late_pair = (late[:, :, None] & (u["ride"] >= 0.5)[:, None, :] & u["large"][:, :, None]
                      & (u["size_k"][:, :, None] > u["size_k"][:, None, :]) & ~single_i & ~single_j)
         # (contact.impact strike_first: the front rank swung at the landing - the ranks behind alone, s_rear of the men)
-        swing_rate = torch.where(late_pair, swing_all if s_rear is None else swing_all * s_rear, swing_rate)
+        if imp_comb:
+            # (comb) every man's blow: battle.py weighs the front rank and the ranks behind by their cohorts' shares
+            swing_rate = torch.where(late_pair, swing_all, swing_rate)
+        else:
+            swing_rate = torch.where(late_pair, swing_all if s_rear is None else swing_all * s_rear, swing_rate)
     return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))
