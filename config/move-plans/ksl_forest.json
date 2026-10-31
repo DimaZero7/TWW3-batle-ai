@@ -1,0 +1,93 @@
+{
+ "name": "ksl_forest",
+ "description": "Kislev plains (ksl_plains_01): one lord on foot (hide_forest) is put on points inside / outside the scan's forest zone (build/maps/ksl_plains_01/forest.npz; build/diag_map/scan.md) and held about 12 s; unit:is_hidden says whether the game counts him 'in the forest'. The far enemy is more than 100 m away.",
+ "monitor": {
+  "arrive_m": 1.5,
+  "stop_samples": 3,
+  "min_ms": 9000,
+  "stuck_window_ms": 8000,
+  "stuck_move_m": 1
+ },
+ "legs": [
+  {
+   "name": "F1_forest_deep",
+   "kind": "shape",
+   "run": false,
+   "timeout_s": 25,
+   "start": {
+    "x": -73.0,
+    "z": -321.0,
+    "facing": 0,
+    "width": 5
+   },
+   "target": {
+    "x": -73.0,
+    "z": -321.0,
+    "facing": 0,
+    "width": 5
+   },
+   "why": "forest ground, 46 m inside the zone",
+   "scan_forest": true
+  },
+  {
+   "name": "F2_forest_edge",
+   "kind": "shape",
+   "run": false,
+   "timeout_s": 25,
+   "start": {
+    "x": -33.0,
+    "z": -297.0,
+    "facing": 0,
+    "width": 5
+   },
+   "target": {
+    "x": -33.0,
+    "z": -297.0,
+    "facing": 0,
+    "width": 5
+   },
+   "why": "forest ground, 3 m inside the zone's edge",
+   "scan_forest": true
+  },
+  {
+   "name": "G1_grass_edge",
+   "kind": "shape",
+   "run": false,
+   "timeout_s": 25,
+   "start": {
+    "x": -26.0,
+    "z": -297.0,
+    "facing": 0,
+    "width": 5
+   },
+   "target": {
+    "x": -26.0,
+    "z": -297.0,
+    "facing": 0,
+    "width": 5
+   },
+   "why": "grass, 4 m outside the forest zone",
+   "scan_forest": false
+  },
+  {
+   "name": "T1_lone_trunk",
+   "kind": "shape",
+   "run": false,
+   "timeout_s": 25,
+   "start": {
+    "x": -107.5,
+    "z": 67.7,
+    "facing": 0,
+    "width": 5
+   },
+   "target": {
+    "x": -107.5,
+    "z": 67.7,
+    "facing": 0,
+    "width": 5
+   },
+   "why": "grass 1.5 m from a lone trunk 182 m from any forest ground",
+   "scan_forest": false
+  }
+ ]
+}

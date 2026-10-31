@@ -2,10 +2,14 @@
 (src/entries/map_capture.lua: bm:get_terrain_height over the radar frame, the multiples of the step - with step 1 or 2
 the engine's own 2 m nodes are among them - plus clear / ground type), then heights.npz (float32 [rows, columns], row = z,
 column = x, origin x0 / z0, step), meta.json (map, frame, deployment zones of the capture scenario, source run, date,
-timing) and preview.png (dark lows, light hills, the zones outlined).
+timing) and preview.png (dark lows, light hills, the zones outlined). One more layer on the same grid (build/diag_map/
+scan.md): passable.npz - blocked uint8 1 = a unit cannot stand there (the node is not reachable for the capture's units
+after deployment: unit:can_reach_position; outside that read - not bm:is_area_clear); passable.png shows it over the
+water and forest ground types (heights.npz ground: the game's own 'in the water' / 'in the forest', 2 m cells).
 
     python -m tools.nn.map_grid capture --name ksl_plains_01 [--step 1]   # build, launch, convert (needs the game free)
     python -m tools.nn.map_grid convert build/map-capture/runs/<run> --name ksl_plains_01
+    python -m tools.nn.map_grid layers build/map-capture/runs/<run> --name ksl_plains_01   # only passable
     python -m tools.nn.map_grid trees --name ksl_plains_01 --points <tree-points.csv.gz> --meta <tree_metadata.txt>
 
 trees.npz (the trunks: x, z, base y, radius r, height h - float32; tree_bodies) comes from the map's tree list (the map
@@ -61,6 +65,106 @@ def parse_grid(text):
     C[iz, ix] = [int(r["clear"]) for r in rows]
     G[iz, ix] = [code[r["ground"]] for r in rows]
     return H, C, G, names, x0, z0, step
+
+
+def parse_reach(text, shape):
+    """The capture's reach columns (map-capture --features: unit:can_reach_position of each side's first unit after
+    deployment) -> (reach side 1, reach side 2) int8 [rows, columns]: 1 yes, 0 no, -1 not read (outside the radar);
+    None when the grid has no reach columns."""
+    reader = csv.DictReader(io.StringIO(text))
+    if "reach_side_1" not in (reader.fieldnames or []):
+        return None
+    R = np.full((2,) + tuple(shape), -1, np.int8)
+    for r in reader:
+        iz, ix = int(r["iz"]), int(r["ix"])
+        R[0, iz, ix] = int(r["reach_side_1"])
+        R[1, iz, ix] = int(r["reach_side_2"])
+    return R[0], R[1]
+
+
+def passable_layers(C, G, names, reach=None):
+    """-> blocked uint8 [rows, columns] (1 = a unit cannot stand there) and counts. Where the reach was read: reachable
+    for none of the captured units (the game's point query: it agrees with is_area_clear but for the 1-node ring of a
+    blocked area, where the 1 x 1 m box touches it and the point itself is free); elsewhere: not clear
+    (bm:is_area_clear of the node's 1 x 1 m box). Water and forest are not layers of their own: the ground types
+    (heights.npz ground) already are them; info counts the blocked nodes by ground type."""
+    blocked = C == 0
+    info = {"cells": int(C.size)}
+    if reach is not None:
+        r1, r2 = reach
+        known = (r1 >= 0) & (r2 >= 0)
+        no = known & (r1 == 0) & (r2 == 0)
+        blocked = np.where(known, no, blocked)
+        info.update(reach_read=int(known.sum()), reach_differs=int((known & (r1 != r2)).sum()),
+                    clear_not_reach=int((known & (C == 1) & no).sum()),
+                    not_clear_reach=int((known & (C == 0) & ~no).sum()),
+                    source="unit:can_reach_position (both units), bm:is_area_clear outside the read")
+    else:
+        info["source"] = "bm:is_area_clear (no reach read)"
+    info.update(blocked=int(blocked.sum()), blocked_share=round(float(blocked.mean()), 4),
+                blocked_by_ground={n: [int((blocked & (G == i)).sum()), int((G == i).sum())]
+                                   for i, n in enumerate(names)})
+    return blocked.astype(np.uint8), info
+
+
+def write_layers(dst, blocked, x0, z0, step, info, run=None):
+    """passable.npz next to heights.npz (the same grid: x0, z0, step) and meta.json's 'passable' entry (the rest of
+    meta.json kept)."""
+    dst = Path(dst)
+    np.savez_compressed(dst / "passable.npz", blocked=blocked, x0=np.float64(x0), z0=np.float64(z0),
+                        step=np.float64(step))
+    mp = dst / "meta.json"
+    meta = json.loads(mp.read_text(encoding="utf-8")) if mp.exists() else {}
+    meta["passable"] = {"file": "passable.npz", "layout": "blocked[iz, ix] uint8, 1 = a unit cannot stand there",
+                        **{k: info[k] for k in ("source", "blocked", "blocked_share", "cells", "reach_read",
+                                                "reach_differs", "clear_not_reach", "not_clear_reach") if k in info},
+                        "blocked_by_ground": {k: f"{v[0]} of {v[1]}" for k, v in info["blocked_by_ground"].items()}}
+    if run is not None:
+        meta["passable"]["run"] = str(run)
+    mp.write_text(json.dumps(meta, indent=1, ensure_ascii=False), encoding="utf-8")
+    return meta
+
+
+def preview_layers(path, blocked, G, names, x0, z0, step, title):
+    """The picture: cannot stand black over the ground types forest / shallow / deep water."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    cls = np.zeros(blocked.shape, np.uint8)
+    for k, n in ((4, "forest"), (2, "shallow_water"), (3, "deep_water")):
+        if n in names:
+            cls[G == names.index(n)] = k
+    cls[blocked > 0] = 1
+    ext = (x0 - step / 2, x0 + (blocked.shape[1] - 0.5) * step, z0 - step / 2, z0 + (blocked.shape[0] - 0.5) * step)
+    fig, ax = plt.subplots(figsize=(8, 7.2), dpi=120)
+    ax.imshow(cls, origin="lower", extent=ext, interpolation="nearest", vmin=-0.5, vmax=4.5,
+              cmap=ListedColormap(["#f4f4f4", "#202020", "#7fc4ff", "#1f4e9c", "#6fbf73"]))
+    ax.set_xlabel("x, m")
+    ax.set_ylabel("z, m")
+    ax.set_title(title + "\nblack: cannot stand; ground: light blue shallow water, dark blue deep water, green forest",
+                 fontsize=9)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def layers(run, name, out_root=MAPS):
+    """Only passable.npz / passable.png (and meta.json's entry) for a map already converted: the run must be the same
+    grid (shape, origin, step) with the same heights and clear layer; heights.npz is not touched."""
+    run = Path(run)
+    text = (run / "tww3_bai_map_capture_grid.csv").read_text(encoding="utf-8")
+    H, C, G, names, x0, z0, step = parse_grid(text)
+    dst = Path(out_root) / name
+    have = np.load(dst / "heights.npz")
+    assert have["height"].shape == H.shape and float(have["step"]) == step, "another grid"
+    assert float(have["x0"]) == x0 and float(have["z0"]) == z0, "another origin"
+    assert np.abs(have["height"] - H).max() < 1e-3 and (have["clear"] == C).all(), "another map or capture"
+    blocked, info = passable_layers(C, G, names, parse_reach(text, H.shape))
+    rel = run.resolve().relative_to(project.ROOT) if run.resolve().is_relative_to(project.ROOT) else run
+    meta = write_layers(dst, blocked, x0, z0, step, info, rel)
+    preview_layers(dst / "passable.png", blocked, G, names, x0, z0, step, f"{name}: cannot stand")
+    return dst, meta
 
 
 def zones(xml_text):
@@ -162,11 +266,16 @@ def convert(run, name, out_root=MAPS):
             "date": datetime.date.today().isoformat()}
     (dst / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False), encoding="utf-8")
     preview(dst / "preview.png", H, x0, z0, step, zone_list, frame, f"{name}: {mp} ({step:g} m grid)")
+    text = (run / "tww3_bai_map_capture_grid.csv").read_text(encoding="utf-8")
+    blocked, info = passable_layers(C, G, names, parse_reach(text, H.shape))
+    meta = write_layers(dst, blocked, x0, z0, step, info, meta["source"]["run"])
+    preview_layers(dst / "passable.png", blocked, G, names, x0, z0, step, f"{name}: cannot stand")
     return dst, meta
 
 
 def capture(name, step=1, python=sys.executable):
-    """Builds map-capture (nodes, the step) and launches it, then converts the new run. The probe lock is held; not when
+    """Builds map-capture (nodes, the step, --features: objects and every node's reach after deployment, ~25 s more)
+    and launches it, then converts the new run. The probe lock is held; not when
     the user plays."""
     if HUMAN.exists():
         raise SystemExit("the user plays (build/steps/HUMAN_PLAYING)")
@@ -175,7 +284,8 @@ def capture(name, step=1, python=sys.executable):
     LOCK.write_text(f"map_grid {name} {datetime.datetime.now().isoformat(timespec='seconds')}\n", encoding="utf-8")
     try:
         before = set(p.name for p in RUNS.glob("*")) if RUNS.exists() else set()
-        code = subprocess.run([python, "-m", "tools.build", "map-capture", "--step", str(step), "--nodes"],
+        code = subprocess.run([python, "-m", "tools.build", "map-capture", "--step", str(step), "--nodes",
+                               "--features"],
                               cwd=project.ROOT, stdout=subprocess.DEVNULL).returncode
         if code:
             raise SystemExit(f"build failed ({code})")
@@ -252,7 +362,16 @@ def main(argv=None):
     v = sub.add_parser("convert")
     v.add_argument("run", type=Path)
     v.add_argument("--name", required=True)
+    ly = sub.add_parser("layers")
+    ly.add_argument("run", type=Path)
+    ly.add_argument("--name", required=True)
+    ly.add_argument("--out-root", type=Path, default=MAPS)
     args = ap.parse_args(argv)
+    if args.cmd == "layers":
+        dst, meta = layers(args.run, args.name, args.out_root)
+        print(dst)
+        print(json.dumps(meta["passable"], indent=1))
+        return 0
     if args.cmd == "trees":
         path, info = trees(args.points, args.meta, args.name)
         print(path)

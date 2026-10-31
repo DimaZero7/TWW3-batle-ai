@@ -1,0 +1,245 @@
+{
+ "name": "ksl_river_ford",
+ "units": [
+  "probe_spears",
+  "probe_cav"
+ ],
+ "description": "Kislev river map (ksl_river_01): Empire spearmen (small) and Empire knights (large) run 90 m over flat land (x 58, z -346..-256, both ways) and over passable shallow water (z -97, x -237..-147, both ways): speed in shallow water against land (the database: small x0.8, large x1.0); then an order 10 m into deep water and (spearmen) onto blocked land and blocked shallow water of the scan (build/maps/ksl_river_01/passable.npz; build/diag_map/scan.md).",
+ "monitor": {
+  "arrive_m": 5,
+  "stop_samples": 3,
+  "min_ms": 3000,
+  "stuck_window_ms": 8000,
+  "stuck_move_m": 1
+ },
+ "legs": [
+  {
+   "name": "S_land_n",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 40,
+   "start": {
+    "x": 58,
+    "z": -346,
+    "facing": 0,
+    "width": 30
+   },
+   "target": {
+    "x": 58,
+    "z": -256,
+    "facing": 0,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_land_s",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 40,
+   "start": {
+    "x": 58,
+    "z": -256,
+    "facing": 180,
+    "width": 30
+   },
+   "target": {
+    "x": 58,
+    "z": -346,
+    "facing": 180,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_water_e",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 40,
+   "start": {
+    "x": -237,
+    "z": -97,
+    "facing": 90,
+    "width": 30
+   },
+   "target": {
+    "x": -147,
+    "z": -97,
+    "facing": 90,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_water_w",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 40,
+   "start": {
+    "x": -147,
+    "z": -97,
+    "facing": 270,
+    "width": 30
+   },
+   "target": {
+    "x": -237,
+    "z": -97,
+    "facing": 270,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_deep",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 25,
+   "start": {
+    "x": 56,
+    "z": 166,
+    "facing": 51,
+    "width": 30
+   },
+   "target": {
+    "x": 81,
+    "z": 186,
+    "facing": 51,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_blocked_land",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 25,
+   "start": {
+    "x": -264,
+    "z": -164,
+    "facing": 39,
+    "width": 30
+   },
+   "target": {
+    "x": -246,
+    "z": -142,
+    "facing": 39,
+    "width": 30
+   }
+  },
+  {
+   "name": "S_blocked_shallow",
+   "unit": "probe_spears",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 25,
+   "start": {
+    "x": -178,
+    "z": -187,
+    "facing": 233,
+    "width": 30
+   },
+   "target": {
+    "x": -194,
+    "z": -199,
+    "facing": 233,
+    "width": 30
+   }
+  },
+  {
+   "name": "C_land_n",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 58,
+    "z": -346,
+    "facing": 0,
+    "width": 30
+   },
+   "target": {
+    "x": 58,
+    "z": -256,
+    "facing": 0,
+    "width": 30
+   }
+  },
+  {
+   "name": "C_land_s",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 58,
+    "z": -256,
+    "facing": 180,
+    "width": 30
+   },
+   "target": {
+    "x": 58,
+    "z": -346,
+    "facing": 180,
+    "width": 30
+   }
+  },
+  {
+   "name": "C_water_e",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": -237,
+    "z": -97,
+    "facing": 90,
+    "width": 30
+   },
+   "target": {
+    "x": -147,
+    "z": -97,
+    "facing": 90,
+    "width": 30
+   }
+  },
+  {
+   "name": "C_water_w",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": -147,
+    "z": -97,
+    "facing": 270,
+    "width": 30
+   },
+   "target": {
+    "x": -237,
+    "z": -97,
+    "facing": 270,
+    "width": 30
+   }
+  },
+  {
+   "name": "C_deep",
+   "unit": "probe_cav",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 25,
+   "start": {
+    "x": 56,
+    "z": 166,
+    "facing": 51,
+    "width": 30
+   },
+   "target": {
+    "x": 81,
+    "z": 186,
+    "facing": 51,
+    "width": 30
+   }
+  }
+ ]
+}

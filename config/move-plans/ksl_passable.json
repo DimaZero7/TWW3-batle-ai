@@ -1,0 +1,211 @@
+{
+ "name": "ksl_passable",
+ "description": "Kislev plains (ksl_plains_01): one lord on foot is ordered onto check points of the scan's 'cannot stand' layer (build/maps/ksl_plains_01/passable.npz; build/diag_map/scan.md). Each leg: teleport 22-32 m away on free ground, one run order to the point; the end position says whether the game lets the unit stand there.",
+ "monitor": {
+  "arrive_m": 1.5,
+  "stop_samples": 3,
+  "min_ms": 3000,
+  "stuck_window_ms": 8000,
+  "stuck_move_m": 1
+ },
+ "legs": [
+  {
+   "name": "B1_cliff",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 39.0,
+    "z": -168.0,
+    "facing": 282.7,
+    "width": 5
+   },
+   "target": {
+    "x": 8.0,
+    "z": -161.0,
+    "facing": 282.7,
+    "width": 5
+   }
+  },
+  {
+   "name": "B2_rocks",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 120.0,
+    "z": -72.0,
+    "facing": 90.0,
+    "width": 5
+   },
+   "target": {
+    "x": 152.0,
+    "z": -72.0,
+    "facing": 90.0,
+    "width": 5
+   }
+  },
+  {
+   "name": "B3_rocks",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 8.0,
+    "z": 51.0,
+    "facing": 270.0,
+    "width": 5
+   },
+   "target": {
+    "x": -24.0,
+    "z": 51.0,
+    "facing": 270.0,
+    "width": 5
+   }
+  },
+  {
+   "name": "B4_small_rock",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 297.0,
+    "z": -178.0,
+    "facing": 198.4,
+    "width": 5
+   },
+   "target": {
+    "x": 287.0,
+    "z": -208.0,
+    "facing": 198.4,
+    "width": 5
+   }
+  },
+  {
+   "name": "E_in3",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 105.0,
+    "z": -60.0,
+    "facing": 90.0,
+    "width": 5
+   },
+   "target": {
+    "x": 137.0,
+    "z": -60.0,
+    "facing": 90.0,
+    "width": 5
+   }
+  },
+  {
+   "name": "E_out3",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 131.0,
+    "z": -92.0,
+    "facing": 0.0,
+    "width": 5
+   },
+   "target": {
+    "x": 131.0,
+    "z": -60.0,
+    "facing": 0.0,
+    "width": 5
+   }
+  },
+  {
+   "name": "E_out1",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 101.0,
+    "z": -60.0,
+    "facing": 90.0,
+    "width": 5
+   },
+   "target": {
+    "x": 133.0,
+    "z": -60.0,
+    "facing": 90.0,
+    "width": 5
+   }
+  },
+  {
+   "name": "P1_forest",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": -78.0,
+    "z": -330.0,
+    "facing": 359.9,
+    "width": 5
+   },
+   "target": {
+    "x": -78.0,
+    "z": -297.6,
+    "facing": 359.9,
+    "width": 5
+   }
+  },
+  {
+   "name": "P2_boulders",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 210.0,
+    "z": -185.0,
+    "facing": 359.5,
+    "width": 5
+   },
+   "target": {
+    "x": 209.7,
+    "z": -152.9,
+    "facing": 359.5,
+    "width": 5
+   }
+  },
+  {
+   "name": "P3_fence",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 101.0,
+    "z": -45.0,
+    "facing": 359.5,
+    "width": 5
+   },
+   "target": {
+    "x": 100.7,
+    "z": -13.3,
+    "facing": 359.5,
+    "width": 5
+   }
+  },
+  {
+   "name": "P4_grass",
+   "kind": "traverse",
+   "run": true,
+   "timeout_s": 30,
+   "start": {
+    "x": 60.0,
+    "z": -72.0,
+    "facing": 0.0,
+    "width": 5
+   },
+   "target": {
+    "x": 60.0,
+    "z": -40.0,
+    "facing": 0.0,
+    "width": 5
+   }
+  }
+ ]
+}

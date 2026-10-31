@@ -20,7 +20,7 @@
   --done:#1f8a5b; --done-bg:#e3f4ec; --open:#b07300; --open-bg:#fff3d9; --later:#5b6b86; --later-bg:#e9edf4;
   --field:#cfe3a8; --out:#7a7f88; --mine:#2b9a6a; --minev:#8fd3b2; --foe:#cc4a3f; --foev:#f0a8a1; --neutral:#eceff3;
   --ours:#3a7bd5; --tc-test:#1a9a8a; --pass:#7b8496; --live:#3a7bd5;
-  --c-pass:#6f7fd0; --c-live:#2f9488; --c-who:#4aa99c; --c-state:#237066; --c-cst:#68bdb1; --c-ars:#b0679a; --c-out:#d08a1c; --c-order:#a88a00; --c-grp:#4f86c6; --c-map:#5b8f4a; --c-water:#4aa3d8;
+  --c-pass:#6f7fd0; --c-live:#2f9488; --c-who:#4aa99c; --c-state:#237066; --c-cst:#68bdb1; --c-ars:#b0679a; --c-out:#d08a1c; --c-order:#a88a00; --c-grp:#4f86c6; --c-map:#5b8f4a; --c-water:#4aa3d8; --c-near:#c99a06; --c-far:#9156d6;
   --f-body:"Golos Text",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
@@ -28,14 +28,14 @@
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
   --pass:#8a93a6; --live:#5b9bf0;
-  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72; --c-water:#6cb8e6;
+  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72; --c-water:#6cb8e6; --c-near:#f0c24a; --c-far:#b58ef2;
   color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
   --pass:#8a93a6; --live:#5b9bf0;
-  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72; --c-water:#6cb8e6;
+  --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72; --c-water:#6cb8e6; --c-near:#f0c24a; --c-far:#b58ef2;
   color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.55;
@@ -346,6 +346,70 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-mapfeat">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Признаки карты <span class="chip done">решено 31.10</span></h2>
+        <ul class="small">
+          <li><b>1. Векторы окон → в общий обработчик</b> (к строкам отрядов): ближнее 64, дальнее 32, цель 32 = <b>128 чисел</b>. Каждый — усреднение и максимум по клеткам последнего слоя свёртки окна, сведённые линейным слоем к своему размеру.</li>
+          <li><b>2. Карта ближнего окна 30 × 30 × 64</b> — без сжатия, для выхода «где ставить области» (аналог «Клетки хода» у отряда).</li>
+        </ul>
+        <details class="why"><summary>Почему так</summary><ul class="small">
+          <li><b>Двойной выход:</b> общему обработчику нужна суть окна (несколько чисел к строкам), выходу «где ставить области» — подробность по клеткам.</li>
+          <li><b>Усреднение + максимум:</b> среднее даёт общую картину окна, максимум — есть ли где-то редкое важное (скала, орудие), которое в среднем растворилось бы.</li>
+        </ul></details>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-mapproc">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Анализ карты <span class="chip done">решено 31.10</span></h2>
+        <div class="where">образцы: генерал — «Анализ карты» (<code>design/general</code>); отряд — <b>tools/nn/unit/net.py</b> MapConv (4 свёртки 3×3, 32 канала, ≈ 32 тыс. весов)</div>
+        <ul class="small">
+          <li><b>Три свёртки 3 × 3 — по одной на окно</b>: у окон разные слои и масштаб, общие веса не годятся.</li>
+          <li><b>Ближнее окно:</b> 34 → 48 → 64 → 64, три слоя. Окошко 3 × 3 трижды видит 7 × 7 клеток ≈ 80 м при клетке 11 м — одна плитка: отряд и его область целиком в одном признаке.</li>
+          <li><b>Дальнее окно:</b> 28 → 32 → 32, два слоя.</li>
+          <li><b>Окно цели:</b> 17 → 32 → 32, два слоя.</li>
+          <li><b>Весов в свёртках:</b> ≈ 111 тыс. (ближнее ≈ 79 тыс., дальнее ≈ 17 тыс., цель ≈ 14 тыс.); входы шире на карточки отрядов (по 8). Векторы окон: 64 / 32 / 32 — см. «Признаки карты». У отряда — ≈ 14 тыс.</li>
+          <li><b>Выход двойной:</b> сжатые векторы трёх окон → в общий обработчик, к строкам отрядов; полная карта ближнего окна 30 × 30 × 64 → для выхода «где ставить области» (как «Клетка хода» у отряда).</li>
+        </ul>
+        <details class="why"><summary>Почему так</summary><ul class="small">
+          <li><b>Три свёртки, а не одна:</b> окна разного масштаба (клетка 11 м и до 32 м) и с разными слоями — одни веса на них учили бы одно и то же признаком разного смысла.</li>
+          <li><b>Три слоя у ближнего:</b> ради поля 7 × 7 клеток — одна плитка, отряд и его область видны одним признаком.</li>
+          <li><b>Не раздувать до 128 каналов «на всякий случай»:</b> расширим, когда упражнение покажет, что не хватает.</li>
+        </ul></details>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет: векторы окон — 64 / 32 / 32 (решено 31.10, «Признаки карты»).</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-ucmap">
+  <section class="cards">
+    <div><div class="colh">Договорились</div>
+      <div class="box done"><h2>Карточка на карте <span class="chip done">решено 31.10</span></h2>
+        <ul class="small">
+          <li><b>Карта сама не знает, кто стоит в пятне</b> — стрелок или пехота. Поэтому каждый отряд, прошедший «Анализ отряда» (128 чисел), сжимается маленьким обучаемым слоем <b>128 → 8</b> (один слой для всех отрядов).</li>
+          <li><b>Эти 8 чисел пишутся в каждую клетку под строем отряда</b> (× доля клетки; два отряда в клетке — среднее), рядом с плотностью и фронтом. Свёртка видит «что» и «где» вместе.</li>
+          <li><b>Куда:</b> мои отряды (ближнее окно), цель (ближнее и окно цели), враги и свои (дальнее окно). Слои: ближнее 18 → 34, дальнее 12 → 28, цель 9 → 17.</li>
+          <li><b>Класс и состояние отдельными слоями не дублируются</b> — берётся тот же анализ.</li>
+          <li><b>Почему 8:</b> должно уместиться ~8–10 фактов (класс, доля живых, усталость, бег, боезапас, в рукопашной, скрыт, размер); числа непрерывные, точные значения остаются в строках.</li>
+          <li><b>Проверка, а не угадывание:</b> сжатие 128 → 8 обучается отдельно — предсказывать эти ~10 фактов. Класс ≥ 95 %, доли с ошибкой ≤ 10 % — хватает; иначе 16 (ещё +24 слоя, ≈ 15 тыс. весов). После проверки сжатие замораживается, как «Анализ отряда».</li>
+        </ul>
+        <details class="why"><summary>Почему так</summary><ul class="small">
+          <li><b>Зачем:</b> без карточки пятно на карте без подписи — свёртка не отличит стрелков от пехоты в том же месте.</li>
+          <li><i>Отвергли: слои классов</i> (стрелки, пехота, конница…) — класс не скажет про усталость, боезапас, бег; карточка несёт всё это сразу.</li>
+          <li><b>Предобучение:</b> пока сжатие не выучилось, его 8 чисел — шум, и карта шумит вместе с ним; поэтому сначала учим сжатие на фактах, потом замораживаем.</li>
+        </ul></details>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>8 или 16</b> чисел — решится проверкой (класс ≥ 95 %, доли с ошибкой ≤ 10 %).</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
 <template id="tpl-gmap">
   <section class="cards">
     <div><div class="colh">Договорились</div>
@@ -353,7 +417,7 @@ a{color:inherit}
         <div class="where">образец: карта зоны отряда — <b>tools/nn/unit/zmap.py</b> (30 × 30, 16 слоёв)</div>
         <ul class="small">
           <li><b>30 × 30 клеток.</b> <b>Клетка = большее из трёх</b> (решение 31.10): размер зоны / 30; 8 м (как у пехоты на личном уровне); наибольшая дальность стрельбы в группе / 14 — чтобы стрелки видели цель в своей дальности.</li>
-          <li><b>Одна карточка — два окна 30 × 30 в одних осях</b> (решение 31.10): слева окно группы (это описание), справа окно цели, между ними связка; итог — <b>30 × 30 × (8 + 12 местности + 8 дальнего окна) + числа 4 = 30 × 30 × 28 + 4</b>.</li>
+          <li><b>Одна карточка — два окна 30 × 30 в одних осях</b> (решение 31.10): слева окно группы (это описание), справа окно цели, между ними связка; итог — <b>карта 30 × 30 × 79 (ближнее 34 + дальнее 28 + цель 17) + числа 4</b>: ближнее — плитки 1, области 1, мои 3 + карточка 8, цель 3 + карточка 8 (если попала), местность 6, огонь 4; дальнее — враги 1 + карточка 8, свои 1 + карточка 8, местность 6, огонь 4; цель — цель 3 + карточка 8, местность 6.</li>
           <li><b>Центр карты = центр зоны</b> (не группы): квадрат зоны всегда целиком на карте и не дрожит. <b>«Вверх» = поворот зоны</b> (дан сверху, стабилен) — не на цель: цель — набор отрядов, может стоять в двух концах строя. В той же системе координат считаются положения, фронт и скорость в строках отрядов.</li>
           <li><b>Собирает код</b> из посылки, состояния боя и снятой карты местности.</li>
           <li><b>Окна внимания — где рисуется карта</b> (полоса под окнами; общий центр — центр зоны, оси зоны):
@@ -362,11 +426,21 @@ a{color:inherit}
               <li><b>дальнее стрелков и орудий</b> — 30 клеток × наибольшая дальность / 14 (арбалеты ~480 м, артиллерия ~1000 м); есть / нет (число 0/1); слои: враги, свои, местность;</li>
               <li><b>окно цели</b> — отдельно, выше.</li>
             </ul>Слои дальнего окна — в списке: плотность врагов, плотность своих + местность (6) = 8 на клетку; в числах — «дальнего окна нет» (0/1).</li>
+          <li><b>Карточка отряда на карте</b> (решение 31.10): каждый отряд после «Анализа отряда» (128) сжат обучаемым слоем 128 → 8 (см. «Карточка на карте»), и эти 8 чисел пишутся в каждую клетку под строем отряда (× доля клетки; два отряда в клетке — среднее), рядом с плотностью и фронтом: мои (ближнее окно), цель (ближнее и окно цели), враги и свои (дальнее окно).</li>
+          <li><b>Огонь — 4 слоя в ближнем и 4 в дальнем окне</b> (решение 31.10): враг — круг досягаемости, враг — дуга огня сейчас, мы — круг досягаемости, мы — дуга огня сейчас; 0/1, только видимые враги (см. «Огонь — круги и дуги»). <b>В окне цели их нет:</b> оно центрировано на цели — её круг накрыл бы всё окно. На эскизе «огонь — круги и дуги»: у каждого стрелка и орудия круг досягаемости (у артиллерии с минимальной дальностью — кольцо) и дуга огня сейчас (±45° от фронта стоя, ±90° на ходу); враг — красные контуры, мы — зелёные; наша зона в красном круге, но вне красной дуги — выйти из круга или зайти сбоку.
+            <ul>
+              <li>только видимые враги;</li>
+              <li>0/1 — достаёт или нет; сила огня — в строках отрядов;</li>
+              <li>как слои стрелка на личном уровне (<code>zmap.py</code> reach, fire_arc), сложены по всем стрелкам группы / врага.</li>
+            </ul></li>
           <li><b>Следующие слои — по одному</b>, после обсуждения.</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
           <li><b>Ближнее окно шире зоны на плитку:</b> отряд у края зоны видит холм или подходящую конницу за краем, а тактик без запаса — нет.</li>
           <li><b>Дальнее окно — отдельно:</b> группа бывает смешанной (пехота + орудия); одно окно по дальности орудий делало бы клетки пехоты грубыми. <i>Отвергли: одно окно с запасом по дальности</i> — по той же причине.</li>
+          <li><b>Огонь — на карте, а не только в строках:</b> вопрос «куда сдвинуть зону, чтобы выйти из круга» — пространственный, его решает свёртка по карте.</li>
+          <li><b>Дуга огня — отдельно от круга:</b> орудия разворачиваются медленно; обход сбоку — реальный ход, его видно только по дуге.</li>
+          <li><b>Огонь — 0/1, а не сила:</b> слой отвечает «достаёт или нет»; сколько урона — уже в строках отрядов.</li>
           <li><b>Местность одинаковая в обоих окнах:</b> цель на холме или в лесу тактику важнее своей земли — видеть землю под целью нужно так же, как под собой.</li>
           <li><i>Не берём: дорогу и грязь</i> — на бой не влияют.</li>
           <li><b>Лес — два слоя:</b> стволы — физика (останавливают стрелы, тела их обходят); зона леса — свойство места в игре (скрытность, замедление, штраф натиску), шире и сплошнее стволов.</li>
@@ -412,7 +486,7 @@ a{color:inherit}
           <li><b>Связка окон — 3 числа</b> (в посылке / строке состояния): расстояние от центра моей группы (фактического, не центра зоны) до центра цели и направление к ней (cos, sin в осях карты). «Вижу её, но не путь».</li>
           <li><b>Форма входа всегда одна</b>, без условия «если далеко»: цель рядом — она будет и на карте группы (слоем, позже), и в своём окне.</li>
           <li><b>Проверка на входе</b> (кодом, как посылка): маска цели должна быть связной по квадратам; рамка цели должна влезать в окно 30 × 30 — иначе цель не компактна. Не так — ошибка уровня выше (оперативника или генератора).</li>
-          <li><b>Итог карточки:</b> 30 × 30 × 28 + 4 (связка 3 + «дальнего окна нет» 1).</li>
+          <li><b>Итог карточки:</b> карта 30 × 30 × 79 (ближнее 34 + дальнее 28 + цель 17) + числа 4 (связка 3 + «дальнего окна нет» 1).</li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
@@ -739,8 +813,11 @@ a{color:inherit}
     {id:"unitproc",t:"Анализ отряда",ty:"proc",st:"agreed",b:[500,770,360,460],pic:"unitproc",n:"185 → 256 → 128, два слоя, ≈ 80 тыс. весов, общие веса (враг 150) · общий блок всех уровней",ref:"tools/nn/unit/net.py RowEncoder (отряд); «Анализ армий» (генерал)"},
     {id:"group",t:"Посылка от оперативника",ty:"in",st:"agreed",b:[0,2142,360,236],pic:"group",n:"маска моих S + маска цели S + центр 2 + поворот 2 + форма 2 + номер группы 1",ref:"выход оперативника = вход тактика"},
     {id:"zone",t:"Зона группы — плитки",ty:"alg",st:"agreed",b:[620,2090,360,340],pic:"zone",n:"плитка 80×80; линия 1×N / квадрат; лишние — пространство тактика; выбыл — дыра",ref:"— (правило кода, своих весов нет)"},
-    {id:"gmap",t:"Карта группы и цели",ty:"in",st:"agreed",b:[1140,1765,740,990],pic:"gmap",tpl:["gmap","tmap"],n:"два окна 30 × 30 в одних осях: группа (5 чисел на клетку) + цель (3) + 3 числа связки + местность 6 × 2 окна + дальнее окно 8 + «дальнего нет» 1 = 30 × 30 × 28 + 4",ref:"tools/nn/unit/zmap.py (карта зоны отряда)"},
+    {id:"gmap",t:"Карта группы и цели",ty:"in",st:"agreed",b:[1140,1625,740,1270],pic:"gmap",tpl:["gmap","tmap"],n:"два окна 30 × 30 в одних осях: группа (5 чисел на клетку) + цель (3) + 3 числа связки + местность 6 × 2 окна → по окнам: ближнее 34 + дальнее 28 + цель 17 (с карточками отрядов по 8) = 30 × 30 × 79 + числа 4",ref:"tools/nn/unit/zmap.py (карта зоны отряда)"},
+    {id:"mapfeat",t:"Признаки карты",ty:"out",st:"agreed",b:[2580,2030,360,460],pic:"mapfeat",n:"векторы окон 64 + 32 + 32 = 128 → общий обработчик; карта ближнего окна 30 × 30 × 64 → «где ставить области»",ref:"«Клетка хода» у отряда (tools/nn/unit/net.py where_*)"},
+    {id:"mapproc",t:"Анализ карты",ty:"proc",st:"agreed",b:[2000,1955,400,610],pic:"mapproc",n:"три свёртки 3 × 3: ближнее 34→48→64→64, дальнее 28→32→32, цель 17→32→32; ≈ 111 тыс. весов",ref:"«Анализ карты» (генерал); tools/nn/unit/net.py MapConv (отряд)"},
     {id:"orders",t:"Приказы тактику",ty:"order",st:"agreed",b:[0,2500,360,250],pic:"orders",n:"«Приказ»: глагол 4 + темп 2 = 6 чисел, без «что дальше»",ref:"—"},
+    {id:"ucmap",t:"Карточка на карте",ty:"proc",st:"agreed",b:[1360,1310,300,230],pic:"ucmap",n:"128 → 8, один обучаемый слой для всех отрядов; 8 чисел — в клетки под строем",ref:"—"},
     {id:"unitcard",t:"Карточка отряда",ty:"out",st:"agreed",b:[960,830,340,340],pic:"unitcard",n:"128 чисел на отряд (настройка)",ref:"«Карточки отрядов» (генерал)"}
   ];
   // links: from -> to; fy / ty where on the side (0 top .. 1 bottom), xm the elbow x (default: halfway), label (over the
@@ -750,8 +827,13 @@ a{color:inherit}
     {from:"changing",to:"unitproc",fy:.42,ty:.5,xm:430,label:"92 / 65",col:"--c-live"},
     {from:"abilities",to:"unitproc",fy:.5,ty:.82,xm:430,label:"24 / 16",col:"--c-ars"},
     {from:"unitproc",to:"unitcard",fy:.5,ty:.5,label:"128",col:"--c-out"},
+    {from:"unitcard",to:"ucmap",fy:.5,ty:.4,xm:1300,label:"128",col:"--c-out"},
+    {from:"ucmap",to:"gmap",dir:"down",label:"8 → в клетки под строем отряда"},
     {from:"group",to:"zone",fy:.5,ty:.5,xm:360,label:"центр, поворот, форма, N",col:"--c-grp"},
-    {from:"zone",to:"gmap",fy:.5,ty:.5,xm:980,label:"слой зоны",col:"--c-grp"}
+    {from:"zone",to:"gmap",fy:.5,ty:.5,xm:980,label:"слой зоны",col:"--c-grp"},
+    {from:"gmap",to:"mapproc",fy:.5,ty:.5,xm:1880,label:"3 окна"},
+    {from:"mapproc",to:"mapfeat",fy:.38,ty:.2,xm:2420,label:"128",col:"--c-out"},
+    {from:"mapproc",to:"mapfeat",fy:.62,ty:.68,xm:2420,label:"30 × 30 × 64",col:"--c-out"}
   ];
   // PARKED (the user 30.10: off the page for now, back later) - move into NODES / EDGES to show again; their descriptions
   // (tpl-cards, tpl-command, tpl-stub) and pictures stay in the file
@@ -850,8 +932,8 @@ a{color:inherit}
     // "Карта группы и цели": one card, two 30 x 30 windows in the same axes (up = my zone's turn, one cell), a link between
     gmap:function(b){var x=b[0],y=b[1],w=b[2],cs=5,ax=x+30,bx=x+380,my=y+56,n=0;GML.forEach(function(g){n+=g[2];});
       var nt=0;TER.forEach(function(g){nt+=g[2];});nt*=2;   // the terrain's numbers a cell, both windows
-      var nf=8;   // the far window: enemies, own units, the terrain (6)
-      var s=T(x+w/2,y+24,'30 × 30 × '+(n+nt+nf)+' + 4 · каждое решение · поворот моей зоны — общий для обоих окон',10.5,'middle');
+      var NW={near:34,far:28,tgt:17},NT=NW.near+NW.far+NW.tgt;   // numbers a cell by window: near 1+1+3+8+3+8+6+4, far 1+8+1+8+6+4, target 3+8+6
+      var s=T(x+w/2,y+24,'30 × 30 × '+NT+' + 4 · каждое решение · поворот моей зоны — общий для обоих окон',10.5,'middle');
       function frame(mx,t){return R(mx,my,30*cs,30*cs,M('--ink',5),3,' stroke="'+M('--ink',25)+'" stroke-width="1"')+T(mx+15*cs,my-6,t,9.5,'middle','fill:var(--ink);font-weight:600');}
       function unit(u,col){return '<g transform="rotate('+u[4]+' '+u[0]+' '+u[1]+')">'+R(u[0]-u[2]/2,u[1]-u[3]/2,u[2],u[3],M(col,65),1.5,' stroke="var('+col+')" stroke-width="1"')+
         '<line x1="'+u[0]+'" y1="'+(u[1]-u[3]/2)+'" x2="'+u[0]+'" y2="'+(u[1]-u[3]/2-5)+'" stroke="var(--ink)" stroke-width="1.4"/></g>';}
@@ -872,6 +954,11 @@ a{color:inherit}
       [[zx+.5*t,zy+.5*t,22,9,0],[zx+1.62*t,zy+.38*t,22,9,25],[zx+.5*t,zy+1.42*t,26,8,-8]].forEach(function(u){s+=unit(u,'--mine');});
       s=sg+'<g transform="rotate(90 '+(ax+15*cs)+' '+(my+15*cs)+')">'+s+'</g>';
       s+='<circle cx="'+(ax+15*cs)+'" cy="'+(my+15*cs)+'" r="2.6" fill="var(--ink)"/>';
+      // a cell under a unit, with its "stack" of 8 numbers (the unit card on the map)
+      var qx=ax+15*cs+18,qy=my+15*cs-22;
+      s+=R(qx-3,qy-3,6,6,'none',1,' stroke="#8a5ad8" stroke-width="1.4"')+Pa('M'+(qx+3)+' '+(qy-3)+'L'+(ax+30*cs+14)+' '+(my+14),'#8a5ad8',1);
+      for(var i=0;i<8;i++)s+=R(ax+30*cs+14+i*2.5,my+14-i*2.5-6,16,5,'color-mix(in srgb,#8a5ad8 '+(25+i*8)+'%,var(--panel))',1,' stroke="#8a5ad8" stroke-width=".6"');
+      s+=T(ax+30*cs+44,my+2,'8 чисел карточки',8,null,'fill:#8a5ad8')+T(ax+30*cs+44,my+12,'в клетке под отрядом',8,null,'fill:#8a5ad8');
       // the target's window: centre = the target's actual centre; a line of three facing us, one behind
       s+=frame(bx,'окно цели');var cx=bx+15*cs,cy=my+15*cs;
       // the terrain: a hill under the target's line (soft contour lines) and a patch of forest in a corner
@@ -894,35 +981,67 @@ a{color:inherit}
       // a band under the windows, full width: "окна внимания — где рисуется карта" - the sketch of the two nested areas, the captions on the right
       var bt=my+30*cs+34;
       s+='<line x1="'+(x+14)+'" y1="'+(bt-12)+'" x2="'+(x+w-14)+'" y2="'+(bt-12)+'" stroke="'+M('--ink',18)+'"/>';
-      s+=T(x+14,bt+4,'окна внимания — где рисуется карта',10.5,null,'fill:var(--ink);font-weight:700');
-      var F=230,wx=x+(w-F)/2,wy=bt+16,wcx=wx+F/2,wcy=wy+F/2,tl=19,nn=4*tl;
+      s+=T(x+14,bt+4,'окна внимания и огонь — что и где рисуется',10.5,null,'fill:var(--ink);font-weight:700');
+      var F=230,wx=x+95,wy=bt+30,wcx=wx+F/2,wcy=wy+F/2,tl=19,nn=4*tl;
+      s+=T(wcx,bt+22,'окна внимания',9.5,'middle','fill:var(--ink);font-weight:600');
       function onFrame(tx,ty,t,col){return R(tx-3,ty-9,t.length*5.6+6,12,'var(--panel)',2)+T(tx,ty,t,8.5,null,'fill:'+col+';font-weight:600');}
-      s+=R(wx,wy,F,F,M('--ink',4),5,' stroke="'+M('--ink',50)+'" stroke-width="1.6" stroke-dasharray="7 5"')+T(wx+2,wy-5,'дальнее',8.5,null,'fill:var(--muted);font-weight:600');
-      s+=R(wcx-nn/2,wcy-nn/2,nn,nn,M('--mine',8),3,' stroke="var(--mine)" stroke-width="2.2"')+T(wcx-nn/2+4,wcy-nn/2+11,'ближнее',8.5,null,'fill:var(--mine);font-weight:600');
+      s+=R(wx,wy,F,F,M('--c-far',5),5,' stroke="var(--c-far)" stroke-width="1.8" stroke-dasharray="7 5"')+T(wx+6,wy+13,'дальнее',8.5,null,'fill:var(--c-far);font-weight:600');
+      s+=R(wcx-nn/2,wcy-nn/2,nn,nn,M('--c-near',8),3,' stroke="var(--c-near)" stroke-width="2.2"')+T(wcx-nn/2+4,wcy-nn/2+11,'ближнее',8.5,null,'fill:var(--c-near);font-weight:600');
       for(var r=0;r<2;r++)for(var c=0;c<2;c++)s+=R(wcx-tl+c*tl,wcy-tl+r*tl,tl,tl,M('--c-grp',14),1.5,' stroke="var(--c-grp)" stroke-width="1" stroke-dasharray="2 2"');
       [[wcx-9,wcy-7],[wcx+9,wcy-7],[wcx,wcy+9]].forEach(function(u){s+=R(u[0]-6,u[1]-2,12,4.5,M('--mine',70),1,' stroke="var(--mine)" stroke-width=".8"');});
       [[wcx+28,wcy-28],[wcx+31,wcy-18]].forEach(function(u){s+=R(u[0]-5,u[1]-2,10,4.5,M('--foe',65),1,' stroke="var(--foe)" stroke-width=".8"');});
       s+=R(wx+F-30,wcy-15,6,30,M('--foe',65),1,' stroke="var(--foe)"')+T(wx+F-27,wcy+28,'цель',8,'middle','fill:var(--foe)');
       s+='<circle cx="'+wcx+'" cy="'+wcy+'" r="2.4" fill="var(--ink)"/>';
+      // the fire sketch, right of it: our shooters (green) and an enemy gun (red), each with its reach circle and its fire arc now;
+      // our zone is partly in the red circle but out of the red arc (the gun is turned aside)
+      var k=.9,FS=300*k,fsx=wx+F+50,fsy=wy;
+      s+=T(fsx+FS/2,bt+22,'огонь — круги и дуги',9.5,'middle','fill:var(--ink);font-weight:600');
+      function farc(cx,cy,r,dir,half,col,op){var a0=(dir-half)*Math.PI/180,a1=(dir+half)*Math.PI/180;   // dir: degrees clockwise from up
+        return '<path d="M'+cx+' '+cy+'L'+(cx+r*Math.sin(a0))+' '+(cy-r*Math.cos(a0))+'A'+r+' '+r+' 0 0 1 '+(cx+r*Math.sin(a1))+' '+(cy-r*Math.cos(a1))+'Z" fill="'+M(col,op)+'" stroke="var('+col+')" stroke-width="1.6"/>';}
+      s+='<clipPath id="fireclip"><rect x="'+fsx+'" y="'+fsy+'" width="'+FS+'" height="'+FS+'"/></clipPath>';
+      s+=R(fsx,fsy,FS,FS,M('--ink',4),5,' stroke="'+M('--ink',30)+'" stroke-width="1"');
+      var g='',ftl=30*k,fzx=fsx+40*k,fzy=fsy+180*k,ux=fzx+ftl,uy=fzy+ftl-6*k,ex=fsx+215*k,ey=fsy+105*k,R1=150*k,R0=24*k,RU=95*k;
+      g+='<path d="M'+(ex-R1)+' '+ey+'a'+R1+' '+R1+' 0 1 0 '+(2*R1)+' 0a'+R1+' '+R1+' 0 1 0 '+(-2*R1)+' 0M'+(ex-R0)+' '+ey+'a'+R0+' '+R0+' 0 1 1 '+(2*R0)+' 0a'+R0+' '+R0+' 0 1 1 '+(-2*R0)+' 0" fill="'+M('--foe',8)+'" fill-rule="evenodd" stroke="var(--foe)" stroke-width="1.6" stroke-dasharray="6 4"/>';
+      g+=farc(ex,ey,R1,40,45,'--foe',14);
+      g+='<circle cx="'+ux+'" cy="'+uy+'" r="'+RU+'" fill="none" stroke="var(--mine)" stroke-width="1.6" stroke-dasharray="6 4"/>';
+      g+=farc(ux,uy,RU,0,45,'--mine',14);
+      s+='<g clip-path="url(#fireclip)">'+g+'</g>';
+      for(var r=0;r<2;r++)for(var c=0;c<2;c++)s+=R(fzx+c*ftl,fzy+r*ftl,ftl,ftl,M('--c-grp',14),2,' stroke="var(--c-grp)" stroke-width="1.2" stroke-dasharray="3 2"');
+      s+=R(ux-13,uy-4,26,8,M('--mine',75),1.5,' stroke="var(--mine)"')+'<line x1="'+ux+'" y1="'+(uy-4)+'" x2="'+ux+'" y2="'+(uy-10)+'" stroke="var(--ink)" stroke-width="1.5"/>';
+      s+='<g transform="rotate(40 '+ex+' '+ey+')">'+R(ex-9,ey-6,18,12,M('--foe',75),2,' stroke="var(--foe)"')+'<line x1="'+ex+'" y1="'+(ey-6)+'" x2="'+ex+'" y2="'+(ey-16)+'" stroke="var(--ink)" stroke-width="2"/></g>';
+      s+=T(ex+24,ey+38,'орудие врага',9,null,'fill:var(--foe);font-weight:600')+T(ux+16,uy+4,'наши стрелки',9,null,'fill:var(--mine);font-weight:600');
+      s+=T(fsx+FS-6,fsy+14,'дуга огня сейчас',8.5,'end','fill:var(--foe)')+T(ex-R0-4,ey+5,'мин.',8,'end','fill:var(--foe)');
+      s+=T(fsx+FS-8,fsy+FS-10,'круг досягаемости',8.5,'end','fill:var(--foe)')+T(fsx+8,fsy+14,'наша дуга и круг',8.5,null,'fill:var(--mine)');
+      s+=T(fzx+ftl,fzy+2*ftl+14,'наша зона: в красном круге,',8.5,'middle','fill:var(--ink)')+T(fzx+ftl,fzy+2*ftl+26,'но вне красной дуги',8.5,'middle','fill:var(--ink)');
       // three columns under the windows: "Слои (в свёртку)" - the layers; "Числа (отдельно, не на клетку)" - the link;
       // "Только на рисунке" - what the drawing marks and the network does not get
-      var y0=my+30*cs+330,lc=x+14,rc=x+300,oc=x+548;   // (under the band of the attention windows)
-      s+=T(lc,y0,'Слои (в свёртку)',10.5,null,'fill:var(--ink);font-weight:700');
-      GML.forEach(function(g,i){var yy=y0+10+i*17,k=g[0];
-        s+=k==='zone'?R(lc,yy-1,13,13,M('--c-grp',30),3,' stroke="var(--c-grp)" stroke-width="1.4" stroke-dasharray="3 2"')
+      var y0=my+30*cs+374,lc=x+14,rc=x+300,oc=x+548;   // (under the band of the attention windows)
+      s+=T(lc,y0,'Слои (в свёртку) — по окнам',10.5,null,'fill:var(--ink);font-weight:700');
+      function ltag(k,yy){return k==='zone'?R(lc,yy-1,13,13,M('--c-grp',30),3,' stroke="var(--c-grp)" stroke-width="1.4" stroke-dasharray="3 2"')
           :k==='areas'?R(lc,yy-1,13,13,'none',3,' stroke="var(--mine)" stroke-width="1.4" stroke-dasharray="3 2"')
           :k==='mine'?R(lc,yy-1,13,13,M('--mine',65),3,' stroke="var(--mine)"')
-          :R(lc,yy-1,13,13,M('--foe',65),3,' stroke="var(--foe)"');
-        s+=T(lc+19,yy+9,g[1],10);});
-      // the far window's layers (only with shooters or guns)
-      var yf=y0+10+GML.length*17+8;
-      s+=T(lc,yf+10,'дальнее окно (если есть стрелки или орудия) — 8 на клетку',10,null,'fill:var(--ink);font-weight:600');
-      s+=R(lc,yf+19,13,13,M('--foe',40),3,' stroke="var(--foe)"')+T(lc+19,yf+29,'плотность врагов',10);
-      s+=R(lc,yf+36,13,13,M('--mine',40),3,' stroke="var(--mine)"')+T(lc+19,yf+46,'плотность своих',10);
-      s+=T(lc+19,yf+63,'+ местность (6) — те же слои, что ниже, в масштабе дальнего окна',8.5,null,'fill:var(--muted)');
+          :k==='owns'?R(lc,yy-1,13,13,M('--mine',40),3,' stroke="var(--mine)"')
+          :k==='foes'?R(lc,yy-1,13,13,M('--foe',40),3,' stroke="var(--foe)"')
+          :k==='card'?(function(){var o='';for(var i=0;i<4;i++)o+=R(lc+i*3,yy+8-i*3,7,4,'color-mix(in srgb,#8a5ad8 '+(35+i*15)+'%,var(--panel))',1,' stroke="#8a5ad8" stroke-width=".6"');return o;})()
+          :R(lc,yy-1,13,13,M('--foe',65),3,' stroke="var(--foe)"');}
+      var yw=y0+10;
+      [['ближнее окно — 34 на клетку',[['zone','зона группы (плитки)'],['areas','личные области отрядов'],['mine','мои отряды — плотность + фронт (cos, sin)'],['card','мои — карточка отряда (8)'],['target','цель — плотность + фронт (если попала)'],['card','цель — карточка отряда (8)']],'+ местность (6) + огонь (4)'],
+       ['дальнее окно (если есть стрелки или орудия) — 28',[['foes','плотность врагов'],['card','враги — карточка отряда (8)'],['owns','плотность своих'],['card','свои — карточка отряда (8)']],'+ местность (6) + огонь (4)'],
+       ['окно цели — 17',[['target','цель — плотность + фронт (cos, sin)'],['card','цель — карточка отряда (8)']],'+ местность (6)']].forEach(function(gw){
+        s+=T(lc,yw+10,gw[0],10,null,'fill:var(--ink);font-weight:600');yw+=17;
+        gw[1].forEach(function(r){s+=ltag(r[0],yw)+T(lc+19,yw+9,r[1],10);yw+=17;});
+        s+=T(lc+19,yw+8,gw[2],8.5,null,'fill:var(--muted)');yw+=18;});
+      // the fire layers (in the near and the far window): reach circle and fire arc now, of the enemy and of us
+      var yq=yw;
+      s+=T(lc,yq+10,'огонь (в ближнем и дальнем окне) — 4',10,null,'fill:var(--ink);font-weight:600');
+      [['--foe','c','враг — круг досягаемости'],['--foe','a','враг — дуга огня сейчас'],['--mine','c','мы — круг досягаемости'],['--mine','a','мы — дуга огня сейчас']].forEach(function(q,i){var yy=yq+20+i*17;
+        s+=q[1]==='c'?'<circle cx="'+(lc+6.5)+'" cy="'+(yy+5.5)+'" r="6" fill="none" stroke="var('+q[0]+')" stroke-width="1.5" stroke-dasharray="3 2"/>'
+          :'<path d="M'+(lc+6.5)+' '+(yy+12)+'L'+(lc+1)+' '+(yy)+'A8 8 0 0 1 '+(lc+12)+' '+yy+'Z" fill="'+M(q[0],20)+'" stroke="var('+q[0]+')" stroke-width="1.4"/>';
+        s+=T(lc+19,yy+9,q[2],10);});
+      var yf=yq+20+4*17-66;   // (the old far group is gone: the terrain follows the fire)
       // the terrain's layers, the same in every window
       var ym=yf+74;
-      s+=T(lc,ym+10,'Местность (в каждом окне)',10,null,'fill:var(--ink);font-weight:600');
+      s+=T(lc,ym+10,'местность (в каждом окне) — 6',10,null,'fill:var(--ink);font-weight:600');
       TER.forEach(function(g,i){var yy=ym+20+i*17,k=g[0];
         s+=k==='edge'?R(lc,yy-1,13,13,M('--ink',30),3)
           :k==='height'?'<path d="M'+lc+' '+(yy+11)+'q6.5 -14 13 0" fill="'+M('--c-map',30)+'" stroke="'+M('--c-map',70)+'" stroke-width="1.2"/>'
@@ -951,11 +1070,57 @@ a{color:inherit}
       s+=R(oc,y0+113,11,11,M('--foe',12),2,' stroke="var(--foe)" stroke-width="1.4" stroke-dasharray="3 2"');
       s+=T(oc+14,y0+122,'рамка цели — квадраты отрядов',9)+T(oc+14,y0+135,'80 × 80: так код собирает',9)+T(oc+14,y0+148,'группу врага (касание)',9)+T(oc+14,y0+161,'и проверяет посылку на входе',9);
       // the attention windows' frames
-      s+=R(oc,y0+175,11,11,M('--mine',8),2,' stroke="var(--mine)" stroke-width="2"');
+      s+=R(oc,y0+175,11,11,M('--c-near',8),2,' stroke="var(--c-near)" stroke-width="2"');
       ['ближнее окно — зона + 1 плитка','со всех сторон; клетка =','размер / 30; здесь рисуются','все слои'].forEach(function(t,i){s+=T(oc+14,y0+184+i*13,t,9);});
-      s+=R(oc,y0+238,11,11,M('--ink',4),2,' stroke="'+M('--ink',50)+'" stroke-width="1.4" stroke-dasharray="3 2"');
+      s+=R(oc,y0+238,11,11,M('--c-far',5),2,' stroke="var(--c-far)" stroke-width="1.6" stroke-dasharray="3 2"');
       ['дальнее окно — 30 клеток ×','дальность стрельбы / 14;','только если в группе есть','стрелки или орудия;','слои: враги, свои, местность'].forEach(function(t,i){s+=T(oc+14,y0+247+i*13,t,9);});
-      s+=T(x+w/2,Math.max(yd+52,y0+330),'итог: карта 30 × 30 × ('+n+' + местность '+nt+' + дальнее '+nf+') + числа 4 = 30 × 30 × '+(n+nt+nf)+' + 4',10.5,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,Math.max(yd+52,y0+330),'итог: карта 30 × 30 × '+NT+' (ближнее '+NW.near+' + дальнее '+NW.far+' + цель '+NW.tgt+') + числа 4',10.5,'middle','fill:var(--ink);font-weight:600');
+      return s;},
+    // "Анализ карты": three 3 x 3 convolutions, one a window (different layers and scales); stacks of layers, the 3 x 3 window, three branches
+    // "Карточка на карте": a unit's card (128, after "Анализ отряда") squeezed by one small learned layer to 8 numbers, painted into the cells
+    ucmap:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'128 → 8 · один слой для всех отрядов',10.5,'middle');
+      for(var i=0;i<16;i++)s+=R(x+16+i*8,y+44,7,14,M('--c-out',25+rnd(i,3)*55),1.5);
+      s+=T(x+16+64,y+72,'карточка отряда 128',8.5,'middle');
+      s+=Pa('M'+(x+150)+' '+(y+51)+'H'+(x+176),M('--ink',45),1.3)+'<path d="M'+(x+176)+' '+(y+47)+'L'+(x+183)+' '+(y+51)+'L'+(x+176)+' '+(y+55)+'z" fill="'+M('--ink',45)+'"/>';
+      for(var i=0;i<8;i++)s+=R(x+190+i*11,y+44,9,14,'color-mix(in srgb,var(--tc) '+(30+i*7)+'%,var(--panel))',1.5,' stroke="var(--tc)" stroke-width=".6"');
+      s+=T(x+190+44,y+72,'8 чисел',8.5,'middle','fill:var(--tc)');
+      [['обучается отдельно: предсказать ~10 фактов'],['(класс, доля живых, усталость, бег, боезапас,','в рукопашной, скрыт, размер)'],['класс ≥ 95 %, доли с ошибкой ≤ 10 % — хватает;','иначе 16'],['потом замораживается, как «Анализ отряда»']].forEach(function(q,i){var yy=y+96+[0,16,46,76][i];
+        q.forEach(function(t,k){s+=T(x+16,yy+k*13,t,9,null,i===0||i===3?'fill:var(--ink)':'');});});
+      return s;},
+    // "Признаки карты": two outputs - the windows' vectors (to the common processing, next to the rows) and the near window's full map
+    mapfeat:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'два выхода «Анализа карты»',10.5,'middle');
+      s+=T(x+16,y+50,'1. векторы окон → в общий обработчик',10,null,'fill:var(--ink);font-weight:700')+T(x+16,y+64,'(к строкам отрядов) — 128 чисел',9);
+      [['ближнее','--c-near',64],['дальнее','--c-far',32],['цель','--foe',32]].forEach(function(q,i){var yy=y+78+i*20,n=q[2]/4;
+        s+=T(x+16,yy+10,q[0],9,null,'fill:var('+q[1]+');font-weight:600');
+        for(var k=0;k<n;k++)s+=R(x+70+k*12,yy+1,10,11,M(q[1],25+rnd(i*20+k,4)*55),1.5);
+        s+=T(x+w-16,yy+10,String(q[2]),9.5,'end','font-family:var(--f-mono)');});
+      s+=T(x+16,y+152,'каждый — усреднение и максимум по клеткам',9)+T(x+16,y+165,'последнего слоя свёртки окна, сведённые',9)+T(x+16,y+178,'линейным слоем к своему размеру',9);
+      s+=T(x+16,y+206,'2. карта ближнего окна 30 × 30 × 64',10,null,'fill:var(--ink);font-weight:700')+T(x+16,y+220,'без сжатия → выход «где ставить области»',9)+T(x+16,y+233,'(как «Клетка хода» у отряда)',9);
+      var gx=x+w/2-50,gy=y+246;for(var i=4;i>=0;i--)s+=R(gx+i*5,gy+12-i*3,90,90,M('--c-near',10+i*8),2,' stroke="'+M('--c-near',55)+'" stroke-width="1"');
+      for(var i=1;i<6;i++)s+='<line x1="'+(gx+i*15)+'" y1="'+(gy+12)+'" x2="'+(gx+i*15)+'" y2="'+(gy+102)+'" stroke="'+M('--ink',12)+'"/><line x1="'+gx+'" y1="'+(gy+12+i*15)+'" x2="'+(gx+90)+'" y2="'+(gy+12+i*15)+'" stroke="'+M('--ink',12)+'"/>';
+      s+=T(gx+45,gy+118,'30 × 30 клеток × 64 признака',8.5,'middle');
+      return s;},
+    mapproc:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'три свёртки 3 × 3 — по одной на окно',10.5,'middle');
+      function stk(sx,sy,sz,n,col){var o='';for(var i=n-1;i>=0;i--)o+=R(sx+i*4,sy-i*4,sz,sz,M(col,14+i*10),2,' stroke="'+M(col,60)+'" stroke-width="1"');return o;}
+      function arr(x1,yy,x2){return Pa('M'+x1+' '+yy+'H'+(x2-6),M('--ink',45),1.3)+'<path d="M'+(x2-7)+' '+(yy-3.5)+'L'+x2+' '+yy+'L'+(x2-7)+' '+(yy+3.5)+'z" fill="'+M('--ink',45)+'"/>';}
+      var BR=[['ближнее окно','34 → 48 → 64 → 64 · 3 слоя','--c-near',[34,48,64,64],46],['дальнее окно','28 → 32 → 32 · 2 слоя','--c-far',[28,32,32],40],['окно цели','17 → 32 → 32 · 2 слоя','--foe',[17,32,32],40]];
+      var yy=y+52;
+      BR.forEach(function(br,bi){var sz=br[4],xx=x+20,cy=yy+30+sz/2;
+        s+=T(x+16,yy+12,br[0],10,null,'fill:var('+br[2]+');font-weight:700')+T(x+16+br[0].length*6.6+8,yy+12,br[1],9.5);
+        br[3].forEach(function(c,i){var n=Math.min(5,Math.round(c/12)+1);s+=stk(xx,yy+26+(sz-sz)+4*n,sz,n,br[2]);
+          s+=T(xx+sz/2+2*n,yy+26+4*n+sz+12,String(c),9,'middle','fill:var(--ink);font-family:var(--f-mono)');
+          if(i===0){var cs=sz/10;s+=R(xx+2*cs,yy+26+4*n+3*cs,3*cs,3*cs,'none',1,' stroke="var(--ink)" stroke-width="1.4"');}
+          var nx=xx+sz+4*n+18;if(i<br[3].length-1)s+=arr(xx+sz+4*n+3,cy+4*n/2,nx-3);xx=nx;});
+        // the window's vector, out to the common processing
+        s+=R(xx+4,cy-4,30,10,'color-mix(in srgb,var(--tc) 35%,var(--panel))',2,' stroke="var(--tc)"')+T(xx+19,cy+20,'вектор',8.5,'middle');
+        if(bi===0)s+=T(x+20,yy+26+sz+40,'окошко 3 × 3 трижды видит 7 × 7 клеток ≈ 80 м — одна плитка:',8.5)+T(x+20,yy+26+sz+52,'отряд и его область целиком в одном признаке',8.5);
+        yy+=bi===0?150:118;});
+      // the two outputs
+      s+=T(x+16,yy+6,'выход двойной:',10,null,'fill:var(--ink);font-weight:600');
+      s+=T(x+16,yy+22,'· сжатые векторы трёх окон → в общий обработчик',9.5)+T(x+26,yy+35,'к строкам отрядов',9.5);
+      s+=T(x+16,yy+52,'· полная карта ближнего окна 30 × 30 × 64 →',9.5)+T(x+26,yy+65,'выход «где ставить области» (как «Клетка хода» у отряда)',9.5);
+      s+=T(x+w/2,yy+90,'весов ≈ 111 тыс. в свёртках (у отряда ≈ 14 тыс.)',10,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,yy+104,'векторы окон 64 / 32 / 32 → «Признаки карты»',9,'middle');
       return s;},
     zone:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'плитка = личная область отряда 80 × 80 м',10.5,'middle'),t=30;
       function tile(tx,ty,kind){return R(tx,ty,t,t,kind==='spare'?M('--c-grp',38):kind==='hole'?'none':M('--c-grp',12),2,' stroke="'+(kind==='hole'?'var(--foe)':'var(--c-grp)')+'" stroke-width="1.2" stroke-dasharray="3 2"')+

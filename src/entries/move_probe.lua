@@ -7,6 +7,8 @@
 -- every tick the unit's movement and every soldier's position are logged
 -- until navigation.services says arrived / stopped / stuck / timeout.
 -- Scenario: scenarios/move_probe.xml. The far enemy general is held by script.
+-- plan.units (optional): several own units by script name; leg.unit picks the one
+-- a leg moves (default the first); the others stand where their last leg ended.
 local battle = require('apps.battle.adapter')
 local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
@@ -62,6 +64,9 @@ function M.main(bm, config, globals)
 
     local function snapshot()
         local row = {motion = formation.motion(state.probe)}
+        -- hidden in the forest (hide_forest / stalk; build/diag_map/scan.md forest check)
+        local ok, hidden = pcall(function() return state.probe:is_hidden() end)
+        if ok and type(hidden) == 'boolean' then row.is_hidden = hidden end
         local men = formation.soldiers(cco, state.probe)
         if men.status == 'ok' then row.soldiers_dm = men.xz_dm else row.soldiers_unavailable = men.reason end
         return row
@@ -75,7 +80,7 @@ function M.main(bm, config, globals)
         if state.cancel_deadline then state.cancel_deadline() end
         emit('result', {status = status or 'completed', legs_done = state.leg_index - (state.leg and 1 or 0),
             legs = #legs, ticks = state.ticks})
-        orders.halt(state.probe_uc)
+        for _, p in ipairs(state.probes) do orders.halt(p.uc) end
         orders.halt(state.held_uc)
         bm:end_battle()
     end
@@ -83,11 +88,14 @@ function M.main(bm, config, globals)
     local function begin_leg(index)
         local leg = legs[index]
         state.leg_index, state.leg = index, leg
+        local p = state.probe_by_name[leg.unit or state.probes[1].name]
+        assert(p, 'leg unit missing: ' .. tostring(leg.unit))
+        state.probe, state.probe_uc = p.unit, p.uc
         local s = leg.start
         orders.teleport(state.probe_uc, vec(s.x, s.z), s.facing, s.width)
         orders.halt(state.probe_uc)
         state.phase, state.phase_ms = 'settle', bm:time_elapsed_ms()
-        emit('leg_begin', {leg = leg.name, index = index, kind = leg.kind})
+        emit('leg_begin', {leg = leg.name, index = index, kind = leg.kind, unit = leg.unit})
     end
 
     local function order_leg()
@@ -171,23 +179,38 @@ function M.main(bm, config, globals)
         end
         assert(common and vector_type, 'common and battle_vector globals required')
         assert(type(legs) == 'table' and #legs > 0, 'Move plan has no legs')
-        local sides = battle.read_sides(bm, 1)
-        state.probe = battle.find_by_name(sides[1], M.PROBE_UNIT)
+        local sides = battle.read_sides(bm)
+        state.probes, state.probe_by_name = {}, {}
+        for _, name in ipairs(config.plan.units or {M.PROBE_UNIT}) do
+            local u = battle.find_by_name(sides[1], name)
+            assert(u, 'scenario unit missing: ' .. name)
+            local p = {name = name, unit = u}
+            state.probes[#state.probes + 1] = p
+            state.probe_by_name[name] = p
+        end
+        state.probe = state.probes[1].unit
         state.held = battle.find_by_name(sides[2], M.HELD_UNIT)
         assert(state.probe and state.held, 'scenario units missing')
-        state.all_units = {state.probe, state.held}
+        state.all_units = {state.held}
+        for _, p in ipairs(state.probes) do state.all_units[#state.all_units + 1] = p.unit end
         local p = state.held:position()
         state.held_spawn = {x = p:get_x(), z = p:get_z()}
         -- Take control before deployment ends so the engine AI cannot move them.
-        state.probe_uc = orders.take_control(sides[1].army, state.probe)
+        local ucs = {}
+        for _, p in ipairs(state.probes) do
+            p.uc = orders.take_control(sides[1].army, p.unit)
+            ucs[#ucs + 1] = p.uc
+        end
+        state.probe_uc = state.probes[1].uc
         state.held_uc = orders.take_control(sides[2].army, state.held)
-        for _, uc in ipairs({state.probe_uc, state.held_uc}) do
+        ucs[#ucs + 1] = state.held_uc
+        for _, uc in ipairs(ucs) do
             orders.set_fire_at_will(uc, false)
             orders.halt(uc)
         end
         state.batch = clock.batch_stamp() .. '-move-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
         state.run_id = state.batch .. '-r1'
-        emit('ready', {units = 2, legs = #legs, plan = config.plan.name,
+        emit('ready', {units = #state.all_units, legs = #legs, plan = config.plan.name,
             slow_speed = state.probe:slow_speed(), fast_speed = state.probe:fast_speed(),
             men = state.probe:number_of_men_alive(),
             -- Number precision of the game's Lua: doubles print 1/3 as 0.33333333333333.

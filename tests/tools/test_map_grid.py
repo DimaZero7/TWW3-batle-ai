@@ -60,3 +60,49 @@ def test_tree_bodies_by_the_game_s_rule():
     assert b["x"].tolist() == [1, 3, 5] and b["z"].tolist() == [2, 4, 6] and b["y"].tolist() == [200, 201, 202]
     assert b["r"].tolist() == pytest.approx([0.6, 2.25, 0.425])
     assert b["h"].tolist() == pytest.approx([15.0, 30.0, 2.5])
+
+
+
+def reach_csv():
+    # 3 x 2 nodes; clear 0 at ix 1 (as grid_csv); reach: (1, 0) a ring node (not clear, reachable),
+    # (2, 1) clear but unreachable, (0, 1) outside the read (-1); deep water at (1, 1)
+    lines = ["ix,iz,x,z,height,clear,ground,inside_radar,reach_side_1,reach_side_2"]
+    reach = {(0, 0): 1, (1, 0): 1, (2, 0): 1, (0, 1): -1, (1, 1): 0, (2, 1): 0}
+    ground = {0: "shallow_water", 1: "deep_water", 2: "grass"}
+    for iz in range(2):
+        for ix in range(3):
+            g = "grass" if iz == 0 else ground[ix]
+            r = reach[(ix, iz)]
+            lines.append(f'{ix},{iz},{-2.0 + ix * 2},{4.0 + iz * 2},100,{int(ix != 1)},"{g}",1,{r},{r}')
+    return "\n".join(lines) + "\n"
+
+
+def test_blocked_is_the_reach_where_read_and_not_clear_elsewhere():
+    text = reach_csv()
+    H, C, G, names, x0, z0, step = map_grid.parse_grid(text)
+    reach = map_grid.parse_reach(text, H.shape)
+    assert reach[0].tolist() == [[1, 1, 1], [-1, 0, 0]]
+    blocked, info = map_grid.passable_layers(C, G, names, reach)
+    assert blocked.dtype == np.uint8
+    assert blocked.tolist() == [[0, 0, 0], [0, 1, 1]]      # (1, 0) reachable -> free; (0, 1) not read, clear -> free
+    assert (info["not_clear_reach"], info["clear_not_reach"], info["reach_read"]) == (1, 1, 5)
+    assert info["blocked_by_ground"]["deep_water"] == [1, 1] and info["blocked_by_ground"]["grass"] == [1, 4]
+
+
+def test_without_reach_blocked_is_not_clear():
+    H, C, G, names, *_ = map_grid.parse_grid(grid_csv())
+    assert map_grid.parse_reach(grid_csv(), H.shape) is None
+    blocked, info = map_grid.passable_layers(C, G, names)
+    assert blocked.tolist() == [[0, 1, 0], [0, 1, 0]] and info["source"].startswith("bm:is_area_clear")
+
+
+def test_passable_goes_next_to_heights_and_into_meta(tmp_path):
+    text = reach_csv()
+    H, C, G, names, x0, z0, step = map_grid.parse_grid(text)
+    blocked, info = map_grid.passable_layers(C, G, names, map_grid.parse_reach(text, H.shape))
+    (tmp_path / "meta.json").write_text('{"name": "m"}', encoding="utf-8")
+    meta = map_grid.write_layers(tmp_path, blocked, x0, z0, step, info)
+    p = np.load(tmp_path / "passable.npz")
+    assert (p["blocked"] == blocked).all() and float(p["x0"]) == x0 and float(p["step"]) == step
+    assert meta["name"] == "m" and meta["passable"]["blocked"] == 2
+    assert meta["passable"]["blocked_by_ground"]["deep_water"] == "1 of 1"
