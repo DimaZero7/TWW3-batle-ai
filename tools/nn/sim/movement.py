@@ -22,13 +22,16 @@ def ramp(t, table):
     return out
 
 
-def velocity(u, goal_x, goal_z, speed_goal, moving, dt):
-    """New velocity [B, N] towards the goal (per-unit acceleration / deceleration, stop on the point)."""
+def velocity(u, goal_x, goal_z, speed_goal, moving, dt, brake_to=None):
+    """New velocity [B, N] towards the goal (per-unit acceleration / deceleration, stop on the point). brake_to (mask,
+    way [B, N]) or None: where mask, the unit brakes on `way` m left instead of the goal's distance (a corner of the way
+    round closed ground, detour.py: it slows for the way's end, not for the corner)."""
     dx, dz = goal_x - u["x"], goal_z - u["z"]
     dist = torch.sqrt(dx * dx + dz * dz + 1e-9)
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     # Slow down so as to stop on the point.
-    brake = torch.sqrt(2 * u["decel"] * (dist - 0.5).clamp(min=0))
+    dist_b = dist if brake_to is None else torch.where(brake_to[0], brake_to[1], dist)
+    brake = torch.sqrt(2 * u["decel"] * (dist_b - 0.5).clamp(min=0))
     want = torch.where(moving, torch.minimum(speed_goal, brake), torch.zeros_like(speed))
     new = torch.where(want > speed, torch.minimum(want, speed + u["accel"] * dt),
                       torch.maximum(want, speed - u["decel"] * dt))

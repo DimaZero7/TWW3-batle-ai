@@ -12,7 +12,7 @@ import torch
 
 from tools.nn.sim import abilities, artillery, effects, fatigue, geometry, knobs, lone_rout, magic, melee, missile, morale
 from tools.nn.sim import movement
-from tools.nn.sim import direct, ground, impact, reform, regen, skirmish, stealth, terrain, vortex
+from tools.nn.sim import detour, direct, ground, impact, reform, regen, skirmish, stealth, terrain, vortex
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -1415,6 +1415,15 @@ def step(st, orders, params=None, dt=None):
     # the hitslow probe - clanrats running at handgunners x0.68, walking x0.94; bolts nothing; the hit reactions)
     if "hs_s" in u:
         want = want * missile.hit_slow_factor(u, params, want > u["walk"] + 0.3)
+    # The way round 'cannot stand' ground (detour.py; config/nn/sim.json terrain.passable.detour; build/diag_map/
+    # pathing.md): a unit heading for its point or closing on its attack's target, out of melee, walks the shortest way
+    # of straight legs from corner to corner round the closed areas grown by half its front + pad_m - its goal this step
+    # is its next corner; a straight line clear of the growth: no corner, the step as before bit for bit. (fgx, fgz: the
+    # goal itself - the side-step, the arrival and the facing read it.)
+    fgx, fgz, has_way = gx, gz, None
+    if passable and "pa_n" in u and detour.cfg_of(params) is not None:
+        follow = standing & (point | close_in) & ~routing & ~engaged & ~sk_run & ~closing & ~retarget & ~push
+        gx, gz, has_way, way_d = detour.steer(u, params, gx, gz, follow, pw["front"], dt, st.t)
     # Turning on the move (turn.move_turn; the database's battle_entities turn_rate, the turning probe
     # build/movelords): a unit heading for a point off its facing turns towards it at its men's turn rate (a formation's
     # men about-face where they stand: its front becomes the old back rank) and runs only the way it faces - its speed
@@ -1426,7 +1435,9 @@ def step(st, orders, params=None, dt=None):
         dxg, dzg = gx - u["x"], gz - u["z"]
         d2 = dxg * dxg + dzg * dzg
         step_m = float(cal["contact"]["step_m"])
-        sidestep = standing & point & ~routing & (d2 < step_m ** 2) & (u["men0"] > 1)
+        # (a unit on a way round closed ground side-steps only near its goal, not near a corner)
+        d2f = d2 if has_way is None else torch.where(has_way, (fgx - u["x"]) ** 2 + (fgz - u["z"]) ** 2, d2)
+        sidestep = standing & point & ~routing & (d2f < step_m ** 2) & (u["men0"] > 1)
         steer = moving & alive & ~locked & ~sidestep & (d2 > 0.25)
         before_b = u["b"].clone()
         movement.face(u, dxg, dzg, steer)
@@ -1445,7 +1456,7 @@ def step(st, orders, params=None, dt=None):
             # the trunks in the way (ground.trunk_speed: each man's detour round the trunks he meets; strider and
             # ignore_trees pass through)
             want = want * ground.trunk_speed(u, pw["front"], pw["depth"], params)
-    vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
+    vx, vz = movement.velocity(u, gx, gz, want, moving, dt, None if has_way is None else (has_way, way_d))
     stop = locked | ~alive
     snare_now, busy_now = abilities.snared(u, params), abilities.busy(u, params)
     if snare_now is not None:
@@ -1496,12 +1507,14 @@ def step(st, orders, params=None, dt=None):
         u["vx"], u["vz"] = vx, vz
         if "blk_s" in u:
             u["blk_s"] = u["blk_s"] + into.float() * dt
+        if has_way is not None:
+            detour.spoil(u, into)
 
     # --- facing and the observed flags ---
     spd = torch.sqrt(vx * vx + vz * vz)
     mv = alive & (spd > 0.3)
     # A formation steps a few metres back or aside to its point without turning round.
-    goal_d = torch.sqrt((gx - u["x"]) ** 2 + (gz - u["z"]) ** 2)
+    goal_d = torch.sqrt((fgx - u["x"]) ** 2 + (fgz - u["z"]) ** 2)
     shuffle = standing & point & ~routing & (goal_d < cal["contact"]["step_m"]) & (u["men0"] > 1)
     # (a unit turning on the move keeps the facing it turned to above)
     movement.face(u, vx, vz, mv & ~shuffle & ~steer)

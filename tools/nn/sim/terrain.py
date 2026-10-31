@@ -107,6 +107,10 @@ def set_map(st, map_id, battles=None, place=None):
         # have stepped onto such a node) and its refused move orders - for the checks, no rule reads them
         u["blk_s"] = torch.zeros_like(u["x"])
         u["blk_o"] = torch.zeros_like(u["x"])
+    if mid >= 0 and ground.has_passable(mid):
+        # the ways round 'cannot stand' ground (detour.py, terrain.passable.detour): read by the step only with the switch on
+        from tools.nn.sim import detour
+        detour.add_state(u)
     if place is not None:
         for k, v in zip(PLACE, place):
             if k not in u:
