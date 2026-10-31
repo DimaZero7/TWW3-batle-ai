@@ -12,7 +12,8 @@ from tools.nn.sim import orders as O  # noqa: E402
 
 from tests.tools.test_sim_impact import CLANRATS, CSPEAR, KNIGHTS, P, SP, SVHALB, landing, touching  # noqa: E402
 
-UP = (P.battle["knockdown_getting_up_delay_min"] + P.battle["knockdown_getting_up_delay_max"]) / 2     # 1.85 s
+UP = ((P.battle["knockdown_getting_up_delay_min"] + P.battle["knockdown_getting_up_delay_max"]) / 2
+      + impact.rise(P))     # 1.85 s lying + 1.1 s getting up (contact.impact wave)
 
 
 class TestRideIn:
@@ -80,11 +81,29 @@ class TestFirstBlowLate:
         _, st, H = landing(KNIGHTS, CSPEAR)
         pw = geometry.pairwise(st.u, SP)
         total, dt = 0.0, P.dt
-        for k in range(1, 8):
+        for k in range(1, 10):
             st.u["kd_t"][0, H] = k * dt
             pair, share = impact.deferred(st.u, P, pw["enemy"], dt)
             assert bool(pair[0, 0, H]) and not bool(pair[0, H, 0])
-            if k * dt <= P.battle["knockdown_getting_up_delay_min"]:
-                assert float(share[0, 0, H]) == 0.0
+            if k * dt <= P.battle["knockdown_getting_up_delay_min"] + impact.rise(P):
+                assert float(share[0, 0, H]) == 0.0                     # lying or getting up: no target (M31)
             total += float(share[0, 0, H])
         assert total == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("wave_on", [1, 0])
+    def test_the_ranks_behind_wait_too(self, wave_on):
+        # (contact.impact wave; build/diag_cav/mechanic.md M31-M34) 1.5 s after riding in among knocked clanrats no knight
+        # strikes them: the men in reach lie, the men behind are beyond them; without the wave the ranks behind strike
+        p = P.with_cal("contact", impact=dict(P.sim["contact"]["impact"], wave={"on": wave_on, "rise_s": 1.1}))
+        _, st, H = landing(KNIGHTS, CLANRATS, params=p)
+        assert float(st.u["ride"][0, H]) == 1.0
+        rates = []
+        for t in (1.5, 4.0 + 5.1):
+            st.u["ran_in"][0, 0] = True
+            st.u["contact_s"][0, 0] = st.u["melee_s"][0, 0] = t + p.dt
+            st.u["kd_t"][0, H] = t
+            pw = geometry.pairwise(st.u, SP)
+            rate, _, _, _ = melee.strikes(st.u, pw, pw["enemy"], p, torch.zeros_like(st.u["men"]))
+            rates.append(float(rate[0, 0, H]))
+        assert rates[1] > 0                                    # long after: the steady rate
+        assert (rates[0] == 0.0) == bool(wave_on)

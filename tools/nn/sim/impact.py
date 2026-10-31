@@ -29,9 +29,11 @@ The impact (land(): a large charger's charge lands this step - battle.py `fire`;
               the rear cone (beyond 120 deg) no brace. The cavcheck probe's flank charge (90 deg; build/diag_cav/
               check_results.md) lost the clanrats 271 HP in the first second, 1515 in 13 s, against the twin's 882 / 1908
               with the 75 deg in the damage and 403 / 1440 with 120 (front lanes unchanged)
-  lying       the men down lie U(knockdown_getting_up_delay_min 1.0, _max 2.7) s: the target's front share down at t s
-              after the landing is down_1 x clamp((2.7 - t) / 1.7, 0, 1) (kd_q, kd_t); a man lying strikes nobody
-              (up_share), the blows on him land (M11: the swing strikes him)
+  lying       the men down lie U(knockdown_getting_up_delay_min 1.0, _max 2.7) s and then get up (contact.impact wave
+              rise_s 1.1: the animation's length, MEASURED - rise()): the target's front share down at t s after the
+              landing is down_1 x clamp((2.7 + rise - t) / 1.7, 0, 1) (kd_q, kd_t); a man lying or getting up strikes
+              nobody (up_share) and is no target (M31-M32, the program: the 'fit as a target' flag, every tick - no new
+              blow, no swing on him; the old M11 'the swing strikes him' was wrong)
   the chain   a man knocked down hits the man behind at his flight speed, at most 3.3 m/s (M8): (1 + e) m / (m B + m)
               x 3.3 <= 2.2 m/s, below the step back (3) - no chain in numbers; the horse riding on is the ranks above
 The ride-in (contact.impact ride_in; build/diag_cav/mechanic.md M25-M27): the brace is each man's own, recomputed every
@@ -50,6 +52,15 @@ The ride-in (contact.impact ride_in; build/diag_cav/mechanic.md M25-M27): the br
               braced stormvermin, knocked back only (6.4), 378 (the twin with the defence 407); the knights lost 248 to
               held clanrats they rode into (the full rule 257, x hold_rate 129) and 1190 to the stormvermin that stopped
               them (x hold_rate 1221).
+The second wave (contact.impact wave; build/diag_cav/mechanic.md M31-M34, the program; melee.strikes, deferred): after a
+              ride-in no man of the charger strikes the unit until the men it knocked down get up - the men in its reach
+              lie or get up (no target), the men behind are beyond them (a man down is an enemy's body for
+              collision_disable_delay_knocked_down_vs_enemies 2 s) - so the first ~0.9 s are the collision damage alone and
+              then nothing; as the men get up (the landing + U(1.0, 2.7) + rise 1.1 s: 2.1-3.8 s) every man of the
+              charger in contact (F, the men within reach: the twin's 18-19 knights at 3 s, the recordings' 20-23 within
+              3 m of a clanrat 1.5-5 s after the impact) swings his first blow - none of them struck since the impact -,
+              his intervals from the mean of it (3 s). Off (wave on 0): the front rank's first blow over 1.0-2.7 s, the
+              ranks behind at once (bit for bit the old rule).
 The knock of a blow (knock(): a large striker's hits on a smaller man, the 'decided' blow, charge_module 5.1):
   P(down) = melee_on_damage_effect_knockdown_chance 0.05 x r x (1 + knock_chance_charging_bonus 2 x f) for r above
   interrupt_mass_ratio_clamp_knockdown 0.5 (r: the striker's mass / the struck man's, f: the striker's charge left), of
@@ -72,6 +83,16 @@ def _cal(params):
     return params.sim["contact"].get("impact") or {}
 
 
+def rise(params):
+    """The getting-up animation's length, s, with contact.impact wave on (else 0): a man knocked down lies
+    U(knockdown_getting_up_delay_min, _max) s and then gets up (state 0x11 'встаёт' till the animation's end) - no target
+    for a blow or a swing all that time (build/diag_cav/mechanic.md M31-M32, the program). Its length is in the animations'
+    data, not the program: MEASURED from the cavcharge recording (the first strong blows 2.4 s after the first knock-downs
+    at 0.3 s: 2.4 - 0.3 - 1.0 = 1.1 s; M33)."""
+    w = _cal(params).get("wave") or {}
+    return float(w.get("rise_s", 0.0)) if w.get("on") else 0.0
+
+
 def ridden(u, params):
     """[B, N] the front men a large charger rode in among are up and out of the brace (module doc, ride_in; False with it
     off): from the mean getting-up time after the landing (knockdown_getting_up_delay_min / _max: 1.85 s) - lying, a man
@@ -79,7 +100,7 @@ def ridden(u, params):
     if not _cal(params).get("ride_in"):
         return torch.zeros_like(u["r"])
     R = params.battle
-    up = (float(R["knockdown_getting_up_delay_min"]) + float(R["knockdown_getting_up_delay_max"])) / 2
+    up = (float(R["knockdown_getting_up_delay_min"]) + float(R["knockdown_getting_up_delay_max"])) / 2 + rise(params)
     return (u["ride"] >= 0.5) & (u["kd_t"] >= up)
 
 
@@ -162,6 +183,7 @@ def deferred(u, params, contact, dt):
     the share of that blow landing over this step [kd_t - dt, kd_t) (kd_t: since the landing, after this step's)."""
     R = params.battle
     lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
+    lo, hi = lo + rise(params), hi + rise(params)                    # (wave: no target till the animation's end too)
     pair = contact & bigger(u) & (u["ride"] >= 0.5)[:, None, :]
     t1 = u["kd_t"][:, None, :]
     share = ((t1.clamp(max=hi) - (t1 - dt).clamp(min=lo)).clamp(min=0) / max(hi - lo, 1e-6)).expand_as(pair.float())
@@ -172,7 +194,7 @@ def lying(u, params):
     """[B, N] the share of a unit's front men lying now (the impact's kd_q by its clock, the blows' pool kd_p)."""
     R = params.battle
     lo, hi = float(R["knockdown_getting_up_delay_min"]), float(R["knockdown_getting_up_delay_max"])
-    q = u["kd_q"] * ((hi - u["kd_t"]) / max(hi - lo, 1e-6)).clamp(0, 1)
+    q = u["kd_q"] * ((hi + rise(params) - u["kd_t"]) / max(hi - lo, 1e-6)).clamp(0, 1)
     return (q + u["kd_p"] * (1 - q)).clamp(0, 1)
 
 

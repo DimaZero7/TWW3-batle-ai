@@ -189,11 +189,21 @@ class TestLanding:
 
 class TestLying:
     def test_the_men_get_up_over_the_database_s_1_0_to_2_7_s(self):
+        # lying U(1.0, 2.7) s (the database) + the getting-up animation (contact.impact wave rise_s 1.1, measured: M33)
         st, H = touching(KNIGHTS, CSPEAR)
         st.u["kd_q"][0, H] = 1.0
-        for t, share in ((0.5, 1.0), (1.0, 1.0), (1.85, 0.5), (2.7, 0.0), (4.0, 0.0)):
+        for t, share in ((0.5, 1.0), (2.1, 1.0), (2.95, 0.5), (3.8, 0.0), (5.0, 0.0)):
             st.u["kd_t"][0, H] = t
             assert float(impact.lying(st.u, P)[0, H]) == pytest.approx(share, abs=1e-6), t
+
+    def test_without_the_wave_no_getting_up_time(self):
+        p = P.with_cal("contact", impact=dict(P.sim["contact"]["impact"], wave={"on": 0, "rise_s": 1.1}))
+        assert impact.rise(p) == 0.0 and impact.rise(P) == pytest.approx(1.1)
+        st, H = touching(KNIGHTS, CSPEAR, params=p)
+        st.u["kd_q"][0, H] = 1.0
+        for t, share in ((1.0, 1.0), (1.85, 0.5), (2.7, 0.0)):
+            st.u["kd_t"][0, H] = t
+            assert float(impact.lying(st.u, p)[0, H]) == pytest.approx(share, abs=1e-6), t
 
     def test_the_lying_men_do_not_strike_the_large_enemy(self):
         st, H = touching(KNIGHTS, CSPEAR)
@@ -201,7 +211,7 @@ class TestLying:
         cut = impact.up_share(st.u, P, torch.ones(1, st.N, st.N))           # (in place: a fresh rate each call)
         assert float(cut[0, H, 0]) == 0.0                                         # the spearmen on the knights
         assert float(cut[0, 0, H]) == 1.0                                         # the knights' blows land
-        st.u["kd_t"][0, H] = 1.85
+        st.u["kd_t"][0, H] = 1.85 + impact.rise(P)
         assert float(impact.up_share(st.u, P, torch.ones(1, st.N, st.N))[0, H, 0]) == pytest.approx(0.5)
 
 

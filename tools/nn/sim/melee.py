@@ -395,6 +395,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     B = params.battle
     cal = params.sim["melee"]
     cc = params.sim["contact"]
+    # (contact.impact wave, impact.rise: the getting-up animation after the lying - the men a large charger rode in
+    # among are no target till its end; late's pairs swing every man in contact, below)
+    imp_wave = bool(((cc.get("impact") or {}).get("wave") or {}).get("on")) and bool((cc.get("impact") or {}).get("ride_in"))
+    rise_s = float((cc.get("impact") or {})["wave"].get("rise_s", 0.0)) if imp_wave else 0.0
     ff = files_share(cal)                # (melee.cycle: the men within reach a file; else the fitted fighting_files)
     h_u, v_u = spacing_of(u, params.sim["formation"]["spacing_m"])
     # a man's place along a contact (melee.body_across): the formation's h, v for circles, the body's width for an ellipse
@@ -633,7 +637,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             F_rank = F_rank * fix
         F_rank = torch.where(flank_j, F_rank * (length_meet / length.clamp(min=1e-6)).clamp(max=1.0), F_rank)
         F_rank = torch.minimum(F_rank, men_i)
-        rank_on = (ran if late is None else ran | late)[:, :, None] & ~single_i & ~single_j
+        rank_on = (ran if late is None or imp_wave else ran | late)[:, :, None] & ~single_i & ~single_j
         F_rank = torch.where(rank_on, F_rank, torch.zeros_like(F_rank))
     wave = cal.get("wave")
     if wave and "contact_s" in u:
@@ -775,8 +779,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     ride = unbraced = None
     if (cc.get("impact") or {}).get("ride_in") and "ride" in u:
         ride = u["ride"] >= 0.5
-        # (lying, a man keeps the brace he had - a reaction freezes it, M26: out of it from the mean getting-up time)
-        up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2
+        # (lying, a man keeps the brace he had - a reaction freezes it, M26: out of it from the mean getting-up time;
+        # contact.impact wave: and the getting-up animation, impact.rise)
+        up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2 + rise_s
         unbraced = ride & (u["kd_t"] >= up)
     cdef = cc.get("charge_defence") or {}
     if cdef.get("on") and "cdl" in u and "cd" in u:
@@ -907,7 +912,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         if ride is not None and "size_k" in u:
             # (contact.impact ride_in, impact.deferred) a large charger that rode in swung its front rank's first blow when
             # the men it knocked down got up - the mean getting-up time after the landing -, its intervals run from then
-            up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2
+            up = (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2 + rise_s
             rp = (ride[:, None, :] & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
                   & swung)
             t2 = t - up
@@ -921,6 +926,14 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
                 front = torch.where(sp_k > 0, F_pre / sp_k.clamp(min=1.0) * (along / along_t.clamp(min=1e-6)).clamp(max=1.0),
                                     front)
             s_f = (front / F.clamp(min=1e-6)).clamp(0, 1)
+            if imp_wave:
+                # (contact.impact wave; build/diag_cav/mechanic.md M31-M34, the program) the ranks behind have no target
+                # either: the men in reach lie or get up (no target), the men behind are beyond them - a man knocked down
+                # is an enemy's body for collision_disable_delay_knocked_down_vs_enemies 2 s; the ranks behind (in by
+                # 0.3 + 0.4 k s, the recording) reach the men as the men down get up among the horses - every man of
+                # the charger in contact waits as the front rank does, his first blow (impact.deferred, swing of all
+                # F) as the men get up, his intervals from then
+                s_f = torch.ones_like(s_f)
             if recv is not None:
                 back2 = (t2 >= interval).to(p.dtype)
             else:
@@ -1023,6 +1036,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each; every man in
     # reach swings, hold_rate is about the men who step in later (contact.first_strike_full; R1).
     swing_rate = full if cc.get("first_strike_full") else swing_from
+    swing_all = swing_rate
     if F0 is not None:
         # The first strike swings the men of the steady front, not the opening wave's (contact.first_strike_steady;
         # config/nn/sim.json contact.first_strike_steady_why): the swing was checked against the game before the wave
@@ -1037,4 +1051,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
                                                       torch.zeros_like(swing_rate)), swing_rate_steady)
     else:
         swing_rate = swing_rate_steady
+    if imp_wave and late is not None:
+        # (contact.impact wave) a large charger that rode in: every man of it in contact now (F, the men within reach -
+        # the recordings: 20-23 knights within 3 m of a clanrat from 1.5 to 5 s after the impact) swings his first blow
+        # as the men it knocked down get up (impact.deferred): none of them struck since the impact, their intervals
+        # are ready (CA Feature Focus #2), not the steady front's swing
+        late_pair = (late[:, :, None] & (u["ride"] >= 0.5)[:, None, :] & u["large"][:, :, None]
+                     & (u["size_k"][:, :, None] > u["size_k"][:, None, :]) & ~single_i & ~single_j)
+        swing_rate = torch.where(late_pair, swing_all, swing_rate)
     return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))

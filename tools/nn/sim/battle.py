@@ -485,6 +485,8 @@ def step(st, orders, params=None, dt=None):
         # (impact.deferred) a large charger that rode in: its front rank's first blow lands as the men it knocked down
         # get up, not at the landing
         d_pair, d_share = impact.deferred(u, params, strike, dt)
+        # (contact.impact wave: the deferred blow is every man's in contact - the ranks behind wait too, melee.strikes -
+        # not the front rank's alone)
         late = (d_share > 0).any(dim=2)
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire,
                                                      late=late)
