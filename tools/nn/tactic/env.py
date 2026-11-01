@@ -5,6 +5,8 @@ network (unit.train.restore) carries its frames out, one decision a second with 
                       formula (teacher.drive: the exam's yardstick). Stored per tactician's decision: the tactician's raw
                       state, the tiles left, the last output's frames and the choices - rebuilt in the update (as at the
                       unit: only raw numbers are kept)
+                      The tactician's choice per unit: keep its frame or change it (decide.py); a noticeable change it chose
+                      costs reward.change (a change the code forced costs nothing)
     Посылка отряду    unit_area(): the frame, the pace of the order as it is, the stage by code (going until its centre is
                       inside the frame, in place from then on, going again on a new frame), no target, a shooter's fire
                       sector by code forward along the zone (else it obeys the infantry's rule, unit.view.allowed, and hardly
@@ -159,15 +161,15 @@ def play(setup, unit_net, net=None, critic=None, greedy=False, formula=False, ke
                  "prev": {k: torch.zeros((Dmax, B, G), device=dev) for k in ("s", "f", "hw", "hd")},
                  "prev_on": torch.zeros((Dmax, B, G), dtype=torch.bool, device=dev),
                  "has_prev": torch.zeros((Dmax, B), dtype=torch.bool, device=dev),
-                 "act": {k: torch.zeros((Dmax, B, G), dtype=torch.long, device=dev) for k in ("width", "depth", "cell")}}
+                 "act": {k: torch.zeros((Dmax, B, G), dtype=torch.long, device=dev) for k in ("keep", "width", "depth", "cell")}}
     lp_old = torch.zeros((Dmax, B), device=dev)
     val = torch.zeros((Dmax, B), device=dev)
     rew = torch.zeros((Dmax, B), device=dev)
     done = torch.zeros((Dmax, B), dtype=torch.bool, device=dev)
     valid = torch.zeros((Dmax, B), dtype=torch.bool, device=dev)
     frames = None
-    stats = {"decisions": 0, "fell": 0.0, "frames_overlap": 0, "frames_out": 0, "changes": 0.0,
-             "ent": {"width": 0.0, "depth": 0.0, "where": 0.0}}
+    stats = {"decisions": 0, "fell": 0.0, "frames_overlap": 0, "frames_out": 0, "changes": 0.0, "small_moves": 0.0,
+             "chose": 0.0, "kept": 0.0, "forced": 0.0, "ent": {"keep": 0.0, "width": 0.0, "depth": 0.0, "where": 0.0}}
     d = -1
     t_tactic = t_units = t_sim = 0.0
     n_unit = 0
@@ -191,7 +193,7 @@ def play(setup, unit_net, net=None, critic=None, greedy=False, formula=False, ke
                 ctx = DC.ctx_of(inp, parcel, tiles)
                 out = TC.drive(ctx.mine_raw, ctx.able, tiles)
             else:
-                out, _, ctx = net(inp, order, parcel, tiles, greedy=greedy)
+                out, _, ctx = net(inp, order, parcel, tiles, prev=frames, greedy=greedy)
                 lp_old[d] = out["lp"]
                 if critic is not None:
                     val[d] = critic(inp, order)
@@ -200,6 +202,11 @@ def play(setup, unit_net, net=None, critic=None, greedy=False, formula=False, ke
             valid[d] = ~st.done & ctx.able.any(1)
             stats["decisions"] += int(valid[d].sum())
             stats["fell"] += float(out["fell"][valid[d]].sum())
+            live_u = valid[d][:, None]
+            free_u = ctx.able & ~out["must"] & live_u
+            stats["chose"] += float(free_u.sum())
+            stats["kept"] += float((out["kept"] & free_u).sum())
+            stats["forced"] += float((out["forced"] & live_u & ~out["must"]).sum())
             ov, ou = U.bad_frames(out["frames"], tiles)
             stats["frames_overlap"] += int((ov & valid[d]).sum())
             stats["frames_out"] += int((ou & valid[d]).sum())
@@ -216,10 +223,12 @@ def play(setup, unit_net, net=None, critic=None, greedy=False, formula=False, ke
             new = {k: v.clone() for k, v in out["frames"].items()}
             if frames is not None:
                 ch = U.changed(new, frames)
-                r_acc = r_acc - float(rw["change"]) * ch.sum(1).float() * (~st.done).float()
+                paid = ch & ~out["forced"] & ~out["must"]        # (only a change the network chose)
+                r_acc = r_acc - float(rw["change"]) * paid.sum(1).float() * (~st.done).float()
                 stats["changes"] += float((ch.sum(1).float() * (~st.done).float()).sum())
                 moved = ((new["s"] - frames["s"]).abs() > 1e-3) | ((new["f"] - frames["f"]).abs() > 1e-3) | \
                         ((new["hw"] - frames["hw"]).abs() > 1e-3) | ((new["hd"] - frames["hd"]).abs() > 1e-3)
+                stats["small_moves"] += float((moved & new["on"] & frames["on"] & ~ch & live_u).sum())
                 k_ = my.clamp(min=0)
                 arrived.scatter_(1, k_, arrived.gather(1, k_) & ~moved)
             # a unit without a frame now (routing) keeps its last one
@@ -278,7 +287,9 @@ def play(setup, unit_net, net=None, critic=None, greedy=False, formula=False, ke
     out_stats = dict(stats)
     out_stats.update({"battles": B, "t_tactic": round(t_tactic, 2), "t_units": round(t_units, 2), "t_sim": round(t_sim, 2),
                       "unit_decisions": n_unit, "seconds": sec, "decisions_mean": round(stats["decisions"] / B, 1),
-                      "changes_per_battle": round(stats["changes"] / B, 2), "reward_mean": round(float(rew[:D].sum()) / B, 4)})
+                      "changes_per_battle": round(stats["changes"] / B, 2), "reward_mean": round(float(rew[:D].sum()) / B, 4),
+                      "small_moves_per_battle": round(stats["small_moves"] / B, 2),
+                      "keep_share": round(stats["kept"] / max(stats["chose"], 1.0), 3)})
     n = max(stats["decisions"], 1)
     out_stats["ent"] = {k: round(v / n, 3) for k, v in stats["ent"].items()}
     out_stats["trade"] = round(float(trade.mean()), 4)
@@ -304,7 +315,8 @@ def _ammo_used(st, shooter):
 
 
 def rebuild(batch, di, bi):
-    """The inputs of the samples (decision di, battle bi) from the stored raw numbers: (inp, order, parcel, tiles, act)."""
+    """The inputs of the samples (decision di, battle bi) from the stored raw numbers: (inp, order, parcel, tiles, act,
+    prev: the frames in force)."""
     p = batch["parcel"]
     M = bi.shape[0]
     dev = bi.device
@@ -319,4 +331,4 @@ def rebuild(batch, di, bi):
     areas = None if not bool(has.any()) else U.world(fr, tiles)
     inp = IN.build(raw, batch["card"][bi], parcel, tiles, areas, bounds=batch["bounds"], rows=batch["K"])
     act = {k: v[di, bi] for k, v in batch["act"].items()}
-    return inp, batch["order"][bi], parcel, tiles, act
+    return inp, batch["order"][bi], parcel, tiles, act, fr

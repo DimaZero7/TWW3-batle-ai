@@ -246,3 +246,190 @@ def test_bans_are_neg_and_frozen_blocks_do_not_train():
     r = DC.report(net)
     assert r["to_train"] == r["total"] - r["analysis_frozen"] - r["squeeze_frozen"]
     assert NEG == -1e9
+
+
+def frames_of(places):
+    """{s, f, hw, hd, on} [1, G] from (s, f, width, depth) or None (no frame)."""
+    G = len(places)
+    out = {k: torch.zeros(1, G) for k in ("s", "f", "hw", "hd")}
+    out["on"] = torch.zeros(1, G, dtype=torch.bool)
+    for j, q in enumerate(places):
+        if q is not None:
+            out["s"][0, j], out["f"][0, j], out["hw"][0, j], out["hd"][0, j] = q[0], q[1], q[2] / 2, q[3] / 2
+            out["on"][0, j] = True
+    return out
+
+
+TEACHER_FRAMES = [(-40.0, 37.33, 80.0, 48.0), (40.0, 37.33, 80.0, 48.0), (5.33, -37.33, 64.0, 48.0)]
+
+
+def test_must_change_no_frame_or_a_hole_under_it():
+    able = torch.ones((1, 3), dtype=torch.bool)
+    t = tiles_2x2()
+    assert U.Seq(t, 3).must_change(None, able).all()
+    prev = frames_of(TEACHER_FRAMES[:2] + [None])
+    assert U.Seq(t, 3).must_change(prev, able)[0].tolist() == [False, False, True]
+    t.drop(torch.tensor([True]), torch.tensor([-40.0]), torch.tensor([40.0]))     # the front left tile is gone
+    assert U.Seq(t, 3).must_change(frames_of(TEACHER_FRAMES), able)[0].tolist() == [True, False, False]
+    out_of_zone = frames_of([(70.0, 0.0, 80.0, 48.0), None, None])
+    assert U.Seq(tiles_2x2(), 3).must_change(out_of_zone, able)[0, 0].item()
+
+
+def test_keepers_close_their_cells_first():
+    """The last slot keeps, the first slots change: they may not lap over it."""
+    seq = U.Seq(tiles_2x2(), 3)
+    able = torch.ones((1, 3), dtype=torch.bool)
+    prev = frames_of(TEACHER_FRAMES)
+    kept = seq.keep(torch.tensor([[False, False, True]]), prev, able)
+    assert kept[0].tolist() == [False, False, True]
+    assert seq.s[0, 2].item() == pytest.approx(5.33) and seq.on[0].tolist() == [False, False, True]
+    ok, _, _ = seq.place(0, torch.tensor([64.0]), torch.tensor([48.0]), torch.tensor([1]))
+    assert not bool(ok.flatten(1)[0, cell_at(5.0, -37.0)])          # on the kept frame
+    assert bool(ok.flatten(1)[0, cell_at(-40.0, 37.0)])
+
+
+def test_keep_lets_go_when_too_few_tiles_remain():
+    """A frame across the zone's middle blocks all four tiles: with two units still to change it is let go, from the last
+    slot back; alone (nobody to change) it stays."""
+    able = torch.ones((1, 3), dtype=torch.bool)
+    big = (0.0, 0.0, 80.0, 80.0)
+    prev = frames_of([None, None, big])
+    kept = U.Seq(tiles_2x2(), 3).keep(torch.tensor([[False, False, True]]), prev, able)
+    assert not kept.any()
+    only = torch.tensor([[False, False, True]])
+    kept = U.Seq(tiles_2x2(), 3).keep(only.clone(), prev, only)
+    assert kept[0, 2].item()
+
+
+def test_random_keep_and_change_keep_the_promise():
+    """Any mix of keepers and changers over many decisions: inside the zone, no overlaps, no error of the level above."""
+    gen = torch.Generator().manual_seed(2)
+    R, G = 64, 3
+    t = tiles_2x2(R, heading=33.0)
+    st = U.steps()
+    able = torch.ones((R, G), dtype=torch.bool)
+    prev = None
+    for _ in range(30):
+        seq = U.Seq(t, G)
+        must = seq.must_change(prev, able)
+        want = (torch.rand((R, G), generator=gen) < 0.6) & ~must
+        kept = seq.keep(want.clone(), prev, able)
+        changing = able & ~kept
+        left = DC.left_after(changing)
+        for j in range(G):
+            a = changing[:, j]
+            w, d = st[torch.randint(3, (R,), generator=gen)], st[torch.randint(3, (R,), generator=gen)]
+            ok, s, f, wm, dm, _ = seq.place_or_least(j, w, d, left[:, j], a)
+            c = torch.multinomial(ok.flatten(1).float() + 1e-9, 1, generator=gen)[:, 0]
+            seq.commit(j, c, s, f, wm, dm, a)
+        fr = seq.frames()
+        over, out = U.bad_frames(fr, t)
+        assert not over.any() and not out.any() and fr["on"].all()
+        if prev is not None:
+            for name in ("s", "f", "hw", "hd"):
+                assert torch.equal(fr[name][kept], prev[name][kept])
+        prev = {k: v.clone() for k, v in fr.items()}
+
+
+class Inp:
+    """The smallest network's input for the walk: my 3 rows, a random map."""
+    def __new__(cls, R=4):
+        return {"cards": torch.randn(R, 6, 128), "map": torch.randn(R, 64, 30, 30)}
+
+
+def ctx_for(R=4, prev=None):
+    t = tiles_2x2(R)
+    able = torch.ones((R, 3), dtype=torch.bool)
+    rows = torch.arange(3)[None].expand(R, 3)
+    return DC.Ctx(t, rows, able, rows, torch.zeros(R, 3, len(TR.RAW)), prev)
+
+
+def repeat(fr, R):
+    return {k: v.expand(R, *v.shape[1:]).clone() for k, v in fr.items()}
+
+
+def test_first_decision_must_change_and_keep_head_starts_on_keep():
+    h = DC.ZoneHeads()
+    torch.manual_seed(1)
+    out = DC.choose(Inp(), ctx_for(), h)
+    assert not out["kept"].any() and out["must"].all() and (out["keep"] == DC.CHANGE).all()
+    assert out["frames"]["on"].all()
+    c = torch.randn(1, 128)
+    p = torch.softmax(h.keep_logits(c[None], None), -1)[0, 0, DC.KEEP].item()
+    b = cfg()["zone_head"]["keep_bias"]
+    assert p == pytest.approx(torch.sigmoid(torch.tensor(float(b))).item(), abs=1e-5)
+
+
+def test_keepers_size_and_cell_do_not_count():
+    """The log-probability and the entropy of a unit that keeps hold no size and no cell; the frame stays bit for bit."""
+    torch.manual_seed(2)
+    h = DC.ZoneHeads()
+    with torch.no_grad():
+        h.keep.bias[DC.KEEP] = 50.0          # all keep
+    prev = repeat(frames_of(TEACHER_FRAMES), 4)
+    enc = Inp()
+    out = DC.choose(enc, ctx_for(prev=prev), h)
+    assert out["kept"].all()
+    assert out["ent"]["where"].abs().max() == 0 and out["ent"]["width"].abs().max() == 0
+    for name in ("s", "f", "hw", "hd"):
+        assert torch.equal(out["frames"][name], prev[name])
+    act = {k: out[k].clone() for k in ("keep", "width", "depth", "cell")}
+    act["width"][:] = 2
+    act["cell"][:] = 7
+    again = DC.choose(enc, ctx_for(prev=prev), h, act=act)
+    assert torch.equal(again["lp"], out["lp"])
+
+
+def test_the_walk_reads_back_with_keepers_and_changers():
+    torch.manual_seed(3)
+    h = DC.ZoneHeads()
+    with torch.no_grad():
+        h.keep.bias[DC.KEEP] = 0.0
+    prev = repeat(frames_of(TEACHER_FRAMES), 32)
+    enc = Inp(32)
+    out = DC.choose(enc, ctx_for(32, prev), h)
+    assert 0 < out["kept"].sum() < 96
+    again = DC.choose(enc, ctx_for(32, prev), h, act={k: out[k] for k in ("keep", "width", "depth", "cell")})
+    assert (again["lp"] - out["lp"]).abs().max() < 1e-4
+    for name in ("s", "f", "hw", "hd"):
+        assert torch.equal(again["frames"][name], out["frames"][name])
+
+
+def test_teacher_says_keep_only_on_the_formula_s_frame():
+    raw = raw_of([(-35.0, -30.0, 0.0), (35.0, -30.0, 0.0), (0.0, 30.0, 160.0)])
+    t = tiles_2x2()
+    able = torch.ones((1, 3), dtype=torch.bool)
+    rows = torch.arange(3)[None]
+    h = DC.ZoneHeads()
+    enc = Inp(1)
+    # the formula's frames: all three keep, nothing else is compared
+    ctx = DC.Ctx(t, rows, able, rows, raw, frames_of(TEACHER_FRAMES))
+    term, st = TC.loss(enc, ctx, h)
+    assert st["keep_said"] == 1.0 and term.item() > 0
+    # one frame 20 m off (over change_m): that one changes; size_ok and cell_ok then read that unit alone
+    off = [(-40.0, 17.0, 80.0, 48.0)] + TEACHER_FRAMES[1:]
+    _, st = TC.loss(enc, DC.Ctx(t, rows, able, rows, raw, frames_of(off)), h)
+    assert st["keep_said"] == pytest.approx(2 / 3)
+    assert st["n"] == 1
+    # within change_m: still the formula's
+    near = [(-40.0, 37.33 - 10.0, 80.0, 48.0)] + TEACHER_FRAMES[1:]
+    _, st = TC.loss(enc, DC.Ctx(t, rows, able, rows, raw, frames_of(near)), h)
+    assert st["keep_said"] == 1.0
+    # another size: changes
+    other = [(-40.0, 37.33, 64.0, 48.0)] + TEACHER_FRAMES[1:]
+    _, st = TC.loss(enc, DC.Ctx(t, rows, able, rows, raw, frames_of(other)), h)
+    assert st["keep_said"] == pytest.approx(2 / 3)
+    # no frames yet: every unit must change, the head has no term
+    _, st = TC.loss(enc, DC.Ctx(t, rows, able, rows, raw, None), h)
+    assert st["keep_said"] == 0.0 and st["n"] == 3
+
+
+def test_keep_head_reads_the_frame():
+    """Beside the card the head reads the unit's frame in force: another frame, another answer once it has learned."""
+    h = DC.ZoneHeads()
+    torch.nn.init.normal_(h.keep.weight)
+    c = torch.randn(1, 3, 128)
+    a = h.keep_logits(c, frames_of(TEACHER_FRAMES))
+    b = h.keep_logits(c, frames_of([(-20.0, 0.0, 48.0, 48.0)] + TEACHER_FRAMES[1:]))
+    assert not torch.allclose(a[0, 0], b[0, 0])
+    assert torch.equal(a[0, 1:], b[0, 1:])

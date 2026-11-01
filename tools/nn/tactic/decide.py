@@ -5,7 +5,11 @@
                  council; the order: verb 4 + pace 3 (order_vec)
     Council      unit.net.Block (imported, not copied) x 2, width 128: each asks each, masked; up to 32 rows + the
                  summary speak; a row keeps its place, so a decision by row goes to that row's slot
-    ZoneHeads    per unit: width and depth (a step of size_steps_m each, two small heads), then 'where': a cell of the
+    ZoneHeads    per unit first 'keep or change': the card + its frame in force (on, centre, width, depth: the card alone
+                 does not say which frame on the map is mine) -> hidden -> 2; the last layer as the unit's width head: zero
+                 weights, a bias on 'keep'; a must_change unit has 'keep' banned. The keepers close their cells first,
+                 then each unit changing:
+                 width and depth (a step of size_steps_m each, two small heads), then 'where': a cell of the
                  near window, as the unit's where head - the card (with the size just chosen, one-hot) is added to the
                  map 64 x 30 x 30, two coordinate layers (the cell's place in the zone's axes: a 3 x 3 stack sees only
                  7 cells, a zone is 15 - not an input of the game, it is the map's own grid), 3 x 3 conv, 1 x 1 conv.
@@ -32,6 +36,7 @@ from tools.nn.unit.net import NEG, Block
 
 VERBS = ("destroy", "hold", "tie", "avoid")
 PACES = ("any", "slow", "fast")          # as unit.net PACE_ANY, PACE_SLOW, PACE_FAST
+CHANGE, KEEP = 0, 1                      # the 'keep or change' head's choices
 CARD_CKPT = project.ROOT / "build" / "diag_tactic" / "card_pretrain" / "card8.pt"
 
 
@@ -85,6 +90,14 @@ class Encoder(nn.Module):
         return self
 
 
+def init_keep(layer):
+    """The 'keep or change' head's start: zero weights, the bias zone_head.keep_bias on 'keep' (as unit.net.init_width)."""
+    with torch.no_grad():
+        layer.weight.zero_()
+        layer.bias.zero_()
+        layer.bias[KEEP] = float(cfg()["zone_head"]["keep_bias"])
+
+
 class ZoneHeads(nn.Module):
     def __init__(self):
         super().__init__()
@@ -92,6 +105,9 @@ class ZoneHeads(nn.Module):
         W = int(c["council"]["width"])
         S = len(c["size_steps_m"])
         ch = int(c["zone_head"]["map"])
+        self.keep_in = nn.Linear(W + 5, int(c["zone_head"]["keep_hidden"]))
+        self.keep = nn.Linear(int(c["zone_head"]["keep_hidden"]), 2)
+        init_keep(self.keep)
         self.width = nn.Linear(W, S)
         self.depth = nn.Linear(W, S)
         self.where_core = nn.Linear(W + 2 * S, ch)
@@ -102,6 +118,16 @@ class ZoneHeads(nn.Module):
         self.register_buffer("coords", torch.stack([k[None, :].expand(C, C), -k[:, None].expand(C, C)])[None],
                              persistent=False)
         self.S = S
+
+    def keep_logits(self, cards, prev):
+        """[R, G, 2]: cards [R, G, W], prev the frames in force {s, f, hw, hd, on} [R, G] or None."""
+        if prev is None:
+            x = torch.zeros(cards.shape[:2] + (5,), device=cards.device)
+        else:
+            k = float(cfg()["pos_m"])
+            x = torch.stack([prev["on"].float(), prev["s"] / k, prev["f"] / k, 2 * prev["hw"] / k, 2 * prev["hd"] / k], -1)
+            x = x * prev["on"][..., None]
+        return self.keep(F.relu(self.keep_in(torch.cat([cards, x], -1))))
 
     def where(self, card, w, d, near):
         """[R, 900] raw logits; card [R, W], w, d [R] the size's steps, near [R, 64, 30, 30]."""
@@ -119,9 +145,11 @@ class Ctx:
     able: torch.Tensor      # [R, G] bool: alive, not routing: the unit chooses
     rows: torch.Tensor      # [R, G] long: the row each unit's card is in (0 when it has none)
     mine_raw: torch.Tensor  # [R, G, RAW] my units' raw state (zeros when it has no row)
+    prev: dict = None       # {s, f, hw, hd, on} [R, G] the frames in force (the last output); None: none yet
 
     def take(self, k, tiles):
-        return Ctx(tiles, self.my[k], self.able[k], self.rows[k], self.mine_raw[k])
+        prev = None if self.prev is None else {n: v[k] for n, v in self.prev.items()}
+        return Ctx(tiles, self.my[k], self.able[k], self.rows[k], self.mine_raw[k], prev)
 
 
 def my_slots(parcel):
@@ -140,15 +168,15 @@ def left_after(able):
     return able.flip(1).long().cumsum(1).flip(1) - able.long()
 
 
-def ctx_of(inp, parcel, tiles):
-    """Ctx of inputs.build's dict."""
+def ctx_of(inp, parcel, tiles, prev=None):
+    """Ctx of inputs.build's dict; prev: the frames in force."""
     my = my_slots(parcel)
     pos = (inp["slot"][:, None] == my[:, :, None]) & (my[:, :, None] >= 0) & inp["mask"][:, None]      # [R, G, K]
     has = pos.any(2)
     rows = pos.float().argmax(2)
     J = inp["J"].gather(1, rows[..., None].expand(-1, -1, inp["J"].shape[-1]))
     able = has & (J[..., TR.I["alive"]] > 0) & ~(J[..., TR.I["r"]] > 0)
-    return Ctx(tiles, my, able, rows, J)
+    return Ctx(tiles, my, able, rows, J, prev)
 
 
 def _pick(lg, given, greedy):
@@ -158,22 +186,40 @@ def _pick(lg, given, greedy):
 
 
 def choose(enc, ctx, heads, act=None, greedy=False):
-    """The walk: {width, depth, cell} [R, G] long, frames (uzone.Seq.frames), lp [R], ent {width, depth, where} [R] (sums
-    over the units), fell [R] (the last resort's uses). act: the same choices again (the update), else sampled."""
+    """The walk: {keep, width, depth, cell} [R, G] long, frames (uzone.Seq.frames), lp [R], ent {keep, width, depth, where}
+    [R] (sums over the units), fell [R] (the last resort's uses), kept, must, forced [R, G] bool (forced: changing by the
+    code, not by its own choice). act: the same choices again (the update), else sampled. The size and the cell of a unit
+    that keeps count neither in lp nor in ent."""
     tiles, able, rows = ctx.tiles, ctx.able, ctx.rows
     R, G = able.shape
     dev = able.device
     seq = U.Seq(tiles, G)
     st = U.steps(dev)
     lp = torch.zeros(R, device=dev)
-    ent = {k: torch.zeros(R, device=dev) for k in ("width", "depth", "where")}
-    out = {k: torch.zeros((R, G), dtype=torch.long, device=dev) for k in ("width", "depth", "cell")}
+    ent = {k: torch.zeros(R, device=dev) for k in ("keep", "width", "depth", "where")}
+    out = {k: torch.zeros((R, G), dtype=torch.long, device=dev) for k in ("keep", "width", "depth", "cell")}
     fell = torch.zeros(R, device=dev)
-    left = left_after(able)
     idx = torch.arange(R, device=dev)
+    # keep or change: the keepers first
+    must = seq.must_change(ctx.prev, able)
+    lk = heads.keep_logits(enc["cards"][idx[:, None], rows], ctx.prev)      # [R, G, 2]
+    ban = torch.stack([torch.zeros_like(must), must], -1)
+    lk = lk.masked_fill(ban, NEG)
+    k = _pick(lk.flatten(0, 1), None if act is None else act["keep"].flatten(), greedy).view(R, G)
+    dk = torch.distributions.Categorical(logits=lk)
+    lp = lp + (dk.log_prob(k) * able).sum(1)
+    pk = dk.probs
+    ent["keep"] = ent["keep"] - (torch.where(pk > 0, pk * dk.logits, torch.zeros_like(pk)).sum(-1) * able).sum(1)
+    out["keep"] = k
+    want = (k == KEEP) & able
+    kept = seq.keep(want.clone(), ctx.prev, able)
+    changing = able & ~kept
+    left = left_after(changing)
     for j in range(G):
+        a = changing[:, j]
+        if not bool(a.any()):
+            continue
         card = enc["cards"][idx, rows[:, j]]
-        a = able[:, j]
         lw, ld = heads.width(card), heads.depth(card)
         w = _pick(lw, None if act is None else act["width"][:, j], greedy)
         d = _pick(ld, None if act is None else act["depth"][:, j], greedy)
@@ -190,7 +236,8 @@ def choose(enc, ctx, heads, act=None, greedy=False):
             ent[k] = ent[k] - torch.where(p > 0, p * dist.logits, torch.zeros_like(p)).sum(1) * a
         out["width"][:, j], out["depth"][:, j], out["cell"][:, j] = w, d, c
         fell = fell + fb.float()
-    return {**out, "frames": seq.frames(), "lp": lp, "ent": ent, "fell": fell}
+    return {**out, "frames": seq.frames(), "lp": lp, "ent": ent, "fell": fell, "kept": kept, "must": must,
+            "forced": changing & (must | want)}
 
 
 class TacticNet(nn.Module):
@@ -201,9 +248,9 @@ class TacticNet(nn.Module):
         if card:
             self.enc.load_card()
 
-    def forward(self, inp, order, parcel, tiles, act=None, greedy=False):
+    def forward(self, inp, order, parcel, tiles, prev=None, act=None, greedy=False):
         enc = self.enc(inp, order)
-        ctx = ctx_of(inp, parcel, tiles)
+        ctx = ctx_of(inp, parcel, tiles, prev)
         return choose(enc, ctx, self.heads, act, greedy), enc, ctx
 
 
@@ -225,7 +272,7 @@ def report(net):
     i = net.enc.inp
     out = {"analysis_frozen": c(i.analysis), "squeeze_frozen": c(i.squeeze), "map": c(i.map),
            "summary": c(net.enc.summary), "council": c(net.enc.council),
-           "size_heads": c(net.heads.width) + c(net.heads.depth),
+           "keep_head": c(net.heads.keep_in) + c(net.heads.keep), "size_heads": c(net.heads.width) + c(net.heads.depth),
            "where_head": c(net.heads.where_core) + c(net.heads.where_a) + c(net.heads.where_b)}
     out["total"] = c(net)
     out["to_train"] = sum(p.numel() for p in net.parameters() if p.requires_grad)

@@ -1,7 +1,8 @@
 """The exam of the tactician's first drill (design/tactic "Экзамен"): no teacher, the fixed battles drill1.exam_specs(),
 each start apart. The main measure: the share of battles where at the contact the infantry stands between the enemy and
 the shooters. The yardstick: the same battles with the teacher's formula driving; the network no worse. The safeguards:
-how often the shooters got into melee, whether they fired, frame changes a battle, the trade. For information: the
+how often the shooters got into melee, whether they fired, frame changes a battle, the share of 'keep', the last resort's uses (fell),
+the trade. For information: the
 infantry's front to its frame's width at the contact (does a unit fill a wide zone).
 
     bash tools/nn/dock.sh tools.nn.tactic.exam1 [--ckpt build/.../latest.pt | --formula | --random] [--device cuda]
@@ -58,6 +59,9 @@ def run(unit_net, P=None, device="cpu", net=None, formula=False, greedy=False, n
     t["who"] = who or ("formula" if formula else "network")
     t["changes_per_battle"] = rs["changes_per_battle"]
     t["fell"] = rs["fell"]
+    t["keep_share"] = rs["keep_share"]
+    t["forced"] = rs["forced"]
+    t["small_moves_per_battle"] = rs["small_moves_per_battle"]
     t["frames_overlap"], t["frames_out"] = rs["frames_overlap"], rs["frames_out"]
     t["seconds"] = round(time.time() - t0, 1)
     t["why"] = {k: round(float((rd["why"] == i).float().mean()), 3) for i, k in

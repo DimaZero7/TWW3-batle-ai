@@ -5,6 +5,12 @@ frames all stand the same way, so every test is on axis-aligned rectangles.
     Seq         one decision of R groups: the units' frames so far, the holes (tiles dropped), and for a size chosen
                 place() -> open [R, C, C] (the 'where' head's allowed cells) and the frame each cell would give
 
+The order within a decision: first every unit that keeps its frame (keep()) closes its cells, then the others choose in
+slot order among what is left. A unit must change when it has no frame in force or its frame lies on a hole or out of the
+group's zone (must_change). Kept frames may leave too few tiles for the units changing (they were placed when others
+stood elsewhere): the code then lets go of kept frames from the last slot back until there is room (keep(), the same
+counting as room()), so the 'no room' error below stays an error of the level above.
+
 A cell is closed when the frame of that size at its centre laps over the edge of the group's zone or over a frame / hole
 by more than one cell, or when the nudge leaves it no room, or when it would leave too few tiles for the units still to
 choose (room(): a tile counts while a square of the least size fits at one of its corners; a frame in the middle of a
@@ -141,32 +147,49 @@ class Seq:
         self.qs = tiles.s[:, :T, None] + d * sgn[:, 0]             # [R, T, 4]
         self.qf = tiles.f[:, :T, None] + d * sgn[:, 1]
 
-    def obstacles(self, upto):
-        """{s, f, hw, hd, on} [R, M]: the holes and the frames of units before `upto`, only columns on somewhere."""
-        parts = [self.hole]
-        if upto > 0:
-            parts.append({"s": self.s[:, :upto], "f": self.f[:, :upto], "hw": self.hw[:, :upto],
-                          "hd": self.hd[:, :upto], "on": self.on[:, :upto]})
+    def obstacles(self):
+        """{s, f, hw, hd, on} [R, M]: the holes and the frames in force, only columns on somewhere."""
+        parts = [self.hole, self.frames()]
         o = {k: torch.cat([p[k] for p in parts], 1) for k in parts[0]}
         keep = o["on"].any(0)
         return {k: v[:, keep] for k, v in o.items()}
 
-    def _free_base(self, upto):
-        """[R, T, 4] bool: the corner squares clear of the frames before `upto` (tiles gone: none)."""
-        base = self.left[:, :, None].expand(self.R, self.T, 4)
-        for m in range(upto):
-            ov = ((self.qs - self.s[:, m, None, None]).abs() < self.q_half + self.hw[:, m, None, None] - TOL) & \
-                 ((self.qf - self.f[:, m, None, None]).abs() < self.q_half + self.hd[:, m, None, None] - TOL)
-            base = base & ~(ov & self.on[:, m, None, None])
-        return base
+    def _free_of(self, s, f, hw, hd, on):
+        """[R, T, 4] bool: the corner squares clear of the frames {s, f, hw, hd} [R, G] that are on (tiles gone: none)."""
+        ov = ((self.qs[..., None] - s[:, None, None]).abs() < self.q_half + hw[:, None, None] - TOL) & \
+             ((self.qf[..., None] - f[:, None, None]).abs() < self.q_half + hd[:, None, None] - TOL) & on[:, None, None]
+        return self.left[:, :, None] & ~ov.any(-1)
 
-    def room(self, s, f, hw, hd, need, upto):
+    def must_change(self, prev, able):
+        """[R, G] bool: the units that choose and have no frame to keep: none in force (prev None or off), or it lies on a
+        hole or out of the group's zone. prev {s, f, hw, hd, on} [R, G]."""
+        if prev is None:
+            return able.clone()
+        ok = _clear(prev["s"], prev["f"], prev["hw"], prev["hd"], self.hole, self.zs[:, None], self.zf[:, None])
+        return able & ~(prev["on"] & ok)
+
+    def keep(self, want, prev, able):
+        """Commits the units that keep their frames, first of all: want [R, G] bool (their choice, never where must_change).
+        Kept frames that leave too few tiles for the units to change are let go from the last slot back. Returns the
+        kept [R, G]."""
+        kept = want & able
+        if prev is None or not bool(kept.any()):
+            return kept
+        for j in reversed(range(self.G)):
+            free = self._free_of(prev["s"], prev["f"], prev["hw"], prev["hd"], kept).any(-1).sum(-1)
+            kept[:, j] = kept[:, j] & ~(free < (able & ~kept).sum(1))
+        for name, have in (("s", self.s), ("f", self.f), ("hw", self.hw), ("hd", self.hd)):
+            have[kept] = prev[name][kept]
+        self.on = self.on | kept
+        return kept
+
+    def room(self, s, f, hw, hd, need):
         """[R, C, C] bool: a frame at (s, f) [R, C, C] leaves at least need [R] tiles for the units still to choose."""
         out = torch.ones_like(s, dtype=torch.bool)
         ask = need > 0
         if not bool(ask.any()):
             return out
-        base = self._free_base(upto)[ask]
+        base = self._free_of(self.s, self.f, self.hw, self.hd, self.on)[ask]
         qs, qf = self.qs[ask][:, None, None], self.qf[ask][:, None, None]         # [r, 1, 1, T, 4]
         ov = ((s[ask][..., None, None] - qs).abs() < hw[ask][..., None, None] + self.q_half - TOL) & \
              ((f[ask][..., None, None] - qf).abs() < hd[ask][..., None, None] + self.q_half - TOL)
@@ -175,11 +198,12 @@ class Seq:
         return out
 
     def place(self, j, width_m, depth_m, need):
-        """(open, s, f) [R, C, C] for unit place j and a size (m, [R]); need [R]: the units still to choose after it."""
+        """(open, s, f) [R, C, C] for unit place j (not committed yet: its own frame is no obstacle) and a size (m, [R]);
+        need [R]: the units still to choose after it."""
         hw, hd = (width_m / 2).view(-1, 1, 1), (depth_m / 2).view(-1, 1, 1)
         zs, zf, cell = self.zs.view(-1, 1, 1), self.zf.view(-1, 1, 1), self.cell.view(-1, 1, 1)
-        ok, s, f = place(self.s0, self.f0, hw, hd, zs, zf, cell, self.obstacles(j))
-        return ok & self.room(s, f, hw, hd, need, j), s, f
+        ok, s, f = place(self.s0, self.f0, hw, hd, zs, zf, cell, self.obstacles())
+        return ok & self.room(s, f, hw, hd, need), s, f
 
     def place_or_least(self, j, width_m, depth_m, need, able):
         """place(), and the last resort: (open, s, f, width_m, depth_m, fell back [R]). able [R]: the groups whose unit j
@@ -202,10 +226,11 @@ class Seq:
     def commit(self, j, cell_i, s, f, width_m, depth_m, able):
         """Unit j's frame from the cell chosen: cell_i [R] (row x C + col), s, f [R, C, C] of place(); able [R]."""
         k = torch.arange(self.R, device=self.dev)
-        self.s[:, j] = s.flatten(1)[k, cell_i]
-        self.f[:, j] = f.flatten(1)[k, cell_i]
-        self.hw[:, j], self.hd[:, j] = width_m / 2, depth_m / 2
-        self.on[:, j] = able
+        self.s[:, j] = torch.where(able, s.flatten(1)[k, cell_i], self.s[:, j])
+        self.f[:, j] = torch.where(able, f.flatten(1)[k, cell_i], self.f[:, j])
+        self.hw[:, j] = torch.where(able, width_m / 2, self.hw[:, j])
+        self.hd[:, j] = torch.where(able, depth_m / 2, self.hd[:, j])
+        self.on[:, j] = self.on[:, j] | able
 
     def frames(self):
         """{s, f, hw, hd, on} [R, G]."""

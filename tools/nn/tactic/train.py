@@ -52,8 +52,8 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
     r_all = ret[d_idx, b_idx]
     pa, pc = params_of(net, critic)
     share = float(cfg()["teach"]["share"])
-    out = {"pi": [], "v": [], "clip": [], "kl": [], "ent": {k: [] for k in ("width", "depth", "where")}, "teach": [],
-           "size_ok": [], "cell_ok": [], "preds": [], "rets": []}
+    out = {"pi": [], "v": [], "clip": [], "kl": [], "ent": {k: [] for k in ("keep", "width", "depth", "where")}, "teach": [],
+           "keep_ok": [], "keep_said": [], "size_ok": [], "cell_ok": [], "preds": [], "rets": []}
     stop = False
     for _ in range(int(tc["epochs"])):
         perm = torch.randperm(M, device=device)
@@ -62,8 +62,8 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
                 duty.start()
             j = perm[i:i + int(tc["minibatch"])]
             di, bi = d_idx[j], b_idx[j]
-            inp, order, parcel, tiles, act = EN.rebuild(batch, di, bi)
-            res, enc, ctx = net(inp, order, parcel, tiles, act=act)
+            inp, order, parcel, tiles, act, prev = EN.rebuild(batch, di, bi)
+            res, enc, ctx = net(inp, order, parcel, tiles, prev=prev, act=act)
             lp = res["lp"]
             pl, clip = ppo.policy_loss(lp[:, None], batch["lp"][di, bi][:, None], a_all[j], torch.ones_like(lp[:, None]),
                                        float(tc["clip"]))
@@ -82,6 +82,8 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
                 if teach_weight > 0:
                     loss = loss + teach_weight * term
                 out["teach"].append(float(term.detach()))
+                out["keep_ok"].append(st["keep_ok"])
+                out["keep_said"].append(st["keep_said"])
                 out["size_ok"].append(st["size_ok"])
                 out["cell_ok"].append(st["cell_ok"])
             opt.zero_grad()
@@ -109,6 +111,7 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
     mean = lambda v: round(float(np.mean(v)), 4) if v else None                          # noqa: E731
     return {"policy_loss": mean(out["pi"]), "value_loss": mean(out["v"]), "clip": mean(out["clip"]), "kl": mean(out["kl"]),
             "explained_var": round(ev, 3), "samples": M, "steps": len(out["pi"]), "teach_loss": mean(out["teach"]),
+            "teach_keep_ok": mean(out["keep_ok"]), "teach_keep_said": mean(out["keep_said"]),
             "teach_size_ok": mean(out["size_ok"]), "teach_cell_ok": mean(out["cell_ok"]), "teach_weight": round(teach_weight, 4),
             "ent_update": {k: mean(v) for k, v in out["ent"].items()}}
 
@@ -123,7 +126,14 @@ def restore(path, device="cpu"):
     if ck.get("kind") != KIND:
         raise ValueError(f"not a {KIND} checkpoint: {path}")
     net, critic = DC.TacticNet().to(device), DC.TacticCritic().to(device)
-    net.load_state_dict(ck["net"])
+    ck["padded"] = False
+    sd, own = dict(ck["net"]), net.state_dict()
+    for name, p in own.items():
+        if name.startswith("heads.keep") and (name not in sd or sd[name].shape != p.shape):
+            # a checkpoint from before the 'keep or change' head (or an older form of it): its start (decide.init_keep)
+            sd[name] = p
+            ck["padded"] = True
+    net.load_state_dict(sd)
     critic.load_state_dict(ck["critic"])
     return net, critic, ck
 
@@ -148,6 +158,9 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--exam-every", type=int, default=0, help="the exam every this many updates (0: at the end only)")
     ap.add_argument("--exam-battles", type=int, default=None)
+    ap.add_argument("--teach-updates", type=int, default=None, help="the teacher's weight falls to zero over this many "
+                    "updates from the start of this run (default: config teach.decay_updates, counted from update 0; a "
+                    "checkpoint from before a new head: from the start of this run)")
     ap.add_argument("--no-lock", action="store_true", help="no GPU lock (a short agent's check beside nothing else)")
     a = ap.parse_args(argv)
     torch.manual_seed(a.seed)
@@ -157,12 +170,18 @@ def main(argv=None):
     pa, pc = params_of(net, critic)
     opt = torch.optim.Adam(pa + pc, lr=float(tc["lr"]))
     done = 0
+    teach_from = 0
     if a.init:
         net, critic, ck = restore(a.init, dev)
         pa, pc = params_of(net, critic)
         opt = torch.optim.Adam(pa + pc, lr=float(tc["lr"]))
-        opt.load_state_dict(ck["opt"])
+        if not ck["padded"]:
+            opt.load_state_dict(ck["opt"])          # (a padded network starts a fresh Adam: its moments do not fit)
         done = int(ck.get("updates", 0))
+        if ck["padded"]:
+            teach_from = done                       # (a new head: the teacher's decay starts afresh)
+    if a.teach_updates is not None:
+        teach_from = done
     unit_net = unit_network(dev)
     duty = UT.Duty(dev, a.gpu_duty)
     out = Path(a.out)
@@ -180,7 +199,7 @@ def main(argv=None):
                 setup = EN.Setup(DR.specs(a.battles, gen), P, dev)
                 batch, rs, rd = EN.play(setup, unit_net, net=net, critic=critic, duty=duty)
                 t1 = time.time()
-                us = update(net, critic, opt, batch, tc, dev, duty, TC.weight_at(done))
+                us = update(net, critic, opt, batch, tc, dev, duty, TC.weight_at(done - teach_from, a.teach_updates))
                 if torch.device(dev).type == "cuda":
                     torch.cuda.empty_cache()           # (the update's cached blocks back for the battles)
                 t2 = time.time()

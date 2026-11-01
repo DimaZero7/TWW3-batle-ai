@@ -10,8 +10,9 @@ formation on every decision of the network, while the network itself drives.
                 the distance in cells; 11 m off is not 100 m off), closed cells out
     drive()     the same formation played by the code: the frames the formula gives through uzone.Seq (the yardstick of
                 the exam: the network chooses among the same cells)
-    loss()      the term of the training: the size's cross-entropy + the where's against the soft label, with the
-                teacher's earlier frames in force
+    loss()      the term of the training: 'keep' when the unit's frame in force already is the formula's (the same size,
+                the centre within reward.change_m), else 'change'; where the teacher says change, the size's
+                cross-entropy + the where's against the soft label, with the teacher's other frames in force
 """
 import torch
 import torch.nn.functional as F
@@ -89,25 +90,47 @@ def drive(raw_mine, able, tiles):
         seq.commit(j, c, s, f, wm, dm, a)
         out["width"][:, j], out["depth"][:, j], out["cell"][:, j] = _steps_of(wm, st), _steps_of(dm, st), c
         fell = fell + fb.float()
-    return {**out, "frames": seq.frames(), "fell": fell}
+    none = torch.zeros((R, G), dtype=torch.bool, device=dev)
+    return {**out, "frames": seq.frames(), "fell": fell, "kept": none, "must": able.clone(), "forced": none}
 
 
 def loss(enc, ctx, heads):
-    """(term, stats): the teacher's term on the groups given: for each unit the size's two cross-entropies and the where's
-    cross-entropy against the soft label, the teacher's earlier frames in force. stats: size_ok, cell_ok (the network's
-    best cell within two cells of the wanted), per unit."""
+    """(term, stats): the teacher's term on the groups given: for each unit the cross-entropy of 'keep or change' (a unit
+    that must change has no choice: no term); where the teacher says change, the size's two cross-entropies and the
+    where's cross-entropy against the soft label, the teacher's other frames in force. stats: keep_ok (the head's best
+    choice is the teacher's, of the units with a choice), keep_said (the teacher's share of 'keep'), size_ok, cell_ok (the
+    network's best cell within two cells of the wanted), per unit changing."""
     tiles, able, rows = ctx.tiles, ctx.able, ctx.rows
     R, G = able.shape
     dev = able.device
     seq = U.Seq(tiles, G)
     want = ideal(ctx.mine_raw, able, tiles)
     st = U.steps(dev)
-    left = left_after(able)
     idx = torch.arange(R, device=dev)
     tot, n = torch.zeros((), device=dev), 0.0
     size_ok, cell_ok = 0.0, 0.0
+    # keep or change
+    must = seq.must_change(ctx.prev, able)
+    prev = ctx.prev
+    said = torch.zeros_like(able)
+    if prev is not None:
+        m = float(cfg()["reward"]["change_m"])
+        near = (prev["s"] - want["s"]) ** 2 + (prev["f"] - want["f"]) ** 2 < m * m
+        same = ((2 * prev["hw"] - st[want["width"]]).abs() < U.TOL) & ((2 * prev["hd"] - st[want["depth"]]).abs() < U.TOL)
+        said = near & same & able & ~must
+    lk = heads.keep_logits(enc["cards"][idx[:, None], rows], prev)
+    ce_k = F.cross_entropy(lk.flatten(0, 1), said.long().flatten(), reduction="none").view(R, G)
+    free = able & ~must
+    tot = tot + (ce_k * free).sum()
+    n_keep = float(free.sum())
+    keep_ok = float(((lk.argmax(-1) == said.long()) & free).sum())
+    kept = seq.keep(said.clone(), prev, able)
+    changing = able & ~kept
+    left = left_after(changing)
     for j in range(G):
-        a = able[:, j]
+        a = changing[:, j]
+        if not bool(a.any()):
+            continue
         card = enc["cards"][idx, rows[:, j]]
         w, d = want["width"][:, j], want["depth"][:, j]
         ok, s, f, wm, dm, _ = seq.place_or_least(j, st[w], st[d], left[:, j], a)
@@ -123,11 +146,13 @@ def loss(enc, ctx, heads):
         dist = cell_dist2(seq, want["s"][:, j], want["f"][:, j]).flatten(1)
         cell_ok += float(((dist.gather(1, lg.argmax(1)[:, None])[:, 0] <= 4.0) & use).sum())
         seq.commit(j, dist.masked_fill(~ok.flatten(1), 1e12).argmin(1), s, f, wm, dm, a)
+    n_all = max(n + n_keep, 1.0)
     n = max(n, 1.0)
-    return tot / n, {"size_ok": size_ok / n, "cell_ok": cell_ok / n, "n": n}
+    return tot / n_all, {"keep_ok": keep_ok / max(n_keep, 1.0), "keep_said": float((said & free).sum()) / max(n_keep, 1.0),
+                         "size_ok": size_ok / n, "cell_ok": cell_ok / n, "n": n}
 
 
-def weight_at(update):
-    """The term's weight at this update of the run: falling to zero linearly (config teach)."""
+def weight_at(update, decay=None):
+    """The term's weight at this update: falling to zero linearly over decay (None: config teach.decay_updates)."""
     c = cfg()["teach"]
-    return float(c["weight"]) * max(0.0, 1.0 - update / max(float(c["decay_updates"]), 1.0))
+    return float(c["weight"]) * max(0.0, 1.0 - update / max(float(c["decay_updates"] if decay is None else decay), 1.0))

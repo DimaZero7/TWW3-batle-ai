@@ -204,8 +204,8 @@ def test_random_network_plays_a_whole_battle(unit_net, monkeypatch):
     assert rs["frames_overlap"] == 0 and rs["frames_out"] == 0
     assert rs["decisions"] > 0
     di, bi = b["valid"].nonzero(as_tuple=True)
-    inp, o, p, t, act = EN.rebuild(b, di, bi)
-    res, _, _ = net(inp, o, p, t, act=act)
+    inp, o, p, t, act, prev = EN.rebuild(b, di, bi)
+    res, _, _ = net(inp, o, p, t, prev=prev, act=act)
     assert (res["lp"] - b["lp"][di, bi]).abs().max() < 1e-3
     # the areas' layer: empty at the first decision, filled at the later ones
     first = di == 0
@@ -252,6 +252,52 @@ def test_zone_changes_cost_and_changed_rule():
     assert U.changed(b, a)[0].tolist() == [False, True]
 
 
+def test_the_same_frame_through_change_costs_as_keep(unit_net, monkeypatch):
+    """A change is paid only when the frame really changed and the network chose it: a keeper pays 0, a unit that chose
+    'change' and landed on the same frame (within change_m) pays 0, not less."""
+    a = {"s": torch.tensor([[0.0, 0.0]]), "f": torch.tensor([[0.0, 0.0]]), "hw": torch.tensor([[24.0, 24.0]]),
+         "hd": torch.tensor([[24.0, 24.0]]), "on": torch.tensor([[True, True]])}
+    same = {k: v.clone() for k, v in a.items()}
+    same["s"][0, 0] = 5.0
+    assert not U.changed(same, a).any()                    # the same frame: nothing to pay, as for a keeper
+    assert not U.changed(a, a).any()
+    # the cost in a battle: all keep from the second decision: only the first decision's frames, no cost at all
+    _short(monkeypatch, 20)
+    net = DC.TacticNet()
+    with torch.no_grad():
+        net.heads.keep.weight.zero_()
+        net.heads.keep.bias[DC.KEEP] = 50.0
+    setup = EN.Setup(sp(4), P, "cpu")
+    b, rs, rd = EN.play(setup, unit_net, net=net)
+    assert rs["changes"] == 0 and rs["keep_share"] == 1.0
+    assert b["reward"].abs().sum() < 1e-3                  # (no contact in 20 s, no end but the trade 0)
+    # always change: paid per real change
+    with torch.no_grad():
+        net.heads.keep.bias[DC.KEEP] = -50.0
+    setup = EN.Setup(sp(4), P, "cpu")
+    b, rs, _ = EN.play(setup, unit_net, net=net)
+    assert rs["changes"] > 0 and rs["keep_share"] == 0.0
+    assert float(b["reward"].sum()) == pytest.approx(-rs["changes"] * cfg()["reward"]["change"], abs=0.3)
+
+
+def test_old_checkpoint_gets_the_keep_head(tmp_path):
+    """A checkpoint from before the head reads with the head at its start; the rest of the weights as they were."""
+    net, critic = DC.TacticNet(), DC.TacticCritic()
+    pa, pc = TT.params_of(net, critic)
+    opt = torch.optim.Adam(pa + pc, lr=1e-4)
+    p = tmp_path / "old.pt"
+    TT.save(p, net, critic, opt, {}, 21)
+    ck = torch.load(p, weights_only=False)
+    for k in [k for k in ck["net"] if k.startswith("heads.keep")]:
+        del ck["net"][k]
+    torch.save(ck, p)
+    n2, _, ck2 = TT.restore(p)
+    assert ck2["padded"] and ck2["updates"] == 21
+    assert n2.heads.keep.weight.abs().sum() == 0
+    assert n2.heads.keep.bias[DC.KEEP].item() == cfg()["zone_head"]["keep_bias"]
+    assert torch.equal(n2.heads.where_a.weight, net.heads.where_a.weight)
+
+
 def test_checkpoint_reads_back(tmp_path):
     net, critic = DC.TacticNet(), DC.TacticCritic()
     pa, pc = TT.params_of(net, critic)
@@ -259,7 +305,7 @@ def test_checkpoint_reads_back(tmp_path):
     p = tmp_path / "x.pt"
     TT.save(p, net, critic, opt, {}, 3)
     n2, c2, ck = TT.restore(p)
-    assert ck["updates"] == 3 and ck["kind"] == TT.KIND
+    assert ck["updates"] == 3 and ck["kind"] == TT.KIND and not ck["padded"]
     for a, b in zip(net.state_dict().values(), n2.state_dict().values()):
         assert torch.equal(a, b)
     assert all(not q.requires_grad for q in n2.enc.inp.analysis.parameters())
