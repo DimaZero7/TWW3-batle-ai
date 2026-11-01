@@ -479,7 +479,97 @@ class TestHoles:
         assert moved > 1.0 and on_c is not None
 
     def test_the_warp_cannons_small_blast_leaves_no_holes(self):
+        """(the measured trigger, holes.ready off: knocked >= knock_min)"""
+        off = P.with_cal("artillery", holes=dict(P.sim["artillery"]["holes"], ready={"on": 0}))
         st, H = TestShells._shot(WARP, SPEAR, dist=200.0)
         front, depth = geometry.dims(st.u, SP)
-        artillery.land(st.u, P, P.dt, front, depth, torch.zeros_like(st.u["r"]))
+        artillery.land(st.u, off, P.dt, front, depth, torch.zeros_like(st.u["r"]))
         assert float(st.u["hole_m"][0, H]) == 0
+
+
+def _stand(u, s, dt=0.5):
+    """holes_reform for s seconds; -> the first second the holes closed (None: not)."""
+    H = _stand.H
+    t = 0.0
+    while t < s:
+        artillery.holes_reform(u, P, dt)
+        t += dt
+        if float(u["hole_m"][0, H]) == 0:
+            return t
+    return None
+
+
+class TestHolesReady:
+    """artillery.holes.ready (config/nn/sim.json; R-work notes/p4/formation.md): a standing unit's stand order: an enemy
+    within 35 m of its box (40 m once in) holds it READY - no re-forming; else it closes up by the clock: the first
+    re-forming within delay_s of the last death lays no new places, the next, min_s on, closes the box."""
+
+    @staticmethod
+    def _holed():
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        TestHoles._volley(st, H)
+        assert float(st.u["hole_m"][0, H]) > 0
+        _stand.H = H
+        return st, H
+
+    def test_a_standing_unit_with_no_enemy_near_closes_up_by_the_clock(self):
+        st, H = self._holed()
+        u = st.u
+        u["hole_t"][0, H] = 7.0                                    # its last re-forming 7 s ago: one now, no new places
+        assert _stand(u, 4.0) is None and float(u["hole_t"][0, H]) < 4.5
+        closed = _stand(u, 10.0)
+        assert closed == pytest.approx(1.0, abs=1.01)              # 5 s after that re-forming
+        assert float(u["cellm"].view(st.B, st.N, -1)[0, H].abs().sum()) == 0
+        # the box closed up to its men
+        front, depth = geometry.dims(u, SP)
+        hf, hd = artillery.holes_box(u, P, front, depth)
+        assert float(hd[0, H]) == float(depth[0, H])
+
+    def test_soon_after_a_re_forming_it_waits_its_five_seconds(self):
+        st, H = self._holed()
+        u = st.u
+        u["hole_t"][0, H] = 0.0
+        assert _stand(u, 4.5) is None
+        assert _stand(u, 1.0) is not None                          # 5 s after the last one; the death 5 s ago
+
+    def test_an_enemy_near_holds_it_ready_and_it_never_closes(self):
+        st, H = self._holed()
+        u = st.u
+        gun = int(u["eng0"][0].argmax())
+        front, depth = geometry.dims(u, SP)
+        off = 30.0 + float(depth[0, H] + depth[0, gun]) / 2        # 30 m edge to edge, straight ahead of the block
+        rad = torch.deg2rad(u["b"][0, H])
+        u["x"][0, gun] = u["x"][0, H] + off * torch.sin(rad)
+        u["z"][0, gun] = u["z"][0, H] + off * torch.cos(rad)
+        u["b"][0, gun] = u["b"][0, H] + 180
+        assert _stand(u, 60.0) is None and float(u["hole_rd"][0, H]) == 1
+        # 38 m: still READY (it leaves at 40 m)
+        extra = 8.0
+        u["x"][0, gun] += extra * torch.sin(rad)
+        u["z"][0, gun] += extra * torch.cos(rad)
+        assert _stand(u, 20.0) is None and float(u["hole_rd"][0, H]) == 1
+        # 42 m: out; it closes
+        u["x"][0, gun] += 4.0 * torch.sin(rad)
+        u["z"][0, gun] += 4.0 * torch.cos(rad)
+        assert _stand(u, 6.0) is not None and float(u["hole_rd"][0, H]) == 0
+
+    def test_38_m_off_a_unit_not_ready_is_not_held(self):
+        st, H = self._holed()
+        u = st.u
+        gun = int(u["eng0"][0].argmax())
+        front, depth = geometry.dims(u, SP)
+        off = 38.0 + float(depth[0, H] + depth[0, gun]) / 2
+        rad = torch.deg2rad(u["b"][0, H])
+        u["x"][0, gun] = u["x"][0, H] + off * torch.sin(rad)
+        u["z"][0, gun] = u["z"][0, H] + off * torch.cos(rad)
+        u["b"][0, gun] = u["b"][0, H] + 180
+        assert _stand(u, 11.0) is not None
+
+    def test_any_shell_kill_opens_holes_with_the_rule_and_the_clock_starts_again(self):
+        st, H = TestShells._shot(WARP, SPEAR, dist=200.0)
+        u = st.u
+        front, depth = geometry.dims(u, SP)
+        u["hole_a"][0, H] = 3.0
+        _, kills, _, knocks = artillery.land(u, P, P.dt, front, depth, torch.zeros_like(u["r"]))
+        assert float(kills.sum() + knocks.sum()) > 0
+        assert float(u["hole_m"][0, H]) > 0 and float(u["hole_a"][0, H]) == 0

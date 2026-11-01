@@ -532,7 +532,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -824,6 +824,16 @@ ARTILLERY = {"gap_m": 150, "crew_gap_m": 80, "fire_s": 120, "push_m": 80, "frien
                        ("rockets_stand", ROCKETS, "cspear", "hold"), ("rockets_walk", ROCKETS, "cspear", "push"),
                        ("crew", "archer", WARP_CANNON, "skirmish")),
              "places": tuple((x, z) for z in (-450.0, -150.0, 150.0, 450.0) for x in (-360.0, -120.0, 120.0, 360.0))}
+
+
+# the memform plan (build/diag_p4; with --mem: the formation's state from the game's memory, apps.mem.order): one battle on
+# the Kislev plains: (mortar_stand, cannon) as the artillery plan's, what stops a holed unit from closing up; (way) clanrat
+# spearmen run s -> t round the ridge (x 130-170: the shortest way north 212 m, the program's first pop on the sim's corners
+# south 247 m), back, then straight through a friendly block (friend, across the line), then routed by script at
+# full health ('Scurry Away' + 'Strength in Numbers': the stat scalar_speed in memory)
+MEMFORM = {"gap_m": 150, "fire_s": 120, "t_w": 30, "mortar_at": (-200.0, -290.0), "cannon_at": (440.0, 150.0),
+           "s": (100.0, 20.0), "t": (195.0, -100.0), "beyond": (100.0, 180.0), "friend": (100.0, 100.0),
+           "parked": (300.0, -300.0), "back_at_s": 85, "friend_at_s": 170, "rout_at_s": 225, "max_s": 260}
 
 
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
@@ -1132,6 +1142,8 @@ def battles(plan):
         out.append([cc(k) for k in c["kinds"]])
     elif plan == "memshot":
         out += memshot_lanes()
+    elif plan == "memform":
+        out.append(memform_lanes())
     elif plan == "monster":
         out.append(monster_lanes())
     elif plan == "artillery":
@@ -1685,6 +1697,30 @@ def memshot_lanes():
     return [b1, b2, b3]
 
 
+def memform_lanes():
+    """The memform plan's one battle (MEMFORM; build/diag_p4): the Mortar and the Great Cannon at held clanrat spearmen as
+    the artillery plan's stand lanes, and clanrat spearmen under script round the ridge and on (module's plan notes)."""
+    c = MEMFORM
+    g = TERRAIN
+    common = dict(map=g["map"], catchment=g["catchment"], answer=False)
+    out = []
+    for kind, gun, place in (("mortar_stand", MORTAR, c["mortar_at"]), ("cannon", GREAT_CANNON, c["cannon_at"])):
+        out.append(lane(gun, "cspear", "shoot", "hold", gap_m=c["gap_m"], fight_s=c["fire_s"], kind=kind, t_w=c["t_w"],
+                        max_s=c["fire_s"], men_all_s=c["fire_s"], men_all_tg=True, place=place, **common))
+    s, t = c["s"], c["t"]
+    steps = [{"at_s": at, "kind": "move", "dx": x - s[0], "dz": z - s[1], "run": True}
+             for at, (x, z) in ((1, t), (c["back_at_s"], s), (c["friend_at_s"], c["beyond"]))]
+    steps.append({"at_s": c["rout_at_s"], "kind": "rout"})
+    fx, fz = c["friend"]
+    tx, tz = c["parked"]
+    out.append(lane("cspear", "spear", "script", "hold", gap_m=round(math.hypot(tx - s[0], tz - s[1])), fight_s=0, kind="way",
+                    a_w=c["t_w"], max_s=c["max_s"], men_all_s=c["max_s"], steps=steps, morale_both=True,
+                    a_at={"x": float(s[0]), "z": float(s[1]), "b": 135.0}, t_at={"x": float(tx), "z": float(tz), "b": 0.0},
+                    place=c["parked"], extras=[{"short": "clanrat", "dx": float(fx - tx), "dz": float(fz - tz), "b": 0,
+                                                "width": c["t_w"]}], **common))
+    return out
+
+
 def artillery_lanes():
     """The artillery plan's one battle (ARTILLERY; build/diag_skv_mon/probes.md): each kind twice, on the grid."""
     c = ARTILLERY
@@ -1852,6 +1888,9 @@ def run_config(plan, index):
     if plan == "memshot":
         # every man of every lane every 0.1 s from memory (all lanes 'near'), the projectiles with them (mem_proj)
         config.update(men_ms=1000, men_after_s=0, men_near_m=400, mem_proj=True)
+    if plan == "memform":
+        # as memshot, with the formation's state every 0.1 s (apps.mem.order)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=600, mem_proj=True, mem_form=True)
     if plan == "cavcharge":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
     if plan == "cavcheck":

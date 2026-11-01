@@ -148,7 +148,7 @@ def up_mean(params):
 
 def comb(params):
     """contact.impact wave comb (with strike_first): the blows of a charger that rode in come in cohorts - each man's one
-    timer (+0xa30) runs from his blow and a miss does not bring it back sooner (the program, build/diag_cav/mechanic.md
+    timer runs from his blow and a miss does not bring it back sooner (the program, build/diag_cav/mechanic.md
     M37), so the front rank that struck at the landing strikes again together an interval later, and the ranks behind,
     whose first blows came as they reached standing men, together an interval after those (the game's memory: 6 of 9
     front knights' second blow 4.6-5.0 s after the contact flag, the lance at -0.7 .. -0.2 s; their third at 10.0-11.3 s)."""
@@ -174,10 +174,9 @@ def rear_window(u, params):
 
 def charge_hold(params):
     """contact.impact wave charge_hold_s (with wave on; absent: 0): a cavalry charger's charge multiplier stays whole that
-    long after its landing, then decays over charge_decay_duration (battle.py). The program (R-work charge_module.md,
-    14308cee8 / 14305e9c0): a man's multiplier is clamp((deadline - now) / 13 s, 0, 1), the deadline set to now + 13 s
+    long after its landing, then decays over charge_decay_duration (battle.py). The program (R-work charge_module.md): a man's multiplier is clamp((deadline - now) / 13 s, 0, 1), the deadline set to now + 13 s
     every tick he is in his charge - so it falls only from the end of HIS charge, not from the landing. MEASURED from the
-    game's memory (each knight's deadline, +0xa3c of the root entity, every 0.1 s; the cavcharge probe, 180 knights of 3
+    game's memory (each knight's deadline, of the root entity, every 0.1 s; the cavcharge probe, 180 knights of 3
     lanes): it stops moving 1.4 / 2.5 / 4.1 s (p10 / 50 / 90) after the contact flag - by lane 3.65 / 2.1 / 2.3 s on
     clanrats / braced spearmen / stormvermin; the knights' strikes at 4-7 s came at a multiplier of 0.72-0.88 (the decay
     from the landing: 0.46-0.69)."""

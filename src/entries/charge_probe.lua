@@ -134,6 +134,8 @@
 -- manager found through a bound unit, with its last place kept - S.track - and apps.mem.hits naming the body a
 -- projectile 'in a man' is in): scanned every mem poll before the men (its poll number = the men's c); every
 -- MEM_PROJ_EVERY polls 'mem_proj' {c, tick, spawn, state, gone, errors, records, other, other_hp, offsets}.
+-- config.mem_form (with config.mem; the memform plan): after each men's poll 'mem_form' {t, tick, units, new, jobs}: the
+-- units' top behaviours and machines, their groups' marks, the way's job and nodes (apps.mem.order).
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -146,6 +148,7 @@ local winds = require('apps.battle.winds')
 local memmen = require('apps.mem.entities')
 local memproj = require('apps.mem.projectiles')
 local memhits = require('apps.mem.hits')
+local memorder = require('apps.mem.order')
 
 local M = {}
 
@@ -767,6 +770,9 @@ function M.main(bm, config, globals)
                             elseif step.kind == 'move' then
                                 local L = lane.layout
                                 orders.move(lane.a.uc, vec(L.ax + (step.dx or 0), L.az + (step.dz or 0)), step.run == true)
+                            elseif step.kind == 'rout' then
+                                -- (the memform plan) the attacker routed by script (lane.morale_both keeps its morale)
+                                pcall(function() lane.a.uc:morale_behavior_rout() end)
                             end
                             emit('probe_phase', {lane = lane.name, phase = 'step' .. i .. ':' .. tostring(step.kind),
                                 t = now - lane.t0})
@@ -1039,6 +1045,12 @@ function M.main(bm, config, globals)
         local e = state.mem.errors()
         if #e > 0 then d.errors = e end
         emit('mem_men', d)
+        -- (config.mem_form, the memform plan) the units' behaviours and groups, the way's job: apps.mem.order
+        if state.mem_form then
+            local f = state.mem_form.poll(names)
+            f.t, f.tick = now, d.tick
+            emit('mem_form', f)
+        end
     end
 
     local function men_sample()
@@ -1422,6 +1434,11 @@ function M.main(bm, config, globals)
                 handle.unhook()
             end
             state.mem = handle
+            if handle and config.mem_form and config.mem.layout.form then
+                local F = memorder.reader(_G.memreader_plus, config.mem.layout, handle.reader.ids)
+                for _, name in ipairs(handle.reader.order) do F.add(name, handle.reader.units[name].ptr) end
+                state.mem_form = F
+            end
             local proj = nil
             if handle and config.mem_proj then
                 -- the projectile scanner on the manager of the battle of a bound unit (no hook of its own)

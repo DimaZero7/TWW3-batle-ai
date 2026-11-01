@@ -87,4 +87,8 @@ def lua_config(path=None, exe=None):
         layout.update({name: _int(raw["layout"][name]) for name in MORALE_LAYOUT})
         fields = raw["layout"].get("u_fields") or {}
         layout["u_fields"] = {name: [_int(off), str(kind)] for name, (off, kind) in fields.items()}
+    if "form" in raw["layout"]:
+        # the unit's formation and way (src/apps/mem/order.lua): {name: offset or a list of offsets}, as they are
+        layout["form"] = {name: ([_int(x) for x in v] if isinstance(v, list) else _int(v))
+                          for name, v in raw["layout"]["form"].items()}
     return {"sites": sites, "layout": layout, "snapshot_max": int(raw.get("snapshot_max", SNAPSHOT_MAX))}

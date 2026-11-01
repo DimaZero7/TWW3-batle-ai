@@ -489,6 +489,9 @@ INTERNAL = {
     "hole_m": ("f", "its men when shells that knock men down first struck it standing (artillery.holes; 0: none, its men "
                     "fill its box evenly): its box keeps that size and its men stay where they stand (cellm) until it "
                     "moves"),
+    "hole_rd": ("f", "1 while an enemy is near enough to hold it READY: it does not re-form (artillery.holes.ready)"),
+    "hole_t": ("f", "seconds since its last re-forming, standing (artillery.holes.ready)"),
+    "hole_a": ("f", "seconds since shells last killed or knocked down its men while it holds holes (artillery.holes.ready)"),
     "art_s": ("f", "seconds since an artillery projectile was fired at it, landed within 12 m of its box or hit its men "
                    "(morale: 'attacked by artillery' for artillery.morale.window_s; below 0: the shot's delay before it "
                    "counts; artillery.morale_mark)"),

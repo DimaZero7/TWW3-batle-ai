@@ -168,8 +168,8 @@ def table(params, device):
 def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=None):
     """Advance the timers, fire abilities (the game's AI by its rule, the network by `use` [B, N]:
     the slot to fire, -1 none) and lay their effects on u (in place). Returns the fields it changed
-    with their old values, for restore(). fx_speed: the innate effects' (speed factor, (v - 1) sum, count) of this
-    step (effects.apply, effects.speed_add): with them a unit's speed multipliers of both add as the game's."""
+    with their old values, for restore(). fx_speed: {stat: the innate effects' (factor, (v - 1) sum, count)} of this
+    step (effects.apply, effects.speed_add / mult_add): a unit's multipliers of those stats from both add as the game's."""
     T = table(params, u["men"].device)
     near_m = float(params.sim["abilities"]["near_m"])
     eye = torch.eye(u["men"].shape[1], dtype=torch.bool, device=u["men"].device)[None]
@@ -194,8 +194,9 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
     zero = torch.zeros_like(u["men"])
     log = {s: zero.clone() for s in MULT}
     add = {s: zero.clone() for s in STATS if s not in MULT}
-    # (effects.speed_add) the speed's multipliers laid here: their (v - 1) summed and how many
-    sd, sn = zero.clone(), zero.clone()
+    # (effects.speed_add, mult_add) the multipliers of these stats laid here: their (v - 1) summed and how many
+    stack = tuple(s for s in (fx_speed or ()) if s in MULT)
+    sd, sn = {s: zero.clone() for s in stack}, {s: zero.clone() for s in stack}
     use = torch.full_like(u["ab0"], -1) if use is None else use
     A = T.shape[0] - 1
     by_targets = bool(params.sim["abilities"].get("enemies_by_targets"))
@@ -279,10 +280,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
             give = reach[g].float()
             if g == "enemies" and t_en_any:
                 give = (reach[g] & ~(c("t_en") > 0)[:, :, None]).float()      # (t_en: once per enemy, below)
-            if fx_speed is not None:
-                v = c(f"{g}_speed")
-                sd = sd + torch.einsum("bij,bi->bj", give, v - 1)
-                sn = sn + torch.einsum("bij,bi->bj", give, (v != 1).float())
+            for s in stack:
+                v = c(f"{g}_{s}")
+                sd[s] = sd[s] + torch.einsum("bij,bi->bj", give, v - 1)
+                sn[s] = sn[s] + torch.einsum("bij,bi->bj", give, (v != 1).float())
             for s in STATS:
                 v = c(f"{g}_{s}")
                 if s in MULT:
@@ -293,10 +294,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
         # the abilities on enemies: each one's stats once on every enemy it lies on (the game's one record per ability
         # and side), and the records for the next step's hold (ab_en)
         on_a = (en_cnt[..., :A] > 0) & present[..., None]                                # [B, j, a]
-        if fx_speed is not None:
-            v = T[:A, COL["enemies_speed"]]
-            sd = sd + (on_a.float() * (v - 1)).sum(-1)
-            sn = sn + (on_a.float() * (v != 1).float()).sum(-1)
+        for s in stack:
+            v = T[:A, COL[f"enemies_{s}"]]
+            sd[s] = sd[s] + (on_a.float() * (v - 1)).sum(-1)
+            sn[s] = sn[s] + (on_a.float() * (v != 1).float()).sum(-1)
         for s in STATS:
             v = T[:A, COL[f"enemies_{s}"]]
             if s in MULT:
@@ -308,10 +309,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
         # the friends' stats of the ability laid on each unit at a cast (on a living unit)
         held = (snap > 0) & (snap_ab >= 0) & alive
         r = T[snap_ab]
-        if fx_speed is not None:
-            v = r[..., COL["friends_speed"]]
-            sd = sd + torch.where(held, v - 1, torch.zeros_like(v))
-            sn = sn + torch.where(held, (v != 1).float(), torch.zeros_like(v))
+        for s in stack:
+            v = r[..., COL[f"friends_{s}"]]
+            sd[s] = sd[s] + torch.where(held, v - 1, torch.zeros_like(v))
+            sn[s] = sn[s] + torch.where(held, (v != 1).float(), torch.zeros_like(v))
         for s in STATS:
             v = r[..., COL[f"friends_{s}"]]
             if s in MULT:
@@ -334,26 +335,31 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
         RECEIVED.append({names[a]: g for a, g in got.items()})
     old = {k: u[k] for k in ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack",
                               "defence", "morale_bonus", "resist_physical")}
-    speed = torch.exp(log["speed"])
     # scalar_charge_speed, when an ability gives it, sets the charge speed; else scalar_speed scales it too
     charge_speed = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
-    if fx_speed is not None:
-        # (effects.speed_add) two or more speed multipliers on a unit, here and among the innate effects (fx_speed):
-        # 1 + all their (v - 1) summed instead of the product (the game: R-work contact_effects_module.md 2.4; the
-        # Warp-Quake's x0.75 with the Gutter Runners' net x0.9: 0.65, not 0.675); the walk / run hold the innate factor
-        # already, so this step's factor is the sum over it. One alone (or none here) as before, bit for bit; the charge
-        # speed with it where no ability gives scalar_charge_speed
-        m_e, sd_e, sn_e = fx_speed
-        two = (sn >= 1) & (sn + sn_e >= 2)
-        summed = (1 + sd_e + sd).clamp(min=0.05) / m_e.clamp(min=1e-6)
-        no_c = log["charge_speed"].abs() <= 1e-9
-        speed = torch.where(two, summed, speed)
-        charge_speed = torch.where(two & no_c, summed, charge_speed)
+
+
+    def over(s):
+        """(effects.speed_add, mult_add) two or more multipliers of a stat on a unit, here and among the innate effects
+        (fx_speed): 1 + all their (v - 1) summed instead of the product (the game: R-work contact_effects_module.md 2.4;
+        the Warp-Quake's x0.75 with the Gutter Runners' net x0.9: 0.65, not 0.675); the field holds the innate factor
+        already, so this step's factor is the sum over it. One alone (or none here) as before, bit for bit."""
+        m = torch.exp(log[s])
+        if s not in stack:
+            return m, None
+        m_e, sd_e, sn_e = fx_speed[s]
+        two = (sn[s] >= 1) & (sn[s] + sn_e >= 2)
+        summed = (1 + sd_e + sd[s]).clamp(min=0.05) / m_e.clamp(min=1e-6)
+        return torch.where(two, summed, m), two
+    speed, two = over("speed")
+    if two is not None:
+        # the charge speed with it where no ability gives scalar_charge_speed
+        charge_speed = torch.where(two & (log["charge_speed"].abs() <= 1e-9), speed, charge_speed)
     u["walk"], u["run"] = u["walk"] * speed, u["run"] * speed
     u["charge_speed"] = u["charge_speed"] * charge_speed
-    u["damage"] = u["damage"] * torch.exp(log["damage"])
-    u["ap_damage"] = u["ap_damage"] * torch.exp(log["ap"])
-    u["charge_bonus"] = u["charge_bonus"] * torch.exp(log["charge"])
+    u["damage"] = u["damage"] * over("damage")[0]
+    u["ap_damage"] = u["ap_damage"] * over("ap")[0]
+    u["charge_bonus"] = u["charge_bonus"] * over("charge")[0]
     u["attack"] = u["attack"] + add["attack"]
     u["defence"] = u["defence"] + add["defence"]
     u["morale_bonus"] = u["morale_bonus"] + add["leadership"]

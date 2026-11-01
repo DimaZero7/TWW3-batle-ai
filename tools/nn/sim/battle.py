@@ -1448,6 +1448,13 @@ def step(st, orders, params=None, dt=None):
         f_en = torch.tensor(crowd["enemy"], dtype=want.dtype, device=want.device)[n_en]
         slow = routing & (u["men0"] > 1) & ~r_pin
         want = torch.where(slow, want * torch.minimum(f_own, f_en), want)
+        if cal["contact"].get("move_crowd"):
+            # A formation on the move through its own that stand still: the same soft collision (contact.move_crowd), the
+            # own's shares; a lord or a friend on the move does not count (not measured: the one lane's friend stood)
+            still = (torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2) <= 0.3) & (u["men0"] > 1)
+            n_st = (near & same_side & still[:, None, :]).sum(2).clamp(max=len(crowd["own"]) - 1)
+            f_st = torch.tensor(crowd["own"], dtype=want.dtype, device=want.device)[n_st]
+            want = torch.where(moving & ~routing & ~engaged & (u["men0"] > 1), want * f_st, want)
     moving = moving | routing
     # A unit in melee closes up to its nearest opponent (walking) until the formations touch.
     foe_gap = torch.where(touch & standing[:, None, :], pw["gap"], torch.full_like(pw["gap"], 1e9))

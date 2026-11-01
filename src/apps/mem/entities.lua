@@ -17,8 +17,7 @@
 --                     down, 0x10 flying, 0x11 getting up);  m_mark  the strike timer's mark (float, s of the tick clock:
 --                     an attack starts -> the mark is now);  m_fit  flags byte (bit 0x2: fit as a target);  m_flags
 --                     flags byte (bit 0x8: braced);  m_brace  the bracing mass multiplier B (float);  m_speed  own speed
---          m_carrier, m_charge (optional)  the entity carrying the man (a pointer; followed to the root, the program's
---                     14307b674) and the root's charge deadline (float, s of the tick clock: the charge multiplier is
+--          m_carrier, m_charge (optional)  the entity carrying the man (a pointer; followed to the root) and the root's charge deadline (float, s of the tick clock: the charge multiplier is
 --                     clamp((deadline - now) / 13 s, 0, 1) - set to now + 13 s every tick the man is in a charge)
 --          m_target, m_target_b (optional)  pointers to men: the target of the man's current task (m_target) and a
 --                     second one (m_target_b) - found by discover (two paths with the same hits), told apart offline

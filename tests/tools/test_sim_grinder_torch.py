@@ -200,7 +200,7 @@ def test_two_speed_multipliers_add_as_the_games():
         same = u["side"][:, :, None] == u["side"][:, None, :]
         alive = (u["side"] > 0) & (u["men"] > 0)
         for on, want in ((1, want_on), (0, want_off)):
-            p = P.with_cal("effects", speed_add=on)
+            p = P.with_cal("effects", speed_add=on, mult_add=on)
             innate = effects.apply(u, p, 0.0, alive & ~u["r"], torch.zeros_like(alive), pw["dist"], same)
             fx = innate.pop(effects.SPEED, None)
             assert (fx is None) == (on == 0)

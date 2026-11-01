@@ -325,16 +325,53 @@ def holes_cal(params):
     return h if h.get("on") else {}
 
 
-def holes_reform(u, params):
+def ready_cal(hc):
+    """artillery.holes.ready (config/nn/sim.json): the game's rule of a standing unit's re-forming, or {} (the measured
+    'knocked >= knock_min, then held until it moves')."""
+    r = hc.get("ready") or {}
+    return r if r.get("on") else {}
+
+
+def holes_ready(u, hc, rd, dt, speed):
+    """The game's stand order (artillery.holes.ready; R-work notes/p4/formation.md): with an enemy unit within near_m of
+    its box, edge to edge (keep_m once in), it is READY and does not re-form at all; else IDLE: it re-forms at the first
+    moment min_s after its last re-forming (the mean distance of its men from their places over 2.5 of a man's radius:
+    any unit with holes here), every idle_s anyway. A re-forming within delay_s of a man's death (a shell's victim
+    flying or down) lays no new places: the men go back to the old ones and the next, min_s on, closes the box.
+    -> close [B, N] bool: the units whose box closes now. In place: hole_rd, hole_t, hole_a."""
+    from tools.nn.sim import geometry
+    holed = u["hole_m"] > 0
+    f, d = geometry.dims(dict(u, men=torch.where(holed, u["hole_m"], u["men"])), rd["spacing"])
+    gap = geometry.rect_gap(u["x"], u["z"], u["b"], f, d)
+    alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    foe = (u["side"][:, :, None] != u["side"][:, None, :]) & alive[:, :, None] & alive[:, None, :]
+    near = torch.where(foe, gap, torch.full_like(gap, float("inf"))).min(-1).values
+    ready = (near < float(rd["near_m"])) | ((u["hole_rd"] > 0) & (near < float(rd["keep_m"])))
+    u["hole_rd"] = ready.to(u["hole_rd"].dtype)
+    t = u["hole_t"] + dt
+    a = torch.where(holed, u["hole_a"] + dt, torch.zeros_like(u["hole_a"]))
+    due = holed & ~ready & (t >= float(rd["min_s"]))
+    idle = ~holed & ~ready & (t >= float(rd["idle_s"]))
+    close = due & (a >= float(rd["delay_s"]))
+    t = torch.where(due | idle | (speed > float(hc["move_v"])), torch.zeros_like(t), t)
+    u["hole_t"], u["hole_a"] = t, a
+    return close
+
+
+def holes_reform(u, params, dt=0.0):
     """In place, each step (land()): a unit holding its men unformed (hole_m > 0) forms again - its men fill its box
     evenly, the box closes up to its men (geometry.dims) - once it moves (its speed over holes.move_v), routs, re-forms
-    to a new width (reform.py), is gone or dead (artillery.holes; the probe: walking targets close up, standing ones
-    under the Mortar and the rockets do not)."""
+    to a new width (reform.py), is gone or dead, or (holes.ready) standing by the game's rule, holes_ready (artillery.holes;
+    the probes: walking targets close up, standing ones with an enemy near under the Mortar and the rockets do not)."""
     hc = holes_cal(params)
     if not hc or "cellm" not in u:
         return
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     go = (u["hole_m"] > 0) & ((speed > float(hc["move_v"])) | u["r"] | (u["men"] <= 0) | u["gone"] | (u["wnew"] >= 0))
+    rd = ready_cal(hc)
+    if rd:
+        rd = dict(rd, spacing=params.sim["formation"]["spacing_m"])
+        go = go | holes_ready(u, hc, rd, dt, speed)
     u["hole_m"] = torch.where(go, torch.zeros_like(u["hole_m"]), u["hole_m"])
     B, N = go.shape
     cm = u["cellm"].view(B, N, -1)
@@ -463,7 +500,7 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
     hc = holes_cal(params) if "cellm" in u else {}
     if hc:
         # (artillery.holes) a unit that moved forms again; the holed keep their box of the men they had then
-        holes_reform(u, params)
+        holes_reform(u, params, dt)
         front, depth = holes_box(u, params, front, depth)
     fly = u["sh_s"] >= 0
     left = u["sh_s"] - dt
@@ -593,9 +630,13 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
         # its men where they stand from now on: its cells keep the men they had less this step's dead there
         kn = knocks.sum(1)
         speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
-        start = (~holed & (kn >= float(hc["knock_min"])) & (speed <= float(hc["move_v"])) & many & ~u["r"]
-                 & (u["wnew"] < 0) & present)
+        rd = ready_cal(hc)
+        struck = (kn + kills.sum(1)) > 0 if rd else kn >= float(hc["knock_min"])
+        start = (~holed & struck & (speed <= float(hc["move_v"])) & many & ~u["r"] & (u["wnew"] < 0) & present)
         keep = holed | start
+        if rd:
+            # (holes.ready) a man who dies now holds the re-laying of places off: its clock starts again
+            u["hole_a"] = torch.where(struck, torch.zeros_like(u["hole_a"]), u["hole_a"])
         even = torch.cat([(men / C)[..., None].expand(-1, -1, C), torch.zeros_like(men)[..., None]], -1)
         base = torch.where(holed[..., None], men[..., None] * cshare, even)
         new_cm = (base - kcell).clamp(min=0)
