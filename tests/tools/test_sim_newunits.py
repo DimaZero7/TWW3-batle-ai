@@ -199,7 +199,8 @@ class TestContactEffects:
         effects.restore(u, old)
         u[f"cfx{slot_of(SUPPRESS)}_s"][0, 0] = 5.0                         # another one stacks
         old = effects.apply(u, P, 0.5, standing, torch.zeros_like(standing), pw["dist"], same)
-        assert float(u["run"][0, 0]) == pytest.approx(0.85 * 0.7 * base["run"])
+        # the speed's multipliers add (effects.speed_add; R-work contact_effects_module.md 2.4): 1 - 0.15 - 0.3
+        assert float(u["run"][0, 0]) == pytest.approx(0.55 * base["run"])
         effects.restore(u, old)
         assert float(u["run"][0, 0]) == pytest.approx(base["run"])
 

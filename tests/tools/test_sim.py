@@ -2176,6 +2176,7 @@ def innate(st, engaged=None, params=P):
     standing = (u["side"] > 0) & ~u["r"]
     engaged = torch.zeros_like(standing) if engaged is None else engaged
     old = effects.apply(u, params, 0.5, standing, engaged, pw["dist"], same)
+    old.pop(effects.SPEED, None)                   # (not a field: the speed's parts for abilities.apply, battle.py)
     after = {k: u[k].clone() for k in old}
     effects.restore(u, old)
     return old, after
@@ -2231,7 +2232,9 @@ class TestInnateEffects:
         assert float(a["run"][0, H]) == pytest.approx(1.1 * run)   # routing (alive): a faster rout
         u["hp"][0, H] = 0.8
         _, a = innate(st)
-        assert float(a["run"][0, H]) == pytest.approx(0.99 * run)  # both: x1.1 x0.9
+        assert float(a["run"][0, H]) == pytest.approx(run)         # both: 1 + 0.1 - 0.1 (effects.speed_add)
+        _, a = innate(st, params=P.with_cal("effects", speed_add=0))
+        assert float(a["run"][0, H]) == pytest.approx(0.99 * run)  # the rule off: x1.1 x0.9
 
     def test_a_routing_skaven_unit_runs_faster_than_an_empire_one(self):
         # (a standing unit a side far away keeps the battle going)

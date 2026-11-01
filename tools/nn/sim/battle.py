@@ -426,6 +426,8 @@ def step(st, orders, params=None, dt=None):
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
     # stats and rule flags hold for this step ---
     innate = effects.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
+    # (effects.speed_add) the innate speed factor, (v - 1) sum and count: the abilities add theirs to them
+    fx_speed = innate.pop(effects.SPEED, None)
     if ground.on(u):
         # the ground under the men (ground.py; a map without a ground layer: none): the database's multipliers of the
         # walk / run and the melee attack by each man's cell, laid with the step's effects (effects.restore puts them back)
@@ -517,7 +519,7 @@ def step(st, orders, params=None, dt=None):
 
     # --- lord abilities cast by the game's AI by its rule or by the network's order: their effects hold
     # for this step ---
-    base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side, orders.ability)
+    base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side, orders.ability, fx_speed=fx_speed)
     vigour = abilities.vigour(u, params, standing)
     # --- fatigue's stat multipliers (the database's unit_fatigue_effects_tables), for this step ---
     tired = fatigue.effects(u, params)

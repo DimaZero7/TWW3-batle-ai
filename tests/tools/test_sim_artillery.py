@@ -440,6 +440,44 @@ class TestHoles:
         self._volley(st, H)
         assert float(st.u["hole_m"][0, H]) == 0
 
+    def test_the_aim_takes_the_living_man_nearest_the_centre(self):
+        """artillery.aim_live: a holed target whose centre cells are empty - the Mortar's aim moves to the cell most
+        likely to hold the man nearest the centre; a formed one, and the rule off, aim at the box's centre."""
+        def aim(st, H, params):
+            u = st.u
+            pw = geometry.pairwise(u, SP)
+            shots = torch.zeros_like(u["men"])
+            shots[0, 0] = float(artillery.shooters(u)[0, 0])
+            target = torch.full_like(u["side"], -1)
+            target[0, 0] = H
+            artillery.launch(u, pw, params, shots, target)
+            return float(u["sh_x"][0, 0]), float(u["sh_z"][0, 0])
+        off = P.with_cal("artillery", aim_live=0)
+        st, H = TestShells._shot(MORTAR, CSPEAR, dist=200.0)
+        cx, cz = float(st.u["x"][0, H]), float(st.u["z"][0, H])
+        # formed: the centre, as with the rule off (bit for bit)
+        assert aim(st.clone(), H, P) == aim(st.clone(), H, off)
+        self._volley(st, H)
+        u = st.u
+        assert float(u["hole_m"][0, H]) > 0
+        on_c, off_c = aim(st.clone(), H, P), aim(st.clone(), H, off)
+        cm = u["cellm"].view(st.B, st.N, -1)[0, H]
+        # empty the centre: the two cells at it and the two beside them across (the cells 6 across x 3 along)
+        cells = cm[:18].view(6, 3)
+        cells[1:5, 1] = 0.0
+        u["cellm"].view(st.B, st.N, -1)[0, H, :18] = cells.reshape(-1)
+        x_on, z_on = aim(st.clone(), H, P)
+        x_off, z_off = aim(st.clone(), H, off)
+        assert x_off == pytest.approx(off_c[0]) and z_off == pytest.approx(off_c[1])
+        moved = math.hypot(x_on - x_off, z_on - z_off)
+        front, depth = artillery.holes_box(u, P, *geometry.dims(u, SP))
+        F, D = float(front[0, H]), float(depth[0, H])
+        # to the centre of the nearest cell still holding men (cell (col, row): (F (col - 2.5) / 6, D (row - 1) / 3))
+        r = [math.hypot(F * (c - 2.5) / 6, D * (w - 1) / 3) for c in range(6) for w in range(3)
+             if float(cells[c, w]) > 1.0]
+        assert moved == pytest.approx(min(r), abs=1e-3), (moved, F, D)
+        assert moved > 1.0 and on_c is not None
+
     def test_the_warp_cannons_small_blast_leaves_no_holes(self):
         st, H = TestShells._shot(WARP, SPEAR, dist=200.0)
         front, depth = geometry.dims(st.u, SP)

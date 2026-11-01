@@ -17,8 +17,8 @@ The unit (start, guns, shooters, split):
 The shells (launch, bursts, land): a projectile with a blast (projectiles_explosions shockwave) or a 'fixed' trajectory
 (the Mortar) is a shell. A volley's shells land together after the flight T - the fixed arc's sqrt(2 d tan(el) / g),
 the low arc's d / (v cos theta). Where (build/diag_arty/mechanic.md, R-work shooting_module.md 2.2-2.3: the game's
-program): every gun aims at one man - the target's most central with prefer_central_targets (STATIC central), else
-the man nearest it (the near edge, under each gun) - at 0.75 of his height, led fully (+ his velocity x T); the miss
+program): every gun aims at one man - the target's most central living one with prefer_central_targets (STATIC central;
+a holed target's empty centre: live_aim, artillery.aim_live), else the man nearest it (the near edge, under each gun) - at 0.75 of his height, led fully (+ his velocity x T); the miss
 is the barrel turned by a uniform yaw and pitch within +-atan(r / 2d), r = sqrt(calibration area x zeroing-in / p):
 across d tan(yaw), along the arc's range at the turned angle (the Mortar's 50 deg: a few metres; the rockets' 11 deg:
 +-55 m); a shell falling through its target's box bursts on its first man. The expectation over the miss by a
@@ -181,6 +181,10 @@ def launch(u, pw, params, shots, target, keep=None):
     aa = torch.where(central, torch.zeros_like(d0), torch.minimum(span, across) / 2)
     x = u["x"].gather(1, t) + u["vx"].gather(1, t) * T + wx * (beyond - near)
     z = u["z"].gather(1, t) + u["vz"].gather(1, t) * T + wz * (beyond - near)
+    if aim_live_on(params) and "cellm" in u:
+        # (artillery.aim_live) the most central LIVING man: a holed target's centre may be empty - the aim moves to the
+        # cell most likely to hold the man nearest the centre (live_aim); a formed target keeps its centre
+        x, z = aim_holed(u, params, pw["front"], pw["depth"], t, central, x, z)
     # the zeroing-in: the gun's shots at this target since it was taken (a new target starts it again)
     tf = target.to(u["sh_kt"].dtype)
     k = torch.where(u["sh_kt"] == tf, u["sh_k"], torch.zeros_like(u["sh_k"]))
@@ -189,6 +193,12 @@ def launch(u, pw, params, shots, target, keep=None):
                       ("sh_r", spread_side(u, d, el, k)), ("sh_d", d), ("sh_el", el), ("sh_t", tf), ("sh_k", k + 1),
                       ("sh_kt", tf)):
         u[name] = torch.where(go, val, u[name])
+
+
+def aim_live_on(params):
+    """artillery.aim_live (config/nn/sim.json) with artillery.holes on: the central aim takes the living man nearest the
+    centre (a formed unit's centre always holds one: only a holed unit's aim moves)."""
+    return bool(cal(params).get("aim_live")) and bool(holes_cal(params))
 
 
 Q_AIM, Q_YAW, Q_PITCH = 3, 10, 24      # the landing's quadrature: the aim across, the yaw, the pitch (midpoints)
@@ -339,6 +349,50 @@ def holes_box(u, params, front, depth):
     holed = u["hole_m"] > 0
     f, d = geometry.dims(dict(u, men=torch.where(holed, u["hole_m"], u["men"])), params.sim["formation"]["spacing_m"])
     return torch.where(holed, f, front), torch.where(holed, d, depth)
+
+
+def live_aim(u, params, front, depth):
+    """(dx, dz, moved) [B, N]: where the man nearest a unit's box centre stands, as an offset from the centre, for a unit
+    holding its men unformed (hole_m > 0, artillery.holes); moved False (offset 0) for the others and where that man is
+    in one of the cells at the centre. The game's prefer_central_targets takes the living man of the least distance to
+    the unit's centre (build/diag_arty/mechanic.md 1; R-work shooting_module.md 2.3): with the men by cell (cellm: k
+    expected men a cell, a cell holding one with 1 - exp(-k)), the cell holding the nearest man is the one of the
+    largest chance 'it holds a man and every cell nearer the centre is empty' (cells by their centres' distance); the
+    aim goes to that cell's centre (its men's place in the cells' model, cells())."""
+    B, N = u["men"].shape
+    ca, cl = CELLS
+    C = ca * cl
+    dev = u["men"].device
+    f, d = holes_box(u, params, front, depth)
+    cm = u["cellm"].view(B, N, C + 1)
+    k = u["men"].clamp(min=0)[..., None] * cm[..., :C] / cm.sum(-1, keepdim=True).clamp(min=1e-9)     # [B, N, C]
+    a = (f[..., None, None] * (_mid(ca, dev) / 2)[:, None]).expand(B, N, ca, cl).reshape(B, N, C)
+    l = (d[..., None, None] * (_mid(cl, dev) / 2)[None, :]).expand(B, N, ca, cl).reshape(B, N, C)
+    r2 = a * a + l * l
+    # (cells by distance, ties by index: stable)
+    order = torch.argsort(r2 + torch.arange(C, device=dev) * 1e-6, dim=-1)
+    p = 1 - torch.exp(-k.gather(-1, order))
+    empty_before = torch.cumprod(torch.cat([torch.ones_like(p[..., :1]), 1 - p[..., :-1]], -1), -1)
+    best = order.gather(-1, (p * empty_before).argmax(-1, keepdim=True))                          # [B, N, 1]
+    r2b = r2.gather(-1, best).squeeze(-1)
+    moved = (u["hole_m"] > 0) & (r2b > r2.min(-1).values * (1 + 1e-4) + 1e-6)
+    da, dl = a.gather(-1, best).squeeze(-1), l.gather(-1, best).squeeze(-1)
+    rad = torch.deg2rad(u["b"])
+    dx = da * torch.cos(rad) + dl * torch.sin(rad)
+    dz = -da * torch.sin(rad) + dl * torch.cos(rad)
+    zero = torch.zeros_like(dx)
+    return torch.where(moved, dx, zero), torch.where(moved, dz, zero), moved
+
+
+@_eager
+def aim_holed(u, params, front, depth, t, central, x, z):
+    """(x, z) the aim points of the shooters with a central aim at targets t [B, N], moved to the living man nearest the
+    centre where the target is holed (live_aim); as given when no unit is (out of the compiled step: a bool of a tensor)."""
+    if not bool((u["hole_m"] > 0).any()):
+        return x, z
+    lx, lz, moved = live_aim(u, params, front, depth)
+    mv = central & moved.gather(1, t)
+    return torch.where(mv, x + lx.gather(1, t), x), torch.where(mv, z + lz.gather(1, t), z)
 
 
 def morale_cal(params):

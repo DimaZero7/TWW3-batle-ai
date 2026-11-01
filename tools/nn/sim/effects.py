@@ -385,6 +385,11 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     on = on & (c("modelled") > 0)
     onf = on.float()
     log = {s: torch.einsum("bne,e->bn", onf, torch.log(c(f"self_{s}").clamp(min=1e-6))) for s in E_MULT}
+    # (effects.speed_add) the speed's multipliers as the game lays them: their (v - 1) summed (sd) and how many (sn)
+    spd_add = speed_add_on(params)
+    if spd_add:
+        sd = torch.einsum("bne,e->bn", onf, c("self_speed") - 1)
+        sn = torch.einsum("bne,e->bn", onf, (c("self_speed") != 1).float())
     add = {s: torch.einsum("bne,e->bn", onf, c(f"self_{s}")) for s in E_STATS if s not in E_MULT}
     eye = torch.eye(u["men"].shape[1], dtype=torch.bool, device=u["men"].device)[None]
     present = u["side"] > 0
@@ -401,6 +406,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
         if rx is not None and key in ab_keys:
             # the aura's ability on a friend: the network's "effects on me from others" (abilities.py ab_rx)
             rx = rx | ((give.sum(1) > 0).long() << ab_keys.index(key))
+        if spd_add:
+            v = T[i, COL["friends_speed"]]
+            sd = sd + give.sum(1) * (v - 1)
+            sn = sn + give.sum(1) * (v != 1).float()
         for s in E_STATS:
             v = T[i, COL[f"friends_{s}"]]
             if s in E_MULT:
@@ -419,6 +428,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
         key = order(params)[i]
         if rx is not None and key in ab_keys:
             rx = rx | ((got_i > 0).long() << ab_keys.index(key))
+        if spd_add:
+            v = T[i, COL["enemies_speed"]]
+            sd = sd + got_i * (v - 1)
+            sn = sn + got_i * (v != 1).float()
         for s in E_STATS:
             v = T[i, COL[f"enemies_{s}"]]
             if s in E_MULT:
@@ -438,6 +451,15 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     own_c = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
     charge_speed = (own_c + torch.where(hexm["charge_speed"].abs() > 1e-9, hexm["charge_speed"],
                                         hexm["speed"])).clamp(min=0.05)
+    if spd_add:
+        # two or more speed multipliers on a unit: 1 + their (v - 1) summed, not their product (the game: R-work
+        # contact_effects_module.md 2.4, 'mult: bonus += (v - 1) x base'); one alone as before, bit for bit. The charge
+        # speed with it where no effect gives scalar_charge_speed (it follows scalar_speed then)
+        two = sn >= 2
+        summed = (1 + sd).clamp(min=0.05)
+        no_c = (log["charge_speed"].abs() <= 1e-9) & (hexm["charge_speed"].abs() <= 1e-9)
+        speed = torch.where(two, summed, speed)
+        charge_speed = torch.where(two & no_c, summed, charge_speed)
     u["walk"], u["run"] = u["walk"] * speed, u["run"] * speed
     u["charge_speed"] = u["charge_speed"] * charge_speed
     u["damage"] = u["damage"] * mult("damage")
@@ -473,11 +495,22 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
         keys = order(params)
         RECEIVED.append({keys[i]: (on[..., i] | got.get(i, torch.zeros_like(on[..., i]))).clone()
                          for i in range(E) if bool(on[..., i].any()) or i in got})
+    if spd_add:
+        # for abilities.apply (battle.py pops it): the speed factor laid here, its (v - 1) summed and how many
+        old[SPEED] = (speed, sd, sn)
     return old
 
 
+def speed_add_on(params):
+    """effects.speed_add (config/nn/sim.json): a unit's speed multipliers added as the game's (1 + sum of v - 1)."""
+    return bool((params.sim.get("effects") or {}).get("speed_add"))
+
+
+SPEED = "_speed"       # apply()'s old dict: the speed's factor, (v - 1) sum and count for abilities.apply (not a field)
+
+
 def restore(u, old):
-    u.update(old)
+    u.update({k: v for k, v in old.items() if k != SPEED})
 
 
 def refresh_on(u, params):

@@ -181,3 +181,31 @@ def test_a_battle_without_grinders_keeps_the_new_fields_at_rest():
 def test_the_unit_drills_leave_the_grinders_out():
     from tools.nn.unit import drill_hold
     assert GR in drill_hold.NOT_IN_DRILLS and GR not in drill_hold.roster()["skv"]
+
+
+def test_two_speed_multipliers_add_as_the_games():
+    """effects.speed_add (R-work contact_effects_module.md 2.4): the Warp-Quake's x0.75 with the Gutter Runners' net
+    x0.9 on the same swordsmen: 1 - 0.25 - 0.1 = 0.65 (the product 0.675 with the rule off); one alone x0.75 as before."""
+    from tools.nn.sim import effects, geometry
+    RUN = "wh2_main_skv_inf_gutter_runners_0"
+    walk = float(P.units[SWORD]["speed"]["walk"])
+    for runners, want_on, want_off in ((True, 0.65, 0.675), (False, 0.75, 0.75)):
+        a = army([(0, -10)], [(0, 20)])
+        if runners:
+            a["sides"][2]["units"].append({"key": RUN, "x": 15, "z": 10, "b": 180})
+        st = scenario.build([a], P)
+        u, H = st.u, st.N // 2
+        step(st, orders(st, {H: QUAKE}))
+        pw = geometry.pairwise(u, P.sim["formation"]["spacing_m"])
+        same = u["side"][:, :, None] == u["side"][:, None, :]
+        alive = (u["side"] > 0) & (u["men"] > 0)
+        for on, want in ((1, want_on), (0, want_off)):
+            p = P.with_cal("effects", speed_add=on)
+            innate = effects.apply(u, p, 0.0, alive & ~u["r"], torch.zeros_like(alive), pw["dist"], same)
+            fx = innate.pop(effects.SPEED, None)
+            assert (fx is None) == (on == 0)
+            base = abilities.apply(u, p, 0.0, alive & ~u["r"], torch.zeros_like(alive), pw["dist"], same, fx_speed=fx)
+            assert float(u["walk"][0, 0]) / walk == pytest.approx(want, abs=1e-5), (runners, on)
+            abilities.restore(u, base)
+            effects.restore(u, innate)
+            assert effects.SPEED not in u
