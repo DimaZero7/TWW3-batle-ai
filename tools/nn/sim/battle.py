@@ -1093,7 +1093,13 @@ def step(st, orders, params=None, dt=None):
     # the slowing from hits of gunpowder (missile.hit_slow): a hit starts its timer on the enemy hit; it acts in this
     # step's movement (below)
     missile.hit_slow_lay(u, params, dt, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
-    shot_at = ((hp_missile + db) * pw["enemy"]).sum(1) > 0     # friendly fire does not count (ume_concerned_under_friendly_fire 0)
+    db_fire = db
+    if hp_art is not None and cal["morale"].get("art_not_under_fire"):
+        # morale.art_not_under_fire: a shell does not set 'attacked by projectile' (-5) - only the artillery's own -8 /
+        # -10 (the game's memory, build/diag_mem/morale: clanrats under a mortar's fire, 673 readings with the
+        # artillery effect, the projectile's fields never set, no -5; under warpfire the -5 was there)
+        db_fire = db - hp_art * scale[:, None, :]
+    shot_at = ((hp_missile + db_fire) * pw["enemy"]).sum(1) > 0     # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
     # the worst side it is struck from this step (morale: attacked in the flank / rear while it lasts)
@@ -1281,8 +1287,12 @@ def step(st, orders, params=None, dt=None):
                             * worth[:, :, None])).any(2),
         # morale.strong_enemy rule "balance": the enemies' strength around the unit against its own and its
         # friends' (morale.strong_power); the term is then the database's -3 ... -24 scale (morale.strong_points).
-        "strong_power": (morale.strong_power(u, d, foes & standing[:, None, :], friends & standing[:, None, :], params)
-                         if (mcal.get("strong_enemy") or {}).get("rule") == "balance" else None),
+        # Rule "code" (the game's program, the memory's points: build/diag_mem/morale): the same with the program's
+        # weights by the formations' rectangle distance (geometry.rect_gap) and whole strengths, rounded points.
+        "strong_power": (morale.strong_power(u, d, foes & standing[:, None, :], friends & standing[:, None, :], params,
+                                             gap=(geometry.rect_gap(u["x"], u["z"], u["b"], pw["front"], pw["depth"])
+                                                  if (mcal.get("strong_enemy") or {}).get("rule") == "code" else None))
+                         if (mcal.get("strong_enemy") or {}).get("rule") in ("balance", "code") else None),
         # (morale.rally_any_enemy: any enemy blocks the rally, routing ones too - the recordings: within 95 m of a
         # routing enemy 0.9 % rallied a second, 12.6 % with none; build/open_battle/spec.md 4)
         "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy"))) & blocks
@@ -1296,8 +1306,14 @@ def step(st, orders, params=None, dt=None):
         # an enemy that causes fear with its formation's edge within that range of the unit's (pw gap: the men nearest,
         # the box of a 51 m wide demigryph line - not its centre); not to a unit immune to psychology (itp) or that causes
         # fear itself (docs/ru/game/mechanics/monsters.md); several do not stack
-        ctx["fear"] = ((foes & u["fear"][:, None, :] & (pw["gap"] <= float(M["fear_effect_range"]))).any(2)
-                       & ~u["itp"] & ~u["fear"])
+        near = pw["gap"] <= float(M["fear_effect_range"])
+        if mcal["fear"].get("reach") == "centre_box":
+            # morale.fear.reach "centre_box" (the game's program, its list of units near: the unit's centre within the
+            # enemy's rectangle widened by fear_effect_range + the unit's own radius - half its box's diagonal; the
+            # memory's fear onsets, build/diag_mem/morale: at 35.2 / 32.6-34.3 m from the enemy box against 35.6)
+            near = geometry.centre_box_dist(u, pw["front"], pw["depth"]) <= (
+                float(M["fear_effect_range"]) + 0.5 * torch.sqrt(pw["front"] ** 2 + pw["depth"] ** 2))[:, :, None]
+        ctx["fear"] = ((foes & u["fear"][:, None, :] & near).any(2) & ~u["itp"] & ~u["fear"])
     if (mcal.get("terror") or {}).get("on") and "terror" in u:
         # Terror (morale.terror; the database's causes_terror: terror_effect_range 5 m): an enemy that causes terror with its
         # edge within that range of the unit's (pw gap, as fear's); who runs and for how long: morale.py

@@ -173,8 +173,9 @@ class TestChargeMoving:
 
 
 def test_the_documented_defaults():
-    # config/nn/sim.json morale: the S26 rules ON, a charge block not started in melee, the strong-enemy balance OFF
+    # config/nn/sim.json morale: the S26 rules ON, a charge block not started in melee, the strong enemy by the game's
+    # program (rule "code": build/diag_mem/morale), not the fitted balance
     m = P.sim["morale"]
     assert m["attacked_first"]["on"] and m["combat_shooter"]["on"] and m["routing_enemies_reach"]["on"]
     assert m["charge"]["moving"]["on"] and not m["charge"]["moving"]["melee_start"]
-    assert m["strong_enemy"]["rule"] == "off"
+    assert m["strong_enemy"]["rule"] == "code"

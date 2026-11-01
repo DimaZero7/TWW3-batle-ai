@@ -4,7 +4,8 @@ or the environment variable BAI_MEM_SITES) - the repository keeps only their nam
 
     dependency()           {pack, workshop_id, sha256}: the pack the launcher copies next to ours
     lua_config(path=None)  {sites = {name: {hi, lo, sig, expect, pattern}}, layout = {name: offset}, snapshot_max}
-                           (the men's layout - src/apps/mem/entities.lua - when the file has it):
+                           (the men's layout - src/apps/mem/entities.lua - and the morale's - src/apps/mem/morale.lua -
+                           when the file has them):
                            the probe's config.mem (a relative address split hi * 2^20 + lo: the game's Lua numbers are
                            32-bit floats, exact only to 2^24)
 """
@@ -24,6 +25,11 @@ LAYOUT = ("mgr_active", "p_shooter", "p_record", "p_state", "p_prev", "p_pos", "
 MEN_LAYOUT = ("u_men", "w_tick", "m_unit", "m_live", "m_pos", "m_vel", "m_face", "m_hp", "m_anim",
               "m_mode", "m_react", "m_mark", "m_fit", "m_flags", "m_brace", "m_speed")
 MEN_OPTIONAL = ("m_target", "m_target_b", "m_carrier", "m_charge")
+# the morale of a unit (src/apps/mem/morale.lua): all of MORALE_LAYOUT or none (a sites file without u_morale: no
+# morale); u_fields {name: [offset, type]} the unit's own fields read beside it, when the file has them
+MORALE_LAYOUT = ("u_morale", "o_unit", "o_state", "o_points", "o_target", "o_fx_n", "o_fx", "n_next", "n_id", "n_val",
+                 "o_timed", "t_stride", "o_contacts", "c_id", "c_side", "o_surprise", "o_waver", "o_charge", "o_rally",
+                 "o_bytes")
 OPTIONAL_SITES = ("dir_table",)
 SNAPSHOT_MAX = 300
 
@@ -77,4 +83,8 @@ def lua_config(path=None, exe=None):
     if "u_men" in raw["layout"]:
         layout.update({name: _int(raw["layout"][name]) for name in MEN_LAYOUT})
         layout.update({name: _int(raw["layout"][name]) for name in MEN_OPTIONAL if name in raw["layout"]})
+    if "u_morale" in raw["layout"]:
+        layout.update({name: _int(raw["layout"][name]) for name in MORALE_LAYOUT})
+        fields = raw["layout"].get("u_fields") or {}
+        layout["u_fields"] = {name: [_int(off), str(kind)] for name, (off, kind) in fields.items()}
     return {"sites": sites, "layout": layout, "snapshot_max": int(raw.get("snapshot_max", SNAPSHOT_MAX))}

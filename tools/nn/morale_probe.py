@@ -86,6 +86,12 @@ UNITS = {
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
     "nr": ("wh2_main_skv_inf_night_runners_1", 120, SKV),
     "flag": ("wh_dlc04_emp_inf_flagellants_0", 120, EMP),
+    "knights": ("wh_main_emp_cav_empire_knights", 60, EMP),
+    "mortar": ("wh_main_emp_art_mortar", 44, EMP),
+    "ogres": ("wh2_main_skv_mon_rat_ogres", 16, SKV),
+    "brood": ("wh2_dlc16_skv_mon_brood_horror_0", 1, SKV),
+    "pusbags": ("wh3_dlc29_skv_inf_pusbags", 180, SKV),
+    "warpfire": ("wh2_main_skv_inf_warpfire_thrower", 32, SKV),        # (no passport in config/nn/units.json: no twin)
 }
 LORDS = {EMP: "general", SKV: "warlord"}
 RESERVES = {EMP: ("gs", "gs"), SKV: ("storm", "storm")}     # parked far: the armies' strength (no army losses)
@@ -95,7 +101,7 @@ TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
 PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer",
-         "hyp")
+         "hyp", "mem")
 PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
 HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
                    "wh_main_character_abilities_rally")
@@ -491,6 +497,74 @@ def hyp_routers_lane(own, foes):
     return {"kind": f"routers_{own}_{foes}", "units": units, "steps": steps, "max_s": 55}
 
 
+MEM_AFTER_ROUT_S = 12
+MEM_CAV_S = 12                 # the knights' charge that long after U's contact
+MEM_MAX_S = 150
+
+
+def mem_lane(kind):
+    """Plan mem (the morale's effects read from memory, build/diag_mem/morale/): battle 1 - tested clanrats (U) held,
+    fearless Empire swordsmen (E) attack them in front from 40 m at the go: 'front' (+ a tested friend F, clanrats 45 m
+    to U's right, never ordered: the friends' rout, flanks), 'cav_flank' / 'cav_rear' (fearless Empire knights K charge
+    U's right flank / rear from 90 m MEM_CAV_S after U's contact: attacked in the flank / rear, the contact push),
+    'art' (a fearless Empire mortar 250 m in front shoots U for 60 s, then stops: the artillery effects and their life);
+    battle 2 - tested Empire spearmen (U) held: 'fear' (fearless rat ogres walk from 60 m to 10 m of U's front, stand,
+    attack 25 s after the go), 'terror' (the fearless Brood Horror walks to 8 m, stands, attacks 25 s after the go);
+    'friends' (as cav_rear, with the tested friend F 45 m to U's right and a tested Empire unit G - spearmen - 60 m behind
+    the swordsmen, both never ordered: the friends' and the enemies' rout); 'charge' (tested Empire swordsmen U attack
+    fearless clanrats at a run from 60 m: the charge bonus and its blocks). A lane ends MEM_AFTER_ROUT_S after U's rout
+    or at MEM_MAX_S. Battle 3 (the check of the fixes, with the units' strength fields read): 'cav_rear' and 'fear' again,
+    'pusbags' and 'warpfire' (below)."""
+    end = s("rout", "end", of="U", delay_s=MEM_AFTER_ROUT_S)
+    if kind == "pusbags":
+        # battle 3: fearless Pusbags attack tested Empire swordsmen at a run from 30 m (the censer's -10)
+        dU = depth("swords")
+        units = [u("U", "swords", 0, -dU / 2, 0), u("P", "pusbags", 0, 30 + depth("pusbags") / 2, 180, True)]
+        return {"kind": kind, "units": units, "steps": [s("go", "attack", "P", target="U"), s("go", "end", delay_s=90),
+                                                        end], "max_s": 100}
+    if kind == "warpfire":
+        # battle 3: fearless warpfire throwers shoot tested Empire spearmen from 30 m for 40 s ('Flames!' -8)
+        dU = depth("spear")
+        units = [u("U", "spear", 0, -dU / 2, 0), u("W", "warpfire", 0, 35, 180, True)]
+        steps = [s("go", "shoot", "W", target="U"), s("go", "stop_fire", "W", delay_s=40), s("go", "halt", "W", delay_s=40),
+                 s("go", "end", delay_s=70), end]
+        return {"kind": kind, "units": units, "steps": steps, "max_s": 80}
+    if kind == "charge":
+        dT = depth("clanrat")
+        units = [u("U", "swords", 0, -depth("swords") / 2, 0), u("T", "clanrat", 0, 60 + dT / 2, 180, True)]
+        return {"kind": kind, "units": units, "steps": [s("go", "attack", "U", target="T"), s("go", "end", delay_s=80)],
+                "max_s": 90}
+    if kind in ("front", "cav_flank", "cav_rear", "art", "friends"):
+        dU = depth("clanrat")
+        units = [u("U", "clanrat", 0, -dU / 2, 0)]
+        if kind == "art":
+            units.append(u("A", "mortar", 0, 250, 180, True))
+            steps = [s("go", "shoot", "A", target="U"), s("go", "stop_fire", "A", delay_s=60),
+                     s("go", "halt", "A", delay_s=60), s("go", "end", delay_s=110)]
+            return {"kind": kind, "units": units, "steps": steps + [end], "max_s": 120}
+        dE = depth("swords")
+        units.append(u("E", "swords", 0, 40 + dE / 2, 180, True))
+        steps = [s("go", "attack", "E", target="U")]
+        if kind in ("front", "friends"):
+            units.append(u("F", "clanrat", 45, -dU / 2, 0))
+        if kind == "friends":
+            units.append(u("G", "spear", 0, 40 + dE + 60 + depth("spear") / 2, 180))
+        if kind != "front":
+            k = (u("K", "knights", 90 + 15, -dU / 2, 270, True) if kind == "cav_flank"
+                 else u("K", "knights", 0, -dU - 90 - depth("knights") / 2, 0, True))
+            if kind == "friends":
+                k = dict(k, x=-30.0)
+            units.append(k)
+            steps.append(s("contact", "attack", "K", of="U", delay_s=MEM_CAV_S, target="U"))
+        return {"kind": kind, "units": units, "steps": steps + [end], "max_s": MEM_MAX_S}
+    dU = depth("spear")
+    foe, gap = ("ogres", 10) if kind == "fear" else ("brood", 8)
+    dF = depth(foe)
+    units = [u("U", "spear", 0, -dU / 2, 0), u("O", foe, 0, 60 + dF / 2, 180, True)]
+    steps = [s("go", "move_walk", "O", x=0, z=round(gap + dF / 2, 1)), s("go", "attack", "O", delay_s=25, target="U")]
+    return {"kind": kind, "units": units, "steps": steps + [end], "max_s": MEM_MAX_S}
+
+
 def rotate(items, k):
     k %= len(items)
     return items[k:] + items[:k]
@@ -523,6 +597,10 @@ def battles(plan):
     if plan == "timer":
         a = [timer_lane(k) for k in TIMER_KINDS]
         return [a, rotate(a, 3)]
+    if plan == "mem":
+        return [[mem_lane(k) for k in ("front", "cav_flank", "cav_rear", "art")],
+                [mem_lane(k) for k in ("fear", "terror", "friends", "charge")],
+                [mem_lane(k) for k in ("cav_rear", "fear", "pusbags", "warpfire")]]
     if plan == "hyp":
         return [[hyp_timer_lane(0), hyp_timer_lane(9), hyp_rally_lane("free", 0), hyp_rally_lane("free", 9),
                  hyp_rally_lane("weak")],
@@ -616,7 +694,7 @@ def write_scenario(plan, index, path=None):
     return path
 
 
-def run(plan, which=None, python=sys.executable, dry=False, deadline=None, kv=(), speed=None, graphics=""):
+def run(plan, which=None, python=sys.executable, dry=False, deadline=None, kv=(), speed=None, graphics="", mem=False):
     """Builds and launches each battle in turn (tools/launcher/launch.ps1: Normal difficulty set and restored by
     the launcher). kv: tools.build --kv rows (the game's rules changed in the probe's pack); speed: the battle
     speed (the timer plan: TIMER_SPEED); graphics: the launcher's -Graphics (lowigpu: the integrated GPU)."""
@@ -630,6 +708,8 @@ def run(plan, which=None, python=sys.executable, dry=False, deadline=None, kv=()
                  "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else [])
         for row in kv or ():
             build += ["--kv", row]
+        if mem:
+            build.append("--mem")
         launch = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER / "launch.ps1"),
                   "-Target", "morale-probe"] + (["-Graphics", graphics] if graphics else [])
         print(f"--- {plan} {i}", flush=True)
@@ -1040,6 +1120,20 @@ def measure(lane):
             back = (t > rally + 0.5) & r
             out["rerout_after_s"] = r1(t[np.argmax(back)] - rally) if back.any() else None
         out["lost_hp"] = r1(1 - np.nanmin(col(lane, "U", "hp")))
+    elif plan == "mem":
+        # the morale's run to the rout (the twin's check): U's contact, first wavering, rout, from the go and from the
+        # contact; the points every 5 s from the contact; U's health at the rout; F's rout (front)
+        pts = points(lane, "U")
+        c, rout = ev["contact"].get("U"), ev["rout"].get("U")
+        w = flag(lane, "U", "w") if not lane.get("sim") else None
+        out["contact_s"], out["rout_s"] = r1(c), r1(rout)
+        out["waver_s"] = r1(t[np.argmax(w)]) if w is not None and w.any() else None
+        out["rout_after_contact_s"] = r1(rout - c) if rout is not None and c is not None else None
+        if c is not None:
+            out["pts_by_5s"] = [at(t, pts, c + k) for k in range(0, 65, 5)]
+        if rout is not None:
+            out["hp_at_rout"] = at(t, col(lane, "U", "hp"), rout)
+        out["f_rout_s"] = r1(ev["rout"].get("F"))
     return out
 
 
@@ -1306,6 +1400,8 @@ def main(argv=None):
                         help="run: a game rule row changed in the probe's pack (tools.build --kv), repeatable")
     parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), help="run: the battle speed")
     parser.add_argument("--graphics", default="", help="run: the launcher's -Graphics (lowigpu, low, ...)")
+    parser.add_argument("--mem", action="store_true", help="run: built with --mem (the morale and its effects from the "
+                        "game's memory: tools/nn/mem_probe.py --morale; docs/ru/game/memreader.md)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     if args.command == "plan":
@@ -1317,7 +1413,7 @@ def main(argv=None):
         which = [int(x) for x in args.battles.split(",")] if args.battles else None
         done = []
         for p in args.plan.split(","):
-            done += run(p, which, dry=args.dry, kv=args.kv, speed=args.speed, graphics=args.graphics)
+            done += run(p, which, dry=args.dry, kv=args.kv, speed=args.speed, graphics=args.graphics, mem=args.mem)
         print("done:", done)
         return 0 if all(d[-1] == 0 for d in done) else 1
     if args.command == "twin":

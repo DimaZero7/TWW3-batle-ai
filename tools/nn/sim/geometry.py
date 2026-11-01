@@ -82,6 +82,15 @@ def _box_point_dist(px, pz, cx, cz, fx, fz, hf, hl):
     return torch.sqrt(a.clamp(min=0) ** 2 + c.clamp(min=0) ** 2)
 
 
+def centre_box_dist(u, front, depth):
+    """[B, N, N] the distance from unit i's centre to unit j's formation rectangle, m (0 inside it; the game's list of
+    units near another: a centre within a rectangle widened by a range)."""
+    br = u["b"] * DEG
+    fx, fz = torch.sin(br), torch.cos(br)
+    return _box_point_dist(u["x"][:, :, None], u["z"][:, :, None], u["x"][:, None, :], u["z"][:, None, :],
+                           fx[:, None, :], fz[:, None, :], depth[:, None, :] / 2, front[:, None, :] / 2)
+
+
 def rect_gap(x, z, b, front, depth):
     """[B, N, N] the signed distance between unit i's and unit j's formation rectangles, m: the shortest distance
     between their edges when apart, minus the least depth of their overlap when they overlap (the separating-axis

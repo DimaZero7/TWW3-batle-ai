@@ -4,6 +4,14 @@ and (--men) the men of a charge probe run's units from memory against the script
 
     python -m tools.nn.mem_probe [run folders...]      # default: the newest build/missile-probe/runs/* with mem rows
     python -m tools.nn.mem_probe --men [run folders...]   # default: the newest build/charge-probe/runs/* with men rows
+    python -m tools.nn.mem_probe --morale [run folders...]  # default: the newest build/morale-probe/runs/* with mem rows
+
+A morale probe run built with --mem (tools/nn/morale_probe.py plan mem) has mem_attach {status, bound} and every poll
+(0.1 s of battle) mem_morale {c, tick, cost, t, units = {name = {st, pts, tgt, n, ok, same, fx [id, points, ...], tm [id,
+value, until, ...], ct [enemy, side, ...], tim [surprise, waver, charge, rally], by [16 flag bytes], uf {field: value},
+mp, ms, w, r, s, sn}}} (src/apps/mem/morale.lua; the script's CCO MoralePercent / MoraleState and flags read in the same
+callback); morale_check: the points against MoralePercent (mp x base = points, base = target - the effects' sum), the
+state against the script's flags, and every effect seen: its number, the game's name (EFFECT), its points, where.
 
 A charge probe run built with --mem has mem_attach {status, bound} and every poll (0.1 s of battle) mem_men {c, tick,
 tick_end, cost, t, units = {name = {n, rows (MAN fields a man, flat), sn, sx, sz}}, new = [[id, unit, address]]}
@@ -42,6 +50,21 @@ RUNS = project.BUILD / "missile-probe" / "runs"
 MEN_RUNS = project.BUILD / "charge-probe" / "runs"
 OUT = project.BUILD / "mem" / "projectiles.json"
 MEN_OUT = project.BUILD / "mem" / "men.json"
+MORALE_RUNS = project.BUILD / "morale-probe" / "runs"
+MORALE_OUT = project.BUILD / "diag_mem" / "morale" / "morale.json"
+# The morale effects by their number in a unit's list (the game's own name table of the effects, read from the program:
+# R-work notes/mem/morale.md); the points of each are the database's _kv_morale rows (config/nn/game_rules.json)
+EFFECT = ("none", "army_supported", "general_nearby", "general_rallying_nearby", "general_alive", "winning", "kills",
+          "flanks_secure", "fortification", "fortification_breach", "settlement", "settlement_plaza", "on_the_hill",
+          "enemy_routing", "overwhelming_friendly_units", "charging", "inspired", "inspired_by_unit_ability",
+          "rallied_by_unit_ability", "by_ground_type", "num_positive", "army_destruction", "general_recently_died",
+          "general_dead", "general_fled_recently", "losing", "melee_contact", "flank_attacked", "rear_attacked",
+          "flanks_exposed_single", "flanks_exposed_multiple", "fatigue_tired", "fatigue_very_tired", "fatigue_exhausted",
+          "casualties", "recent_casualties", "extended_casualties", "damaged_by_artillery", "attacked_by_artillery",
+          "attacked_by_projectile", "under_friendly_fire", "fighting_cavalry", "friends_routing", "enemy_numbers",
+          "surprised", "frightened_horses", "fear_enemy_unit", "discouraged_by_unit_ability", "projectiles_overhead",
+          "night_battle_unprepared", "enemy_controls_land", "settlement_destruction", "concerned_by_ground_type",
+          "terror_enemy_unit", "immunity_terror")
 # a man's row from memory (src/apps/mem/entities.lua M.ROW)
 MAN = ("id", "live", "x", "z", "y", "vx", "vz", "face", "hp", "anim", "mode", "react", "mark", "fit", "flags", "brace",
        "speed", "tgt", "tgt2", "carried", "chg")
@@ -316,13 +339,167 @@ def men_check(men):
             "polls_spanning_ticks": drift, "errors": men["errors"][:10], "discover": men["discover"]}
 
 
+def effect_name(i):
+    return EFFECT[i] if 0 <= i < len(EFFECT) else f"effect_{i}"
+
+
+def load_morale(run_dir):
+    """{run, cfg, attach, bound, go_ms, polls [{t (s from the go), tick, cost, units {name: row}}], errors} of one
+    morale probe run with mem rows."""
+    run_dir = Path(run_dir)
+    cfg = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))["config"]
+    out = {"run": run_dir.name, "cfg": cfg, "attach": None, "bound": None, "go_ms": None, "polls": [], "errors": []}
+    for r in rows(run_dir):
+        ev = r.get("event")
+        if ev == "mem_attach":
+            out["attach"], out["bound"] = r.get("status"), r.get("bound")
+        elif ev == "probe_go":
+            out["go_ms"] = r["model_ms"]
+        elif ev == "mem_morale":
+            out["polls"].append({"t": float(r.get("t", r["model_ms"])) / 1000, "tick": r.get("tick"),
+                                 "cost": r.get("cost"), "units": r.get("units") or {}})
+            out["errors"] += list(r.get("errors") or [])
+    g = (out["go_ms"] or 0) / 1000
+    for p in out["polls"]:
+        p["t"] = round(p["t"] - g, 2)
+    return out
+
+
+def _pairs(xs, k=2):
+    xs = list(xs.values()) if isinstance(xs, dict) else list(xs or [])
+    return [tuple(xs[i:i + k]) for i in range(0, len(xs) - k + 1, k)]
+
+
+def unit_roles(cfg):
+    """{unit name: (lane, kind, role, fearless)} of a morale probe run's lanes."""
+    return {un["name"]: (ln["name"], ln.get("kind"), un["role"], bool(un.get("fearless")))
+            for ln in cfg.get("lanes", []) for un in ln["units"]}
+
+
+def morale_check(mor):
+    """The morale from memory against the script and the effects seen (module doc)."""
+    roles = unit_roles(mor["cfg"])
+    per = {}
+    effects = {}
+    for p in mor["polls"]:
+        for name, u in p["units"].items():
+            lane, kind, role, fearless = roles.get(name, (None, None, None, None))
+            row = per.setdefault(name, {"lane": lane, "kind": kind, "role": role, "fearless": fearless, "polls": 0,
+                                        "list_ok": 0, "same": 0, "mp_polls": 0, "mp_equal": 0, "mp_err_max": 0.0,
+                                        "base": {}, "states": {}, "flag_polls": 0, "flag_equal": 0})
+            row["polls"] += 1
+            row["same"] += int(u.get("same", 0))
+            fx = _pairs(u.get("fx"))
+            if not u.get("ok"):
+                continue
+            row["list_ok"] += 1
+            base = int(u["tgt"]) - sum(v for _, v in fx)
+            row["base"][base] = row["base"].get(base, 0) + 1
+            key = f"{u['st']}:{u.get('ms')}"
+            row["states"][key] = row["states"].get(key, 0) + 1
+            # the script's flags against the state: wavering 5, routing 6 / shattered 7
+            if u.get("w") is not None and u.get("r") is not None:
+                w, r = bool(u["w"]), bool(u["r"])
+                row["flag_polls"] += 1
+                row["flag_equal"] += int((w == (u["st"] == 5)) and (r == (u["st"] in (6, 7))))
+            mp = u.get("mp")
+            if mp is not None and base > 0:
+                err = abs(float(mp) - u["pts"] / base)
+                row["mp_polls"] += 1
+                row["mp_equal"] += int(err < 6e-4)
+                row["mp_err_max"] = max(row["mp_err_max"], err)
+            for i, v in fx:
+                e = effects.setdefault(int(i), {"name": effect_name(int(i)), "values": {}, "units": set(), "polls": 0})
+                e["values"][int(v)] = e["values"].get(int(v), 0) + 1
+                e["units"].add(f"{lane}:{kind}:{role}")
+                e["polls"] += 1
+    for e in effects.values():
+        e["units"] = sorted(e["units"])
+    mp_polls = sum(r["mp_polls"] for r in per.values())
+    flag_polls = sum(r["flag_polls"] for r in per.values())
+    cost = [p["cost"] for p in mor["polls"] if p.get("cost") is not None]
+    return {"run": mor["run"], "attach_ok": bool((mor["attach"] or {}).get("ok")), "bound": mor["bound"],
+            "polls": len(mor["polls"]), "errors": mor["errors"][:10], "units": per,
+            "mp_share": sum(r["mp_equal"] for r in per.values()) / max(1, mp_polls), "mp_polls": mp_polls,
+            "flag_share": sum(r["flag_equal"] for r in per.values()) / max(1, flag_polls), "flag_polls": flag_polls,
+            "list_ok_share": sum(r["list_ok"] for r in per.values()) / max(1, sum(r["polls"] for r in per.values())),
+            "effects": {f"{i}:{e['name']}": {k: e[k] for k in ("values", "units", "polls")}
+                        for i, e in sorted(effects.items())},
+            "cost_ms_median": float(np.median(cost)) if cost else None}
+
+
+def morale_series(mor, name):
+    """{t, st, pts, tgt, mp, ok, w, r, fx {effect name: [points per poll; None where the list was not read]}, tm, tim,
+    uf {field: [..]}} of one unit."""
+    out = {"t": [], "st": [], "pts": [], "tgt": [], "mp": [], "ok": [], "w": [], "r": [], "fx": {}, "tm": [], "tim": [],
+           "uf": {}}
+    n = 0
+    for p in mor["polls"]:
+        u = p["units"].get(name)
+        if u is None:
+            continue
+        out["t"].append(p["t"])
+        for k in ("st", "pts", "tgt", "mp", "ok", "w", "r"):
+            out[k].append(u.get(k))
+        seen = {}
+        for i, v in _pairs(u.get("fx")):
+            seen[effect_name(int(i))] = seen.get(effect_name(int(i)), 0) + v
+        for k in set(out["fx"]) | set(seen):
+            out["fx"].setdefault(k, [0] * n).append(seen.get(k, 0) if u.get("ok") else None)
+        out["tm"].append(_pairs(u.get("tm"), 3))
+        out["tim"].append(list(u["tim"].values()) if isinstance(u.get("tim"), dict) else u.get("tim"))
+        for k, v in (u.get("uf") or {}).items():
+            out["uf"].setdefault(k, [None] * n).append(v)
+        for k in out["uf"]:
+            if len(out["uf"][k]) < n + 1:
+                out["uf"][k].append(None)
+        n += 1
+    return out
+
+
+def spans(t, on):
+    """[(from, to)] the runs of True in `on` over the times t."""
+    out, start = [], None
+    for ti, x in zip(t, on):
+        if x and start is None:
+            start = ti
+        if not x and start is not None:
+            out.append((start, ti))
+            start = None
+    if start is not None:
+        out.append((start, t[-1]))
+    return out
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runs", nargs="*", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--men", action="store_true", help="the men of a charge probe run (module doc)")
+    parser.add_argument("--morale", action="store_true", help="the morale of a morale probe run (module doc)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
+    if args.morale:
+        runs = args.runs or [p for p in sorted(MORALE_RUNS.glob("*")) if has_mem(p)][-1:]
+        res = []
+        for r in runs:
+            mor = load_morale(r)
+            chk = morale_check(mor)
+            chk["series"] = {name: morale_series(mor, name) for name in chk["units"]}
+            res.append(chk)
+            print(f"{chk['run']}: attach {chk['attach_ok']}, polls {chk['polls']}, list ok {chk['list_ok_share']:.4f}, "
+                  f"MoralePercent = points / base {chk['mp_share']:.4f} of {chk['mp_polls']}, flags = state "
+                  f"{chk['flag_share']:.4f} of {chk['flag_polls']}, cost ms median {chk['cost_ms_median']}, "
+                  f"errors {chk['errors']}")
+            for name, row in chk["units"].items():
+                print("  ", name, row)
+            for k, e in chk["effects"].items():
+                print("  ", k, e)
+        out = args.out or MORALE_OUT
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(res, indent=1, default=float), encoding="utf-8")
+        print(out)
+        return 0
     if args.men:
         runs = args.runs or [p for p in sorted(MEN_RUNS.glob("*")) if has_mem(p)][-1:]
         res = [men_check(load_men(r)) for r in runs]

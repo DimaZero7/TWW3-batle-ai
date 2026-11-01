@@ -216,14 +216,34 @@ def strategic_value(u, params):
     return (u["cp_fixed"] + u["cp_missile"] * share) * u["hp"].clamp(0, 1)
 
 
-def strong_power(u, d, foes, friends, params):
-    """[B, N] the 'combat power' of the enemies around a unit (morale.strong_enemy, rule "balance"):
-    k x E / F, E = the standing enemies' strategic values, F = its own + its standing friends', each weighted by
-    max(0, 1 - distance / reach_m) (centre to centre; the unit itself at full weight). foes / friends [B, N, N]:
-    the pairs to count (standing, alive; friends without the unit itself). Measured: config/nn/sim.json
-    morale.strong_enemy.why."""
+def round_away(x):
+    """The game's rounding of a morale effect's points (the program's float -> int: x + 0.5 truncated above 0, x - 0.5
+    below - half away from zero; torch.round would take 2.5 to 2)."""
+    return torch.where(x >= 0, torch.floor(x + 0.5), torch.ceil(x - 0.5))
+
+
+def strong_power(u, d, foes, friends, params, gap=None):
+    """[B, N] the 'combat power' of the enemies around a unit (morale.strong_enemy):
+    rule "balance" - k x E / F, E = the standing enemies' strategic values, F = its own + its standing friends', each
+    weighted by max(0, 1 - distance / reach_m) (centre to centre; the unit itself at full weight; measured: config/nn/
+    sim.json morale.strong_enemy.why);
+    rule "code" (the game's program, R-work notes/mem/morale.md; gap [B, N, N] the formations' rectangle distance, m) -
+    E / F with each unit's strength truncated to a whole number, every enemy and friend within neighbour_effect_range
+    (120 m) of the unit's rectangle weighted 2 - 1.6 x clamp(gap, 0.3 R, R) / R (R = 120 m: 1.52 up to 36 m, 0.4 at
+    120 m), the unit itself at 1; an enemy counts only if its run speed is above speed_ratio (0.75) of the unit's.
+    foes / friends [B, N, N]: the pairs to count (standing, alive; friends without the unit itself)."""
     se = params.sim["morale"]["strong_enemy"]
     v = strategic_value(u, params)
+    if se.get("rule") == "code":
+        R = float(params.morale["neighbour_effect_range"])
+        g = gap.clamp(min=0)
+        near = g <= R
+        w = 2.0 - 1.6 * g.clamp(0.3 * R, R) / R
+        vj = torch.floor(v)[:, None, :] * w
+        foes = foes & near & (u["run"][:, None, :] > float(se["speed_ratio"]) * u["run"][:, :, None])
+        enemy = torch.where(foes, vj, torch.zeros_like(vj)).sum(2)
+        own = torch.floor(v) + torch.where(friends & near, vj, torch.zeros_like(vj)).sum(2)
+        return torch.where(own >= 1, enemy / own.clamp(min=1), torch.zeros_like(own))
     fall = (1 - d / float(se["reach_m"])).clamp(min=0)
     vj = v[:, None, :] * fall
     if se.get("speed_ratio") is not None:
@@ -236,13 +256,15 @@ def strong_power(u, d, foes, friends, params):
     return float(se["k"]) * enemy / own.clamp(min=1e-6)
 
 
-def strong_points(power, R):
+def strong_points(power, R, whole=False):
     """[B, N] the database's strong-enemy penalty: enemy_morale_penalty_value_min (-3) at combat power
     enemy_morale_penalty_combat_power_min (4), linear to value_max (-24) at combat_power_max (32), held beyond;
-    0 below the minimum."""
+    0 below the minimum. whole (rule "code"): rounded as the game rounds it (round_away)."""
     lo, hi = R["enemy_morale_penalty_combat_power_min"], R["enemy_morale_penalty_combat_power_max"]
     vlo, vhi = R["enemy_morale_penalty_value_min"], R["enemy_morale_penalty_value_max"]
     pts = vlo + (power.clamp(lo, hi) - lo) * ((vhi - vlo) / (hi - lo))
+    if whole:
+        pts = torch.where(power < hi, round_away(pts), torch.full_like(pts, float(vhi)))
     return torch.where(power >= lo, pts, torch.zeros_like(pts))
 
 
@@ -312,6 +334,11 @@ def terms(u, ctx, params):
                                                                       R["max_routing_enemies_to_consider"])
         out["routing_friends"] = R["routing_friends_effect_weighting"] * net.clamp(max=0)
         out["routing_enemies"] = R["routing_enemies_effect_weighting"] * net.clamp(min=0)
+        if cal["routing_net"].get("whole"):
+            # (morale.routing_net.whole) the points rounded as the game rounds them (round_away): one routing enemy
+            # +3, two +5, three +8 (the game's memory, build/diag_mem/morale: +3 for one), not 2.5 / 5 / 7.5
+            out["routing_friends"] = round_away(out["routing_friends"])
+            out["routing_enemies"] = round_away(out["routing_enemies"])
     out["under_fire"] = torch.where(ctx["under_fire"], R["ume_concerned_attacked_by_projectile"], 0.0)
     out["fatigue"] = torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
                                  torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
@@ -319,7 +346,8 @@ def terms(u, ctx, params):
     # scale -3 ... -24 by the combat power around the unit (strong_power / strong_points); else (ctx strong_enemy,
     # an enemy worth morale.strong_ratio times as much within 70 m) the database's enemy_morale_penalty_value_min.
     if ctx.get("strong_power") is not None:
-        out["strong_enemy"] = strong_points(ctx["strong_power"], R)
+        out["strong_enemy"] = strong_points(ctx["strong_power"], R,
+                                            whole=(cal.get("strong_enemy") or {}).get("rule") == "code")
     else:
         out["strong_enemy"] = torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
     # The charge (+15, the database's charge_bonus) in blocks of morale.charge.block_s (battle.py u chm_s).

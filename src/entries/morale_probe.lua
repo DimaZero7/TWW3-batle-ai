@@ -20,6 +20,11 @@
 -- effect's text), PercentHpLostRecently, moving fast, firing, and its active effects (fx: the phase
 -- keys of CCO ActiveEffectList, as the bridge's nn_effects). A lane also ends after max_s. The
 -- battle ends when every lane is done.
+-- config.mem (a probe built with --mem only; docs/ru/game/memreader.md): the morale of every lane unit from the game's
+-- memory (apps.mem.morale) - 'mem_attach' once (the checks, each unit bound or why not); from the go every MEM_POLL_MS
+-- of battle 'mem_morale' {c, tick, cost, t, units = {name = morale row (apps.mem.morale) + mp, ms (CCO MoralePercent,
+-- MoraleState), w, r, s (wavering, routing, shattered), sn (men alive) read by the script in the same callback}}
+-- of the running lanes' units.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -28,11 +33,14 @@ local orders = require('apps.orders.adapter')
 local facing = require('apps.orders.facing')
 local map = require('apps.map.adapter')
 local services = require('apps.bridge.services')
+local memmorale = require('apps.mem.morale')
 
 local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_morale_probe_tick'
+local MEM_TIMER = 'tww3_bai_morale_probe_mem'
+M.MEM_POLL_MS = 100
 M.TRIGGERS = {go = true, contact = true, rout = true, rally = true, waver = true, step = true}
 M.ACTIONS = {attack = true, attack_walk = true, shoot = true, move = true, move_walk = true, halt = true,
     stop_fire = true, shadow = true, ability = true, kill = true, ['end'] = true}
@@ -77,7 +85,10 @@ function M.main(bm, config, globals)
         row.model_ms = bm:time_elapsed_ms()
     end)
 
-    local function stop_timers() pcall(function() bm:remove_process(TIMER) end) end
+    local function stop_timers()
+        pcall(function() bm:remove_process(TIMER) end)
+        pcall(function() bm:remove_process(MEM_TIMER) end)
+    end
     local function fail(err)
         state.active = false
         state.finished = true
@@ -241,6 +252,34 @@ function M.main(bm, config, globals)
         if not busy then finish('completed') end
     end
 
+    -- (config.mem) the morale from memory every MEM_POLL_MS (module comment)
+    local function mem_poll()
+        if not (state.active and state.mem) then return end
+        local names = {}
+        for _, lane in ipairs(state.lanes) do
+            if lane.running then
+                for _, it in pairs(lane.roles) do names[#names + 1] = it.name end
+            end
+        end
+        if #names == 0 then return end
+        local okt, tick = pcall(state.mem.tick, names[1])
+        local d = state.mem.poll(names)
+        d.t, d.tick = now_ms(), okt and tick or nil
+        for name, row in pairs(d.units) do
+            local u = state.units[name] and state.units[name].unit
+            if u then
+                row.mp, row.ms = round(read(cco, u, 'MoralePercent'), 4), read(cco, u, 'MoraleState')
+                row.w = read(function() return u:is_wavering() end)
+                row.r = read(function() return u:is_routing() end)
+                row.s = read(function() return u:is_shattered() end)
+                row.sn = read(function() return u:number_of_men_alive() end)
+            end
+        end
+        local e = state.mem.errors()
+        if #e > 0 then d.errors = e end
+        emit('mem_morale', d)
+    end
+
     local function go()
         local now = now_ms()
         for _, lane in ipairs(state.lanes) do
@@ -251,6 +290,10 @@ function M.main(bm, config, globals)
         state.active = true
         guarded(tick)()
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
+        if state.mem then
+            mem_poll()
+            bm:repeat_callback(guarded(mem_poll), M.MEM_POLL_MS, MEM_TIMER)
+        end
         flush()
     end
 
@@ -319,6 +362,23 @@ function M.main(bm, config, globals)
         end
         state.batch = clock.batch_stamp() .. '-mprobe-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
         state.run_id = state.batch .. '-r1'
+        if config.mem then
+            local handle, status = memmorale.attach(_G.memreader_plus, config.mem)
+            local bound = {}
+            if handle then
+                for _, lane in ipairs(state.lanes) do
+                    for _, it in pairs(lane.roles) do
+                        if bound[it.name] == nil then
+                            local ok, info = handle.bind(it.name, it.unit)
+                            bound[it.name] = ok and info or {why = info}
+                        end
+                    end
+                end
+                handle.unhook()
+            end
+            state.mem = handle
+            emit('mem_attach', {status = status, bound = bound})
+        end
         emit('ready', {lanes = #state.lanes})
         flush()
         bm:register_phase_change_callback('Deployed', guarded(start))
