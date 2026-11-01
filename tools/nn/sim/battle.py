@@ -549,7 +549,12 @@ def step(st, orders, params=None, dt=None):
             # (contact.impact wave: the deferred blow is every man's in contact - the ranks behind wait too,
             # melee.strikes - not the front rank's alone)
             late = (d_share > 0).any(dim=2)
-    # (parts only with the comb: a hook in place of melee.strikes - the fighters lab - keeps the old call)
+    kcal = cal.get("kills") or {}
+    w_hp = bool(kcal.get("wound_hp")) and bool(kcal.get("wound_pool"))
+    if w_hp and parts is None:
+        parts = {}                           # (kills.wound_hp: melee.strikes fills the HP a hit on an unwounded man)
+    # (parts only with the comb or kills.wound_hp: a hook in place of melee.strikes - the fighters lab - keeps the old
+    # call)
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire,
                                                      late=late, **({"parts": parts} if parts is not None else {}))
     if big_on:
@@ -602,6 +607,11 @@ def step(st, orders, params=None, dt=None):
         else:
             swung = torch.where(d_pair, swing * d_share, swung)
     hp_melee = rate * dt + swung
+    if w_hp:
+        # (kills.wound_hp; melee.wound_hp) a fresh unit's men take the whole hit until the pool of its wounded is full
+        hp_melee, mhit_n = melee.wound_hp(u, hp_melee, mhit, parts["fresh"], F_men)
+    else:
+        mhit_n = mhit
     if big_on:
         # the impact's collision damage, and the knock of a large striker's hits on smaller men (impact.knock: the front
         # share lying from blows, by the game's mass ratio rule)
@@ -885,7 +895,7 @@ def step(st, orders, params=None, dt=None):
             ok = (hp > 0) & (per > 0) & torch.isfinite(hp) & torch.isfinite(per)
             lam = torch.where(ok, hp / torch.where(ok, per, torch.ones_like(per)), torch.zeros_like(hp))
             return torch.where(ok, torch.poisson(lam) * per, hp)
-        hp_melee = rolled(hp_melee, mhit)
+        hp_melee = rolled(hp_melee, mhit_n)
         hp_missile = rolled(hp_missile, shit)
     gun_hp = None
     if art_on:
@@ -952,6 +962,12 @@ def step(st, orders, params=None, dt=None):
         W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
         W_cap = own * (u["hp_man"] - hit_m).clamp(min=0)
         k_m = torch.minimum((W + D - W_cap).clamp(min=0), D) / hm
+        if w_hp:
+            # (kills.wound_hp) while the pool fills, the hits that kill an unwounded man outright are men (the game's
+            # memory, the knights' charge: the clanrats' wounded 30-56 HP till 6 s while a blow of 58-60 HP killed -
+            # not a pool filling first); their share of the HP: P(kill) x HP a man / the fresh hit
+            kap = (dm * parts["fresh_kill"] * hm[:, None, :] / parts["fresh"].clamp(min=1e-6)).sum(1) / D.clamp(min=1e-9)
+            k_m = torch.maximum(k_m, kap.clamp(0, 1) * D / hm)
         pool_k = dm / D.clamp(min=1e-9)[:, None, :] * k_m[:, None, :]
         shot_k = (dmg - dm - db_k) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit,
                                                                      cal["kills"]["exponent"])

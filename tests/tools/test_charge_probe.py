@@ -1206,3 +1206,15 @@ def test_monster_measure_counts_the_men_round_the_horror_and_its_regeneration():
     out = cp.monster_measure(lane)
     assert out["round_1s"] == [3, 3, 4]                       # within 1.0 / 1.5 / 2.5 m of its surface
     assert out["regen_hp_s"] == pytest.approx(6.0, abs=0.05)
+
+
+def test_the_memmelee_plan_two_pairs_fresh_and_battered_both_fighting_dense_men():
+    """build/diag_mem/melee: swordsmen -> clanrats and stormvermin -> spearmen, fresh and with the target at 30 %, both
+    fighting 60 s after the contact; the men from memory every 0.1 s all the fight."""
+    (b,) = cp.battles("memmelee")
+    assert [l["kind"] for l in b] == ["swords_clanrat_full", "svsh_spear_full", "swords_clanrat_t30", "svsh_spear_t30"]
+    assert all(l["mode"] == "attack_walk" and l["target_mode"] == "both" and l["fight_s"] == 60 for l in b)
+    assert [bool(l.get("damage")) for l in b] == [False, False, True, True]
+    assert b[2]["damage"]["t"] == {"method": "kill", "share": 0.7}
+    config, _, _ = cp.run_config("memmelee", 1)
+    assert config["men_after_s"] >= 60

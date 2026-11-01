@@ -316,6 +316,9 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           and at a walk, from a standstill, the target parked 300 m off - 1 battle of 2 lanes; the centre every 0.25 s,
           the soldiers' places every 0.5 s all the way. Table: cavalry [runs] (the speed each second, on 60-180 m, the
           men's own speeds);
+  memmelee   melee blow by blow from the game's memory (build/diag_mem/melee; a probe with --mem): swordsmen ->
+          clanrats, stormvermin (sword and shield) -> Empire spearmen, each pair fresh and with the target at 30 %,
+          both sides fighting (attack at a walk from 3 m), 60 s after the contact; every man every 0.1 s - 1 battle;
   cavcharge  the Empire Knights' charge into infantry standing still (build/diag_cav/mechanic.md M6-M9, sim_gap.md 1):
           an attack at a run from 80 m on clanrats (sword and shield: no charge defence), clanrat spearmen and
           stormvermin with halberds (both braced, charge defence v large and charge reflection), held (never ordered)
@@ -522,7 +525,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memmelee", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -757,6 +760,8 @@ TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 de
 # first men 1 s after the contact (does the game tell a man knocked down? the manfields plan found Position only)
 KNIGHTS = "wh_main_emp_cav_empire_knights"
 CAVRUN = {"leg_m": 200, "gap_m": 300, "a_w": 45, "max_s": {True: 60, False: 125}, "band_m": (60, 180)}
+# the memmelee plan: the pairs (attacker, target), the battered target's men killed before the go (share), the fight
+MEMMELEE = {"pairs": (("swords", "clanrat"), ("svsh", "spear")), "cut": 0.7, "gap_m": 3, "fight_s": 60, "max_s": 80}
 CAVCHARGE = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "men_after_s": 15,
              "targets": (("clanrat", "no_defence"), ("cspear", "spears_braced"),
                          ("wh2_main_skv_inf_stormvermin_0", "halberds_braced")),
@@ -1069,6 +1074,14 @@ def battles(plan):
                          steps=[{"at_s": 1, "kind": "move", "dx": 0, "dz": -c["leg_m"], "run": run}],
                          max_s=c["max_s"][run], men_all_s=c["max_s"][run], kind="run" if run else "walk")
                     for run in (True, False)])
+    elif plan == "memmelee":
+        # (build/diag_mem/melee) the blow of a man: fresh pairs and the target at 30 % (a battered unit), both fighting
+        g = MEMMELEE
+        def mm(a, t, cut):
+            extra = {"damage": {"t": {"method": "kill", "share": g["cut"]}}} if cut else {}
+            return lane(a, t, "attack_walk", "both", gap_m=g["gap_m"], fight_s=g["fight_s"], max_s=g["max_s"],
+                        kind=f"{a}_{t}_{'t30' if cut else 'full'}", **extra)
+        out.append([mm(a, t, cut) for cut in (False, True) for a, t in g["pairs"]])
     elif plan == "cavcharge":
         # the knights charge (attack at a run from gap_m: the last 40 m at their charge speed) held infantry, 30 m on 30 m
         c = CAVCHARGE
@@ -1778,6 +1791,9 @@ def run_config(plan, index):
         config.update(men_ms=1000, men_after_s=130, men_near_m=80)
     if plan == "cavrun":
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=0, men_near_m=0)
+    if plan == "memmelee":
+        # the men from memory every 0.1 s all the fight (dense to men_after_s after the contact)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=MEMMELEE["fight_s"] + 5, men_near_m=60)
     if plan == "cavcharge":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
     if plan == "cavcheck":

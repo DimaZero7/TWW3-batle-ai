@@ -109,6 +109,69 @@ def per_hit(base, ap, armour, hp_man, resist=0.0, single=None):
     return eff if single is None else torch.where(single, mu, eff)
 
 
+def fresh_hit(base, ap, armour, hp_man, resist=0.0, single=None):
+    """HP a hit takes from an unwounded man: E[min(X, HP a man)], X the hit's HP before his health caps it - the
+    armour-piercing part whole, the base part less the armour roll U(0.5, 1) x armour % (uniform between per_hit's
+    lo and hi; their mean per_hit's mu). per_hit's HP a hit is the long fight's mean, each man cut down in E[N] blows
+    (the killing blow's surplus lost); this is the first blow on a man, whose surplus nothing loses (kills.wound_hp:
+    the game's memory, build/diag_mem/melee: the HP of a hit = min(X, the struck man's HP) blow by blow). single: a lone
+    man - his health is one pool, the mean (as per_hit)."""
+    keep = 1 - torch.as_tensor(resist)
+    a = (torch.as_tensor(armour) / 100).clamp(min=0)
+    lo = ((ap + base * (1 - a).clamp(min=0)) * keep).clamp(min=1)
+    hi = ((ap + base * (1 - a / 2).clamp(min=0)) * keep).clamp(min=1)
+    mu = ((ap + base * (1 - armour_cut(armour))) * keep).clamp(min=1)
+    h = torch.as_tensor(hp_man, dtype=lo.dtype)
+    w = (hi - lo).clamp(min=1e-6)
+    part = ((h - lo) * (h + lo) / 2 + h * (hi - h)) / w
+    r = torch.where(h >= hi, mu, torch.where(h <= lo, h.expand_as(lo), part))
+    r = torch.minimum(r, mu)
+    return r if single is None else torch.where(single, mu, r)
+
+
+def fresh_kill(base, ap, armour, hp_man, resist=0.0, single=None):
+    """P(a hit kills an unwounded man outright): P(X >= HP a man), X uniform between per_hit's lo and hi (fresh_hit);
+    0 for a lone man (one pool of health)."""
+    keep = 1 - torch.as_tensor(resist)
+    a = (torch.as_tensor(armour) / 100).clamp(min=0)
+    lo = ((ap + base * (1 - a).clamp(min=0)) * keep).clamp(min=1)
+    hi = ((ap + base * (1 - a / 2).clamp(min=0)) * keep).clamp(min=1)
+    h = torch.as_tensor(hp_man, dtype=lo.dtype)
+    w = hi - lo
+    q = torch.where(w > 1e-6, ((hi - h) / w.clamp(min=1e-6)).clamp(0, 1), (lo >= h).to(lo.dtype))
+    return q if single is None else torch.where(single, torch.zeros_like(q), q)
+
+
+def wound_hp(u, hp, hit, fresh, F_men):
+    """kills.wound_hp (with kills.wound_pool; battle.py): the HP the blows take [B, N, N] (striker, struck) and their HP
+    a hit, when the struck unit's wounded are fewer than the pool's steady level. The game takes a hit's HP up to the
+    struck man's health (min(X, his HP): the game's memory, build/diag_mem/melee - 1930 strikes, the rule's HP a hit
+    with the struck man's HP 19.2-22.7 against the game's 19.3-22.4); per_hit's HP a hit hp / E[N] is the steady mean,
+    the killing blow's surplus lost at every man. A unit coming fresh into a fight has no wounded: its men take the whole
+    hit (fresh_hit) until they are cut down. Kept as the wound pool's own bookkeeping (battle.py kills.wound_pool: the
+    pool W of the living's wounds fills to W* = the unit's own men in contact x (HP a man - the hit) before a blow kills):
+    the surplus of the killing blows is lost only at the kills, so the HP taken D and the kills K x HP a man solve
+    D = H x fresh - K x HP a man x (fresh / hit - 1) with K x HP a man = clamp(W + D - W*, 0, D): D = the old
+    H x hit once the pool is full, H x fresh while W + D stays below W*, between them D = H hit + (W* - W)(1 - hit / fresh).
+    H: the hits (hp / hit). A lone man (a lord) is one pool: unchanged. Returns (hp, hit) - the hits' count kept."""
+    hm = u["hp_man"].clamp(min=1e-6)
+    ratio = (fresh / hit.clamp(min=1e-6)).clamp(min=1.0)
+    raw = hp * ratio
+    D, R = hp.sum(1), raw.sum(1)
+    hit_m = (hp * hit).sum(1) / D.clamp(min=1e-9)
+    own = F_men.sum(2)
+    own = torch.where(own > 0, own, F_men.sum(1)).clamp(max=u["men"].clamp(min=0))
+    W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
+    gap = (own * (hm - hit_m).clamp(min=0) - W).clamp(min=0)
+    Dn = D + gap * (1 - D / R.clamp(min=1e-9))
+    Dn = torch.minimum(torch.maximum(Dn, D), R)
+    room = R - D
+    extra = torch.where((u["men0"] > 1) & (room > 1e-9), Dn - D, torch.zeros_like(D))
+    hp_new = hp + (raw - hp) / room.clamp(min=1e-9)[:, None, :] * extra[:, None, :]
+    hit_new = torch.where(hp > 0, hit * hp_new / hp.clamp(min=1e-12), hit)
+    return hp_new, hit_new
+
+
 def kill_share(hp_man, hit, exponent):
     """Men lost per man's worth of HP lost: 1 when a hit kills, less when blows only wound."""
     n = (hp_man / hit.clamp(min=1e-6)).clamp(min=1)
@@ -393,7 +456,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     (contact.first_strike_rank); late [B, N] (with first): large chargers whose front rank's first blow comes later, when
     the men they knocked down get up (impact.deferred, contact.impact ride_in) - their swing is their front rank too.
     parts (a dict, contact.impact wave comb): filled with s_front / s_rear [B, N, N], the shares of F of a ride-in
-    charger's front rank and ranks behind (late's swing is then every man's in contact: battle.py weighs the cohorts)."""
+    charger's front rank and ranks behind (late's swing is then every man's in contact: battle.py weighs the cohorts);
+    and fresh / fresh_kill [B, N, N], the HP a hit on an unwounded man and the chance it kills him outright (fresh_hit,
+    fresh_kill; kills.wound_hp)."""
     B = params.battle
     cal = params.sim["melee"]
     cc = params.sim["contact"]
@@ -863,6 +928,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     hit = per_hit((dmg + extra * share) * reflect / div, (ap + extra * (1 - share)) * reflect / div,
                   u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal),
                   single=single_j)
+    if parts is not None:
+        # (kills.wound_hp, battle.py) the HP a hit on an unwounded man
+        args = ((dmg + extra * share) * reflect / div, (ap + extra * (1 - share)) * reflect / div,
+                u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal))
+        parts["fresh"] = fresh_hit(*args, single=single_j)
+        parts["fresh_kill"] = fresh_kill(*args, single=single_j)
     # Blows a second a fighting man: the interval runs after a hit, a miss costs melee.miss_s (build/hitchance);
     # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).
     interval = u["interval"][:, :, None].clamp(min=1e-6)
