@@ -598,8 +598,9 @@ def step(st, orders, params=None, dt=None):
     if d_pair is not None:
         # (contact.impact strike_first, impact.strike_first: the front rank's swing lands at the landing too - its lances
         # reach the men before the bodies touch; the deferred share is the ranks behind's, melee.strikes)
-        if d_front is not None and parts:
-            # (comb) each cohort's share of every man's blow (melee.strikes parts)
+        if d_front is not None and parts and "s_rear" in parts:
+            # (comb) each cohort's share of every man's blow (melee.strikes parts; without melee.swing_interval the comb's
+            # shares are not computed: the strike_first rule below)
             cohort = parts["s_rear"] * d_share + parts["s_front"] * d_front
             swung = torch.where(d_pair, swing * cohort + torch.where(first_pair, swing, torch.zeros_like(swing)), swung)
         elif impact.strike_first(params):
@@ -607,9 +608,20 @@ def step(st, orders, params=None, dt=None):
         else:
             swung = torch.where(d_pair, swing * d_share, swung)
     hp_melee = rate * dt + swung
+    own_k = None
+    if kcal.get("wound_face_cavalry") and "size_k" in u:
+        # (kills.wound_face_cavalry; the game's memory, build/diag_mem/cav2) the wounded pool of a unit struck by a horseman
+        # holds its men within the horses' reach, not only its own men striking (F): a knight stands at ~2 men, and the
+        # knights' blows land on fresh men all 13 s (the struck man's HP 55-60 at 1-10 s; the clanrats' wounded HP 300-800
+        # at 6-12 s against the twin's pool full at 500 from 6 s, its blows then the smoothed 30 HP against the game's
+        # 44-49); the men at the face: F / fighting_files (the twin 26-33 at 6-12 s, the memory's men within 3.15 m of a
+        # knight 27-55)
+        cav_on = (u["large"][:, :, None] & (u["size_k"][:, :, None] == 2) & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+                  & (hp_melee > 0)).any(1)
+        own_k = torch.where(cav_on, 1.0 / max(melee.files_share(cal["melee"]), 1e-6), torch.ones_like(u["men"]))
     if w_hp:
         # (kills.wound_hp; melee.wound_hp) a fresh unit's men take the whole hit until the pool of its wounded is full
-        hp_melee, mhit_n = melee.wound_hp(u, hp_melee, mhit, parts["fresh"], F_men)
+        hp_melee, mhit_n = melee.wound_hp(u, hp_melee, mhit, parts["fresh"], F_men, own_k=own_k)
     else:
         mhit_n = mhit
     if big_on:
@@ -966,8 +978,10 @@ def step(st, orders, params=None, dt=None):
         D = dm.sum(1)
         hit_m = (dm * mhit).sum(1) / D.clamp(min=1e-9)
         own = F_men.sum(2)                                   # its own men striking in contact
-        own = torch.where(own > 0, own, F_men.sum(1)).clamp(max=u["men"].clamp(min=0))   # (not striking back: the
-        # men striking it)
+        own = torch.where(own > 0, own, F_men.sum(1))      # (not striking back: the men striking it)
+        if own_k is not None:
+            own = own * own_k                                  # (kills.wound_face_cavalry: the men at the horses' face)
+        own = own.clamp(max=u["men"].clamp(min=0))
         W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
         W_cap = own * (u["hp_man"] - hit_m).clamp(min=0)
         k_m = torch.minimum((W + D - W_cap).clamp(min=0), D) / hm

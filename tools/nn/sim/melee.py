@@ -142,7 +142,7 @@ def fresh_kill(base, ap, armour, hp_man, resist=0.0, single=None):
     return q if single is None else torch.where(single, torch.zeros_like(q), q)
 
 
-def wound_hp(u, hp, hit, fresh, F_men):
+def wound_hp(u, hp, hit, fresh, F_men, own_k=None):
     """kills.wound_hp (with kills.wound_pool; battle.py): the HP the blows take [B, N, N] (striker, struck) and their HP
     a hit, when the struck unit's wounded are fewer than the pool's steady level. The game takes a hit's HP up to the
     struck man's health (min(X, his HP): the game's memory, build/diag_mem/melee - 1930 strikes, the rule's HP a hit
@@ -153,14 +153,18 @@ def wound_hp(u, hp, hit, fresh, F_men):
     the surplus of the killing blows is lost only at the kills, so the HP taken D and the kills K x HP a man solve
     D = H x fresh - K x HP a man x (fresh / hit - 1) with K x HP a man = clamp(W + D - W*, 0, D): D = the old
     H x hit once the pool is full, H x fresh while W + D stays below W*, between them D = H hit + (W* - W)(1 - hit / fresh).
-    H: the hits (hp / hit). A lone man (a lord) is one pool: unchanged. Returns (hp, hit) - the hits' count kept."""
+    H: the hits (hp / hit). A lone man (a lord) is one pool: unchanged. own_k [B, N] (kills.wound_face_cavalry, battle.py):
+    the pool's men x it. Returns (hp, hit) - the hits' count kept."""
     hm = u["hp_man"].clamp(min=1e-6)
     ratio = (fresh / hit.clamp(min=1e-6)).clamp(min=1.0)
     raw = hp * ratio
     D, R = hp.sum(1), raw.sum(1)
     hit_m = (hp * hit).sum(1) / D.clamp(min=1e-9)
     own = F_men.sum(2)
-    own = torch.where(own > 0, own, F_men.sum(1)).clamp(max=u["men"].clamp(min=0))
+    own = torch.where(own > 0, own, F_men.sum(1))
+    if own_k is not None:
+        own = own * own_k
+    own = own.clamp(max=u["men"].clamp(min=0))
     W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
     gap = (own * (hm - hit_m).clamp(min=0) - W).clamp(min=0)
     Dn = D + gap * (1 - D / R.clamp(min=1e-9))
@@ -857,7 +861,13 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         up = _impact.up_mean(params) if imp_wave else (
             (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2)
         unbraced = ride & (u["kd_t"] >= up)
+        if _impact.brace_kept(params):
+            # (contact.impact brace_kept; the game's memory, build/diag_mem/cav2/brace_why.py) the men a charger rode in
+            # among keep the brace: standing, a man is braced in 15 526 of 15 526 polls within 4 m of a knight (walking
+            # too), out of it only while he gets up (0x11: 3 %) - and then he strikes nobody and is no target
+            unbraced = None
     cdef = cc.get("charge_defence") or {}
+    q_cd = ch_full = None
     if cdef.get("on") and "cdl" in u and "cd" in u:
         # Charge defence (the database's attributes charge_defense_vs_large / charge_defense; build/diag_cav/sim_gap.md 1,
         # R-work charge_module.md 7): a braced unit (standing: slower than melee.braced_speed - a standing unit is not in
@@ -870,7 +880,22 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             braced_j = braced_j & ~unbraced[:, None, :]
         vs = u["cd"][:, None, :] | (u["cdl"][:, None, :] & u["large"][:, :, None])
         ahead = pw["rel_j"].abs() <= float(cdef.get("front_deg", 45.0)) * geometry.DEG
-        ch = torch.where(braced_j & vs & ahead, torch.zeros_like(ch), ch)
+        cancel = braced_j & vs & ahead
+        crowd = cdef.get("crowd")
+        if crowd is not None:
+            # (contact.charge_defence crowd; the game's memory, build/diag_mem/cav2/brace_why.py) the program tests the
+            # 45 deg on each blow against the STRUCK MAN's facing, not the unit's front: once a large charger stands in
+            # melee with the unit (not its blow at the landing - the lances come from the front: 29.7 HP a hit on the
+            # braced clanrat spearmen, 26 without the charge), each man faces his own enemy and the knights round him
+            # strike from beside him too - crowd of the blows (the memory: 0.30 of 115 knights' blows on braced clanrat
+            # spearmen, 0.24 of 89 on braced stormvermin, 0.3-13 s) come from beyond 45 deg and keep the charge (HP a
+            # hit 44.4 / 33.5 against 48.2 / 35.0 with the charge, 30.6 / 17.8 within 45 deg against 26.1 / 15.4
+            # without); the chance and the HP a hit below are the two kinds of blow mixed (q_cd)
+            landing = ran[:, :, None] if ran is not None else torch.zeros_like(u["large"][:, :, None])
+            q_cd = torch.where(cancel & u["large"][:, :, None] & ~landing, torch.full_like(ch, float(crowd)),
+                               torch.zeros_like(ch))
+            ch_full = ch
+        ch = torch.where(cancel, torch.zeros_like(ch), ch)
     large_j = u["large"][:, None, :]
     bonus = torch.where(large_j, u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
     extra = u["charge_bonus"][:, :, None] * ch + bonus
@@ -934,6 +959,27 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
                 u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal))
         parts["fresh"] = fresh_hit(*args, single=single_j)
         parts["fresh_kill"] = fresh_kill(*args, single=single_j)
+    if q_cd is not None:
+        # (contact.charge_defence crowd, above) the blows that keep the charge: their chance and HP a hit, mixed in by
+        # their share q_cd - the chance is linear in the bonus, the HP a hit capped at a man's health is not
+        extra1 = u["charge_bonus"][:, :, None] * ch_full + bonus
+        if "dh" in pw:
+            extra1 = extra1 * hf
+        p1 = hit_chance(u["attack"][:, :, None] + extra1, defence, B["melee_hit_chance_normalisation_coefficient"],
+                        B["melee_hit_chance_base"], B["melee_hit_chance_min"], B["melee_hit_chance_max"],
+                        float(cal.get("hit_roll_offset", 0.0)))
+        args1 = ((dmg + extra1 * share) * reflect / div, (ap + extra1 * (1 - share)) * reflect / div,
+                 u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal))
+        hit1 = per_hit(*args1, single=single_j)
+        w0, w1 = (1 - q_cd) * p, q_cd * p1
+        pm = (w0 + w1).clamp(min=1e-9)
+        hit = torch.where(q_cd > 0, (w0 * hit + w1 * hit1) / pm, hit)
+        if parts is not None:
+            parts["fresh"] = torch.where(q_cd > 0, (w0 * parts["fresh"] + w1 * fresh_hit(*args1, single=single_j)) / pm,
+                                         parts["fresh"])
+            parts["fresh_kill"] = torch.where(q_cd > 0, (w0 * parts["fresh_kill"] + w1 * fresh_kill(*args1, single=single_j))
+                                              / pm, parts["fresh_kill"])
+        p = torch.where(q_cd > 0, w0 + w1, p)
     # Blows a second a fighting man: the interval runs after a hit, a miss costs melee.miss_s (build/hitchance);
     # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).
     interval = u["interval"][:, :, None].clamp(min=1e-6)
@@ -951,6 +997,25 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     else:
         recv = hp_j = None
         per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
+    cav_pair = None
+    cyc_cav = cal.get("cycle_cavalry") or {}
+    if cyc_cav.get("on") and "size_k" in u:
+        # (melee.cycle_cavalry; the game's memory, build/diag_mem/cav2/who.py) a horseman's blows on smaller men by the
+        # program's cycle (build/diag_cav/mechanic.md M37: one timer a man from his attack's start, a miss no sooner back):
+        # the knights within reach of a standing man that are ready strike at once - ready and in reach 7.8-16.6 at 2-4 s,
+        # 0.0-0.5 from 7 s on, every lane -, so a knight in reach strikes once an interval (the knights' strikes a second
+        # over those within 3.2 m 0.22 / 0.24 / 0.29 on clanrats / braced spearmen / stormvermin at 4-13 s, 1 / interval
+        # 0.20), not the infantry's "a miss costs miss_s" (0.30 / 0.43 / 0.49 at their chances). face_share: the knights
+        # that strike so, as a share of the knights at the face (within 4.55 m of an enemy man: the twin's F / fighting_files,
+        # 37-45 against the memory's 34-39) - the memory's strikes a second x the interval over the knights at the face,
+        # 4.2-13 s: 0.70 / 0.72 / 0.78 (build/diag_mem/cav2/facerate.py; those within 3.2 m of a standing man are 0.60 of
+        # the face, and new knights keep stepping into reach as others step out: 1.12-1.48 strikes an interval each)
+        cav_pair = (u["large"][:, :, None] & (u["size_k"][:, :, None] == 2) & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+                    & ~single_i & ~single_j)
+        cav_k = float(cyc_cav.get("face_share", ff)) / max(ff, 1e-6)
+        per_c = cycle_rate(p, interval, hit, u["hp_man"][:, None, :].expand_as(p), single_j, torch.zeros_like(p[:, :, :1]),
+                           cal.get("cycle") or {}) * cav_k
+        per_s = torch.where(cav_pair, per_c, per_s)
     if q_wrap is not None:
         # (melee.wrap) the wrap's share of i's blows on a target it meets front to front lands on the target's flank:
         # the man struck faces his own enemy, so the wrapping man strikes him from the side (the game's side of a blow
@@ -965,6 +1030,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             per_fl = cycle_rate(p_fl, interval, hit, hp_j, single_j, recv, cyc)
         else:
             per_fl = p_fl / (p_fl * interval + float(cal["miss_s"]))
+        if cav_pair is not None:
+            per_fl = torch.where(cav_pair, cycle_rate(p_fl, interval, hit, u["hp_man"][:, None, :].expand_as(p), single_j,
+                                                      torch.zeros_like(p[:, :, :1]), cal.get("cycle") or {}) * cav_k, per_fl)
         per_s = per_s * (1 - q) + per_fl * q
         p = p * (1 - q) + p_fl * q
     if cal.get("swing_interval") and "ran_in" in u and "contact_s" in u:
@@ -1028,9 +1096,17 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
                 # landing and the ranks behind that struck as they reached standing men strike again together, an interval
                 # later, comb_blows times (impact.deferred's cohorts, battle.py) - no steady rate for the pair till then
                 lo_r, hi_r = _impact.rear_window(u, params)
+                if _impact.front_reach(params):
+                    # (contact.impact wave front_reach; the game's memory, build/diag_mem/cav2/mix.py) after the lances the
+                    # front rank is no longer the men in reach: the ranks behind ride up beside it and the knights at the
+                    # face (F / fighting_files, the twin's 37-45 against the memory's 34-39 within 4.55 m of a man) stand
+                    # within the strike's reach of a standing man alike - the memory's share 0.55-0.65 of them, the front
+                    # rank's 0.64-0.81 (5.4-6.2 of its 9 knights): the front rank's men in reach are its files x
+                    # fighting_files (the twin's F / (F / fighting_files)), the rest of F the ranks behind
+                    s_front = s_front * ff
                 K = _impact.comb_blows(params)
                 h_front = K * interval
-                h_rear = hi_r[:, :, None] + (K - 1) * interval
+                h_rear = hi_r[:, :, None] + (_impact.comb_blows_rear(params) - 1) * interval
                 back = torch.where(rp, s_front * (t >= h_front).to(p.dtype) + (1 - s_front) * (t >= h_rear).to(p.dtype),
                                    back)
                 # the ranks behind that strike: the men of the charger in contact within the strike's reach - F, with the

@@ -13,7 +13,20 @@ from tools.nn.sim import battle, geometry, impact, melee, morale, scenario  # no
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
 
-P = load()
+
+
+def before_comb(params):
+    """The rules before the game's memory's comb (config/nn/sim.json impact_comb_why): the ride-in's second wave with the
+    recording's rise 1.1 s, the ridden-in men out of the brace, the whole charge cancelled by the unit's front, the miss
+    rule for horsemen, the wounded pool of the own men striking - the rules these tests check, still in the code behind
+    their switches (tests/tools/test_sim_cav_mem.py checks the comb's)."""
+    imp = dict(params.sim["contact"]["impact"], brace_kept=0, wave={"on": 1, "rise_s": 1.1})
+    cd = {k: v for k, v in params.sim["contact"]["charge_defence"].items() if k != "crowd"}
+    return (params.with_cal("contact", impact=imp, charge_defence=cd).with_cal("melee", cycle_cavalry={"on": 0})
+            .with_cal("kills", wound_face_cavalry=0))
+
+
+P = before_comb(load())
 R = P.battle
 KNIGHTS, DEMI, ROSE = ("wh_main_emp_cav_empire_knights", "wh_main_emp_cav_demigryph_knights_0",
                        "wh3_dlc25_emp_cav_knights_of_the_black_rose")

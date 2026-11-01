@@ -14,7 +14,9 @@ from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
 
 PROBE = json.loads((project.ROOT / "data/units/probe-units.json").read_text(encoding="utf-8"))["units"]
-P = dataclasses.replace(load(), units={**PROBE, **load().units})
+from tests.tools.test_sim_impact import before_comb  # noqa: E402
+
+P = before_comb(dataclasses.replace(load(), units={**PROBE, **load().units}))      # (the rules before the comb)
 KNIGHTS, DEMI = "wh_main_emp_cav_empire_knights", "wh_main_emp_cav_demigryph_knights_0"
 CSPEAR, CLANRATS, SVHALB = "wh2_main_skv_inf_clanrat_spearmen_0", "wh2_main_skv_inf_clanrats_1", \
     "wh2_main_skv_inf_stormvermin_0"

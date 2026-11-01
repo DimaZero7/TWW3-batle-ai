@@ -190,6 +190,17 @@ def comb_blows(params):
     return int((_cal(params).get("wave") or {}).get("comb_blows", 3))
 
 
+def comb_blows_rear(params):
+    """The ranks behind's blows the comb keeps together (contact.impact wave comb_blows_rear; absent: comb_blows): 1 - their
+    first blows alone, then the steady rate. The game's memory (build/diag_mem/cav2/ranks.py, rearfirst.py): the front rank's
+    lances are one moment, so its next blows come together (5 / 5.5 / 6 knights at 4.2-7 s, again at 10-13 s); the ranks
+    behind's first blows are spread over the knights' arrival (p10-p90 2.8-7.0 s on clanrats, 1.6-6.2 on braced clanrat
+    spearmen) and new knights keep reaching standing men (18-22.5 knights behind strike in 13 s, ~10 in the first wave), so
+    from then on their blows come as a flow: 3.4 / 3.3 / 2.7 a second at 4.2-7 / 7-10 / 10-13 s on clanrats, no gap."""
+    w = _cal(params).get("wave") or {}
+    return int(w.get("comb_blows_rear", w.get("comb_blows", 3)))
+
+
 def strike_first(params):
     """contact.impact strike_first (with ride_in and wave on; build/diag_cav/mechanic.md M36-M37, M39 1, 3, 4): the front
     rank of a large charger that rides in swings at the landing - its lance reaches the men before the bodies touch (the
@@ -200,11 +211,30 @@ def strike_first(params):
     return bool(c.get("strike_first")) and bool(c.get("ride_in")) and bool((c.get("wave") or {}).get("on"))
 
 
+def brace_kept(params):
+    """contact.impact brace_kept (with ride_in; absent: off): the men a large charger rode in among keep the brace - the
+    game's memory (build/diag_mem/cav2/brace_why.py, the cavcharge probe's 2 runs x 3 lanes, every target man within 4 m
+    of a knight 0.5-13 s after the contact): a standing man is braced in 15 526 of 15 526 polls, walking or not (own
+    speed > 0.1 m/s: 0.90 of all polls, 1.00 of the standing ones), out of it only while getting up (0x11: 0.03) and in
+    part lying (0xf: 0.83) - and those strike nobody and are no target (impact.up_share, the wave). So the ride-in takes
+    neither the charge defence nor the charge reflection nor the bracing of a new landing (ridden() never)."""
+    return bool(_cal(params).get("brace_kept")) and bool(_cal(params).get("ride_in"))
+
+
+def front_reach(params):
+    """contact.impact wave front_reach (with comb; absent: off): after the landing the front rank's men within the
+    strike's reach are its files x fighting_files, the rest of the men in reach (F) the ranks behind (melee.strikes'
+    comb; the game's memory, build/diag_mem/cav2/mix.py: the knights at the face - within 4.55 m of a man - stand within
+    3.2 m of a standing man alike, 0.55-0.65 of them, the front rank 5.4-6.2 of 9)."""
+    w = _cal(params).get("wave") or {}
+    return bool(w.get("front_reach")) and comb(params)
+
+
 def ridden(u, params):
     """[B, N] the front men a large charger rode in among are up and out of the brace (module doc, ride_in; False with it
-    off): from the mean getting-up time after the landing (knockdown_getting_up_delay_min / _max: 1.85 s) - lying, a man
-    keeps the brace he had (M26: a reaction freezes it)."""
-    if not _cal(params).get("ride_in"):
+    off, or with brace_kept): from the mean getting-up time after the landing (knockdown_getting_up_delay_min / _max:
+    1.85 s) - lying, a man keeps the brace he had (M26: a reaction freezes it)."""
+    if not _cal(params).get("ride_in") or brace_kept(params):
         return torch.zeros_like(u["r"])
     return (u["ride"] >= 0.5) & (u["kd_t"] >= up_mean(params))
 
@@ -298,10 +328,11 @@ def deferred(u, params, contact, dt):
         w = (hi - lo).clamp(min=1e-6)
         rear = torch.zeros_like(pair, dtype=t1.dtype)
         front = torch.zeros_like(rear)
-        for k in range(comb_blows(params)):
+        for k in range(max(comb_blows(params), comb_blows_rear(params))):
             a, b = lo + k * I, hi + k * I
-            rear = rear + (torch.minimum(t1, b) - torch.maximum(t1 - dt, a)).clamp(min=0) / w
-            if k >= 1:
+            if k < comb_blows_rear(params):
+                rear = rear + (torch.minimum(t1, b) - torch.maximum(t1 - dt, a)).clamp(min=0) / w
+            if 1 <= k < comb_blows(params):
                 front = front + ((t1 >= k * I) & (t1 - dt < k * I)).to(t1.dtype)
         zero = torch.zeros_like(rear)
         return pair, torch.where(pair, rear, zero), torch.where(pair, front, zero)
