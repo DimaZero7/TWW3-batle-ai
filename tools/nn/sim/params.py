@@ -330,12 +330,16 @@ def artillery_static(units, sim, effects_index, key):
     u = units[key]
     eng = u.get("engines") or {}
     m = u.get("missile") or {}
-    out = {"eng0": 0.0, "eng_hp": 0.0, "crew_k": 0.0, "fix_el": 0.0, "min_range": 0.0, "m_bvl": 0.0, "ex_r": 0.0,
+    out = {"eng0": 0.0, "eng_hp": 0.0, "crew_k": 0.0, "eng_r": 0.0, "eng_q": 1.0, "eng_h": 0.0, "fix_el": 0.0,
+           "min_range": 0.0, "m_bvl": 0.0, "ex_r": 0.0,
            "ex_d": 0.0, "ex_ap": 0.0, "ex_f": 0.0, "ex_v": 0.0, "ex_allies": False, "ex_magic": False, "ex_fx": -1,
            "c_rad": 0.0, "c_mom": 0.0, "p_magic": False, "central": False, "rl_add": 0.0}
     if not (sim.get("artillery") or {}).get("on") or not eng.get("n"):
         return out
-    out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1))
+    out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1),
+               # a gun's body (the engine's battle entity: radius, radii_ratio, height - the projectiles' hit box)
+               eng_r=float(eng.get("radius_m") or 0.0), eng_q=float(eng.get("radii_ratio") or 1.0),
+               eng_h=float(eng.get("height_m") or 0.0))
     if m:
         bl = m.get("blast") or {}
         out.update(fix_el=float(m.get("fixed_elevation") or 0.0) if m.get("trajectory") == "fixed" else 0.0,

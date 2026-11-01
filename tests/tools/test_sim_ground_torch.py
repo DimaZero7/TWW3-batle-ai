@@ -148,6 +148,17 @@ def wall(x0, x1, every=1.0, r=0.4, h=14.0):
             "r": np.full(n, r, np.float32), "h": np.full(n, h, np.float32)}
 
 
+def _low_line():
+    """P with terrain.trees.los off: the projectile's own rule on the low arc (the lob by the trunks: test_sim_memshot)."""
+    import copy
+    p = copy.deepcopy(P)
+    p.sim["terrain"]["trees"].pop("los", None)
+    return p
+
+
+P_LOW = _low_line()
+
+
 def keep_of(trunks, gap=100.0):
     mid = flat_map(trunks=trunks)
     st = scenario.build([army([(ARCHER, 0, 0, 90)], [(CLANRAT, gap, 0, 270)])], P)
@@ -155,7 +166,7 @@ def keep_of(trunks, gap=100.0):
     pw = geometry.pairwise(st.u, SP)
     tgt = torch.full_like(st.u["side"], -1, dtype=torch.int64)
     tgt[0, 0] = st.N // 2
-    k = ground.trunk_keep(st.u, pw, tgt, None, P)
+    k = ground.trunk_keep(st.u, pw, tgt, None, P_LOW)
     ground._LAYERS.clear()
     ground._DEV.clear()
     return float(k[0, 0]), st

@@ -221,6 +221,9 @@ STATIC = {
                   "crew, its guns fire (artillery.guns)"),
     "eng_hp": ("f", "health of one gun (its battle entity's hit_points + the unit's bonus_hit_points: 473 the Empire's)"),
     "crew_k": ("f", "the crew a gun needs to fire (engines.crew_per_engine: 3, the engine_type Generic_3_Crew)"),
+    "eng_r": ("f", "a gun's body radius, m (its battle entity's radius: 3.5 the Warp Lightning Cannon; 0 not artillery)"),
+    "eng_q": ("f", "a gun's body radii_ratio (across / along its facing: 0.5; 1 not artillery)"),
+    "eng_h": ("f", "a gun's body height, m (its battle entity's height: 4.5 the Warp Lightning Cannon)"),
     "fix_el": ("f", "the launch angle of a 'fixed' trajectory, degrees (the Mortar 50: it arcs over friends and hills, "
                     "its shells land after their flight; 0: not fixed)"),
     "min_range": ("f", "the projectile's minimum range, m: a target nearer, edge to edge, is not taken (0: none; given "

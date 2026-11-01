@@ -904,8 +904,17 @@ def step(st, orders, params=None, dt=None):
         # (artillery.guns_after); a unit without guns keeps all (share 0)
         gs = artillery.gun_share(u)
         keep_c = (1 - gs)[:, None, :]
-        gun_hp = (hp_melee + hp_missile).sum(1)
-        hp_melee, hp_missile = hp_melee * keep_c, hp_missile * keep_c
+        gsh = pen_info.get("gun_share")
+        if gsh is None:
+            gun_hp = (hp_melee + hp_missile).sum(1)
+            hp_melee, hp_missile = hp_melee * keep_c, hp_missile * keep_c
+        else:
+            # (artillery.gun_share "bodies") the projectiles' hits on the guns by their bodies (missile.battery: the
+            # pair's share, gsh), every other harm by the count; gun_hp is a share of gs below, so the missile part
+            # enters over gs
+            gun_m = (hp_missile * gsh).sum(1)
+            gun_hp = hp_melee.sum(1) + torch.where(gs > 0, gun_m / gs.clamp(min=1e-9), torch.zeros_like(gun_m))
+            hp_melee, hp_missile = hp_melee * keep_c, hp_missile * (1 - gsh)
         if hp_bomb is not None:
             gun_hp = gun_hp + hp_bomb.sum(1)
             hp_bomb, kills_bomb = hp_bomb * keep_c, kills_bomb * keep_c

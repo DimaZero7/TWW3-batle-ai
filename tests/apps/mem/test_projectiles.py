@@ -206,3 +206,39 @@ def test_one_missed_poll_is_not_a_new_projectile(lua):
     """)
     d = lua.globals().D
     assert len(d.spawn) == 1 and len(d.gone) == 0 and list(d.state[1].values())[:3] == [1, 3, 6]
+
+
+def test_tracked_projectile_leaves_its_last_place_and_spawn_hook_adds_a_field(lua):
+    # S.track: every poll reads a flying projectile's place; its gone row carries the last one (where it stopped: the
+    # game frees a done projectile within a tick). S.on_spawn's value is the spawn row's 15th field.
+    lua.execute("""
+        S = P.scanner(mr, L, 0)
+        S.track = true
+        S.on_spawn = function(p, st) if st == 2 then return {8, 42} end end
+        local list = MEM[MGR][L.mgr_active]
+        proj(1000, 0, 5, 0, 700, 800); list[1] = 1000
+        proj(1100, 2, 7, 0, 700, 800); list[2] = 1100
+        S.scan(MGR)
+        MEM[1000][L.p_time] = 0.5; MEM[1000][L.p_pos] = 30
+        S.scan(MGR)
+        list[1] = nil; list[2] = nil
+        S.scan(MGR); S.scan(MGR); S.scan(MGR)
+        D = S.drain()
+    """)
+    d = lua.globals().D
+    assert d.spawn[1][15] is None and list(d.spawn[2][15].values()) == [8, 42]
+    gone = {r[1]: list(r.values()) for r in d.gone.values()}
+    assert gone[1] == [1, 3, 30, 2, -5, 50, 1, 0, 0.5]       # the last place read (x 30 at flight time 0.5)
+    assert gone[2][:3] == [2, 3, 7]
+
+
+def test_untracked_gone_rows_stay_short(lua):
+    lua.execute("""
+        S = P.scanner(mr, L, 0)
+        proj(1000, 0, 5, 0, 700, 800); MEM[MGR][L.mgr_active] = {1000}
+        S.scan(MGR)
+        MEM[MGR][L.mgr_active] = {}
+        S.scan(MGR); S.scan(MGR); S.scan(MGR)
+        D = S.drain()
+    """)
+    assert [list(r.values()) for r in lua.globals().D.gone.values()] == [[1, 2]]

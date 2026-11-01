@@ -32,6 +32,10 @@
 -- {id, st, x, y, z, vx, vy, vz, t}; records: the new database records {rec, ptr, cat}; ammo: the ammo_left hook's
 -- calls {unit, ammo} (unit: the battle unit's address as text, ammo read from memory).
 -- handle.stats() -> the counters (memreader's hook_info of proj_update); handle.detach() removes both hooks.
+-- The scanner's two options (the charge probe's shots, apps.mem.hits): S.track - every poll the position of each
+-- flying projectile is read and kept, and its gone row carries the last one {id, c, x, y, z, vx, vy, vz, t} (where it
+-- stopped: the game frees a done projectile within a tick, so its state 7 is often never seen); S.on_spawn(p, st) -
+-- called for each new projectile, its value (if any) is the spawn row's 15th field (what a projectile 'in a man' is in).
 local M = {}
 
 local LYING = {[5] = true, [6] = true}
@@ -131,6 +135,15 @@ function M.scanner(mr, L, snapshot_max)
         return s
     end
 
+    -- (S.track) the last place seen of a projectile, and its gone row
+    function S.keep(rec, f)
+        rec.x, rec.y, rec.z, rec.vx, rec.vy, rec.vz = f.x, f.y, f.z, f.vx, f.vy, f.vz
+    end
+    function S.gone_row(rec, c)
+        if not (S.track and rec.x) then return {rec.id, c} end
+        return {rec.id, c, r1(rec.x), r1(rec.y), r1(rec.z), r1(rec.vx), r1(rec.vy), r1(rec.vz), r3(rec.t)}
+    end
+
     function S.scan(mgr)
         S.calls = S.calls + 1
         S.mgr = mgr
@@ -147,14 +160,20 @@ function M.scanner(mr, L, snapshot_max)
                 local t = nil
                 if rec and rec.st == DONE and st ~= DONE then
                     -- the slot was freed and reused for a new projectile within one tick
-                    S.gone[#S.gone + 1] = {rec.id, c}
+                    S.gone[#S.gone + 1] = S.gone_row(rec, c)
                     S.live[key], rec = nil, nil
                 end
+                local f_now = nil
                 if rec and st ~= DONE and not LYING[st] then
-                    t = mr.read_float(p, L.p_time)
+                    if S.track then
+                        f_now = read_full(p)
+                        t = f_now.t
+                    else
+                        t = mr.read_float(p, L.p_time)
+                    end
                     if rec.t and t + 1e-3 < rec.t then           -- the flight clock went back: a new projectile
-                        S.gone[#S.gone + 1] = {rec.id, c}
-                        S.live[key], rec = nil, nil
+                        S.gone[#S.gone + 1] = S.gone_row(rec, c)
+                        S.live[key], rec, f_now = nil, nil, nil
                     end
                 end
                 if not rec then
@@ -168,15 +187,24 @@ function M.scanner(mr, L, snapshot_max)
                             y = {L.s_feet + 4, 'float'}, z = {L.s_feet + 8, 'float'}})
                         if ok and feet then sx, sy, sz = r1(feet.x), r1(feet.y), r1(feet.z) end
                     end
-                    S.spawn[#S.spawn + 1] = {rec.id, c, f.st, r1(f.x), r1(f.y), r1(f.z), r1(f.vx), r1(f.vy), r1(f.vz),
+                    local row = {rec.id, c, f.st, r1(f.x), r1(f.y), r1(f.z), r1(f.vx), r1(f.vy), r1(f.vz),
                         r3(f.t), record_id(f.rp), sx, sy, sz}
+                    if S.on_spawn then
+                        local okw, w = pcall(S.on_spawn, p, f.st)
+                        if okw and w ~= nil then row[15] = w end
+                        if not okw and #S.errors < 20 then S.errors[#S.errors + 1] = 'on_spawn: ' .. tostring(w) end
+                    end
+                    S.spawn[#S.spawn + 1] = row
+                    if S.track then S.keep(rec, f) end
                 elseif st ~= rec.st then
                     local f = read_full(p)
                     S.state[#S.state + 1] = {rec.id, c, st, r1(f.x), r1(f.y), r1(f.z), r3(f.t)}
                     rec.st = st
                     rec.t = f.t
+                    if S.track then S.keep(rec, f) end
                 elseif t then
                     rec.t = t
+                    if f_now then S.keep(rec, f_now) end
                 end
                 rec.c = c
             end
@@ -189,7 +217,7 @@ function M.scanner(mr, L, snapshot_max)
             if rec.c ~= c then
                 rec.miss_c = rec.miss_c or c
                 if c - rec.miss_c + 1 >= M.MISS_POLLS then
-                    S.gone[#S.gone + 1] = {rec.id, rec.miss_c}
+                    S.gone[#S.gone + 1] = S.gone_row(rec, rec.miss_c)
                     S.live[key] = nil
                 end
             else

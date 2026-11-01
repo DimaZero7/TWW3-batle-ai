@@ -319,6 +319,13 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
   memmelee   melee blow by blow from the game's memory (build/diag_mem/melee; a probe with --mem): swordsmen ->
           clanrats, stormvermin (sword and shield) -> Empire spearmen, each pair fresh and with the target at 30 %,
           both sides fighting (attack at a walk from 3 m), 60 s after the contact; every man every 0.1 s - 1 battle;
+  memshot  what each projectile struck, from the game's memory (build/diag_mem/missile; a probe with --mem: the
+          projectiles with their last place and the body a projectile 'in a man' is in, the men every 0.1 s): battle 1
+          on the default field - archers -> the Warp Lightning Cannon 115 m, crossbowmen -> the Plagueclaw Catapult
+          140 m, slingers -> Empire Knights / Empire spearmen 100 m (held), the Ratling Gun -> a lone Gold Wizard /
+          swordsmen 12 m wide 100 m; battle 2 on the Kislev plains - archers -> clanrats (no shield) 100 m half on forest
+          and half on grass (3 sites: visible - under 85 % on forest), behind a 57 m forest strip, on grass; battle 3 the
+          ground plan's strip (57 / 11 / 7 m) and grass lanes again (clanrats with shields, 30 m wide); 60 s each.
   cavcharge  the Empire Knights' charge into infantry standing still (build/diag_cav/mechanic.md M6-M9, sim_gap.md 1):
           an attack at a run from 80 m on clanrats (sword and shield: no charge defence), clanrat spearmen and
           stormvermin with halberds (both braced, charge defence v large and charge reflection), held (never ordered)
@@ -525,7 +532,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memmelee", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -762,6 +769,23 @@ KNIGHTS = "wh_main_emp_cav_empire_knights"
 CAVRUN = {"leg_m": 200, "gap_m": 300, "a_w": 45, "max_s": {True: 60, False: 125}, "band_m": (60, 180)}
 # the memmelee plan: the pairs (attacker, target), the battered target's men killed before the go (share), the fight
 MEMMELEE = {"pairs": (("swords", "clanrat"), ("svsh", "spear")), "cut": 0.7, "gap_m": 3, "fight_s": 60, "max_s": 80}
+# the memshot plan (build/diag_mem/missile): battle 1 (shooter, target, gap m front to front, target width, kind) on a
+# 3 x 2 grid; battle 2 the Kislev plains sites (shooter x, z, target x, z; build/diag_mem/missile/find_sites.py: a
+# 40 x 10 m box half forest / half grass - the forest part's side across - the shooter on grass 100 m off, the line's
+# first 75 m open; the strip and grass sites of GROUND); the clanrats without shields (an arrow is not blocked)
+MEMSHOT = {"fire_s": 60,
+           "b1": (("archer", "wh2_main_skv_art_warp_lightning_cannon", 115, 30, "gun_warp"),
+                  ("xbow", "wh2_main_skv_art_plagueclaw_catapult", 140, 30, "gun_claw"),
+                  ("slinger", "wh_main_emp_cav_empire_knights", 100, 30, "knights"),
+                  ("slinger", "spear", 100, 30, "spears"),
+                  ("ratling", "goldwiz", 100, 5, "rat_lone"),
+                  ("ratling", "swords", 100, 12, "rat_w12")),
+           "b1_places": tuple((x, z) for z in (-250.0, 250.0) for x in (-300.0, 0.0, 300.0)),
+           "b2_target": "wh2_main_skv_inf_clanrats_0", "b2_w": 40,
+           "b2": {"edge_1": (-130.0, -460.6, -80, -374), "edge_2": (329.3, 287.3, 400, 358),
+                  "edge_3": (88.6, 359.9, -8, 334), "strip_57": (160.6, -366.1, 64, -392),
+                  "grass_1": (-217.4, -2.0, -304, 48)},
+           "b3": ("strip_57", "strip_11", "strip_7", "grass_1", "grass_2")}
 CAVCHARGE = {"gap_m": 80, "fight_s": 20, "a_w": 30, "t_w": 30, "decay_s": 13, "men_after_s": 15,
              "targets": (("clanrat", "no_defence"), ("cspear", "spears_braced"),
                          ("wh2_main_skv_inf_stormvermin_0", "halberds_braced")),
@@ -1106,6 +1130,8 @@ def battles(plan):
             return lane(KNIGHTS, "clanrat", "attack_run", "hold", gap_m=c["gap_m"], fight_s=c["fight_s"], kind=kind,
                         a_side=90, **common)
         out.append([cc(k) for k in c["kinds"]])
+    elif plan == "memshot":
+        out += memshot_lanes()
     elif plan == "monster":
         out.append(monster_lanes())
     elif plan == "artillery":
@@ -1630,6 +1656,35 @@ def monster_lanes():
     return out
 
 
+def memshot_lanes():
+    """The memshot plan's two battles (MEMSHOT): the shooters fire from the go (shoot, fire at will), the targets held
+    (never ordered, fire at will off: the guns never answer)."""
+    c = MEMSHOT
+    b1 = []
+    for (a, t, gap, w, kind), place in zip(c["b1"], c["b1_places"]):
+        b1.append(lane(a, t, "shoot", "hold", gap_m=gap, fight_s=c["fire_s"], max_s=c["fire_s"], answer=False, kind=kind,
+                       t_w=w, place=place))
+    g = TERRAIN
+    b2 = []
+    for kind, (sx, sz, tx, tz) in c["b2"].items():
+        b = math.degrees(math.atan2(tx - sx, tz - sz)) % 360
+        b2.append(lane("archer", c["b2_target"], "shoot", "hold", gap_m=round(math.hypot(tx - sx, tz - sz)),
+                       fight_s=c["fire_s"], max_s=c["fire_s"], answer=False, kind=kind, reorder_s=3, map=g["map"],
+                       catchment=g["catchment"], t_w=c["b2_w"], a_at={"x": sx, "z": sz, "b": round(b, 1)},
+                       t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)}, place=(sx, sz)))
+    # battle 3: the ground plan's strip and grass lanes again (clanrats with shields, 30 m wide: build/diag_g49/ground) -
+    # the memshot strip lane (no shields, 40 m) and the ground plan's disagree on what the strip takes
+    b3 = []
+    for kind in c["b3"]:
+        sx, sz, tx, tz, _ = GROUND["shoot"][kind]
+        b = math.degrees(math.atan2(tx - sx, tz - sz)) % 360
+        b3.append(lane("archer", "clanrat", "shoot", "hold", gap_m=round(math.hypot(tx - sx, tz - sz)),
+                       fight_s=c["fire_s"], max_s=c["fire_s"], answer=False, kind="g_" + kind, reorder_s=3, map=g["map"],
+                       catchment=g["catchment"], a_at={"x": sx, "z": sz, "b": round(b, 1)},
+                       t_at={"x": float(tx), "z": float(tz), "b": round((b + 180) % 360, 1)}, place=(sx, sz)))
+    return [b1, b2, b3]
+
+
 def artillery_lanes():
     """The artillery plan's one battle (ARTILLERY; build/diag_skv_mon/probes.md): each kind twice, on the grid."""
     c = ARTILLERY
@@ -1794,6 +1849,9 @@ def run_config(plan, index):
     if plan == "memmelee":
         # the men from memory every 0.1 s all the fight (dense to men_after_s after the contact)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=MEMMELEE["fight_s"] + 5, men_near_m=60)
+    if plan == "memshot":
+        # every man of every lane every 0.1 s from memory (all lanes 'near'), the projectiles with them (mem_proj)
+        config.update(men_ms=1000, men_after_s=0, men_near_m=400, mem_proj=True)
     if plan == "cavcharge":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
     if plan == "cavcheck":
@@ -2140,10 +2198,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             for r_ in ("a", "tg"):
                 if int(slot[r_][b]) >= 0:
                     keep[b, int(slot[r_][b])] = True
-    # the new units' plans (UNIT_PLANS): the entry turns every unit's fire at will off and only the 'shoot' attacker and
-    # a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
+    # the new units' plans (UNIT_PLANS) and memshot: the entry turns every unit's fire at will off and only the 'shoot'
+    # attacker and a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
     for b, ln in enumerate(meta):
-        if ln.get("plan") in UNIT_PLANS:
+        if ln.get("plan") in UNIT_PLANS + ("memshot",):
             if ln["spec"].get("mode") != "shoot" and int(slot["a"][b]) >= 0:
                 st.u["range"][b, int(slot["a"][b])] = 0.0
             if ln["spec"].get("target_mode") != "skirmish" and int(slot["tg"][b]) >= 0:

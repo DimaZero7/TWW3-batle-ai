@@ -130,6 +130,10 @@
 -- MEM_SPARSE-th poll; sn / sx, sz: the script's men alive and unit place read in the same callback (the check). At the
 -- lane's contact + MEM_DISCOVER_S 'mem_men_discover' {lane, s, hits}: the pointers from 12 men of one unit to the other's
 -- (apps.mem.entities discover: where a man keeps his target).
+-- config.mem_proj (with config.mem; the memshot plan): the projectiles too (apps.mem.projectiles' scanner on the
+-- manager found through a bound unit, with its last place kept - S.track - and apps.mem.hits naming the body a
+-- projectile 'in a man' is in): scanned every mem poll before the men (its poll number = the men's c); every
+-- MEM_PROJ_EVERY polls 'mem_proj' {c, tick, spawn, state, gone, errors, records, other, other_hp, offsets}.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -140,6 +144,8 @@ local map = require('apps.map.adapter')
 local services = require('apps.bridge.services')
 local winds = require('apps.battle.winds')
 local memmen = require('apps.mem.entities')
+local memproj = require('apps.mem.projectiles')
+local memhits = require('apps.mem.hits')
 
 local M = {}
 
@@ -147,7 +153,7 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 local WINDS_TIMER = 'tww3_bai_charge_probe_winds'
 local MEM_TIMER = 'tww3_bai_charge_probe_mem'
-local MEM_POLL_MS, MEM_SPARSE = 100, 5
+local MEM_POLL_MS, MEM_SPARSE, MEM_PROJ_EVERY, MEM_OTHER_EVERY = 100, 5, 5, 10
 M.MEM_DISCOVER_S = {1, 3, 5}
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true,
@@ -966,9 +972,31 @@ function M.main(bm, config, globals)
     end
 
     -- (config.mem) the men from memory every MEM_POLL_MS (module comment).
+    -- (config.mem_proj) the projectiles, before the men (module comment)
+    local function proj_poll()
+        local P = state.proj
+        if not P then return end
+        if not P.mgr then
+            local ok, m = pcall(memproj.manager, _G.memreader_plus, config.mem, P.unit, config.mem.layout.u_battle)
+            if ok and m then P.mgr = m else return end
+        end
+        local ok, err = pcall(P.S.scan, P.mgr)
+        if not ok and #P.S.errors < 20 then P.S.errors[#P.S.errors + 1] = tostring(err) end
+        if state.mem_c % MEM_PROJ_EVERY == 0 then
+            local d = P.S.drain()
+            d.fly = nil
+            d.c = state.mem_c
+            d.other = P.H.drain_other()
+            if state.mem_c % MEM_OTHER_EVERY == 0 then d.other_hp = P.H.poll_other() end
+            if not P.told and P.H.offsets() then d.offsets, P.told = P.H.offsets(), true end
+            emit('mem_proj', d)
+        end
+    end
+
     local function mem_poll()
         if not (state.active and state.mem) then return end
         state.mem_c = (state.mem_c or 0) + 1
+        proj_poll()
         local now = now_ms()
         local names = {}
         for _, lane in ipairs(state.lanes) do
@@ -1394,7 +1422,26 @@ function M.main(bm, config, globals)
                 handle.unhook()
             end
             state.mem = handle
-            emit('mem_attach', {status = status, bound = bound})
+            local proj = nil
+            if handle and config.mem_proj then
+                -- the projectile scanner on the manager of the battle of a bound unit (no hook of its own)
+                local mr, L = _G.memreader_plus, config.mem.layout
+                local units, first = {}, nil
+                for _, name in ipairs(handle.reader.order) do
+                    local U = handle.reader.units[name]
+                    units[name] = mr.tostring(U.ptr)
+                    first = first or U.ptr
+                end
+                local S = memproj.scanner(mr, L, 0)
+                S.track = true
+                local H = memhits.new(mr, L, handle.reader.ids, {units = units})
+                S.on_spawn = function(p, st)
+                    if st == 2 or st == 3 then return H.who(p) end
+                end
+                state.proj = {S = S, H = H, unit = first}
+                proj = {units = units, ok = first ~= nil}
+            end
+            emit('mem_attach', {status = status, bound = bound, proj = proj})
         end
         emit('ready', {lanes = #state.lanes})
         flush()

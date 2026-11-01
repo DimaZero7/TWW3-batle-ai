@@ -498,6 +498,33 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 
+def battery(u, pw, params, p):
+    """(p, gun share) [B, i, j]: the hit chance of i's projectiles at an artillery unit j with its guns' bodies
+    (artillery.gun_share "bodies"; else p as given and None). The game's projectiles strike bodies, not a unit (build/
+    diag_mem/missile: what each projectile struck, read from the game's memory): a battery's guns are large bodies (their
+    battle entity's radius, radii_ratio, height: the Warp Lightning Cannon 3.5 m, 0.5, 4.5 m) standing in the line of
+    the unit's box (its files h apart), its crew round them. The guns are hit as a formation of those bodies
+    (hit_chance_plane with the guns' radius, ratio, height: the same spread, the same rule); a gun lost leaves its
+    stretch of the line empty (x guns left / guns at the start); what passes the guns meets the crew by the crew's own
+    chance p: p_all = p_gun + (1 - p_gun) p, the guns' share of the hits p_gun / p_all."""
+    from tools.nn.sim import artillery
+    if (params.sim.get("artillery") or {}).get("gun_share") != "bodies" or "eng_r" not in u or not artillery.on(params):
+        return p, None
+    art = (u["eng0"] > 0) & (u["eng"] > 0)
+    ug = dict(u)
+    ug["radius"] = torch.where(art, u["eng_r"], u["radius"])
+    ug["body_ratio"] = torch.where(art, u["eng_q"], u["body_ratio"])
+    ug["height"] = torch.where(art, u["eng_h"], u["height"])
+    ug["men0"] = torch.where(art, torch.ones_like(u["men0"]), u["men0"])
+    cfg = params.sim["missile"]
+    pg = hit_chance_plane(ug, pw, ellipse=bool(cfg.get("body_ellipse")), params=params)
+    left = (u["eng"] / u["eng0"].clamp(min=1.0)).clamp(0, 1)
+    pg = torch.where(art[:, None, :], pg * left[:, None, :], torch.zeros_like(pg))
+    p_all = pg + (1 - pg) * p
+    share = torch.where(p_all > 0, pg / p_all.clamp(min=1e-9), torch.zeros_like(pg))
+    return p_all, share
+
+
 def front_share(u, pw, params):
     """[B, i, j] the share of i's hits on formation j that strike j's front rank (kills.missile_front): a projectile
     strikes the first man on its path (CA: a projectile is a body that must touch a model), and a formation stands
@@ -1298,12 +1325,16 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     men = u["men"].clamp(min=0)
     lone = torch.where(u["men0"] <= 1, torch.full_like(men, ms["single_entity_factor"]), torch.ones_like(men))
     acc = ms.get("accuracy")
+    gun_sh = None
     if acc:
         # the spread model (hit_chance) for a lone man always, for formations unless missile.accuracy.units "rates";
         # its lone-man chance replaces single_entity_factor out of melee
         p = hit_chance(u, pw, params)
         if acc.get("units", "model") == "rates":
             p = torch.where((u["men0"] <= 1)[:, None, :], p, old)
+        # an artillery target's guns are bodies of their own (battery; artillery.gun_share "bodies"): its hit chance
+        # with them, and their share of the hits (info["gun_share"], battle.py: the guns' health)
+        p, gun_sh = battery(u, pw, params, p)
         rate = p
         own_out = torch.ones_like(men)
     else:
@@ -1404,6 +1435,15 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         md, ma = md * hf, ma * hf
     hit = melee.per_hit(md, ma, u["armour"][:, None, :],
                         u["hp_man"][:, None, :], resist, single=(u["men0"] <= 1)[:, None, :])
+    if acc and gun_sh is not None:
+        # (missile.battery) a hit on a gun takes the hit's mean (a gun's 473-543 HP: no overkill), on the crew the
+        # crew's per_hit; the guns' share of the HP (battle.py: their health) is their hits' share x their HP a hit
+        hit_g = melee.per_hit(md, ma, u["armour"][:, None, :], u["eng_hp"][:, None, :], resist,
+                              single=torch.ones_like(gun_sh, dtype=torch.bool))
+        mix = gun_sh * hit_g + (1 - gun_sh) * hit
+        if info is not None:
+            info["gun_share"] = torch.where(mix > 0, gun_sh * hit_g / mix.clamp(min=1e-9), torch.zeros_like(mix))
+        hit = mix
     hp = landed * hit * (1 - shield)
     if "fix_el" in u:
         # a fixed trajectory's shell (the Mortar) strikes when it lands, with its blast (artillery.land): none here

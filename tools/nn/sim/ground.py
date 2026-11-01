@@ -298,15 +298,9 @@ def trunk_speed(u, front, depth, params):
     return torch.where(through, torch.ones_like(f), f)
 
 
-def trunk_keep(u, pw, target, lob, params, rays=(-0.5, 0.0, 0.5)):
-    """[B, N] the share of shooter i's projectiles at its target that no trunk stops (trees.md 1, 5: a projectile that
-    meets a trunk stops, no damage; the trunks do not count over the projectile's first veg_m metres of flight -
-    vegetation_ignore_time x its speed). Each ray (the shooter's front: the middle and the ends, to the target's nearest
-    man) is its flight - the low arc as the line of fire's (missile._arc_tan; lob: 45 deg) - sampled at `samples` points:
-    past veg_m of path and between a cell's trunk base and top, the path takes lam x the horizontal step; the ray keeps
-    exp(-sum), the unit the rays' mean. 1 where the battle's map has no trees or there is no target."""
-    if not on(u) or target is None:
-        return torch.ones_like(u["x"])
+def _trunk_rays(u, pw, target, lob, params, rays, veg_on=True):
+    """([B, N] per ray: the trunks' sum of lam x step along it, ...), has [B]: the rays of trunk_keep (its docstring;
+    veg_on False: the trunks count from the muzzle - the line of fire's check, trunk_lob)."""
     from tools.nn.sim import missile
     out, _, _ = _device(u["x"].device)
     tc = params.sim["terrain"]["trees"]
@@ -323,17 +317,30 @@ def trunk_keep(u, pw, target, lob, params, rays=(-0.5, 0.0, 0.5)):
     sx, sz = torch.cos(b), -torch.sin(b)
     ha = float(fcfg.get("aim_frac", 0.75)) * u["height"].gather(1, t[..., 0])
     tx, tz = u["x"] + dx * reach, u["z"] + dz * reach
+    # terrain.trees.fan (absent: off - every ray to the target's nearest man): the shooters' projectiles go to the
+    # target's men across its whole front (the game's memory, build/diag_mem/missile: the paths fan out over the span the
+    # shooter sees, front |cos phi| + depth |sin phi|), so each ray ends at its own share of that span, across the line
+    span = None
+    if tc.get("fan"):
+        rel = pw["rel_j"].gather(2, t)[..., 0]
+        fr, dp = pw["front"].gather(1, t[..., 0]), pw["depth"].gather(1, t[..., 0])
+        span = fr * torch.cos(rel).abs() + dp * torch.sin(rel).abs()
     h_t = terrain.height(u, tx, tz) + ha
     v = u["muzzle_v"].clamp(min=1.0)
-    veg = u["veg_m"] if "veg_m" in u else torch.zeros_like(v)
+    veg = u["veg_m"] if ("veg_m" in u and veg_on) else torch.zeros_like(v)
     k = (torch.arange(M, device=v.device, dtype=v.dtype) + 0.5) / M
-    keep = torch.zeros_like(v)
+    sums = []
     for r in rays:
         ox = u["x"] + fx * pw["depth"] / 2 + sx * r * pw["front"]
         oz = u["z"] + fz * pw["depth"] / 2 + sz * r * pw["front"]
         h0 = terrain.height(u, ox, oz) + hm
-        L = torch.sqrt((tx - ox) ** 2 + (tz - oz) ** 2).clamp(min=1.0)
-        dh = h_t - h0
+        ex, ez, h_e = tx, tz, h_t
+        if span is not None:
+            # (fan) the ray's end r x span across the line of fire (its right: (cos th, -sin th))
+            ex, ez = tx + torch.cos(th) * r * span, tz - torch.sin(th) * r * span
+            h_e = terrain.height(u, ex, ez) + ha
+        L = torch.sqrt((ex - ox) ** 2 + (ez - oz) ** 2).clamp(min=1.0)
+        dh = h_e - h0
         tan = missile._arc_tan(v, L, dh)
         if lob is not None:
             tan = torch.where(lob, torch.ones_like(tan), tan)
@@ -344,13 +351,55 @@ def trunk_keep(u, pw, target, lob, params, rays=(-0.5, 0.0, 0.5)):
         sl = tan[..., None] - 2 * a[..., None] * xs
         step = (L / M)[..., None]
         flown = torch.cumsum(step * torch.sqrt(1 + sl * sl), -1)
-        px = ox[..., None] + (tx - ox)[..., None] * k
-        pz = oz[..., None] + (tz - oz)[..., None] * k
+        px = ox[..., None] + (ex - ox)[..., None] * k
+        pz = oz[..., None] + (ez - oz)[..., None] * k
         lam = _at(u, "lam", px, pz)
         live = (flown > veg[..., None]) & (y <= _at(u, "top", px, pz)) & (y >= _at(u, "base", px, pz) - 0.5)
-        keep = keep + torch.exp(-(lam * step * live.float()).sum(-1))
-    keep = keep / len(rays)
+        sums.append((lam * step * live.float()).sum(-1))
     mid = u["terr"][:, 0].clamp(min=0)
     has = out["has_trees"][mid] & (u["terr"][:, 0] >= 0)
+    return sums, has
+
+
+def trunk_keep(u, pw, target, lob, params, rays=(-0.5, 0.0, 0.5)):
+    """[B, N] the share of shooter i's projectiles at its target that no trunk stops (trees.md 1, 5: a projectile that
+    meets a trunk stops, no damage; the trunks do not count over the projectile's first veg_m metres of flight -
+    vegetation_ignore_time x its speed). Each ray (the shooter's front: the middle and the ends, to the target's nearest
+    man; terrain.trees.fan: to the matching share of the target's span) is its flight - the low arc as the line of
+    fire's (missile._arc_tan; lob: 45 deg) - sampled at `samples` points: past veg_m of path and between a cell's trunk
+    base and top, the path takes lam x the horizontal step; the ray keeps exp(-sum), the unit the rays' mean. With
+    terrain.trees.los an arcing unit that does not lob already lobs by the trunks on its low line (trunk_lob): the
+    keep is the lob's and the low arc's by that share. 1 where the battle's map has no trees or there is no target."""
+    if not on(u) or target is None:
+        return torch.ones_like(u["x"])
+    sums, has = _trunk_rays(u, pw, target, lob, params, rays)
+    keep = sum(torch.exp(-x) for x in sums) / len(rays)
+    q = trunk_lob(u, pw, target, lob, params, rays)
+    if q is not None:
+        up = torch.ones_like(lob) if lob is not None else torch.ones_like(target, dtype=torch.bool)
+        s_lob, _ = _trunk_rays(u, pw, target, up, params, rays)
+        keep_lob = sum(torch.exp(-x) for x in s_lob) / len(rays)
+        keep = q * keep_lob + (1 - q) * keep
     # (no unit's attribute takes part in the game's check: the Wood Elves' arrows have the same 42 m - trees.md 1)
     return torch.where(has[:, None] & (target >= 0), keep, torch.ones_like(keep))
+
+
+def trunk_lob(u, pw, target, lob, params, rays=(-0.5, 0.0, 0.5)):
+    """[B, N] the share of an arcing unit's shots that lob at 45 deg because trunks close its low line
+    (terrain.trees.los; None with the key off): the game's program checks a dual_low_fixed unit's line along its real
+    path with the bodies - 3 rays, 2 must be clear (R-work artillery_rules.md 6; a tree is a body, trees.md 1) - so a
+    ray is closed when it meets a trunk, by the trunks' density on the low arc from the muzzle (the line's check, not
+    the projectile's flight clock): p = 1 - exp(-sum lam x step) a ray, the unit lobs when 2 of 3 are closed,
+    p1 p2 + p1 p3 + p2 p3 - 2 p1 p2 p3. 0 for direct fire (its line sees only the ground and buildings) and for a unit
+    that lobs already. MEASURED (build/diag_mem/missile, the game's memory): archers 100 m off, the arrows at 41-50 deg
+    - a 57 m forest strip on the line 100 % (twice), forest edges 83-100 %, an 11 m strip 43 %, a 7 m strip and open
+    ground 0 %."""
+    if not ((params.sim.get("terrain") or {}).get("trees") or {}).get("los"):
+        return None
+    sums, _ = _trunk_rays(u, pw, target, None, params, rays, veg_on=False)
+    p = [1 - torch.exp(-x) for x in sums]
+    q = p[0] * p[1] + p[0] * p[2] + p[1] * p[2] - 2 * p[0] * p[1] * p[2] if len(p) == 3 else         (sum(p) / len(p))
+    arcing = ~u["direct"] if "direct" in u else torch.ones_like(target, dtype=torch.bool)
+    if lob is not None:
+        arcing = arcing & ~lob
+    return torch.where(arcing & (target >= 0), q, torch.zeros_like(q))
