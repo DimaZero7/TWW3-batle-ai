@@ -136,6 +136,7 @@
 -- MEM_PROJ_EVERY polls 'mem_proj' {c, tick, spawn, state, gone, errors, records, other, other_hp, offsets}.
 -- config.mem_form (with config.mem; the memform plan): after each men's poll 'mem_form' {t, tick, units, new, jobs}: the
 -- units' top behaviours and machines, their groups' marks, the way's job and nodes (apps.mem.order).
+-- config.mem_extras (with config.mem; the tacwalk plan): the lanes' extras are bound and polled like the attacker and the target.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -1018,6 +1019,7 @@ function M.main(bm, config, globals)
                 if dense or state.mem_c % MEM_SPARSE == 1 then
                     names[#names + 1] = lane.a.name
                     names[#names + 1] = lane.t.name
+                    for _, e in ipairs(config.mem_extras and lane.extras or {}) do names[#names + 1] = e.name end
                 end
                 if lane.contact then
                     lane.mem_disc = lane.mem_disc or 1
@@ -1429,6 +1431,11 @@ function M.main(bm, config, globals)
                             local ok, info = handle.bind(it.name, it.unit)
                             bound[it.name] = ok and info or {why = info}
                         end
+                    end
+                    -- (config.mem_extras, the tacwalk plan) the lane's extras too: whose man an arrow is in
+                    for _, e in ipairs(config.mem_extras and lane.extras or {}) do
+                        local ok, info = handle.bind(e.name, state.units[e.name].unit)
+                        bound[e.name] = ok and info or {why = info}
                     end
                 end
                 handle.unhook()

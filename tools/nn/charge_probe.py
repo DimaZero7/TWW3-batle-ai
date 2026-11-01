@@ -526,13 +526,15 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
+# the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
+TACTIC_PLANS = ("tacpass", "tacfire", "tacwalk")
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -863,6 +865,9 @@ def battles(plan):
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         return magic_probe.battles()
+    if plan in TACTIC_PLANS:
+        from tools.nn import tactic_probe
+        return tactic_probe.battles(plan)
     if plan == "swing":
         def cut(a, t, n, kind, mode="attack_walk", gap_m=3):
             sh = lambda short: round((UNITS[short][1] - n + 0.5) / UNITS[short][1], 4)
@@ -1918,6 +1923,9 @@ def run_config(plan, index):
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         config.update(magic_probe.config_extra(index))
+    if plan in TACTIC_PLANS:
+        from tools.nn import tactic_probe
+        config.update(tactic_probe.config_extra(plan))
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 

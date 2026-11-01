@@ -1,6 +1,5 @@
 """The tactician's analysis of its input (design/tactic "Анализ отряда", "Карточка на карте", "Анализ карты",
-"Признаки карты"; the user's decisions 30-31.10). New modules, not trained yet; what comes after them (the rows'
-council with the map, the outputs) is not designed yet.
+"Признаки карты"; the user's decisions 30-31.10). What comes after them (the council, the zones' heads): decide.py.
 
     UnitAnalysis   one block for every row (the levels' common block): 185 -> 256 -> 128, ReLU after each layer;
                    row i -> card i (identity by slot: the block reads every row by itself, the rows never mix);
