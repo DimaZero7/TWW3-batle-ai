@@ -8,7 +8,8 @@ Brood Horror) heals; a battle without one is unchanged bit for bit.
              its fire clock runs (3 HP/s); no more than its men's health (a dead man stays dead) and no more than its pool:
              heal_cap (regen.cap 0.75, the database's healing_percentage_cap: the community's '75 % of the maximum') x its
              starting health in the whole battle - the program's pool never refills (the Horror: 4506 HP, 12.5 min of it)
-  the fire   a flaming blow's damage on it (STATIC flaming: the Knights of the Blazing Sun's lances) starts its fire clock at
+  the fire   a flaming blow's or shell's damage on it (STATIC flaming: the Knights of the Blazing Sun's lances; p_fire, ex_fire:
+             the Warpfire Throwers' shell and blast) starts its fire clock at
              regen.burn_s 10 s (the program's 100 ticks; where the clock runs down was not found - read as 10 s); the
              blow itself is x1.2 by Regeneration's weakness to fire -20 % (effects.py resist_flame, melee.resist_of)
 Needs torch."""
@@ -19,12 +20,17 @@ def on(params):
     return bool((params.sim.get("regen") or {}).get("on"))
 
 
-def burn(u, params, dt, hp_melee, enemy):
+def burn(u, params, dt, hp_melee, enemy, hp_missile=None, hp_art=None):
     """The fire clock (module doc), in place: down by dt, and back to regen.burn_s on a unit a flaming enemy's blows took
-    HP from this step (hp_melee [B, i, j]: HP i's blows took from j, enemy [B, i, j])."""
+    HP from this step (hp_melee [B, i, j]: HP i's blows took from j, enemy [B, i, j]) - any fire: a flaming shell's own hit
+    (hp_missile, STATIC p_fire) and its blast (hp_art, ex_fire: build/diag_skv_mon/mechanic.md M13)."""
     if "burn_s" not in u or "flaming" not in u:
         return
     hit = ((hp_melee * enemy) * u["flaming"][:, :, None].float()).sum(1) > 0
+    if hp_missile is not None and "p_fire" in u:
+        hit = hit | (((hp_missile * enemy) * u["p_fire"][:, :, None].float()).sum(1) > 0)
+    if hp_art is not None and "ex_fire" in u:
+        hit = hit | (((hp_art * enemy) * u["ex_fire"][:, :, None].float()).sum(1) > 0)
     left = (u["burn_s"] - dt).clamp(min=0)
     u["burn_s"] = torch.where(hit & (u["regen"] > 0), torch.full_like(left, float(params.sim["regen"]["burn_s"])), left)
 

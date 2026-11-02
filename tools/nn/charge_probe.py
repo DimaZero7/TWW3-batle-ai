@@ -332,6 +332,10 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           Concealment Bombs pressed at the go, (swords) swordsmen from 80 m, 60 s after the contact. The target hides, so
           lane.a_on_sight: the attack order at the go all the same, a_try_s later, standing, a run to the target's front line and
           the attack order when the target is visible - 1 battle;
+  warpfire  the Warpfire Throwers (build/diag_warpfire; a probe with --mem: the men and the shells from memory, read only), 3 lanes of 1
+          battle: burst after burst at swordsmen held 45 m (near) and 70 m (far) centre to centre, 50 s; swordsmen walking at them
+          from 90 m (walk), the throwers firing to the end - the health by burst, the cycle, the ammunition, the fire in melee, the
+          walk under fire;
   cavcharge  the Empire Knights' charge into infantry standing still (build/diag_cav/mechanic.md M6-M9, sim_gap.md 1):
           an attack at a run from 80 m on clanrats (sword and shield: no charge defence), clanrat spearmen and
           stormvermin with halberds (both braced, charge defence v large and charge reflection), held (never ordered)
@@ -412,6 +416,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe artillery [runs...] [--sim]         # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe run --plan triads --mem --speed 20  # the Eshin Triads (build/diag_triads)
     python -m tools.nn.charge_probe triads [runs...] [--sim]            # its table (--sim: + the twin, torch)
+    python -m tools.nn.charge_probe run --plan warpfire --mem --speed 20  # the Warpfire Throwers (build/diag_warpfire)
+    python -m tools.nn.charge_probe warpfire [runs...] [--sim]          # its table (--sim: + the twin, torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -476,6 +482,8 @@ UNITS = {
     "runners": ("wh2_main_skv_inf_death_runners_0", 72, SKV),
     # the Eshin Triads (the triads plan; build/diag_triads)
     "triads": ("wh2_dlc14_skv_inf_eshin_triads_0", 72, SKV),
+    # the Warpfire Throwers (the warpfire plan; build/diag_warpfire)
+    "warpfire": ("wh2_main_skv_inf_warpfire_thrower", 32, SKV),
 }
 
 
@@ -546,7 +554,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -857,6 +865,11 @@ TRIADS = {"kn_gap_m": 150, "kn_fight_s": 20, "sw_gap_m": 80, "sw_fight_s": 60, "
           "melee_s": (-1, 55), "windows_s": (10, 20, 30, 45, 60)}
 
 
+# the Warpfire Throwers' plan (build/diag_roster/wh2_main_skv_inf_warpfire_thrower/mechanic.md 7): gaps front to front (near: 45 m centre to
+# centre; far: 70 m; walk: 90 m); the fire's seconds; the gap between two bursts in the ammunition's record
+WARPFIRE = {"near_gap_m": 36, "far_gap_m": 61, "walk_gap_m": 81, "fire_s": 50, "walk_s": 100, "burst_gap_s": 3.0}
+
+
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
     """One lane's spec (before it gets a place)."""
     out = {"attacker": attacker, "target": target, "mode": mode, "target_mode": target_mode, "gap_m": gap_m,
@@ -1157,6 +1170,12 @@ def battles(plan):
                          t_casts=[{"key": BOMBS_KEY, "at_s": 0}], **common),
                     lane("swords", "triads", "attack_run", "hold", gap_m=c["sw_gap_m"], fight_s=c["sw_fight_s"], kind="swords",
                          **common)])
+    elif plan == "warpfire":
+        c = WARPFIRE
+        common = dict(answer=False, morale_rows=True)
+        out.append([lane("warpfire", "swords", "shoot", "hold", gap_m=c["near_gap_m"], fight_s=c["fire_s"], max_s=c["fire_s"], kind="near", **common),
+                    lane("warpfire", "swords", "shoot", "hold", gap_m=c["far_gap_m"], fight_s=c["fire_s"], max_s=c["fire_s"], kind="far", **common),
+                    lane("warpfire", "swords", "shoot", "both_walk", gap_m=c["walk_gap_m"], fight_s=c["walk_s"], max_s=c["walk_s"], kind="walk", **common)])
     elif plan == "cavcharge":
         # the knights charge (attack at a run from gap_m: the last 40 m at their charge speed) held infantry, 30 m on 30 m
         c = CAVCHARGE
@@ -1934,6 +1953,9 @@ def run_config(plan, index):
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=600, mem_proj=True, mem_form=True)
     if plan == "cavcharge":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
+    if plan == "warpfire":
+        # health every 0.25 s; every man of every lane every 0.1 s from memory, the projectiles with them (mem_proj)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=400, mem_proj=True)
     if plan == "triads":
         # health every 0.25 s; the men from memory every 0.1 s within 60 m all the fight
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=TRIADS["sw_fight_s"] + 5, men_near_m=60)
@@ -2287,7 +2309,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     # the new units' plans (UNIT_PLANS) and memshot: the entry turns every unit's fire at will off and only the 'shoot'
     # attacker and a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
     for b, ln in enumerate(meta):
-        if ln.get("plan") in UNIT_PLANS + ("memshot",):
+        if ln.get("plan") in UNIT_PLANS + ("memshot", "warpfire"):
             if ln["spec"].get("mode") != "shoot" and int(slot["a"][b]) >= 0:
                 st.u["range"][b, int(slot["a"][b])] = 0.0
             if ln["spec"].get("target_mode") != "skirmish" and int(slot["tg"][b]) >= 0:
@@ -4227,6 +4249,58 @@ def triads_measure(lane):
     return out
 
 
+def warpfire_measure(lane):
+    """A warpfire lane (WARPFIRE): the bursts by the ammunition's fall (their start, end and shells, the cycle), the first hit, the
+    target's share of health and men before each next burst's first hit and by the seconds from the first hit; the walk lane: the
+    target's speed before the first hit and under fire, the contact, the ammunition spent after it."""
+    spec, smp = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in smp])
+    out = {"run": lane["run"], "lane": spec["name"], "kind": spec.get("kind"), "pair": f"{SHORT[spec['a_key']]}>{SHORT[spec['t_key']]}"}
+    am, hp, men = series(smp, "a", "ammo"), series(smp, "tg", "hp"), series(smp, "tg", "men")
+    ok = np.isfinite(am)
+    ta, va = t[ok], am[ok]
+    drops = [k for k in range(1, len(va)) if va[k] < va[k - 1] - 0.5]
+    bursts = []
+    for k in drops:
+        if bursts and ta[k] - bursts[-1][1] <= WARPFIRE["burst_gap_s"]:
+            bursts[-1][1] = float(ta[k])
+            bursts[-1][2] += float(va[k - 1] - va[k])
+        else:
+            bursts.append([float(ta[k - 1]), float(ta[k]), float(va[k - 1] - va[k])])
+    out["ammo0"] = float(va[0]) if len(va) else None
+    out["bursts"] = [[round(a, 2), round(b, 2), round(n, 1)] for a, b, n in bursts]
+    if len(bursts) > 1:
+        out["cycle_s"] = round(bursts[1][0] - bursts[0][0], 2)
+    if len(bursts) > 2:
+        out["cycle2_s"] = round(bursts[2][0] - bursts[1][0], 2)
+    if bursts:
+        out["first_shot_s"], out["shells_1"] = round(bursts[0][0], 2), round(bursts[0][2], 1)
+    h0, m0 = float(hp[0]), float(men[0])
+    hit = next((float(t[k]) for k in range(len(t)) if np.isfinite(hp[k]) and hp[k] < h0 - 1.0), None)
+    out["first_hit_s"] = hit
+    if hit is not None:
+        out["hp_by_s"] = [round(at(t, hp, hit + k) / h0, 3) for k in range(0, 8)]
+        out["men_by_s"] = [round(at(t, men, hit + k) / m0, 3) for k in range(0, 8)]
+    for i, b in enumerate(bursts[1:4], 1):
+        # before the next burst's first hit: its start + the first burst's flight
+        w = b[0] + (max(hit - bursts[0][0], 0.0) if hit is not None else 0.0)
+        out[f"hp_b{i}"], out[f"men_b{i}"] = round(at(t, hp, w) / h0, 3), round(at(t, men, w) / m0, 3)
+    if spec.get("kind") == "walk":
+        x, z = series(smp, "tg", "x"), series(smp, "tg", "z")
+        c = (lane.get("contacts") or {}).get(1)
+        out["contact_s"] = c
+
+        def speed(a, b):
+            xa, za, xb, zb = at(t, x, a), at(t, z, a), at(t, x, b), at(t, z, b)
+            return round(float(np.hypot(xb - xa, zb - za) / (b - a)), 2) if b > a else None
+        if hit is not None:
+            out["v_before"] = speed(3.0, hit)
+            out["v_under"] = speed(hit, min(hit + 8.0, c if c is not None else hit + 8.0))
+        if c is not None:
+            out["ammo_after_contact"] = round(at(t, am, c + 1.0) - float(va[-1]), 1)
+    return out
+
+
 def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copies=4, params=None):
     """The rows of a plan's lanes (measure) and the means of each kind over its copies: prints them, writes
     build/charge-probe/<plan>.json (not in Git). With sim, the simulator's twin on the same lanes too (the new units'
@@ -4396,7 +4470,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
                                                      "shootcontact", "recontact", "pursuit", "cavalry",
-                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder", "triads"),
+                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder", "triads", "warpfire"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -4460,6 +4534,10 @@ def main(argv=None):
     if args.command == "grinder":
         plan_report("grinder", grinder_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
                     sim=args.sim, device=args.device, copies=min(args.copies, 4))
+        return 0
+    if args.command == "warpfire":
+        plan_report("warpfire", warpfire_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
+                    sim=args.sim, device=args.device)
         return 0
     if args.command == "triads":
         plan_report("triads", triads_measure, args.runs or runs(), out=None if args.out == OUT else args.out,

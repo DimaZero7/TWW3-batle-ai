@@ -58,7 +58,8 @@
   "wh3_dlc29_unit_passive_pestilent_perfection",
   "wh3_dlc29_unit_passive_unshakable_pathogen",
   "wallbreaker",
-  "wh2_main_unit_contact_weeping_blade"
+  "wh2_main_unit_contact_weeping_blade",
+  "wh_main_unit_contact_morale"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -1044,6 +1045,34 @@
    "modelled": true,
    "sim": "stat_armour mult 0.5 (for 35 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
    "why": null
+  },
+  "wh_main_unit_contact_morale": {
+   "kind": "contact",
+   "name": "Wh Main Unit Contact Morale",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": -8.0,
+     "on": [
+      "hit"
+     ],
+     "sim": "leadership"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "duration_s": 10.0,
+   "when": "for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)",
+   "source": "db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases (duration), special_ability_phase_stat_effects (wh_main_unit_contact_morale); config/nn/units.json contact_phases",
+   "kb": "docs/en/game/mechanics/abilities.md#contact-effects",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_morale add -8 (for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
+   "why": null
   }
  },
  "units": {
@@ -1242,6 +1271,11 @@
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
+  "wh2_main_skv_inf_warpfire_thrower": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
   "wh2_main_skv_mon_rat_ogres": [
    "causes_fear",
    "hide_forest",
@@ -1373,6 +1407,9 @@
   ],
   "wh2_main_skv_inf_plague_monk_censer_bearer": [
    "wh2_main_unit_contact_plague_monk_censer_morale"
+  ],
+  "wh2_main_skv_inf_warpfire_thrower": [
+   "wh_main_unit_contact_morale"
   ],
   "wh3_dlc29_skv_inf_pusbags": [
    "wh2_main_unit_contact_plague_monk_censer_morale",

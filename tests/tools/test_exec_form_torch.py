@@ -132,7 +132,7 @@ def test_the_rollouts_log_probability_is_the_updates():
         # a sharper start so the formation heads choose something besides keep
         new.heads.face.bias.zero_()
         new.heads.width.bias.zero_()
-        torch.manual_seed(3)
+        torch.manual_seed(4)        # (4 since the Warpfire Throwers' 2 token columns: build/diag_warpfire/seed_exec.py; 3 chose keep everywhere)
         lg, a, _ = new.act(obs, None)
         lg2, _, _ = new.act(obs, None, action=a)
     assert bool((a.face > 0).any()) and bool((a.width > 0).any())

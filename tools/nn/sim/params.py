@@ -103,8 +103,9 @@ class Params:
                  if any(a.get("attribute") == "stalk" for a in p.get("attributes") or ())}
         self.can_hide = any({"stalk", "hide_forest"} & set(u.get("attributes") or ()) or given & set(u.get("abilities") or ())
                             for u in (self.units or {}).values())
+        # (shells without guns too: is_round, the Warpfire Throwers' class)
         self.has_art = bool(((self.sim or {}).get("artillery") or {}).get("on")) and any(
-            (u.get("engines") or {}).get("n") for u in (self.units or {}).values())
+            (u.get("engines") or {}).get("n") or is_round(u, self.sim or {}) for u in (self.units or {}).values())
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -248,8 +249,14 @@ class Params:
             "heal_cap": float((self.sim.get("regen") or {}).get("cap", 0.0)) if innate.heal_of(self, key) > 0 else 0.0,
             "direct": bool(missile.get("direct")) if missile else False,
             # a volley of several shots a man (the database's shots_per_volley) fired as a burst at the measured rate
-            # (missile.burst_rate_s by projectile; missile.py, battle.py)
-            "spv": float(missile.get("shots_per_volley") or 1) if missile else 1.0,
+            # (missile.burst_rate_s by projectile; missile.py, battle.py); a shell without guns: every shell a man fires a
+            # cycle (shots_per_volley x burst_size x projectile_number; the Warpfire Throwers' 4, the Stormfiends' 8)
+            "spv": (float(missile.get("shots_per_volley") or 1) * (
+                float(missile.get("burst_size") or 1) * float(missile.get("projectile_number") or 1)
+                if is_round(u, self.sim) else 1.0)) if missile else 1.0,
+            # (missile.burst_cut, burst_reaim) a burst of shots_per_volley, the Ratling Gun's, is the man's fire: an order cuts
+            # it, a dead target man holds it; a burst_size burst is an object of its own in the game's program: neither
+            "bst_cut": bool(missile) and float(missile.get("shots_per_volley") or 1) > 1,
             "bst_rate": float((ms.get("burst_rate_s") or {}).get(missile.get("projectile"), 0.0)) if missile else 0.0,
             "melee_fire": bool(missile) and missile.get("projectile") in (ms.get("fire_in_melee") or ()),
             # its hits on a lone man in melee land as out of melee (missile.single_in_melee_projectiles: the Ratling Gun)
@@ -282,7 +289,9 @@ class Params:
             "rt_s": rt_s,
             # its hits slow the small formations they hit (missile.hit_slow: the hit reactions of gunpowder, by category)
             "hslow": bool(missile) and bool((ms.get("hit_slow") or {}).get("on"))
-                     and cat in ((ms.get("hit_slow") or {}).get("categories") or ()),
+                     and cat in ((ms.get("hit_slow") or {}).get("categories") or ())
+                     # (a shell's knock is its own rule, artillery.lie: the Warpfire Throwers' memory)
+                     and not is_round(u, self.sim),
             "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "rout_death_s": (self.sim["morale"]["lord_fall"].get("rout_death_s") or {}).get(faction, 0),
@@ -325,24 +334,48 @@ class Params:
         }
 
 
+def is_round(u, sim):
+    """A unit without guns whose projectile bursts (a shockwave blast; artillery.rounds on, config/nn/sim.json): the class
+    'shells without guns' (the Warpfire Throwers; the Globadiers next) - by the passport's data alone."""
+    art = sim.get("artillery") or {}
+    if not art.get("on") or not (art.get("rounds") or {}).get("on") or (u.get("engines") or {}).get("n"):
+        return False
+    return ((u.get("missile") or {}).get("blast") or {}).get("type") == "shockwave"
+
+
 def artillery_static(units, sim, effects_index, key):
     """The STATIC artillery fields of a unit (state.py eng0 ... c_mom): its guns (engines.n, hp, crew_per_engine), its
     projectile's fixed elevation (trajectory 'fixed'), minimum range, bonus against large, collision radius and
     momentum, its blast (missile.blast) and the blast's contact effect (index in effects_index, -1 none). Every field 0
-    (ex_fx -1) for a unit without guns or with sim.json artillery off: the rules then never act on it."""
+    (ex_fx -1) for a unit without guns or with sim.json artillery off: the rules then never act on it - but for the
+    class 'shells without guns' (is_round): its projectile's and blast's fields, the arc's gravity, the path's end, fire
+    and is_spell (rd True; the guns' fields stay 0)."""
     u = units[key]
     eng = u.get("engines") or {}
     m = u.get("missile") or {}
     out = {"eng0": 0.0, "eng_hp": 0.0, "crew_k": 0.0, "eng_r": 0.0, "eng_q": 1.0, "eng_h": 0.0, "fix_el": 0.0,
            "min_range": 0.0, "m_bvl": 0.0, "ex_r": 0.0,
            "ex_d": 0.0, "ex_ap": 0.0, "ex_f": 0.0, "ex_v": 0.0, "ex_allies": False, "ex_magic": False, "ex_fx": -1,
-           "c_rad": 0.0, "c_mom": 0.0, "p_magic": False, "central": False, "rl_add": 0.0}
-    if not (sim.get("artillery") or {}).get("on") or not eng.get("n"):
+           "c_rad": 0.0, "c_mom": 0.0, "p_magic": False, "central": False, "rl_add": 0.0,
+           "m_g": 9.81, "exp_m": 0.0, "rd": False, "cat_art": False, "p_fire": False, "ex_fire": False,
+           "p_spell": False, "ex_spell": False}
+    rd = is_round(u, sim)
+    if not (sim.get("artillery") or {}).get("on") or not (eng.get("n") or rd):
         return out
-    out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1),
-               # a gun's body (the engine's battle entity: radius, radii_ratio, height - the projectiles' hit box)
-               eng_r=float(eng.get("radius_m") or 0.0), eng_q=float(eng.get("radii_ratio") or 1.0),
-               eng_h=float(eng.get("height_m") or 0.0))
+    if rd:
+        # (artillery.rounds) the arc's own gravity and the path's end: for this class only - the Warp Lightning Cannon's 6
+        # in the database stays 9.81 here (a gun's arc was measured so; sim.json artillery.rounds.why)
+        out.update(rd=True, m_g=float(m.get("gravity") or 9.81), exp_m=float(m.get("expiry_m") or 0.0),
+                   p_fire=bool(m.get("flaming")), p_spell=bool(m.get("is_spell")),
+                   ex_fire=bool(m["blast"].get("flaming")), ex_spell=bool(m["blast"].get("is_spell")))
+    else:
+        out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1),
+                   # a gun's body (the engine's battle entity: radius, radii_ratio, height - the projectiles' hit box)
+                   eng_r=float(eng.get("radius_m") or 0.0), eng_q=float(eng.get("radii_ratio") or 1.0),
+                   eng_h=float(eng.get("height_m") or 0.0))
+    # the artillery's morale (artillery.morale_mark; battle.py): a gun's, and a projectile of the database's category
+    # 'artillery' (the Globadiers); the Warpfire Throwers' category musket has none (the game's memory: its fields 0)
+    out["cat_art"] = (not rd) or m.get("category") == "artillery"
     if m:
         bl = m.get("blast") or {}
         out.update(fix_el=float(m.get("fixed_elevation") or 0.0) if m.get("trajectory") == "fixed" else 0.0,

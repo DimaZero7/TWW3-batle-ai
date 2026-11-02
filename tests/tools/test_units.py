@@ -99,7 +99,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # third wave (07.10.2026).
     # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10, the 3 Skaven
     # monsters of 29.10, the Pusbags and the Warp Grinders of 31.10 (no cards)
-    assert checked >= 9 and len(units.UNITS) == 55
+    assert checked >= 9 and len(units.UNITS) == 56
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -124,7 +124,7 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
                 # the artillery (29.10.2026): its guns' weapon
                 "wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
                 "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
-                "wh2_main_skv_art_warp_lightning_cannon")
+                "wh2_main_skv_art_warp_lightning_cannon", "wh2_main_skv_inf_warpfire_thrower")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)
@@ -240,7 +240,8 @@ def test_the_new_units_and_their_contact_phases():
     assert "wh_main_unit_passive_frenzy" in u["wh2_main_skv_inf_plague_monks"]["abilities"]
     assert set(ph) == {"wh2_dlc12_unit_contact_suppressive_fire", "wh2_main_unit_contact_plague_monk_censer_morale",
                        "wh_main_unit_contact_poison", "wh2_dlc09_unit_contact_shieldbreaker",     # (+ the Jezzails')
-                       "wh2_main_unit_contact_weeping_blade"}                                      # (+ the Death Runners')
+                       "wh2_main_unit_contact_weeping_blade",                                      # (+ the Death Runners')
+                       "wh_main_unit_contact_morale"}                                              # (+ the Warpfire Throwers')
     # (the weeping blade: 35 s)
     assert all(p["duration_s"] == (35.0 if "weeping" in k else 10.0) and p["effect"] == "negative" for k, p in ph.items())
     assert ph["wh2_main_unit_contact_plague_monk_censer_morale"]["stats"] == [
@@ -364,7 +365,7 @@ def test_the_artillery_passports():
     assert (mortar["range_m"], mortar["min_range_m"], mortar["reload_s"], mortar["ammo"]) == (380, 60, 19.0, 22)
     assert mortar["blast"] == {"key": "wh_main_emp_mortar_explosion", "type": "shockwave", "radius_m": 6.0,
                                "speed": 11.0, "damage": 60.0, "ap_damage": 16.0, "force": 260.0, "allies": True,
-                               "magic": False, "contact_phase": None}
+                               "magic": False, "flaming": False, "is_spell": False, "contact_phase": None}
     assert cannon["direct"] and cannon["can_bounce"] and cannon["can_roll"] and cannon["blast"] is None
     assert (cannon["penetration_max"], cannon["penetration_cap"], cannon["damage"], cannon["ap_damage"]) == (
         9, "very_large", 88, 352)

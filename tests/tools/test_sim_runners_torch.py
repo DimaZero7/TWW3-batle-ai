@@ -201,7 +201,7 @@ def blade_j():
 
 
 def test_five_contact_effects_fit_and_the_table_has_the_armour_column():
-    assert len(effects.contact_keys(P)) == 5 and effects.CONTACT_SLOTS >= 5
+    assert len(effects.contact_keys(P)) == 6 and effects.CONTACT_SLOTS >= 6       # (+ the Warpfire Throwers' 'Flames!')
     row = effects.row(P, BLADE)
     assert row[effects.COL["self_armour"]] == 0.5 and row[effects.COL["duration_s"]] == 35.0
     assert effects.laid_by(P, DR)[0] == effects.index(P)[BLADE]

@@ -42,7 +42,7 @@ def shooters():
     pp = DH._passports()
     out = {"emp": [], "skv": []}
     for k, v in pp.items():
-        if v.get("caste") != "missile_infantry" or not v.get("missile"):
+        if v.get("caste") != "missile_infantry" or not v.get("missile") or k in DH.NOT_IN_DRILLS:
             continue
         cp = v["combat_potential"]
         if cp["melee"] >= HYBRID_RATIO * cp["missile"]:

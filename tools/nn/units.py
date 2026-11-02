@@ -97,7 +97,12 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # 02.11.2026, the Eshin Triads (build/diag_roster/wh2_dlc14_skv_inf_eshin_triads_0/units.md, mechanic.md): the Death
          # Runners' body, bombs and blade with a guandao against large (+15), charge reflection and charge defence against
          # large; no rule of their own. Only the v3 army scheme fields them (config/nn/pools.json units_v3)
-         "wh2_dlc14_skv_inf_eshin_triads_0")
+         "wh2_dlc14_skv_inf_eshin_triads_0",
+         # 02.11.2026, the Warpfire Throwers (build/diag_roster/wh2_main_skv_inf_warpfire_thrower/units.md, mechanic.md): the
+         # Ratling Gun's body, 32 crews; a burst of 4 slow flaming shells a crew with a 3 m blast and no guns - the class
+         # "shells without guns" (tools/nn/sim/artillery.py: every field by data, the Globadiers next). Only the v3 army
+         # scheme fields them (config/nn/pools.json units_v3)
+         "wh2_main_skv_inf_warpfire_thrower")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
@@ -248,8 +253,20 @@ FIELDS = {
                          "card stat_missile_damage_over_time = (damage + ap_damage) x 10 / reload_s"),
     "missile.damage": ("projectiles.damage", "see reload_s"),
     "missile.ap_damage": ("projectiles.ap_damage", "see reload_s"),
-    "missile.projectile_number": ("projectiles.projectile_number", None),
+    "missile.projectile_number": ("projectiles.projectile_number (bursts a man: the Stormfiends' warpfire 2, 8 shells a "
+                                  "man; the simulator multiplies it for shells without guns, artillery.py)", None),
     "missile.shots_per_volley": ("projectiles.shots_per_volley", None),
+    "missile.burst_size": ("projectiles.burst_size: the shells of a burst (the Warpfire Throwers' 4; the program: a burst "
+                           "object of its own, its shells 0.5 s apart in the game's memory, each -1 ammunition)", None),
+    "missile.burst_delay_s": ("projectiles.burst_shot_delay, s (0.35 the Warpfire Throwers: 5 ticks of 0.1 s in the game)", None),
+    "missile.gravity": ("projectiles.gravity: the arc's gravity, m/s2, 9.81 for a negative value of the database (the "
+                        "game's program; the Warpfire Throwers' 3, the Globadiers' 6.5)", None),
+    "missile.expiry_m": ("projectiles.expiry_range, m: the path after which a shell ends, blast too (85 the Warpfire "
+                         "Throwers; 0 none)", None),
+    "missile.flaming": ("projectiles.ignition_amount > 0: the projectile's own hit is flaming (fire resistance, the fire "
+                        "clock of a regeneration: build/diag_skv_mon/mechanic.md M13, M14, M20)", None),
+    "missile.is_spell": ("projectiles.is_spell: the only thing that meets spell resistance (the game's program M20; a "
+                         "magical projectile without it does not)", None),
     "missile.trajectory": ("projectiles.trajectory_sight", None),
     "missile.direct": ("projectiles.trajectory_sight == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line "
                        "past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` "
@@ -432,6 +449,9 @@ def passport(key, t):
             "category": pr["category"], "range_m": pr["effective_range"], "min_range_m": pr["minimum_range"],
             "reload_s": pr["base_reload_time"], "damage": pr["damage"], "ap_damage": pr["ap_damage"],
             "projectile_number": pr["projectile_number"], "shots_per_volley": pr["shots_per_volley"],
+            "burst_size": pr["burst_size"], "burst_delay_s": pr["burst_shot_delay"],
+            "gravity": pr["gravity"] if (pr["gravity"] or -1) > 0 else 9.81, "expiry_m": pr["expiry_range"],
+            "flaming": (pr.get("ignition_amount") or 0) > 0, "is_spell": bool(pr["is_spell"]),
             "trajectory": pr["trajectory_sight"], "direct": pr["trajectory_sight"] == "low",
             "muzzle_velocity": pr["muzzle_velocity"],
             "max_elevation": pr["max_elevation"], "calibration_distance_m": pr["calibration_distance"],
@@ -449,6 +469,7 @@ def passport(key, t):
                       "speed": ex["detonation_speed"], "damage": ex["detonation_damage"],
                       "ap_damage": ex["detonation_damage_ap"], "force": ex["detonation_force"],
                       "allies": bool(ex["affects_allies"]), "magic": bool(ex["is_magical"]),
+                      "flaming": (ex.get("ignition_amount") or 0) > 0, "is_spell": bool(ex["is_spell"]),
                       "contact_phase": ex["contact_phase_effect"]} if ex else None}
     if key in SPELLS:
         out["spells"] = list(SPELLS[key])

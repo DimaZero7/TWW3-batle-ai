@@ -93,7 +93,7 @@ UNITS = {
     "ogres": ("wh2_main_skv_mon_rat_ogres", 16, SKV),
     "brood": ("wh2_dlc16_skv_mon_brood_horror_0", 1, SKV),
     "pusbags": ("wh3_dlc29_skv_inf_pusbags", 180, SKV),
-    "warpfire": ("wh2_main_skv_inf_warpfire_thrower", 32, SKV),        # (no passport in config/nn/units.json: no twin)
+    "warpfire": ("wh2_main_skv_inf_warpfire_thrower", 32, SKV),
     "runners": ("wh2_main_skv_inf_death_runners_0", 72, SKV),
 }
 LORDS = {EMP: "general", SKV: "warlord"}

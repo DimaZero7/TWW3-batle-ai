@@ -102,7 +102,9 @@ def test_the_effects_catalogue():
                                                     # the Warp Grinders' attribute (31.10.2026)
                                                     "wallbreaker",
                                                     # the Death Runners' weeping blade (02.11.2026)
-                                                    "wh2_main_unit_contact_weeping_blade"]
+                                                    "wh2_main_unit_contact_weeping_blade",
+                                                    # the Warpfire Throwers' 'Flames!' (02.11.2026)
+                                                    "wh_main_unit_contact_morale"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():

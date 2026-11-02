@@ -63,8 +63,9 @@ def test_the_blade_is_a_modelled_contact_effect_last_in_the_order():
     e = doc["effects"][BLADE]
     assert e["kind"] == "contact" and e["modelled"] and e["duration_s"] == 35.0
     assert [(s["stat"], s["how"], s["value"], s["sim"]) for s in e["stats"]] == [("stat_armour", "mult", 0.5, "armour")]
-    assert doc["order"][-1] == BLADE and doc["inflicts"][DR] == [BLADE]
-    assert sum(1 for x in doc["effects"].values() if x["kind"] == "contact") == 5
+    # (the Warpfire Throwers' 'Flames!' after it, 02.11.2026)
+    assert doc["order"][-2:] == [BLADE, "wh_main_unit_contact_morale"] and doc["inflicts"][DR] == [BLADE]
+    assert sum(1 for x in doc["effects"].values() if x["kind"] == "contact") == 6
 
 
 def test_the_runners_join_the_v3_pools_only():
@@ -145,10 +146,12 @@ def test_the_blades_armour_is_the_tokens_number_and_its_new_columns_go_last():
     from tools.nn.model import effects as mfx
     from tools.nn.model import observation as ob
     assert ob.TAIL[-2:] == (ob.FX_STATS4, ob.FX_LATE) and ob.FX_STATS4 == ("fxs_stat_armour_mult",)
-    assert ob.FX_LATE == (f"fx_{BLADE}_owned", f"fx_{BLADE}_on")
-    assert ob.NAMES[-3:] == ob.FX_STATS4 + ob.FX_LATE
+    # (the Warpfire Throwers' 'Flames!' after the blade, 02.11.2026: +2 columns)
+    flames = "wh_main_unit_contact_morale"
+    assert ob.FX_LATE == (f"fx_{BLADE}_owned", f"fx_{BLADE}_on", f"fx_{flames}_owned", f"fx_{flames}_on")
+    assert ob.NAMES[-5:] == ob.FX_STATS4 + ob.FX_LATE
     # a token of the Warp Grinders' width (the last checkpoints) stays a beginning of today's
-    old = ob.TOKEN - 3
+    old = ob.TOKEN - 5
     assert ob.old_columns(old) == list(range(old))
     on = np.zeros((1, 1, len(mfx.keys())), bool)
     on[0, 0, mfx.keys().index(BLADE)] = True

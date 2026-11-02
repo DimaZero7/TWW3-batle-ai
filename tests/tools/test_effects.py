@@ -63,7 +63,9 @@ def test_contact_effects_come_from_the_weapons_with_the_database_numbers():
                         "wh3_dlc29_skv_inf_pusbags": [CENSER, POISON],
                         # the Death Runners (02.11.2026): the weeping blade (armour x0.5, 35 s)
                         "wh2_main_skv_inf_death_runners_0": ["wh2_main_unit_contact_weeping_blade"],
-                        "wh2_dlc14_skv_inf_eshin_triads_0": ["wh2_main_unit_contact_weeping_blade"]}
+                        "wh2_dlc14_skv_inf_eshin_triads_0": ["wh2_main_unit_contact_weeping_blade"],
+                        # the Warpfire Throwers (02.11.2026): 'Flames!', the shell's own hit (-8 leadership, 10 s)
+                        "wh2_main_skv_inf_warpfire_thrower": ["wh_main_unit_contact_morale"]}
     # nobody owns a contact effect (it lies on the enemy it hits)
     assert not any(k in v for v in links.values() for k in (POISON, CENSER, SUPPRESS))
     for k in (POISON, CENSER, SUPPRESS):

@@ -46,8 +46,9 @@ def _passports():
 # whether the unit level should learn them; the Warp Grinders the same (31.10.2026: two active abilities on every enemy
 # within 35 m - Warp-Quake's direct damage and Seismic Snare's no-move)
 # the Death Runners and the Eshin Triads the same (02.11.2026: hiding melee units with Concealment Bombs and the weeping blade)
+# the Warpfire Throwers the same (02.11.2026: a burst of shells with a blast; drill_shoot's shooters leave them out too)
 NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags", "wh2_dlc14_skv_inf_warp_grinder_0", "wh2_main_skv_inf_death_runners_0",
-                 "wh2_dlc14_skv_inf_eshin_triads_0")
+                 "wh2_dlc14_skv_inf_eshin_triads_0", "wh2_main_skv_inf_warpfire_thrower")
 
 
 def roster():

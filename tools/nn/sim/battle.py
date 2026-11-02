@@ -566,6 +566,10 @@ def step(st, orders, params=None, dt=None):
     if vx_on:
         # (vortex.up_share) the front men an enemy vortex knocked down strike nobody while they lie (x 1 elsewhere)
         rate, swing = vortex.up_share(u, rate), vortex.up_share(u, swing)
+    if artillery.on(params) and "lie_p" in u:
+        # (artillery.lie) the men a shell without guns knocked down strike nobody while they lie (x 1 elsewhere)
+        keep_up = (1 - u["lie_p"])[:, :, None]
+        rate, swing = rate * keep_up, swing * keep_up
     if stuck_cal.get("on") and "stk_n" in u:
         # A router running into a standing enemy formation (its boxes touching by their own edges - not the rout's exit
         # contact - with the router moving towards it, not a formation chasing it by order) leaves among its men as many
@@ -812,7 +816,9 @@ def step(st, orders, params=None, dt=None):
     if "bst_s" in u:
         # A burst (missile.py burst_share): a volley of spv shots a man (the Ratling Gun's 18) leaves at the measured
         # rate over spv / bst_rate s from its start; the reload runs from the start (the cycle start to start)
-        burst, start, share, volley_target = missile.burst_share(u, volley_target, m_target, share, dt)
+        # (a shell without guns: its stream arrives after the flight, artillery.round_delay)
+        burst, start, share, volley_target = missile.burst_share(
+            u, volley_target, m_target, share, dt, delay=artillery.round_delay(u, pw, volley_target) if art_on else None)
     pen_info = {}
     if (cal["missile"].get("penetration") or {}).get("on") and missile.pen_limit(params) > 1 and cal["kills"].get(
             "missile_front") and "fw" in u:
@@ -841,9 +847,10 @@ def step(st, orders, params=None, dt=None):
         if artillery.morale_cal(params):
             # (artillery.morale_mark) the artillery's morale clocks: fired at now, a shell landed near, a man hit by a
             # projectile's own hit - a ball's (missile.volley's hits of a gun) or a fixed shell's (land's own)
-            gun = (u["eng0"] > 0) & (shots > 0) & (volley_target >= 0)
+            # (cat_art: a gun's, or a projectile of the category artillery; the Warpfire Throwers' have none of it)
+            gun = u["cat_art"] & (shots > 0) & (volley_target >= 0)
             fired_at = torch.zeros_like(u["men"]).scatter_add_(1, volley_target.clamp(min=0), gun.float()) > 0
-            ball = torch.where((u["eng0"] > 0)[:, :, None] & pw["enemy"], hp_missile / shit.clamp(min=1e-6),
+            ball = torch.where(u["cat_art"][:, :, None] & pw["enemy"], hp_missile / shit.clamp(min=1e-6),
                                torch.zeros_like(hp_missile)).sum(1)
             own = ball + art_info["own"]
             draw = morale._hash_uniform(u["men"].shape[0], u["men"].shape[1], torch.round(st.t / dt).long(),
@@ -852,6 +859,8 @@ def step(st, orders, params=None, dt=None):
             artillery.morale_mark(u, params, dt, fired_at, art_info["near"] > 0, hit_now)
         keep_t = None if trunk is None else torch.where(u["fix_el"] > 0, torch.ones_like(trunk), trunk)
         artillery.launch(u, pw, params, shots, volley_target, keep=keep_t)
+        # (shells without guns: their knocks lay the men down, artillery.lie; none of them: no change)
+        artillery.lie(u, params, dt, knocks_art)
         u["art_kd"] = u["art_kd"] + (knocks_art * pw["enemy"]).sum(2)
     hp_bomb = kills_bomb = None
     if magic.on(params) and "bm0_s" in u:
@@ -1059,7 +1068,7 @@ def step(st, orders, params=None, dt=None):
         files = (pw["front"] / u["sp_h"].clamp(min=0.1)).clamp(min=1).gather(1, ti)
         lost = torch.where(u["men0"] > 1, drop, torch.zeros_like(drop)).gather(1, ti)
         front = (lost / files).clamp(0, 1)
-        on = burst & (at >= 0) & (u["bst_s"] > 0) & bool((cal["missile"].get("burst_reaim") or 0))
+        on = burst & u["bst_cut"] & (at >= 0) & (u["bst_s"] > 0) & bool((cal["missile"].get("burst_reaim") or 0))
         u["bst_p"] = torch.where(on, 1 - (1 - u["bst_p"]) * (1 - front), u["bst_p"])
     want = kills.sum(1)
     credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
@@ -1091,7 +1100,9 @@ def step(st, orders, params=None, dt=None):
     if regen.on(params):
         # regeneration (regen.py: the Brood Horror's 6 HP/s, half for 10 s after a flaming blow, 75 % of its health a battle
         # at most); a battle without a regenerating unit heals nobody
-        regen.burn(u, params, dt, hp_melee * scale[:, None, :], pw["enemy"].float())
+        # (any fire: a flaming shell's own hit and its blast too - the Warpfire Throwers)
+        regen.burn(u, params, dt, hp_melee * scale[:, None, :], pw["enemy"].float(), hp_missile * scale[:, None, :],
+                   None if hp_art is None else hp_art * scale[:, None, :])
         regen.heal(u, params, dt)
         hp_new = u["hp_abs"]
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
@@ -1123,7 +1134,8 @@ def step(st, orders, params=None, dt=None):
         # morale.art_not_under_fire: a shell does not set 'attacked by projectile' (-5) - only the artillery's own -8 /
         # -10 (the game's memory, build/diag_mem/morale: clanrats under a mortar's fire, 673 readings with the
         # artillery effect, the projectile's fields never set, no -5; under warpfire the -5 was there)
-        db_fire = db - hp_art * scale[:, None, :]
+        # ... a shell of the artillery's morale (cat_art): the Warpfire Throwers' blast sets the -5, the memory's record
+        db_fire = db - torch.where(u["cat_art"][:, :, None], hp_art * scale[:, None, :], torch.zeros_like(hp_art))
     shot_at = ((hp_missile + db_fire) * pw["enemy"]).sum(1) > 0     # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]

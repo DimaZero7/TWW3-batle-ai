@@ -241,12 +241,13 @@ def hit_slow_factor(u, params, fast):
     battle_entities hit_reactions_ignore_chance 70-75 %, infantry 0) - hit_slow.run while it runs (fast [B, N]), else
     hit_slow.walk."""
     hs = params.sim["missile"].get("hit_slow") or {}
-    one = torch.ones_like(u["hp"])
-    if not hs.get("on") or "hs_s" not in u:
-        return one
-    on = (u["hs_s"] > 0) & (u["men0"] > 1) & ~u["large"]
-    k = torch.where(fast, torch.full_like(one, float(hs["run"])), torch.full_like(one, float(hs["walk"])))
-    return torch.where(on, k, one)
+    out = torch.ones_like(u["hp"])
+    if hs.get("on") and "hs_s" in u:
+        on = (u["hs_s"] > 0) & (u["men0"] > 1) & ~u["large"]
+        k = torch.where(fast, torch.full_like(out, float(hs["run"])), torch.full_like(out, float(hs["walk"])))
+        out = torch.where(on, k, out)
+    # (artillery.lie) the men a shell without guns knocked down do not walk: the unit's way x the standing share
+    return out * (1 - u["lie_p"]) if "lie_p" in u else out
 
 
 def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, prev=None, per_man=False,
@@ -399,6 +400,12 @@ def acc_shrink(u, params):
     return (a if radius else torch.sqrt(a))[:, :, None]
 
 
+def _arc_g(u):
+    """[B, N, 1] the gravity of each shooter's arc: its projectile's (STATIC m_g: 9.81, the Warpfire Throwers' 3 -
+    artillery.rounds), 9.81 in a unit without the field."""
+    return u["m_g"][:, :, None] if "m_g" in u else 9.81
+
+
 def hit_chance(u, pw, params):
     """[B, i, j] chance that a projectile of i aimed at j hits a man of j (module docstring: the spread model).
     missile.accuracy.spacing "db": the target's own close spacing (sp_h, sp_v) and formation (geometry.dims);
@@ -411,7 +418,7 @@ def hit_chance(u, pw, params):
     shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
     sig = (k * u["cal_area"][:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None] * shrink).clamp(min=1e-3)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
-    theta = 0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))
+    theta = 0.5 * torch.asin((d * _arc_g(u) / (v * v)).clamp(max=1.0))
     shadow = u["height"][:, None, :] / torch.tan(theta.clamp(min=1e-3))
     r = u["radius"][:, None, :]
     p_lone = 1 - torch.exp(-(math.pi * r * r + 2 * r * torch.minimum(shadow, 3 * sig)) / (2 * math.pi * sig * sig))
@@ -459,7 +466,7 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     params: the accuracy's cut (acc_shrink; None: the area's)."""
     d = pw["dist"].clamp(min=5.0)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
-    theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    theta = (0.5 * torch.asin((d * _arc_g(u) / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
     sig, half = _spread(u, d, acc_theta(theta, v, d, pw.get("dh")), params)
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)                      # the spread along the line, on the ground
@@ -537,7 +544,7 @@ def front_share(u, pw, params):
     of its hits on the front rank. 1 for a lone man."""
     d = pw["dist"].clamp(min=5.0)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
-    theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    theta = (0.5 * torch.asin((d * _arc_g(u) / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
     sig, half = _spread(u, d, acc_theta(theta, v, d, pw.get("dh")), params)
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)
@@ -646,7 +653,7 @@ def spill_geometry(u, pw, target, params):
     d_ij = pw["dist"].gather(2, tj).clamp(min=5.0)                          # [B, i, 1]
     th_ij = pw["theta"].gather(2, tj)                                       # bearing i -> j
     v0 = u["muzzle_v"].clamp(min=1.0)[:, :, None]
-    theta = (0.5 * torch.asin((d_ij * 9.81 / (v0 * v0)).clamp(max=1.0))).clamp(min=1e-3)
+    theta = (0.5 * torch.asin((d_ij * _arc_g(u) / (v0 * v0)).clamp(max=1.0))).clamp(min=1e-3)
     dh_ij = pw["dh"].gather(2, tj) if "dh" in pw else None
     sig, _ = _spread(u, d_ij, acc_theta(theta, v0, d_ij, dh_ij), params)   # (the square: its equal-variance Gaussian)
     sa = sig / torch.sin(theta)
@@ -763,11 +770,11 @@ def spill_geometry(u, pw, target, params):
 G = 9.81
 
 
-def _arc_tan(v, L, dh):
-    """tan of the low launch angle that puts a shot of speed v (m/s) dh m higher at L m: a flat shot keeps its speed and
-    its angle rises with the range (tw-modding 'Missiles and You'); out of reach: 45 deg."""
-    disc = v ** 4 - G * (G * L * L + 2 * dh * v * v)
-    tan = (v * v - torch.sqrt(disc.clamp(min=0))) / (G * L.clamp(min=1e-3))
+def _arc_tan(v, L, dh, g=G):
+    """tan of the low launch angle that puts a shot of speed v (m/s) dh m higher at L m at gravity g: a flat shot keeps its
+    speed and its angle rises with the range (tw-modding 'Missiles and You'); out of reach: 45 deg."""
+    disc = v ** 4 - g * (g * L * L + 2 * dh * v * v)
+    tan = (v * v - torch.sqrt(disc.clamp(min=0))) / (g * L.clamp(min=1e-3))
     return torch.where(disc >= 0, tan, torch.ones_like(tan))
 
 
@@ -825,7 +832,8 @@ def arc_lines(u, pw, target, params):
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     ds = (pw["depth"] / 2)[:, :, None]                             # the shooter's half depth
     dt_ = pw["depth"].gather(1, t)[:, :, None] / 2                 # the target's half depth
-    th_d = (0.5 * torch.asin((dist.clamp(min=5.0) * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    g = _arc_g(u)
+    th_d = (0.5 * torch.asin((dist.clamp(min=5.0) * g / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
     sig, _ = _spread(u, dist, th_d, params)         # (the square spread: its equal-variance Gaussian here)
     blocked = torch.zeros_like(along)
     low = torch.zeros_like(along)
@@ -834,12 +842,12 @@ def arc_lines(u, pw, target, params):
         s = sr * ds
         for tr in nodes:
             L = (dist + tr * dt_ - s).clamp(min=1.0)
-            tan = _arc_tan(v, L, ha - hm)
+            tan = _arc_tan(v, L, ha - hm, g)
             clear = torch.ones_like(along, dtype=torch.bool)
             below = torch.zeros_like(along)
             for e in (-1.0, 1.0):
                 x = torch.minimum((along + e * span - s).clamp(min=0.0), L)
-                c = hm + x * tan - G * x * x * (1 + tan * tan) / (2 * v * v) - hf
+                c = hm + x * tan - g * x * x * (1 + tan * tan) / (2 * v * v) - hf
                 clear = clear & (c > 0)
                 below = torch.maximum(below, _phi(-c / (sig * x / L).clamp(min=1e-3)))
             blocked = blocked + (~clear).float() / 4
@@ -1179,20 +1187,28 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, wit
     return out + (catch,) if with_catch else out
 
 
-def burst_share(u, volley_target, m_target, loaded, dt):
+def burst_share(u, volley_target, m_target, loaded, dt, delay=None):
     """A burst weapon's step (spv > 1 shots a man in a volley at bst_rate a second: the Ratling Gun's 18 at 4 a second,
     measured - its bullets at a lone target: 64 every 0.5 s from 32 men, 576 = 32 x 18 a burst, build/newunits).
     -> (burst [B, N] the burst units, start [B, N] a burst starts now, loaded [B, N] the share of a man's shots to fire
     this step as volley() takes it, target [B, N]). A burst starts where a volley would (volley_target: the men loaded
     and aimed) and goes on spv / bst_rate s at the unit's target now (m_target; none: no shot that step, the clock
-    runs); the other units keep their volley (loaded, volley_target). Updates bst, bst_s in place."""
+    runs); the other units keep their volley (loaded, volley_target). Updates bst, bst_s in place. delay [B, N]: seconds
+    the burst's first shot takes to arrive (a shell's flight, artillery.round_delay: its stream of hits comes that much
+    later, the reload's clock still from the start); None: none."""
     burst = (u["spv"] > 1) & (u["bst_rate"] > 0)
     start = burst & (volley_target >= 0) & (u["bst_s"] <= 1e-6)
     length = u["spv"] / u["bst_rate"].clamp(min=1e-6)
-    bst_s = torch.where(start, length, u["bst_s"])
+    if delay is None:
+        bst_s = torch.where(start, length, u["bst_s"])
+    else:
+        bst_s = torch.where(start, length + delay, u["bst_s"])
     bst = torch.where(start, loaded, u["bst"])
     going = burst & (bst_s > 1e-6) & (m_target >= 0)
     now = torch.minimum(bst_s, torch.full_like(bst_s, dt))
+    if delay is not None:
+        # (a flight's wait: nothing arrives until the seconds left are the burst's own; the step that crosses it, its part)
+        now = torch.where(bst_s > length + 1e-4, torch.minimum(now, (length + dt - bst_s).clamp(min=0)), now)
     # the men aiming again (burst_reaim: their target man died) come back at aim_s (on average: exp(-dt / aim_s)); a
     # new burst starts with every man aimed
     paused = torch.zeros_like(bst)
@@ -1218,6 +1234,8 @@ def burst_cut(u, mask, spread_s=0.0):
     if "bst_s" not in u:
         return torch.zeros_like(mask)
     cut = mask & (u["spv"] > 1) & (u["bst_rate"] > 0) & (u["bst_s"] > 1e-6)
+    if "bst_cut" in u:
+        cut = cut & u["bst_cut"]              # (a burst_size burst, the Warpfire Throwers': no order ends it)
     length = u["spv"] / u["bst_rate"].clamp(min=1e-6)
     begun = torch.ones_like(u["bst_s"])
     if spread_s > 0:
@@ -1421,6 +1439,9 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         # mechanic.md M20; artillery.py); every other projectile as before
         magic_r = (u["resist_missile"] + u["resist_magic"]).clamp(-1.0, 0.9)[:, None, :]
         resist = torch.where(u["p_magic"][:, :, None], magic_r, resist)
+        if "rd" in u:
+            # (artillery.rounds) a shell without guns: the game's table (artillery.round_resist)
+            resist = torch.where(u["rd"][:, :, None], artillery.round_resist(u, u["p_magic"], u["p_spell"], u["p_fire"]), resist)
     # the same damage rule as a blow (melee.per_hit: armour roll, overkill; a lone man loses the mean)
     md, ma = u["m_damage"][:, :, None], u["m_ap"][:, :, None]
     if "m_bvl" in u:

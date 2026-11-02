@@ -173,6 +173,9 @@ STATIC = {
     "ab2": ("i", "its third ability (-1 none)"),
     "spv": ("f", "shots a man fires in one volley (the database's projectiles shots_per_volley: 18 the Ratling Gun, 1 "
                  "the others)"),
+    "bst_cut": ("b", "its burst is a volley's (shots_per_volley > 1: the Ratling Gun): a new order cuts it, a dead target man "
+                     "holds it (missile.burst_cut, burst_reaim); a burst_size burst, the Warpfire Throwers', is an object of its "
+                     "own in the game: neither"),
     "bst_rate": ("f", "shots a second a man fires in a burst (a volley of spv > 1 shots fired over spv / bst_rate s: the "
                       "Ratling Gun 4, measured - config/nn/sim.json missile.burst_rate_s); 0: the volley at once"),
     "melee_fire": ("b", "shoots in melee too (config/nn/sim.json missile.fire_in_melee: the Ratling Gun, measured)"),
@@ -246,6 +249,16 @@ STATIC = {
     "p_magic": ("b", "a gun's projectile is magical (the passport's missile.magic: the Warp Lightning Cannon, the "
                      "Plagueclaw): its own hit meets the target's spell resistance, not the physical (missile.volley, "
                      "artillery.land; build/diag_skv_mon/mechanic.md M20)"),
+    "m_g": ("f", "the gravity of its projectile's arc, m/s2 (9.81; artillery.rounds: the passport's missile.gravity, 3 the "
+                 "Warpfire Throwers)"),
+    "exp_m": ("f", "the path after which its shell ends, blast too, m (artillery.rounds: missile.expiry_m; 0 not read)"),
+    "rd": ("b", "a shell without guns (params.is_round): a blast with no engine - the class's aim, resistances and flight"),
+    "cat_art": ("b", "its projectiles count for the artillery's morale (a gun's, or the database's category artillery; "
+                     "artillery.morale_mark)"),
+    "p_fire": ("b", "its shell's own hit is flaming (artillery.rounds; regen.burn, artillery.round_resist)"),
+    "ex_fire": ("b", "its shell's blast is flaming"),
+    "p_spell": ("b", "its shell's own hit is a spell (is_spell): spell resistance cuts it (artillery.round_resist)"),
+    "ex_spell": ("b", "its shell's blast is a spell"),
     "ex_fx": ("i", "the contact effect the blast lays on the units it strikes (contact_phase_effect; index in "
                    "config/nn/effects.json order, -1 none)"),
     "c_rad": ("f", "the projectile's collision radius, m (a fixed shell's own hit: the men within it + their radius)"),
@@ -521,6 +534,9 @@ INTERNAL = {
     "dd_t": ("f", "seconds to the next tick of its direct damage on itself while it is on (0: a tick at once - the phase "
                   "strikes at its start, so at every new melee; direct.py)"),
     "dd_sum": ("f", "bookkeeping: HP its direct damage on itself has taken so far"),
+    "lie_p": ("f", "the share of its men lying from the knocks of shells without guns (artillery.lie): the unit's way and its "
+                   "blows x (1 - lie_p)"),
+    "lie_s": ("f", "the mean seconds those men still lie (artillery.lie; artillery.rounds.lie_s from a knock)"),
     "vk_p": ("f", "the share of its front men lying from the knocks of enemy vortices (vortex.py: in at the knocks a front "
                   "man, out at 1 / the mean getting-up delay 1.85 s); its blows are x (1 - vk_p)"),
     "vx_hits": ("f", "bookkeeping: enemy men struck by the vortices of its dead so far (vortex.py)"),
