@@ -99,7 +99,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # third wave (07.10.2026).
     # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10, the 3 Skaven
     # monsters of 29.10, the Pusbags and the Warp Grinders of 31.10 (no cards)
-    assert checked >= 9 and len(units.UNITS) == 57
+    assert checked >= 9 and len(units.UNITS) == 58
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -125,7 +125,7 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
                 "wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
                 "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
                 "wh2_main_skv_art_warp_lightning_cannon", "wh2_main_skv_inf_warpfire_thrower",
-                "wh2_main_skv_inf_poison_wind_globadiers")
+                "wh2_main_skv_inf_poison_wind_globadiers", "wh2_main_skv_inf_death_globe_bombardiers")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)

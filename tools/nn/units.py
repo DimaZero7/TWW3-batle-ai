@@ -106,7 +106,11 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # 02.11.2026, the Poisoned Wind Globadiers (build/diag_roster/wh2_main_skv_inf_poison_wind_globadiers/units.md, mechanic.md):
          # the class "shells without guns" with a 2 m blast and a contact effect of direct damage (the poison, on friends too), the
          # arc's fixed 30 deg lob. Only the v3 army scheme fields them (config/nn/pools.json units_v3)
-         "wh2_main_skv_inf_poison_wind_globadiers")
+         "wh2_main_skv_inf_poison_wind_globadiers",
+         # 02.11.2026, the Death Globe Bombardiers (build/diag_roster/wh2_main_skv_inf_death_globe_bombardiers/units.md, mechanic.md):
+         # the Globadiers' class by data alone, no poison, a 4 m blast of 9 + 33 with a force of 65; the Stormvermin's body. Only the
+         # v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh2_main_skv_inf_death_globe_bombardiers")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in

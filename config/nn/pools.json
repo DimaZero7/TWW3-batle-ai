@@ -104,7 +104,8 @@
         {"key": "wh2_main_skv_inf_death_runners_0", "slot": "death_runners", "width": 30},
         {"key": "wh2_dlc14_skv_inf_eshin_triads_0", "slot": "eshin_triads", "width": 30},
         {"key": "wh2_main_skv_inf_warpfire_thrower", "slot": "warpfire", "width": 35},
-        {"key": "wh2_main_skv_inf_poison_wind_globadiers", "slot": "globadiers", "width": 35}
+        {"key": "wh2_main_skv_inf_poison_wind_globadiers", "slot": "globadiers", "width": 35},
+        {"key": "wh2_main_skv_inf_death_globe_bombardiers", "slot": "bombardiers", "width": 35}
       ]
     }
   }

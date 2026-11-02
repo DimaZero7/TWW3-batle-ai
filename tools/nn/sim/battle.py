@@ -806,6 +806,10 @@ def step(st, orders, params=None, dt=None):
             lost_t = 1 - u["men"].gather(1, ti) / men0_t.clamp(min=1e-6)
             broken = (u["broken_at"] > 0) & (aim_at >= 0) & (men0_t > 1) & (lost_t >= u["broken_at"] - 1e-6)
             late = torch.where(broken, torch.ones_like(late), late)
+        # A volley of single shells (land_w > 0: the Globadiers, the Bombardiers) does not wait for a re-aim: its cycle stays one number while the target's men die
+        # (memory, starts of the volleys: the Bombardiers 11.6 s while 30-65 % of the spearmen die, the Globadiers 13.5-13.8 s; missile.reload_projectile_why)
+        if "land_w" in u:
+            late = torch.where(u["land_w"] > 0, torch.zeros_like(late), late)
         waited = u["loaded_s"] >= u["aim_s"] * late - dt / 2 - 1e-6
         u["loaded_s"] = torch.where(full & (m_target >= 0), u["loaded_s"] + dt, torch.zeros_like(u["loaded_s"]))
         full = full & waited

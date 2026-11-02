@@ -1207,6 +1207,11 @@
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
+  "wh2_main_skv_inf_death_globe_bombardiers": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
   "wh2_main_skv_inf_death_runners_0": [
    "guerrilla_deploy",
    "stalk",

@@ -81,7 +81,9 @@ def test_sector_features_count_own_and_visible_enemies_where_they_stand():
     vis = (~o["own"] & o["attend"] & (o["tokens"][..., ob.INDEX["visible"]] > 0.5)).sum(-1).float()
     assert torch.allclose(f[..., i("enemy_units")].sum(-1) * sectors.UNITS, vis)
     # a unit's sector is the one its position falls in
-    pos = o["pos"][0, 0] * ob.POS
+    # (the first own unit it attends: the draws of this synthetic battle go with the passports' number, slot 0 may be absent, 02.11.2026)
+    first = int((o["own"][0] & o["attend"][0]).float().argmax())
+    pos = o["pos"][0, first] * ob.POS
     j = ((pos + CFG.grid_half) // sectors.step(CFG)).long()
     assert f[0, j[0] * CFG.sectors + j[1], i("own_units")] > 0
     # hidden enemies are not counted as visible

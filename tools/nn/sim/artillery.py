@@ -42,7 +42,7 @@ A magical projectile's own hit (p_magic: the Warp Lightning Cannon, the Plaguecl
 physical (missile.volley, land; as the blast's ex_magic).
 The cycle: a gun's reload + its aim and fire animations (artillery.cycle_add_s, measured; STATIC rl_add).
 Shells without guns (artillery.rounds, STATIC rd - by the passport's data: a shockwave blast and no engine; the Warpfire
-Throwers, the Globadiers next; build/diag_roster/wh2_main_skv_inf_warpfire_thrower/mechanic.md): the same land() and ring,
+Throwers, the Globadiers, the Death Globe Bombardiers; build/diag_roster/wh2_main_skv_inf_warpfire_thrower/mechanic.md): the same land() and ring,
 with these differences:
   shots       the men's bursts (spv = shots_per_volley x burst_size x projectile_number at the measured rate; missile.burst_share)
   flight      round_delay: the whole stream of a burst arrives its flight later (ammunition too; the reload's clock from the
@@ -66,6 +66,7 @@ with these differences:
               arc at the muzzle speed (missile.clear_shot's lob; launch, flight, bursts)
   the window  a volley of single shells lands over artillery.volley_land_s (land_w; the men's throws are not together), its aim as it left; a burst's
               stream does not need it
+  the clock   a volley of single shells (land_w) waits for no re-aim (battle.py; memory: 11.6 s between the Bombardiers' starts while 30-65 % of the target die)
   the poison  a blast's contact effect with direct damage (the catalogue's direct: the Globadiers' poisoned wind): direct.from_contact, each 0.1 s tick with a
               shell's ring on the unit one strike, then its own ticks; info["touch"] the shells whose ring reaches a unit's box
 Not modelled (config/nn/sim.json artillery.shell_why): the cannonball's bounce and roll, each gun's own clock (the

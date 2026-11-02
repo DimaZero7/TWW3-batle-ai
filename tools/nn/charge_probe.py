@@ -338,6 +338,9 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           50 s; table: globes [runs] [--sim];
   globes2  the second battle: the lob past friends standing 8 m before the target (lob, 60 m), far again with the morale's effects from memory (mem_morale), Empire knights at
           60 m (knights: no knock, a large body);
+  dglobes  the Death Globe Bombardiers (build/diag_bombardiers; a probe with --mem: the men and the shells from memory, read only), 3 lanes of 1 battle: volley
+          after volley at Empire spearmen held 60 m centre to centre (near, fearless), at Empire knights held 60 m (knights, fearless: no knock, a large body), at
+          spearmen 60 m with the target's morale and the shooters' own clanrat spearmen right before the shooters (lob: is the line closed?); 45 s; table: dglobes [runs] [--sim];
   warpfire  the Warpfire Throwers (build/diag_warpfire; a probe with --mem: the men and the shells from memory, read only), 3 lanes of 1
           battle: burst after burst at swordsmen held 45 m (near) and 70 m (far) centre to centre, 50 s; swordsmen walking at them
           from 90 m (walk), the throwers firing to the end - the health by burst, the cycle, the ammunition, the fire in melee, the
@@ -426,6 +429,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe warpfire [runs...] [--sim]          # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe run --plan globes --mem --speed 20  # the Globadiers (build/diag_globadiers)
     python -m tools.nn.charge_probe globes [runs...] [--sim]            # its table (the warpfire table's measures)
+    python -m tools.nn.charge_probe run --plan dglobes --mem --speed 20  # the Death Globe Bombardiers (build/diag_bombardiers)
+    python -m tools.nn.charge_probe dglobes [runs...] [--sim]           # its table (the warpfire table's measures)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -494,6 +499,8 @@ UNITS = {
     "warpfire": ("wh2_main_skv_inf_warpfire_thrower", 32, SKV),
     # the Poisoned Wind Globadiers (the globes plan; build/diag_globadiers)
     "globes": ("wh2_main_skv_inf_poison_wind_globadiers", 48, SKV),
+    # the Death Globe Bombardiers (the dglobes plan; build/diag_bombardiers)
+    "dglobes": ("wh2_main_skv_inf_death_globe_bombardiers", 48, SKV),
 }
 
 
@@ -564,7 +571,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire", "globes", "globes2") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire", "globes", "globes2", "dglobes") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -881,6 +888,8 @@ WARPFIRE = {"near_gap_m": 36, "far_gap_m": 61, "walk_gap_m": 81, "fire_s": 50, "
 # the Globadiers' plan (build/diag_roster/wh2_main_skv_inf_poison_wind_globadiers/mechanic.md 7): centre to centre (near: 60 m, the target fearless; far: 80 m,
 # the target with its morale; friends: 50 m, the shooters' clanrat spearmen in melee with the target on the line of fire); the fire's seconds
 GLOBES = {"near_m": 60, "far_m": 80, "friends_m": 50, "fire_s": 50, "w": 30, "lob_gap_m": 8}
+# the Death Globe Bombardiers' plan (build/diag_roster/wh2_main_skv_inf_death_globe_bombardiers/mechanic.md 6): centre to centre; the fire's seconds; the friends' gap to the shooters' front
+DGLOBES = {"near_m": 60, "fire_s": 45, "w": 30, "friend_gap_m": 1.0}
 
 
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
@@ -1206,6 +1215,19 @@ def battles(plan):
         out.append([lane("globes", "spear", "shoot", "hold", gap_m=gap(c["near_m"]), fight_s=c["fire_s"], max_s=c["fire_s"], kind="lob", extras=friends, **common),
                     lane("globes", "spear", "shoot", "hold", gap_m=gap(c["far_m"]), fight_s=c["fire_s"], max_s=c["fire_s"], kind="far", t_morale=True, **common),
                     lane("globes", KNIGHTS, "shoot", "hold", gap_m=gap(c["near_m"], k_d), fight_s=c["fire_s"], max_s=c["fire_s"], kind="knights", **common)])
+    elif plan == "dglobes":
+        # (near and knights: the blast on standing men, with and without a knock; lob: the shooters' own friends right before them, the arc from memory, the target's morale)
+        c = DGLOBES
+        a_d, t_d = depth(UNITS["dglobes"][0], UNITS["dglobes"][1], c["w"]), depth(UNITS["spear"][0], UNITS["spear"][1], c["w"])
+        e_d = depth(UNITS["cspear"][0], UNITS["cspear"][1], c["w"])
+        k_d = depth(KNIGHTS, UNITS[KNIGHTS][1], c["w"])
+        gap = lambda m, t=t_d: round(m - (a_d + t) / 2, 1)
+        common = dict(answer=False, morale_rows=True, a_w=c["w"], t_w=c["w"])
+        # (Lua M.layout: from the target's place, the attacker at +z: the friends' near edge friend_gap_m before the shooters' front)
+        friends = [{"short": "cspear", "dx": 0.0, "dz": round(t_d / 2 + gap(c["near_m"]) - c["friend_gap_m"] - e_d / 2, 1), "b": 180, "width": c["w"]}]
+        out.append([lane("dglobes", "spear", "shoot", "hold", gap_m=gap(c["near_m"]), fight_s=c["fire_s"], max_s=c["fire_s"], kind="near", **common),
+                    lane("dglobes", KNIGHTS, "shoot", "hold", gap_m=gap(c["near_m"], k_d), fight_s=c["fire_s"], max_s=c["fire_s"], kind="knights", **common),
+                    lane("dglobes", "spear", "shoot", "hold", gap_m=gap(c["near_m"]), fight_s=c["fire_s"], max_s=c["fire_s"], kind="lob", t_morale=True, extras=friends, **common)])
     elif plan == "warpfire":
         c = WARPFIRE
         common = dict(answer=False, morale_rows=True)
@@ -1998,6 +2020,9 @@ def run_config(plan, index):
     if plan == "globes2":
         # (mem_morale: the targets' morale effects from memory, apps.mem.morale)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=GLOBES["fire_s"] + 5, men_near_m=400, mem_proj=True, mem_extras=True, mem_morale=True)
+    if plan == "dglobes":
+        # (as globes2: the men and the shells from memory, the friends', the targets' morale effects)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=DGLOBES["fire_s"] + 5, men_near_m=400, mem_proj=True, mem_extras=True, mem_morale=True)
     if plan == "triads":
         # health every 0.25 s; the men from memory every 0.1 s within 60 m all the fight
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=TRIADS["sw_fight_s"] + 5, men_near_m=60)
@@ -2351,7 +2376,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     # the new units' plans (UNIT_PLANS) and memshot: the entry turns every unit's fire at will off and only the 'shoot'
     # attacker and a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
     for b, ln in enumerate(meta):
-        if ln.get("plan") in UNIT_PLANS + ("memshot", "warpfire", "globes", "globes2"):
+        if ln.get("plan") in UNIT_PLANS + ("memshot", "warpfire", "globes", "globes2", "dglobes"):
             if ln["spec"].get("mode") != "shoot" and int(slot["a"][b]) >= 0:
                 st.u["range"][b, int(slot["a"][b])] = 0.0
             if ln["spec"].get("target_mode") != "skirmish" and int(slot["tg"][b]) >= 0:
@@ -4512,7 +4537,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
                                                      "shootcontact", "recontact", "pursuit", "cavalry",
-                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder", "triads", "warpfire", "globes", "globes2"),
+                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder", "triads", "warpfire", "globes", "globes2", "dglobes"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -4581,7 +4606,7 @@ def main(argv=None):
         plan_report("warpfire", warpfire_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
                     sim=args.sim, device=args.device)
         return 0
-    if args.command in ("globes", "globes2"):
+    if args.command in ("globes", "globes2", "dglobes"):
         plan_report(args.command, warpfire_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
                     sim=args.sim, device=args.device)
         return 0
