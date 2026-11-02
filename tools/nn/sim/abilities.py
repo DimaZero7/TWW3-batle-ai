@@ -41,6 +41,14 @@ The same ability of two owners does not stack on one enemy (the game finds the r
 stats count once. Its direct damage (the passport's direct, Warp-Quake) is tools/nn/sim/direct.py from_abilities; its
 cant_move (Seismic Snare) the movement's and the orders' (battle.py: snared()). The abilities without t_en (the lords')
 keep their old reach (their enemies' columns are neutral).
+Attributes of an active ability (02.11.2026, Concealment Bombs; class rule, data: the passport's attributes, the phase's
+special_ability_phase_attribute_effects; config/nn/sim.json abilities.attributes): while it is active its owner carries
+the rule flags of the phase's attributes on itself (RULES, as the innate effects' - stalk, unspottable, unbreakable...);
+an attribute on others, or one without a rule here, acts on nothing (ability_rules says which).
+Limited uses (02.11.2026; the passport's uses, the database's num_uses; abilities.uses_limit): ab{k}_n counts down at each
+fire; at 0 the ability does not fire again and its recharge does not run out (the game's program: no recharge starts, the
+button is off to the battle's end; build/diag_roster/wh2_main_skv_inf_death_runners_0/mechanic.md 2.2) - the timers show a
+frozen recharge_s, so the network sees it not ready. -1: no limit (every other ability), its timers to the bit as before.
 Received (`ab_rx`, INTERNAL, the network's "effects on me from others"): a bitmask over the passports' order (keys())
 of the abilities of OTHER units on each unit in the last step - a friend's aura or cast laid on it (snap), an enemy's on
 it; effects.py adds the innate auras' (`fx_rx`: Hold the Line); State.observation() gives their union.
@@ -66,6 +74,15 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
              ("stat_resistance_physical", "add"): "resist_physical"}
+# The rules a unit's attribute can set -> the unit field that carries the flag for the step (the innate effects' as well:
+# effects.py); unspottable (02.11.2026): an enemy sees it hidden only within stealth.unspottable_m (stealth.py)
+RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
+         "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
+         "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd", "causes_fear": "fear",
+         "immune_to_psychology": "itp", "causes_terror": "terror", "unspottable": "unsp"}
+# the database's attribute key where it is not the rule's name (tools/nn/effects.py ATTRIBUTES)
+ATTRIBUTE_RULE = {"charge_defense": "charge_defence", "charge_defense_vs_large": "charge_defence_vs_large",
+                  "mounted_fire_move": "fire_while_moving"}
 # A list to append each step's {ability key: [B, N] bool - on the unit, own or a friend's} to, or None (training:
 # off); the probes' simulator twins read it (tools/nn/morale_probe.py).
 RECEIVED = None
@@ -78,7 +95,7 @@ HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", 
     "t_en", "dd_n", "dd_base", "dd_low", "dd_s", "cant_move",
     # (the passport's loop_stance: the Grinders turn their drills in place) its owner takes no order and stands while
     # it is active (busy())
-    "loop")
+    "loop") + tuple(f"rule_{r}" for r in RULES)        # (02.11.2026) its phase's attributes on its owner (module doc)
 COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
 
@@ -128,6 +145,37 @@ def effects(passport):
     return out
 
 
+def rules_of(passport):
+    """The rules (RULES) the phase's attributes set on the ability's owner himself (module doc)."""
+    out = []
+    for a in passport.get("attributes") or ():
+        r = ATTRIBUTE_RULE.get(a.get("attribute"), a.get("attribute"))
+        if r in RULES and "self" in (a.get("on") or ()) and r not in out:
+            out.append(r)
+    return out
+
+
+def ability_rules(params):
+    """The rules any modelled active ability of the passports sets (module doc), abilities.attributes on; only json - the
+    step reads no tensor for a rule nobody gives (old armies: bit for bit)."""
+    cal = params.sim["abilities"]
+    if not (cal.get("attributes") or {}).get("on"):
+        return ()
+    model = set(cal["model"])
+    out = []
+    for k, p in params.abilities.items():
+        if k in model and not p["passive"] and not p.get("auto"):
+            out += [r for r in rules_of(p) if r not in out]
+    return tuple(out)
+
+
+def uses_table(params):
+    """[A + 1] the uses of each ability (-1: no limit, also the last row: no ability; abilities.uses_limit off: all -1).
+    Only json."""
+    on = (params.sim["abilities"].get("uses_limit") or {}).get("on")
+    return [int(params.abilities[k].get("uses", -1)) if on else -1 for k in keys(params)] + [-1]
+
+
 def row(params, key):
     """One ability's row of the table (COLS)."""
     p = params.abilities[key]
@@ -152,6 +200,8 @@ def row(params, key):
             float(math.floor(max(1.0, float(d["amount"]) * float(d.get("scale", 1.0))))) if hit else 0.0,
             float(d.get("min_unary", 1.0)) if hit else 0.0, float(d["every_s"]) if hit else 0.0,
             float(bool(p.get("cant_move")) and en), float(bool(p.get("loop_stance")) and not p["passive"])]
+    own = rules_of(p) if not p["passive"] and not auto else ()
+    out += [float(r in own) for r in RULES]
     for g in GROUPS:
         for s in STATS:
             out.append(eff.get((g, s), 1.0 if s in MULT else 0.0))
@@ -204,6 +254,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
     # (the module doc's "On enemies") the abilities on enemies: the last step's records (ab_en) held to range + hold
     hold_m = float(params.sim["abilities"].get("enemy_hold_m", 0.0))
     t_en_any = on_enemies(params) and "ab_en" in u
+    # (module doc) the attributes' rule flags: the old values for restore(), then what the active abilities add
+    given = ability_rules(params)
+    rule_old = {RULES[r]: u[RULES[r]] for r in given}
+    rule_on = {r: torch.zeros_like(present) for r in given}
     if t_en_any:
         en_cnt = zero[..., None].expand(-1, -1, A + 1).clone()                            # [B, j, a] owners reaching
         en_prev = (u["ab_en"][..., None] >> torch.arange(A + 1, device=u["men"].device)) & 1    # [B, j, a]
@@ -232,9 +286,16 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
             off = off | ((c(f"off_{f}") > 0) & off_now[f])
         ready = standing & has & ~passive & (on <= 0) & (cd <= 0) & ~off
         ordered = (use == k) & (c("self_cast") > 0)
+        n_key = f"ab{k}_n"
+        if n_key in u:
+            ready = ready & (u[n_key] != 0)       # (module doc) limited uses: none left, no fire
         fire = ready & ((u["ai"] & want) | ordered)
         on = torch.where(fire, c("active_s"), on)
         cd = torch.where(fire, c("active_s") + c("recharge_s"), cd)
+        if n_key in u:
+            u[n_key] = torch.where(fire & (u[n_key] > 0), u[n_key] - 1, u[n_key])
+            # the last use: its recharge does not run out, the timers show it frozen at recharge_s
+            cd = torch.where(u[n_key] == 0, torch.maximum(cd, c("recharge_s")), cd)
         # switched off while active: it ends now and recharges from now
         ended = (on > 0) & off
         cd = torch.where(ended, torch.minimum(cd, c("recharge_s").clamp(min=0)), cd)
@@ -243,6 +304,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
         u[f"ab{k}_cd"] = torch.where(has, cd, u[f"ab{k}_cd"])
         # active: its owner alive (routing too: it goes on, spec 3.4)
         active = has & alive & (c("modelled") > 0) & (on > 0)
+        for rl in given:
+            rule_on[rl] = rule_on[rl] | (active & (c(f"rule_{rl}") > 0))
         follow = c("update") > 0                    # an aura that follows the owner (update_targets)
         reach = {"self": eye & active[:, :, None], "friends": friends & (active & follow)[:, :, None],
                  "enemies": enemies & active[:, :, None]}
@@ -335,6 +398,9 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
         RECEIVED.append({names[a]: g for a, g in got.items()})
     old = {k: u[k] for k in ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack",
                               "defence", "morale_bonus", "resist_physical")}
+    for rl in given:
+        old[RULES[rl]] = rule_old[RULES[rl]]
+        u[RULES[rl]] = u[RULES[rl]] | rule_on[rl]
     # scalar_charge_speed, when an ability gives it, sets the charge speed; else scalar_speed scales it too
     charge_speed = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
 

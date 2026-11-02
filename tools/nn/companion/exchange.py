@@ -607,19 +607,23 @@ def ability_timers(doc, names, slots, passports=None, own=1):
     unit; the observation keeps it only while the unit is seen): `on` 1 s, timers 0. own: the side whose
     uses the bridge counts (1; the enemy's script: 2, its own bridge's abilities_used). A spell's slot (abilities.py
     SPELL_AT + j) also gives sp{j}_on / sp{j}_cd (its passport's active_s and recharge_s from its last cast: the
-    recharge runs from the effect's end, the magic probe); the caster shows no phase of it."""
+    recharge runs from the effect's end, the magic probe); the caster shows no phase of it. An ability of limited uses
+    (the passport's uses > 0: Concealment Bombs; abilities_count: {unit: {ability: how many times the bridge used it}}): with
+    none left the recharge is frozen at recharge_s, as the simulator's (tools/nn/sim/abilities.py) - not ready to the end."""
     passports = passports or {**model_abilities.load_spells(), **model_abilities.load()}
     N = len(names)
     K = max((len(s) for s in slots), default=0)
     out = {f"ab{k}_{t}": np.zeros((1, N)) for k in range(K) for t in ("on", "cd")}
     t = doc.get("t", 0) / 1000.0
     used = doc.get("abilities_used") or {}
+    counted = doc.get("abilities_count") or {}
     rows = {u["n"]: u for u in doc["units"]}
     for i, name in enumerate(names):
         row = rows.get(name, {})
         fx = _effects(row)
         mine = int(row.get("side", 0)) == own
         last = used.get(name) if isinstance(used.get(name), dict) else {}
+        times = counted.get(name) if isinstance(counted.get(name), dict) else {}
         for k, key in enumerate(slots[i]):
             if not key or key not in passports:
                 continue
@@ -632,6 +636,9 @@ def ability_timers(doc, names, slots, passports=None, own=1):
                 on, cd = max(0.0, active - since), max(0.0, active + recharge - since)
                 if fx is not None and not seen_on and since >= TAKE_S and on > 0 and p.get("phases"):
                     on = cd = 0.0                      # the card does not show it: it did not take
+                limit = int(p.get("uses", -1) or -1)
+                if limit > 0 and int(times.get(key, 0)) >= limit:
+                    cd = max(cd, recharge)             # none left: the recharge does not run out
             if seen_on and on <= 0 and not p.get("passive"):
                 on = 1.0
                 cd = max(cd, on)

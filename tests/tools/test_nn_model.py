@@ -642,7 +642,7 @@ def fx_cols(tokens):
     """Every effect's (owned, on) pair in the catalogue's order: the first FX_MID in the middle, FX_NEW and FX_CAV at the
     end."""
     mid = tokens[..., T0 - NEW_EFFECTS:T0]
-    new = tokens[..., [ob.INDEX[n] for n in ob.FX_NEW + ob.FX_CAV + ob.FX_MON]]
+    new = tokens[..., [ob.INDEX[n] for n in ob.FX_NEW + ob.FX_CAV + ob.FX_MON + ob.FX_LATE]]
     return np.concatenate([mid, new], -1) if isinstance(tokens, np.ndarray) else torch.cat([mid, new], -1)
 
 

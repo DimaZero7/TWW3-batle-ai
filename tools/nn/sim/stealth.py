@@ -14,6 +14,11 @@ The game's rules (the game's database and the community's breakdown of the engin
   unit is not yet hidden (its hide clock running: fresh_before; 0 - the old reading, the first fresh_s after it hid);
   edge to edge of the formations (geometry.pairwise gap at the step's start): the Gutter Runners are seen within 64 m,
   by the Jezzails within 128 m, clanrats in the woods within 48 m;
+* a unit with the attribute unspottable (02.11.2026: Concealment Bombs while on, abilities.py) is seen only within
+  unspottable_m (the database's _kv_rules unspottable_unit_reveal_distance: 20 m), edge to edge, whoever looks: no spotting
+  distance, hiding_scalar, forest, fresh bonus or night (the game's program, build/diag_roster/
+  wh2_main_skv_inf_death_runners_0/mechanic.md 1.1); it hides as any other unit (the attribute alone does not hide: it needs
+  stalk; a clock of 5 s if it was seen for longer than quick_s, and those 5 s it too is seen only within 20 m);
 * its own acts reveal it: firing (at will and on the move; the attribute snipe would keep it hidden - none of our hiding
   units has it) and melee; an attack order does not (reveal.attack_order 0: the probe of 25.10.2026), running does not.
 The probe 'скрытность' (25.10.2026, 3 battles) checks the rules: seen at 66.6 / 64.8 / 62.9 m standing / walking /
@@ -26,7 +31,7 @@ it is no order (HOLD, as a dead target), the enemy's blows do not fall on it, an
 with the token's `hidden` column. A dead unit is seen (the game shows a destroyed unit).
 
 
-State: STATIC stalk (the attribute's rule flag, effects.py), hidef (hide_forest), spot_m / spot_tree (its spotting
+State: STATIC stalk (the attribute's rule flag, effects.py), unsp (unspottable's), hidef (hide_forest), spot_m / spot_tree (its spotting
 distances), hide_k (hiding_scalar); INTERNAL hid (hidden now), hid_s (seconds it has met the conditions unseen: the hide
 clock), hid_t (seconds since it hid), hid_g (seconds of the grace used), hid_r (the quick re-hide's window left), hid_d
 (deployed, not stepped: a hide_forest unit in the woods at the first step starts hidden). Only json without torch here at
@@ -118,6 +123,9 @@ def update(u, pw, params, dt, fired, engaged, attack):
         spot = torch.where(mostly[:, :, None], u["spot_tree"][:, None, :], spot)
     reach = (spot + torch.where(fresh, float(c["fresh_bonus_m"]), 0.0)[:, :, None]) * u["hide_k"][
         :, :, None]                                                     # [B, i hidden, j observer]
+    unsp_m = float(c.get("unspottable_m") or 0.0)
+    if unsp_m > 0 and "unsp" in u:
+        reach = torch.where(u["unsp"][:, :, None], torch.full_like(reach, unsp_m), reach)
     eyes = alive & ~u["r"] if c.get("routers_blind") else alive
     spotted = (pw["enemy"] & eyes[:, None, :] & (pw["gap"] <= reach)).any(2)
     acts = torch.zeros_like(can)

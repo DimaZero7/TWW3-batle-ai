@@ -74,7 +74,10 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_reloading", "add"): "reloading",
              # 29.10.2026 (the Skaven monsters): the fire's resistance - Regeneration's weakness -20 (a flaming blow x1.2;
              # the game's program sums the resistances, build/diag_skv_mon/mechanic.md M14, M20; tools/nn/sim/regen.py)
-             ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame"}
+             ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame",
+             # 02.11.2026 (the Death Runners): the weeping blade's armour x0.5 (the contact effects only: abilities have no
+             # stat_armour in our pools; tools/nn/sim/effects.py E_STATS)
+             ("stat_armour", "mult"): "armour"}
 # Rules the simulator acts on (tools/nn/sim/effects.py RULES): rule -> what the simulator does.
 SIM_RULES = {
     "unbreakable": "morale points never below leadership: never wavers or routs (morale.py)",
@@ -85,6 +88,8 @@ SIM_RULES = {
     "fire_while_moving": "aims and shoots while moving (battle.py)",
     "fatigue_immune": "gains no fatigue (fatigue.py)",
     "stalk": "hides anywhere: any ground is cover for it (tools/nn/sim/stealth.py; config/nn/sim.json stealth)",
+    "unspottable": "seen while hidden only within unspottable_unit_reveal_distance 20 m, edge to edge, no other term "
+                   "(tools/nn/sim/stealth.py; config/nn/sim.json stealth.unspottable_m)",
     "charge_defence_vs_large": "braced (slower than melee.braced_speed), cancels the charge bonus of a large charger "
                                "within 45 deg of its front (melee.py; config/nn/sim.json contact.charge_defence)",
     "charge_defence": "braced, cancels the charge bonus of any charger within 45 deg of its front (melee.py; "
@@ -135,6 +140,10 @@ ATTRIBUTES = {
               "does": "hides in any terrain, open ground too (fandom 'Stalk'); seen by an enemy within its spotting "
                       "distance x the unit's hiding_scalar, revealed by firing and melee, not by running",
               "kb": KB + "abilities.md#attributes-selection"},
+    "unspottable": {"name": "Unspottable", "rules": ["unspottable"],
+                    "does": "seen while hidden only within 20 m, edge to edge (needs stalk or hide_forest to hide at all; our pools "
+                            "get it from an active ability's phase: Concealment Bombs)",
+                    "kb": KB + "abilities.md#attributes-selection"},
     "immune_to_psychology": {"name": "Immune to Psychology", "rules": ["immune_to_psychology"],
                              "does": "immune to fear and terror", "kb": KB + "abilities.md#attributes-selection"},
     "causes_fear": {"name": "Causes Fear", "rules": ["causes_fear"],
@@ -163,6 +172,8 @@ ATTRIBUTES = {
                     "kb": KB + "abilities.md#attributes-selection",
                     "schema_why": "no walls or buildings in our battles"},
 }
+# (an active ability's attributes - Concealment Bombs' stalk + unspottable - are not this catalogue's: an active ability is no
+# innate effect; tools/nn/sim/abilities.py rules_of)
 # Contact effects (fandom "Contact Effect"; docs/en/game/mechanics/abilities.md "Contact effects"): a weapon's blow
 # (melee_weapons.contact_phase) or projectile hit (projectiles.contact_stat_effect) lays its phase on the enemy it hits
 # for the phase's duration (special_ability_phases, 10 s), each hit starting it again; since Update 8.1 different
@@ -172,7 +183,8 @@ ATTRIBUTES = {
 CONTACT_NAMES = {"wh_main_unit_contact_poison": "Poison!",
                  "wh2_main_unit_contact_plague_monk_censer_morale": "Contaminated!",
                  "wh2_dlc12_unit_contact_suppressive_fire": "Suppressed!",
-                 "wh2_dlc09_unit_contact_shieldbreaker": "Shieldbreaker"}
+                 "wh2_dlc09_unit_contact_shieldbreaker": "Shieldbreaker",
+                 "wh2_main_unit_contact_weeping_blade": "Weeping Blade"}
 KB_CONTACT = KB + "abilities.md#contact-effects"
 # The ability attributes (special_ability_phase_attribute_effects) that are rules of the simulator.
 ABILITY_ATTRIBUTE_RULES = {"unbreakable": "unbreakable", "immune_to_psychology": "immune_to_psychology",

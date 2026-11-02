@@ -25,7 +25,8 @@ def test_every_plan_builds_lanes_far_apart_with_a_tested_side(plan):
         names = {u["name"] for l in lanes for u in l["units"]}
         for l in lanes:
             tested = [u for u in l["units"] if not u["fearless"]]
-            assert tested and all(u["name"] not in config["fearless"] for u in tested)
+            # (plan runners: its blade and melee lanes are about the blows, both sides fearless)
+            assert (tested or plan == "runners") and all(u["name"] not in config["fearless"] for u in tested)
             for s in l["steps"]:
                 assert s["on"] in ("go", "contact", "rout", "rally", "waver", "step")
                 assert s["do"] == "end" or s["unit"] in {u["role"] for u in l["units"]}

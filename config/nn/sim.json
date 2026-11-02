@@ -444,8 +444,11 @@
       "wh_main_character_abilities_stand_your_ground",
       "wh_main_character_abilities_foe_seeker",
       "wh2_dlc14_unit_abilities_warp_quake",
-      "wh2_dlc14_unit_abilities_seismic_snare"
+      "wh2_dlc14_unit_abilities_seismic_snare",
+      "wh2_main_unit_abilities_concealment_bombs"
     ],
+    "attributes": {"on": 1, "why": "The attributes of an active ability's phase on its owner while it is active (tools/nn/sim/abilities.py rules_of; on 0: none). Database: special_ability_phase_attribute_effects, Concealment Bombs: stalk + unspottable and no stat at all. The program (build/diag_roster/wh2_main_skv_inf_death_runners_0/mechanic.md 1.2, 2.1): the phase's attributes act while the phase runs; its 73 s run in melee too."},
+    "uses_limit": {"on": 1, "why": "The database's unit_special_abilities.num_uses (the passport's uses; Concealment Bombs 3, every older ability -1). The program (mechanic.md 2.2): the count goes down at the press; when the active time ends with none left no recharge starts and the button stays off to the battle's end (tools/nn/sim/abilities.py; on 0: no limit)."},
     "enemy_hold_m": 5,
     "cant_move": {"on": 1, "routers": 1, "why": "Seismic Snare's phase flag cant_move (abilities.json cant_move; tools/nn/sim/abilities.py snared, battle.py; on 0: off). The game's program (build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md T1-T3): the units it lies on refuse an order to move, take an attack order only on a target already within reach (in contact; a shooter: within its range), their melee goes on, no damage takes it off, only a unit flying in the air is immune (none in our pools). MEASURED (the probe 'grinder', build/charge-probe/runs/20261031-132356, 1 battle, 2 lanes a case): swordsmen walking under a move order stopped within 0.5 s of the press and stood ON after the 13 s to the lane's end (75 s) - the order in force is dropped, as here (battle.py: a move, a withdraw or an attack beyond reach becomes a halt); in melee they kept fighting (in contact all the 13 s, the Grinders' HP lost 54 / 32 HP/s under the snare against 68 / 28 before it); routers (routed by script) stood the 13 s and ran on after it - routers 1 holds a router too (routers 0: not). The owner's side (the passport's loop_stance, abilities.busy): the Grinders were 'unorderable' all the 17 / 13 s of their ability, a move order given 2 s into Warp-Quake was refused and not taken up after it - they stand and take no order while it is active."},
     "grinders_why": "The Warp Grinders' two actives (31.10.2026; config/nn/abilities.json from the database, the game's program build/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md): no target to choose (passport self_cast: none of target_friends / enemies / ground - the network and the bridge press them as a lord's own, perform_special_ability(key, the unit)), both on EVERY enemy unit whose centre is within effect_range 35 m of the Grinders' centre, held to 35 + enemy_hold_m 5 = 40 m (the program), re-picked every step, no visibility check, the same ability of two Grinders not stacking on one enemy (one record per ability and side: abilities.py 'On enemies'). Warp-Quake 17 s / recharge 90 s: the enemies' speed x 0.75 and direct damage (direct.py from_abilities: at once and every 0.5 s 18 random men of each unit 2 / 3 / 4 HP, mean 3.2 - 115 HP/s on a unit of 18+ men; magical: armour and shields no, spell resistance and the ward yes). Seismic Snare 13 s / recharge 60 s: cant_move (above). Who presses them for the game's AI: the default_trigger 'near' (a standing enemy within near_m 60 m) - A STAND-IN: the game's rule for ai_usage hex_melee_area_self / direct_damage_multi_entity_area was not found in its program (mechanic.md 6).",
@@ -454,8 +457,10 @@
       "wh2_main_character_abilities_verminous_valour": "melee",
       "wh_main_character_abilities_rally": "melee",
       "wh_main_character_abilities_stand_your_ground": "melee",
-      "wh_main_character_abilities_foe_seeker": "melee"
+      "wh_main_character_abilities_foe_seeker": "melee",
+      "wh2_main_unit_abilities_concealment_bombs": "never"
     },
+    "bombs_trigger_why": "Who presses Concealment Bombs for the game's AI and the scripts: never. 1 game battle (build/diag_runners/ai_read.txt, the v3 seed 900100285, 3 Death Runners under the game's AI): all three were revealed on the way in at the old distance, about 64 m edge to edge (hidden with 126-180 m to the nearest enemy, seen by 96-105 m centre to centre), no unit hidden within 64 m of a standing enemy all battle, so no press before a contact; the two later spells of hiding (11 s, 3 s) with the nearest enemy 112-129 m off are stalk's own. The database's template flanking_opportunity (5 x 0.25 x own units in its area: a self ability) gives no threshold in the program (mechanic.md 5); a press inside a melee would not show in this record (it hides nothing there). A stand-in: one battle; the network presses them by order.",
     "friends_min": {
       "wh_main_character_abilities_stand_your_ground": 1,
       "wh_main_character_abilities_rally": 2
@@ -472,6 +477,8 @@
     "fresh_bonus_m": 20.0,
     "fresh_s": 5.0,
     "start_hidden": 1,
+    "unspottable_m": 20.0,
+    "unspottable_why": "The database's _kv_rules unspottable_unit_reveal_distance 20 (config/nn/game_rules.json battle). The program (build/diag_roster/wh2_main_skv_inf_death_runners_0/mechanic.md 1.1, read whole): for a hiding unit with the attribute unspottable the distance is this number and nothing else - no observer's spotting distance, no hiding_scalar, night, weather, forest or the +20 m of the first 5 s; edge to edge of the formations. 0: off (tools/nn/sim/stealth.py).",
     "reveal": {"fire": 1, "melee": 1, "attack_order": 0},
     "fresh_before": 1,
     "quick_s": 1.5,

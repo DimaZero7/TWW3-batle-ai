@@ -99,7 +99,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # third wave (07.10.2026).
     # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10, the 3 Skaven
     # monsters of 29.10, the Pusbags and the Warp Grinders of 31.10 (no cards)
-    assert checked >= 9 and len(units.UNITS) == 53
+    assert checked >= 9 and len(units.UNITS) == 54
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -239,8 +239,10 @@ def test_the_new_units_and_their_contact_phases():
     assert poison["melee"]["contact_phase"] == "wh_main_unit_contact_poison" and not poison["melee"]["magic"]
     assert "wh_main_unit_passive_frenzy" in u["wh2_main_skv_inf_plague_monks"]["abilities"]
     assert set(ph) == {"wh2_dlc12_unit_contact_suppressive_fire", "wh2_main_unit_contact_plague_monk_censer_morale",
-                       "wh_main_unit_contact_poison", "wh2_dlc09_unit_contact_shieldbreaker"}     # (+ the Jezzails')
-    assert all(p["duration_s"] == 10.0 and p["effect"] == "negative" for p in ph.values())
+                       "wh_main_unit_contact_poison", "wh2_dlc09_unit_contact_shieldbreaker",     # (+ the Jezzails')
+                       "wh2_main_unit_contact_weeping_blade"}                                      # (+ the Death Runners')
+    # (the weeping blade: 35 s)
+    assert all(p["duration_s"] == (35.0 if "weeping" in k else 10.0) and p["effect"] == "negative" for k, p in ph.items())
     assert ph["wh2_main_unit_contact_plague_monk_censer_morale"]["stats"] == [
         {"stat": "stat_morale", "how": "add", "value": -10.0}]
     assert units.phase_keys(u) == sorted(ph)

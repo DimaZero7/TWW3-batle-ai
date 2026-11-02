@@ -49,31 +49,31 @@ try:
 except ImportError:          # the table's layout is importable without torch
     torch = None
 
-from tools.nn.sim.abilities import MULT, SIM_STATS, SLOTS, STATS
+from tools.nn.sim.abilities import MULT, RULES, SIM_STATS, SLOTS, STATS
 
 # The effects' stats: the abilities' and the missile damage (poison: x0.85, scalar_missile_damage_base / _ap); since
 # 25.10.2026 (line g43) the shield's block chance (the shield breaker's -24: percentage points off the chance, at least 0 -
 # how the game adds it is not described: an assumption), the accuracy (Blackpowder Discipline's +40, added to land_units
 # accuracy + marksmanship, at most 100) and the reload skill (its +10: the reload is max(4 s, base x (100 - skill) %), the
 # game's rule, base the database's reload_s; the measured cycle scales with it)
-E_STATS = STATS + ("m_damage", "m_ap", "shield", "accuracy", "reloading", "resist_flame")
-E_MULT = MULT + ("m_damage", "m_ap")
+# (02.11.2026, the weeping blade x0.5) the armour: the stat of the unit, one for blows and missiles alike (melee.py, missile.py,
+# artillery.py, magic.py read the field); the game: bonus += (v - 1) x base, then round(base + bonus), half away from zero
+# (build/diag_roster/wh2_main_skv_inf_death_runners_0/mechanic.md 4.3: 25 -> 13)
+E_STATS = STATS + ("m_damage", "m_ap", "shield", "accuracy", "reloading", "resist_flame", "armour")
+E_MULT = MULT + ("m_damage", "m_ap", "armour")
 E_SIM_STATS = {**SIM_STATS, ("scalar_missile_damage_base", "mult"): "m_damage",
                ("scalar_missile_damage_ap", "mult"): "m_ap", ("stat_missile_block_chance", "add"): "shield",
                ("stat_accuracy", "add"): "accuracy", ("stat_reloading", "add"): "reloading",
                # (29.10.2026, the Skaven monsters) the fire's resistance, % (Regeneration's weakness -20: a flaming blow
                # x1.2 - the game sums the resistances, build/diag_skv_mon/mechanic.md M14, M20; melee.py)
-               ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame"}
+               ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame",
+               ("stat_armour", "mult"): "armour"}
 RELOAD_MIN_S = 4.0  # the game's floor of a reload cut by the reload skill (max(4 s, base x (100 - skill) %))
-CONTACT_SLOTS = 4   # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx3_s)
+CONTACT_SLOTS = 8   # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx7_s; 5 used, the queue's sooner or later)
 
 PREDICATES =("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "not_wavering", "hp_below_half",
               "hp_below_quarter", "moving", "climbing")
-# The catalogue's rules the simulator acts on -> the unit field that carries the flag for the step.
-RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
-         "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
-         "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd", "causes_fear": "fear",
-         "immune_to_psychology": "itp", "causes_terror": "terror"}
+# (RULES: the catalogue's rules the simulator acts on -> the unit field that carries the flag for the step; abilities.py)
 TIMERS = 2          # timed effects a unit can carry (fxt0, fxt1)
 MAX_EFFECTS = 62    # the bitmask is an int64
 # self: the owner; friends: an aura's (range_m); enemies (25.10.2026, the Snare Net): the enemies whose centre is within
@@ -439,7 +439,7 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
             else:
                 add[s] = add[s] + got_i * v
     fields = ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack", "defence",
-              "morale_bonus", "resist_physical", "m_damage", "m_ap") + tuple(RULES.values()) + tuple(
+              "morale_bonus", "resist_physical", "m_damage", "m_ap", "armour") + tuple(RULES.values()) + tuple(
         f for f in ("shield", "acc", "reload", "resist_flame") if f in u)
     old = {k: u[k] for k in fields}
     factor = {}
@@ -472,6 +472,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     u["damage"] = u["damage"] * mult("damage")
     u["ap_damage"] = u["ap_damage"] * mult("ap")
     u["charge_bonus"] = u["charge_bonus"] * mult("charge")
+    # the armour: only where an effect lays one (the rest keep theirs to the bit), rounded as the game (E_STATS' note)
+    m_armour = mult("armour")
+    # (+ 1e-3: exp(log 0.5) in float32 may fall just below 0.5, and 95 x 0.5 must round to 48)
+    u["armour"] = torch.where(m_armour != 1, torch.floor(u["armour"] * m_armour + 0.5 + 1e-3), u["armour"])
     # the shield's block chance (the shield breaker: -24 percentage points, at least 0), the accuracy (at most 100) and
     # the reload skill (E_STATS' note): only where an effect gives one (the rest keep their numbers to the bit)
     if "shield" in u:
@@ -520,7 +524,7 @@ def stacked(params):
     return (("speed",) if fx.get("speed_add") else ()) + (MULT_ADD if fx.get("mult_add") else ())
 
 
-MULT_ADD = ("damage", "ap", "charge", "m_damage", "m_ap")
+MULT_ADD = ("damage", "ap", "charge", "m_damage", "m_ap", "armour")
 SPEED = "_speed"       # apply()'s old dict: per stat its factor, (v - 1) sum and count for abilities.apply (not a field)
 
 

@@ -60,7 +60,9 @@ def test_contact_effects_come_from_the_weapons_with_the_database_numbers():
                         # the Skaven monsters (29.10.2026): the Brood Horror's claws poison as the Giant Rats' bites
                         "wh2_dlc16_skv_mon_brood_horror_0": [POISON],
                         # the Pusbags (31.10.2026): the poisoned sword and the vortices of their dead (the censer's -10)
-                        "wh3_dlc29_skv_inf_pusbags": [CENSER, POISON]}
+                        "wh3_dlc29_skv_inf_pusbags": [CENSER, POISON],
+                        # the Death Runners (02.11.2026): the weeping blade (armour x0.5, 35 s)
+                        "wh2_main_skv_inf_death_runners_0": ["wh2_main_unit_contact_weeping_blade"]}
     # nobody owns a contact effect (it lies on the enemy it hits)
     assert not any(k in v for v in links.values() for k in (POISON, CENSER, SUPPRESS))
     for k in (POISON, CENSER, SUPPRESS):

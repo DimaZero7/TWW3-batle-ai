@@ -193,6 +193,8 @@ STATIC = {
                           "magical projectile (magic.py; docs/en/game/mechanics/magic.md)"),
     # (25.10.2026, line g43: stealth, the penetrating bullet, the reload skill, the delayed passive)
     "stalk": ("b", "attribute stalk: any ground hides it (tools/nn/sim/stealth.py)"),
+    "unsp": ("b", "attribute unspottable (02.11.2026: Concealment Bombs while on, abilities.py): an enemy sees it hidden "
+                  "only within stealth.unspottable_m, edge to edge, with no other term (stealth.py)"),
     "spot_m": ("f", "how far it sees a hidden enemy, m (the database's land_units spot_dist_scrub: 80, the Jezzails 160; "
                     "stealth.py)"),
     "hide_k": ("f", "its hiding_scalar: an enemy sees it hidden within its spotting distance x this (0.8 the Gutter "
@@ -325,6 +327,10 @@ INTERNAL = {
     "cfx1_s": ("f", "the second contact effect's (cfx0_s)"),
     "cfx2_s": ("f", "the third contact effect's"),
     "cfx3_s": ("f", "the fourth contact effect's"),
+    "cfx4_s": ("f", "the fifth contact effect's (02.11.2026, the weeping blade)"),
+    "cfx5_s": ("f", "the sixth contact effect's"),
+    "cfx6_s": ("f", "the seventh contact effect's"),
+    "cfx7_s": ("f", "the eighth contact effect's"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
     "late": ("f", "share of a shooter's men whose target man died since their last shot (missile.reaim: they aim "
                   "again before the next shot): 1 - prod(1 - the target's men lost a step / its men), 0 at a volley "
@@ -400,6 +406,10 @@ INTERNAL = {
     "w0": ("f", "the width the re-form started from, m (the width goes from it to wnew evenly over wT)"),
     "wT": ("f", "the re-form's time, s (reform.ready_s)"),
     "ws": ("f", "seconds into the re-form"),
+    # (02.11.2026, Concealment Bombs: the passport's uses) the uses left of each slot's ability, -1 no limit (abilities.py)
+    "ab0_n": ("i", "uses left of ability 0 (the passport's uses; -1 no limit; 0: off to the battle's end)"),
+    "ab1_n": ("i", "the same of ability 1"),
+    "ab2_n": ("i", "the same of ability 2"),
     "ab0_on": ("f", "seconds ability 0 stays active"),
     "ab0_cd": ("f", "seconds until ability 0 is ready"),
     "ab1_on": ("f", "seconds ability 1 stays active"),

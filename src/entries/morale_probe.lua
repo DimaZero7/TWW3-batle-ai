@@ -18,7 +18,9 @@
 -- Every tick_ms 'probe_sample': per running lane every role's place, bearing, men, health, melee,
 -- routing / wavering / shattered, CCO MoralePercent, MoraleState and MoraleGreatestEffect (the strongest morale
 -- effect's text), PercentHpLostRecently, moving fast, firing, and its active effects (fx: the phase
--- keys of CCO ActiveEffectList, as the bridge's nn_effects). A lane also ends after max_s. The
+-- keys of CCO ActiveEffectList, as the bridge's nn_effects), hid (unit:is_hidden()), v (unit:is_visible_to_alliance of the
+-- other side's alliance) and, with lane.card, arm (the unit card's current armour: CCO UnitDetailsContext.StatList,
+-- stat_armour, contact effects included). A lane also ends after max_s. The
 -- battle ends when every lane is done.
 -- config.mem (a probe built with --mem only; docs/ru/game/memreader.md): the morale of every lane unit from the game's
 -- memory (apps.mem.morale) - 'mem_attach' once (the checks, each unit bound or why not); from the go every MEM_POLL_MS
@@ -112,7 +114,26 @@ function M.main(bm, config, globals)
     end
     local function now_ms() return bm:time_elapsed_ms() end
 
-    local function unit_row(u)
+    -- The unit card's current armour (lane.card; module comment): its row of the card found once per unit, checked each read.
+    local arm_index = {}
+    local function card_armour(u)
+        local uid = read(function() return tostring(u:unique_ui_id()) end)
+        if not uid then return nil end
+        local function at(i, field) return read(cco, u, 'UnitDetailsContext.StatList.At(' .. i .. ').' .. field) end
+        local i = arm_index[uid]
+        if i == nil or at(i, 'Key') ~= 'stat_armour' then
+            i = nil
+            local n = read(cco, u, 'UnitDetailsContext.StatList.Size')
+            if type(n) ~= 'number' or n < 0 or n > 100 then return nil end
+            for k = 0, n - 1 do
+                if at(k, 'Key') == 'stat_armour' then i = k break end
+            end
+            arm_index[uid] = i
+        end
+        return i and round(at(i, 'Value'), 2) or nil
+    end
+
+    local function unit_row(u, it, lane)
         local p = read(function() return u:position() end)
         local row = {men = read(function() return u:number_of_men_alive() end),
             hp = round(read(function() return u:unary_hitpoints() end), 4),
@@ -128,6 +149,10 @@ function M.main(bm, config, globals)
         if type(effect) == 'string' and effect ~= '' then row.mge = effect end
         local fx = services.active_effects(function(field) return read(cco, u, field) end)
         if fx and #fx > 0 then row.fx = table.concat(fx, ',') end
+        row.hid = read(function() return u:is_hidden() end)
+        local other = it and state.alliances and state.alliances[3 - it.side]
+        if other then row.v = read(function() return u:is_visible_to_alliance(other) end) end
+        if lane and lane.card then row.arm = card_armour(u) end
         return row
     end
 
@@ -172,7 +197,7 @@ function M.main(bm, config, globals)
         elseif d == 'ability' then
             local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, s.key)
             emit('probe_ability', {lane = lane.name, unit = s.unit, key = s.key, ok = ok and used == true,
-                t = now - lane.events.go})
+                error = (not ok) and tostring(used) or nil, t = now - lane.events.go})
         elseif d == 'shadow' then
             lane.shadows[s.unit] = {target = s.target, d = s.d}
         elseif d == 'kill' then
@@ -211,7 +236,7 @@ function M.main(bm, config, globals)
                 local ev = lane.events
                 local r = {lane = lane.name, t = now - ev.go, u = {}}
                 for role, it in pairs(lane.roles) do
-                    local row = unit_row(it.unit)
+                    local row = unit_row(it.unit, it, lane)
                     r.u[role] = row
                     if row.m and not ev.contact[role] then
                         ev.contact[role] = now
@@ -336,6 +361,7 @@ function M.main(bm, config, globals)
         local fearless = {}
         for _, name in ipairs(config.fearless or {}) do fearless[name] = true end
         local sides = battle.read_sides(bm)
+        state.alliances = {sides[1].alliance, sides[2].alliance}
         for side = 1, 2 do
             for _, u in ipairs(sides[side].units) do
                 local name = u:name()
@@ -348,7 +374,7 @@ function M.main(bm, config, globals)
         end
         for i, l in ipairs(config.lanes) do
             local lane = {name = l.name, x = l.x, z = l.z, max_s = l.max_s, units = l.units, steps = l.steps or {},
-                roles = {}, shadows = {}}
+                roles = {}, shadows = {}, card = l.card}
             for _, spec in ipairs(l.units) do
                 lane.roles[spec.role] = state.units[spec.name]
                 assert(lane.roles[spec.role], 'scenario unit missing: ' .. tostring(spec.name))

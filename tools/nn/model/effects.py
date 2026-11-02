@@ -132,7 +132,11 @@ FX_STAT2_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS2)
 # fire's resistance: Regeneration's weakness -20 (a flaming blow x1.2) and a resistance to fire an effect may give.
 FX_STATS3 = (("stat_weakness_flame", "add"), ("stat_resistance_flame", "add"))
 FX_STAT3_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS3)
-FX_ALL = FX_STATS + FX_STATS2 + FX_STATS3
+# Then (02.11.2026, the Death Runners; the token's FX_STATS4 after FX_MON: older checkpoints load with zero weights) the
+# weeping blade's armour x0.5.
+FX_STATS4 = (("stat_armour", "mult"),)
+FX_STAT4_NAMES = tuple(f"fxs_{s}_{h}" for s, h in FX_STATS4)
+FX_ALL = FX_STATS + FX_STATS2 + FX_STATS3 + FX_STATS4
 FX_MULT = np.array([h == "mult" for _, h in FX_ALL])
 _TORCH = {}
 
@@ -140,10 +144,11 @@ _TORCH = {}
 @lru_cache(maxsize=1)
 def stat_table():
     """[E, len(FX_ALL)] float32: per effect of the catalogue (keys() order) the log of each multiplier and each
-    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note), FX_STATS, FX_STATS2, FX_STATS3."""
+    addition / its scale (abilities.STATS) it lays on the unit itself (FX_STATS' note), FX_STATS, FX_STATS2, FX_STATS3,
+    FX_STATS4."""
     from tools.nn.model import abilities
     doc = load()
-    scale = {(s, h): float(k) for s, h, k in abilities.STATS}
+    scale = {(s, h): float(k) for s, h, k in abilities.STATS}     # (the additions'; a multiplier needs none)
     col = {sh: j for j, sh in enumerate(FX_ALL)}
     out = np.zeros((len(keys(doc)), len(FX_ALL)), np.float32)
     for i, k in enumerate(keys(doc)):

@@ -143,6 +143,9 @@ def test_our_abilities_are_data_with_every_stat_priced():
     quake, snare = a.pop("wh2_dlc14_unit_abilities_warp_quake"), a.pop("wh2_dlc14_unit_abilities_seismic_snare")
     assert not quake.parts and quake.unpriced == ("scalar_speed mult 0.75 on enemies",)
     assert not snare.parts and not snare.unpriced
+    # (02.11.2026) Concealment Bombs: attributes only (stalk + unspottable), no stat for a brick to price
+    bombs = a.pop("wh2_main_unit_abilities_concealment_bombs")
+    assert not bombs.parts and not bombs.unpriced
     assert set(a) == {"wh2_main_character_abilities_verminous_valour", "wh_main_character_abilities_deadly_onslaught",
                       "wh_main_character_abilities_foe_seeker", "wh_main_character_abilities_rally",
                       "wh_main_character_abilities_stand_your_ground"}

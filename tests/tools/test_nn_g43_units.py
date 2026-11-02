@@ -89,7 +89,7 @@ def test_the_effects_catalogue():
     assert [(s["stat"], s["how"], s["value"], s["sim"]) for s in br["stats"]] == [
         ("stat_missile_block_chance", "add", -24.0, "shield")]
     # the order is append-only: the 19 effects before line g43 keep their places, the cavalry's (29.10.2026) after g43's
-    assert len(doc["order"]) == ob.FX_MID + (len(ob.FX_NEW) + len(ob.FX_CAV) + len(ob.FX_MON)) // 2
+    assert len(doc["order"]) == ob.FX_MID + (len(ob.FX_NEW) + len(ob.FX_CAV) + len(ob.FX_MON) + len(ob.FX_LATE)) // 2
     assert set(doc["order"][ob.FX_MID:ob.FX_MID + ob.FX_G43]) == {
         "ignore_trees", "snipe", "stalk", BREAKER, SNARE, BLACKPOWDER}
     # ... and the artillery's cant_run (29.10.2026: catalogued, no rule - its run speed is its walk's)
@@ -100,7 +100,9 @@ def test_the_effects_catalogue():
                                                     "wh3_dlc29_unit_passive_pestilent_perfection",
                                                     "wh3_dlc29_unit_passive_unshakable_pathogen",
                                                     # the Warp Grinders' attribute (31.10.2026)
-                                                    "wallbreaker"]
+                                                    "wallbreaker",
+                                                    # the Death Runners' weeping blade (02.11.2026)
+                                                    "wh2_main_unit_contact_weeping_blade"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():
@@ -152,10 +154,10 @@ def test_the_sight_columns():
 def test_the_new_effect_pairs_and_stats_are_the_tokens_tail():
     c = len(ob.FX_LAST)          # (the cavalry's pairs after them, the monsters' fire stats and pairs: 29.10.2026)
     g = len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT) + c
-    assert ob.NAMES[-g:] == ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT + ob.FX_LAST and ob.TAIL[-6:] == (
-        ob.FX_NEW, ob.FX_STATS2, ob.SIGHT, ob.FX_CAV, ob.FX_STATS3, ob.FX_MON)
-    assert ob.FX_LAST == ob.FX_CAV + ob.FX_STATS3 + ob.FX_MON
-    assert ob.FX_NEW + ob.FX_CAV + ob.FX_MON == mfx.NAMES[2 * ob.FX_MID:] and ob.NAMES[:ob.INDEX["volley_ready"]][-2 * ob.FX_MID:] == mfx.NAMES[
+    assert ob.NAMES[-g:] == ob.FX_NEW + ob.FX_STATS2 + ob.SIGHT + ob.FX_LAST and ob.TAIL[-8:] == (
+        ob.FX_NEW, ob.FX_STATS2, ob.SIGHT, ob.FX_CAV, ob.FX_STATS3, ob.FX_MON, ob.FX_STATS4, ob.FX_LATE)
+    assert ob.FX_LAST == ob.FX_CAV + ob.FX_STATS3 + ob.FX_MON + ob.FX_STATS4 + ob.FX_LATE
+    assert ob.FX_NEW + ob.FX_CAV + ob.FX_MON + ob.FX_LATE == mfx.NAMES[2 * ob.FX_MID:] and ob.NAMES[:ob.INDEX["volley_ready"]][-2 * ob.FX_MID:] == mfx.NAMES[
         :2 * ob.FX_MID]
     # the token before line g43: today's first columns; recorded tokens of that width widen with zeros
     old = ob.TOKEN - g

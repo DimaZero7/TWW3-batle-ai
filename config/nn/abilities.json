@@ -216,6 +216,54 @@
     "key": "wh2_main_character_abilities_verminous_valour"
    }
   },
+  "wh2_main_unit_abilities_concealment_bombs": {
+   "active_s": 73.0,
+   "recharge_s": 90.0,
+   "initial_s": 0.0,
+   "uses": 3,
+   "vigour_per_s": 0.0,
+   "cp": [
+    150,
+    0
+   ],
+   "range_m": 0.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": true,
+   "update_targets": false,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [
+    "wh2_main_unit_abilities_concealment_bombs"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [],
+   "attributes": [
+    {
+     "attribute": "stalk",
+     "effect": "positive",
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_unit_abilities_concealment_bombs"
+    },
+    {
+     "attribute": "unspottable",
+     "effect": "positive",
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_unit_abilities_concealment_bombs"
+    }
+   ]
+  },
   "wh2_main_unit_passive_scurry_away": {
    "active_s": -1.0,
    "recharge_s": -1.0,

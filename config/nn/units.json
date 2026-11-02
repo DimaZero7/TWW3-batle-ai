@@ -526,6 +526,17 @@
     }
    ]
   },
+  "wh2_main_unit_contact_weeping_blade": {
+   "duration_s": 35.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "stat_armour",
+     "how": "mult",
+     "value": 0.5
+    }
+   ]
+  },
   "wh_main_unit_contact_poison": {
    "duration_s": 10.0,
    "effect": "negative",
@@ -6504,6 +6515,103 @@
    "multiplayer_cost": 600,
    "combat_potential": {
     "melee": 240.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_death_runners_0": {
+   "land_unit": "wh2_main_skv_inf_death_runners_0",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 72,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 4,
+   "entity": "wh2_main_skv_infantry_fast_360",
+   "spacing": {
+    "template": "wh2_main_infantry_medium_rabble",
+    "h": 1.8,
+    "v": 1.9,
+    "scatter": 0.4,
+    "chaotic": false
+   },
+   "hp_per_man": 80,
+   "hp_total": 5760,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "radii_ratio": 1.0,
+   "body_shape": "circle",
+   "knock_ignore": 0,
+   "hit_reaction_ignore": 0,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 32,
+    "defence": 28,
+    "charge_bonus": 22,
+    "weapon": "wh2_main_skv_weeping_blade",
+    "damage": 8,
+    "ap_damage": 22,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 10,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "flaming": false,
+    "contact_phase": "wh2_main_unit_contact_weeping_blade",
+    "weapon_length": 1.0
+   },
+   "armour": 20,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 68,
+   "damage_resist": {
+    "all": 0,
+    "physical": 30,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 1,
+   "projectile_speed_keep": 0.95,
+   "attributes": [
+    "guerrilla_deploy",
+    "stalk",
+    "strider"
+   ],
+   "abilities": [
+    "wh2_main_unit_abilities_concealment_bombs",
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 850,
+   "combat_potential": {
+    "melee": 950.0,
     "missile": 0.0
    },
    "missile": null,

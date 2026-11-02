@@ -521,6 +521,12 @@
       "group": "wh3_default_land_melee_infantry_special",
       "quality": "tier_2_step_2_units"
      }
+    ],
+    "wh2_main_skv_inf_death_runners_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_flanking",
+      "quality": "tier_2_step_4_units"
+     }
     ]
    }
   }

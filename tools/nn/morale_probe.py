@@ -37,6 +37,8 @@ Plans (battles):
           at the first wavering, or the engine killing 30 % of the men every 4 s; run with the game's rules and with
           waver_base_timeout changed in the probe's pack (--kv waver_base_timeout=x10 / =0): 'timer' prints the delays
           wavering -> rout and MoralePercent <= 0 -> rout per variant (timer_lane).
+  runners the Death Runners (tools/nn/runners_probe.py its table; build/diag_runners; 3 battles of 3 lanes, 0.25 s samples,
+          with --mem the morale of the target from memory: is there a 'surprised' timer): runners_lane.
   hyp     morale hypotheses (4 battles, lanes in a column along z, 0.25 s samples, speed 3): 1 - the waver timer and the
           rally clock at rank 0 and 9 (the rank written into the scenario), a weak enemy by a router; 2 - rear then
           flank strikes (one leaves first), two even fights, the rally against a 12 m / 60 m enemy front; 3 - a weak
@@ -92,6 +94,7 @@ UNITS = {
     "brood": ("wh2_dlc16_skv_mon_brood_horror_0", 1, SKV),
     "pusbags": ("wh3_dlc29_skv_inf_pusbags", 180, SKV),
     "warpfire": ("wh2_main_skv_inf_warpfire_thrower", 32, SKV),        # (no passport in config/nn/units.json: no twin)
+    "runners": ("wh2_main_skv_inf_death_runners_0", 72, SKV),
 }
 LORDS = {EMP: "general", SKV: "warlord"}
 RESERVES = {EMP: ("gs", "gs"), SKV: ("storm", "storm")}     # parked far: the armies' strength (no army losses)
@@ -101,7 +104,7 @@ TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
 PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer",
-         "hyp", "mem")
+         "hyp", "mem", "runners")
 PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
 HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
                    "wh_main_character_abilities_rally")
@@ -565,6 +568,67 @@ def mem_lane(kind):
     return {"kind": kind, "units": units, "steps": steps + [end], "max_s": MEM_MAX_S}
 
 
+BOMBS = "wh2_main_unit_abilities_concealment_bombs"
+RUNNERS_TICK_MS = 250          # (the plan's samples: a run of 5.4 m/s moves 1.35 m between two)
+
+
+def runners_lane(kind):
+    """Plan runners (build/diag_roster/wh2_main_skv_inf_death_runners_0/mechanic.md; tools/nn/runners_probe.py).
+    Battle 1, seeing and morale (tested swordsmen U held, front edge at z = 0; fearless Death Runners R): 'plain' - R attack at
+    a run from 130 m without the bombs (seen at 64 m? does the attack order reveal? morale at the contact); 'bomb' - the bombs at
+    the go, the same attack 1 s later (seen at 20 m? does the press reveal? the morale's 'surprised' -30 and its timer at the
+    contact out of hiding); 'bomb_walk' - the bombs at the go, a walk to 26 m (a stand: still hidden), at 60 s a walk to 10 m (seen at
+    20 m without any attack order), at 71 s the attack.
+    Battle 2, the blade and the uses: 'blade_gs' - R attack fearless greatswords (armour 95) from 40 m, 60 s (the card's armour, HP a
+    second both ways); 'blade_leave' - R attack fearless swordsmen, 15 s after the contact R run off 150 m (the blade's life: 35 s after
+    the last hit); 'uses' - R alone (swordsmen 250 m off) press the bombs at 0, 170, 340 and 510 s (the phase on the card each
+    time? the fourth refused? 73 s and the recharge 90 s).
+    Battle 3: 'arrow_ctrl' - fearless skavenslave slingers shoot fearless greatswords from 90 m for 30 s, R stand 200 m off;
+    'arrow_blade' - R strike the greatswords first, run off 4 s after the contact, the same fire 10 s after the contact (is the
+    armour one for blows and missiles? armour 95 -> 48 cuts the sling's base part by ~2.2); 'melee_sw' - R attack fearless swordsmen
+    at a run from 40 m, 60 s (the melee's HP a second both ways)."""
+    dR, dU = depth("runners"), depth("swords")
+    R = lambda gap, x=0.0: u("R", "runners", x, gap + dR / 2, 180, True)
+    if kind in ("plain", "bomb"):
+        steps = [s("go", "attack", "R", target="U")] if kind == "plain" else [
+            s("go", "ability", "R", key=BOMBS), s("go", "attack", "R", delay_s=1, target="U")]
+        return {"kind": kind, "units": [u("U", "swords", 0, -dU / 2, 0), R(130)],
+                "steps": steps + [s("contact", "end", of="U", delay_s=40)], "max_s": 90}
+    if kind == "bomb_walk":
+        steps = [s("go", "ability", "R", key=BOMBS), s("go", "move_walk", "R", x=0, z=round(26 + dR / 2, 1)),
+                 s("go", "move_walk", "R", delay_s=60, x=0, z=round(10 + dR / 2, 1)),
+                 s("go", "attack", "R", delay_s=71, target="U"), s("contact", "end", of="U", delay_s=30)]
+        return {"kind": kind, "units": [u("U", "swords", 0, -dU / 2, 0), R(110)], "steps": steps, "max_s": 120}
+    if kind == "blade_gs":
+        dG = depth("gs")
+        return {"kind": kind, "card": True, "units": [u("U", "gs", 0, -dG / 2, 0, True), R(40)],
+                "steps": [s("go", "attack", "R", target="U"), s("contact", "end", of="U", delay_s=60)], "max_s": 80}
+    if kind == "blade_leave":
+        return {"kind": kind, "card": True, "units": [u("U", "swords", 0, -dU / 2, 0, True), R(40)],
+                "steps": [s("go", "attack", "R", target="U"),
+                          s("contact", "move", "R", of="U", delay_s=15, x=0, z=round(190 + dR / 2, 1)),
+                          s("contact", "end", of="U", delay_s=70)], "max_s": 100}
+    if kind == "uses":
+        steps = [s("go", "ability", "R", delay_s=at, key=BOMBS) for at in (0, 170, 340, 510)]
+        return {"kind": kind, "units": [u("U", "swords", 0, -dU / 2, 0), R(250)], "steps": steps + [s("go", "end", delay_s=600)],
+                "max_s": 610}
+    if kind in ("arrow_ctrl", "arrow_blade"):
+        dG = depth("gs")
+        units = [u("U", "gs", 0, -dG / 2, 0, True), u("S", "slingers", 90, -dG / 2, 270, True)]
+        if kind == "arrow_ctrl":
+            units.append(R(200))
+            fire = [s("go", "shoot", "S", delay_s=14, target="U"), s("go", "stop_fire", "S", delay_s=44),
+                    s("go", "end", delay_s=50)]
+            return {"kind": kind, "card": True, "units": units, "steps": fire, "max_s": 60}
+        units.append(R(10))
+        steps = [s("go", "attack", "R", target="U"), s("contact", "move", "R", of="U", delay_s=4, x=-150, z=round(150 + dR / 2, 1)),
+                 s("contact", "shoot", "S", of="U", delay_s=10, target="U"), s("contact", "stop_fire", "S", of="U", delay_s=40),
+                 s("contact", "end", of="U", delay_s=46)]
+        return {"kind": kind, "card": True, "units": units, "steps": steps, "max_s": 80}
+    return {"kind": kind, "card": True, "units": [u("U", "swords", 0, -dU / 2, 0, True), R(40)],
+            "steps": [s("go", "attack", "R", target="U"), s("contact", "end", of="U", delay_s=60)], "max_s": 80}
+
+
 def rotate(items, k):
     k %= len(items)
     return items[k:] + items[:k]
@@ -601,6 +665,10 @@ def battles(plan):
         return [[mem_lane(k) for k in ("front", "cav_flank", "cav_rear", "art")],
                 [mem_lane(k) for k in ("fear", "terror", "friends", "charge")],
                 [mem_lane(k) for k in ("cav_rear", "fear", "pusbags", "warpfire")]]
+    if plan == "runners":
+        return [[runners_lane(k) for k in ("plain", "bomb", "bomb_walk")],
+                [runners_lane(k) for k in ("blade_gs", "blade_leave", "uses")],
+                [runners_lane(k) for k in ("arrow_ctrl", "arrow_blade", "melee_sw")]]
     if plan == "hyp":
         return [[hyp_timer_lane(0), hyp_timer_lane(9), hyp_rally_lane("free", 0), hyp_rally_lane("free", 9),
                  hyp_rally_lane("weak")],
@@ -646,7 +714,7 @@ def layout(specs, plan):
             else:
                 tested.add(UNITS[un["short"]][2])
         lanes.append({"name": f"L{k}", "kind": spec["kind"], "x": round(x, 1), "z": round(z, 1), "max_s": spec["max_s"],
-                      "units": units, "steps": spec["steps"]})
+                      "units": units, "steps": spec["steps"], **({"card": True} if spec.get("card") else {})})
     park = []
     for faction in (EMP, SKV):
         sign = -1 if faction == EMP else 1
@@ -673,7 +741,8 @@ def run_config(plan, index):
     """(entry config, model seconds, arena) of battle `index` (1-based) of a plan."""
     lanes, park, fearless, arena = layout(battles(plan)[index - 1], plan)
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS,
-              "tick_ms": TIMER_TICK_MS if plan == "timer" else HYP_TICK_MS if plan == "hyp" else TICK_MS, "lanes": lanes,
+              "tick_ms": (TIMER_TICK_MS if plan == "timer" else HYP_TICK_MS if plan == "hyp"
+                          else RUNNERS_TICK_MS if plan == "runners" else TICK_MS), "lanes": lanes,
               "park": park, "fearless": fearless}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
@@ -1208,7 +1277,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
     shadows = [dict() for _ in range(B)]
     last = {}
     rec = {"t": [], "rows": [], "terms": [], "fx": []}
-    fields = ("x", "z", "b", "men", "hp", "m", "r", "morale", "f", "fire", "cmb")
+    fields = ("x", "z", "b", "men", "hp", "m", "r", "morale", "f", "fire", "cmb", "hid", "vis", "armour", "hp_abs")
     # the effects on each unit, each step (tools/nn/sim/effects.py, abilities.py RECEIVED): the game's fx
     fx_e, fx_a = [], []
 
@@ -1316,6 +1385,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
                                  "r": bool(r["r"][b, i]), "fast": bool(r["f"][b, i]),
                                  "pts": float(r["morale"][b, i]), "fire": bool(r["fire"][b, i]),
                                  "cmb": float(r["cmb"][b, i]) if "cmb" in r else 0.0,
+                                 "hid": bool(r["hid"][b, i]) if "hid" in r else False,
+                                 "v": bool(r["vis"][b, i]) if "vis" in r else True,
+                                 "arm0": float(r["armour"][b, i]), "hp_abs": float(r["hp_abs"][b, i]),
                                  "fx": ",".join(sorted(e for e, v in f.items() if v[b, i]))}
                                 for r, f, k in zip(rec["rows"], rec["fx"], keep) if k]
         terms = {}

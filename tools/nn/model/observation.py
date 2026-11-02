@@ -203,26 +203,30 @@ SIGHT = ("hidden", "pierce_men", "spotting")
 # group of their own at the end (test_nn_g43_input: FX_MID + FX_G43 + the later groups' pairs = the catalogue's): the
 # cavalry's (29.10.2026: causes_fear, immune_to_psychology) and the artillery's (29.10.2026: cant_run) are FX_CAV (FX_CAVN
 # effects); then FX_STATS3 (29.10.2026, the Skaven monsters: the fire's resistance, effects.FX_STATS3) and the effects
-# after the artillery's - the monsters' causes_terror and Regeneration, and the catalogue's next ones - FX_MON, the
-# token's last (it grows with the catalogue).
+# after the artillery's - the monsters' causes_terror and Regeneration, the Pusbags', the Warp Grinders' - FX_MON (FX_MONN
+# effects); then FX_STATS4 (02.11.2026, the Death Runners: the armour's multiplier, effects.FX_STATS4) and the catalogue's next
+# effects - the weeping blade and on - FX_LATE, the token's last (it grows with the catalogue).
 FX_MID = 19
 FX_G43 = 6
 FX_CAVN = 3
+FX_MONN = 5
 FX_NEW = effects.NAMES[2 * FX_MID:2 * (FX_MID + FX_G43)]
 FX_CAV = effects.NAMES[2 * (FX_MID + FX_G43):2 * (FX_MID + FX_G43 + FX_CAVN)]
 FX_STATS3 = effects.FX_STAT3_NAMES
-FX_MON = effects.NAMES[2 * (FX_MID + FX_G43 + FX_CAVN):]
-FX_LAST = FX_CAV + FX_STATS3 + FX_MON         # the token's columns after SIGHT
+FX_MON = effects.NAMES[2 * (FX_MID + FX_G43 + FX_CAVN):2 * (FX_MID + FX_G43 + FX_CAVN + FX_MONN)]
+FX_STATS4 = effects.FX_STAT4_NAMES
+FX_LATE = effects.NAMES[2 * (FX_MID + FX_G43 + FX_CAVN + FX_MONN):]
+FX_LAST = FX_CAV + FX_STATS3 + FX_MON + FX_STATS4 + FX_LATE         # the token's columns after SIGHT
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE))
          + effects.NAMES[:2 * FX_MID] + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE + FX_STATS + FIGHT
-         + FX_NEW + FX_STATS2 + SIGHT + FX_CAV + FX_STATS3 + FX_MON)
+         + FX_NEW + FX_STATS2 + SIGHT + FX_CAV + FX_STATS3 + FX_MON + FX_STATS4 + FX_LATE)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT, FX_NEW, FX_STATS2, SIGHT, FX_CAV, FX_STATS3, FX_MON)
+TAIL = (AIM, RECEIVED, MAGIC, SHAPE, FX_STATS, FIGHT, FX_NEW, FX_STATS2, SIGHT, FX_CAV, FX_STATS3, FX_MON, FX_STATS4, FX_LATE)
 
 
 def old_columns(width):
@@ -546,13 +550,15 @@ def observe(state, setup, side, memory=None, full=False):
     form = _shape(m, state, shown, xs)
     fxs_all = _f(m, effects.stats_on(m, fx_on & shown[..., None]))
     nfx, nfx2 = len(FX_STATS), len(FX_STATS) + len(FX_STATS2)
-    fxs, fxs2, fxs3 = fxs_all[..., :nfx], fxs_all[..., nfx:nfx2], fxs_all[..., nfx2:]
+    nfx3 = nfx2 + len(FX_STATS3)
+    fxs, fxs2, fxs3, fxs4 = fxs_all[..., :nfx], fxs_all[..., nfx:nfx2], fxs_all[..., nfx2:nfx3], fxs_all[..., nfx3:]
     fight, melee_t0 = _fight(m, state, S, memory, tn, alive, sees, shown, xs)
     sight = _sight(m, state, S, shown, xs)
-    g43, cav = 2 * (FX_MID + FX_G43), 2 * (FX_MID + FX_G43 + FX_CAVN)
-    fx_mid, fx_new, fx_cav, fx_mon = fx[..., :2 * FX_MID], fx[..., 2 * FX_MID:g43], fx[..., g43:cav], fx[..., cav:]
+    g43, cav, mon = 2 * (FX_MID + FX_G43), 2 * (FX_MID + FX_G43 + FX_CAVN), 2 * (FX_MID + FX_G43 + FX_CAVN + FX_MONN)
+    fx_mid, fx_new, fx_cav, fx_mon, fx_late = (fx[..., :2 * FX_MID], fx[..., 2 * FX_MID:g43], fx[..., g43:cav], fx[..., cav:mon],
+                                               fx[..., mon:])
     tokens = (_cat(m, [dyn, _f(m, S.passport), fx_mid, late, arc[..., None], order, weapon, aim, rx, magic, form, fxs,
-                       fight, fx_new, fxs2, sight, fx_cav, fxs3, fx_mon], -1) * _f(m, S.present)[..., None])
+                       fight, fx_new, fxs2, sight, fx_cav, fxs3, fx_mon, fxs4, fx_late], -1) * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)

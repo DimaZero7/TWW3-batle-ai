@@ -65,8 +65,10 @@ def test_the_catalogue_models_both_and_the_vortex_lays_the_censers_morale():
     assert v["modelled"] and v["vortex"]["behaviour"] == "vortex_on_entity_death" and not v["off_when"]
     assert {PATHOGEN, PERFECTION} <= set(doc["units"][PUS])
     assert doc["inflicts"][PUS] == [CENSER_MORALE, POISON]
-    # appended: an older network's effect pairs keep their places (the Warp Grinders' wallbreaker after them, 31.10.2026)
-    assert doc["order"][-3:-1] == [PERFECTION, PATHOGEN]
+    # appended: an older network's effect pairs keep their places (the Warp Grinders' wallbreaker after them, 31.10.2026;
+    # the Death Runners' weeping blade after it, 02.11.2026)
+    i = doc["order"].index(PERFECTION)
+    assert doc["order"][i:i + 2] == [PERFECTION, PATHOGEN] and doc["order"][i + 2] == "wallbreaker"
 
 
 def test_what_the_class_does_not_model_says_why():

@@ -122,6 +122,7 @@ function M.start(opts)
     local seen, seen_rows = {}, {}   -- the rows of the last decision, by unit name and as a list
     local fired = {}   -- the last move whose state showed the unit firing
     local used, own_by_name, unit_by_name = {}, {}, {}   -- used[name][key] = battle ms of the last use
+    local counted = {}                                   -- counted[name][key] = how many times the bridge used it
     for _, it in ipairs(opts.enemies) do enemy_by_name[it.name], unit_by_name[it.name] = it, it.unit end
     for _, it in ipairs(opts.own) do own_by_name[it.name], unit_by_name[it.name] = it, it.unit end
     -- Own units' active abilities (as the card lists them) and what was last logged.
@@ -336,7 +337,7 @@ function M.start(opts)
         local rows = opts.rows()
         effects(rows)
         readiness()
-        local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used,
+        local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used, counted,
             winds.read(opts.army))
         if opts.soldiers then
             -- every soldier's place (nn_arena soldiers_state): only a reading not sent yet
@@ -533,6 +534,8 @@ function M.start(opts)
         if not ok then return 'error' end
         used[req.unit] = used[req.unit] or {}
         used[req.unit][req.key] = opts.now_ms()
+        counted[req.unit] = counted[req.unit] or {}
+        counted[req.unit][req.key] = (counted[req.unit][req.key] or 0) + 1
         return 'used'
     end
 

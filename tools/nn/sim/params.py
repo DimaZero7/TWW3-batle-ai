@@ -98,7 +98,10 @@ class Params:
         self.pen_men = pen_limit_of(self.units or {}, self.sim or {})
         # (hide_forest too: on a map with forest ground such a unit hides there - stealth.cover; without one it never
         # meets the conditions, so stealth's step changes nothing)
-        self.can_hide = any({"stalk", "hide_forest"} & set(u.get("attributes") or ())
+        # (an ability's phase may give stalk too: Concealment Bombs, abilities.py; a unit without it hides only then)
+        given = {k for k, p in (self.abilities or {}).items()
+                 if any(a.get("attribute") == "stalk" for a in p.get("attributes") or ())}
+        self.can_hide = any({"stalk", "hide_forest"} & set(u.get("attributes") or ()) or given & set(u.get("abilities") or ())
                             for u in (self.units or {}).values())
         self.has_art = bool(((self.sim or {}).get("artillery") or {}).get("on")) and any(
             (u.get("engines") or {}).get("n") for u in (self.units or {}).values())

@@ -88,7 +88,12 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # crews of 184 HP, armour 70, a magical drill 18 + 78 sweeping 4 men; two active abilities without a target -
          # Warp-Quake (direct damage to every enemy within 35 m: tools/nn/sim/abilities.py, direct.py) and Seismic Snare
          # (no movement for the enemies within 35 m). Only the v3 army scheme fields them (config/nn/pools.json units_v3)
-         "wh2_dlc14_skv_inf_warp_grinder_0")
+         "wh2_dlc14_skv_inf_warp_grinder_0",
+         # 02.11.2026, the Death Runners (build/diag_roster/wh2_main_skv_inf_death_runners_0/units.md, mechanic.md): the Gutter
+         # Runners' body, 72 men of 80 HP, the first hiding melee unit; the weeping blade (a contact effect: armour x0.5 for
+         # 35 s) and Concealment Bombs (an active ability of attributes: stalk + unspottable, 3 uses a battle:
+         # tools/nn/sim/abilities.py, stealth.py). Only the v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh2_main_skv_inf_death_runners_0")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in

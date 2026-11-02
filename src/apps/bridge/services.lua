@@ -362,12 +362,13 @@ end
 
 -- What the companion reads: meta (batch, factions, attacker...), the move
 -- number, the battle time and every unit's row; used = {unit name -> {ability key ->
--- battle ms of its last use by the bridge}} (the companion counts the timers from it); winds =
+-- battle ms of its last use by the bridge}} (the companion counts the timers from it); counted = the same with how many
+-- times the bridge used it (an ability of limited uses: Concealment Bombs, the passport's uses; companion.exchange); winds =
 -- the own army's Winds of Magic {cur, rate} (apps.battle.winds; the player sees his own pool only),
 -- absent when the engine gives none.
-function M.state_document(meta, move, t_ms, units, done, used, winds)
+function M.state_document(meta, move, t_ms, units, done, used, counted, winds)
     local doc = {move = move, t = t_ms, units = units, done = done == true, abilities_used = used or {},
-        winds = winds}
+        abilities_count = counted or {}, winds = winds}
     for k, v in pairs(meta) do doc[k] = v end
     return doc
 end

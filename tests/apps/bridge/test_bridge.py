@@ -308,3 +308,12 @@ def test_a_formation_order_is_new_when_its_facing_or_width_changes(lua):
     assert changed(hold, wide) and not changed(wide, hold)          # no width given: the width in force stays
     assert not changed(wide, t({"kind": "hold", "run": False, "width": 40.6}))
     assert changed(wide, t({"kind": "hold", "run": False, "width": 45}))
+
+
+def test_the_state_document_carries_the_uses_counted_and_the_winds(lua):
+    # (an ability of limited uses: the companion counts them from abilities_count; tools/nn/companion/exchange.py ability_timers)
+    make = lua.eval("""function()
+        return bridge.state_document({batch = 'b'}, 3, 1000, {}, false, {own = {k = 500}}, {own = {k = 2}}, {cur = 7})
+    end""")
+    doc = make()
+    assert doc.abilities_used.own.k == 500 and doc.abilities_count.own.k == 2 and doc.winds.cur == 7 and doc.batch == "b"

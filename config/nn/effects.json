@@ -57,7 +57,8 @@
   "wh_main_unit_passive_regeneration",
   "wh3_dlc29_unit_passive_pestilent_perfection",
   "wh3_dlc29_unit_passive_unshakable_pathogen",
-  "wallbreaker"
+  "wallbreaker",
+  "wh2_main_unit_contact_weeping_blade"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -1015,6 +1016,34 @@
    "modelled": false,
    "sim": null,
    "why": "no walls or buildings in our battles"
+  },
+  "wh2_main_unit_contact_weeping_blade": {
+   "kind": "contact",
+   "name": "Weeping Blade",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_armour",
+     "how": "mult",
+     "value": 0.5,
+     "on": [
+      "hit"
+     ],
+     "sim": "armour"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "duration_s": 35.0,
+   "when": "for 35 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)",
+   "source": "db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases (duration), special_ability_phase_stat_effects (wh2_main_unit_contact_weeping_blade); config/nn/units.json contact_phases",
+   "kb": "docs/en/game/mechanics/abilities.md#contact-effects",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_armour mult 0.5 (for 35 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
+   "why": null
   }
  },
  "units": {
@@ -1109,6 +1138,13 @@
   ],
   "wh2_main_skv_inf_clanrats_1": [
    "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_death_runners_0": [
+   "guerrilla_deploy",
+   "stalk",
+   "strider",
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
   ],
@@ -1313,6 +1349,9 @@
   ],
   "wh2_main_skv_art_plagueclaw_catapult": [
    "wh2_main_unit_contact_plague_monk_censer_morale"
+  ],
+  "wh2_main_skv_inf_death_runners_0": [
+   "wh2_main_unit_contact_weeping_blade"
   ],
   "wh2_main_skv_inf_gutter_runner_slingers_1": [
    "wh_main_unit_contact_poison"

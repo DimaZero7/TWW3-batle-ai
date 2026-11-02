@@ -99,8 +99,10 @@ def initial_cooldowns(u, params):
     passports = params.abilities or {}
     init = [float(passports[k].get("initial_s", 0.0)) for k in sim_abilities.keys(params)] + [0.0]
     table = torch.tensor(init, device=u["men"].device)
+    uses = torch.tensor(sim_abilities.uses_table(params), device=u["men"].device)
     for k in range(sim_abilities.SLOTS):
         u[f"ab{k}_cd"] = table[u[f"ab{k}"]].clone()
+        u[f"ab{k}_n"] = uses[u[f"ab{k}"]].clone()
     fx_init = [float((passports.get(k) or {}).get("initial_s", 0.0)) for k in sim_effects.order(params)] + [0.0]
     fx_table = torch.tensor(fx_init, device=u["men"].device)
     for j in range(sim_effects.TIMERS):

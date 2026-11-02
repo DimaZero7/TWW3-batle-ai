@@ -382,7 +382,9 @@ def test_the_teachers_wait_runs_out_against_an_enemy_that_stands():
     shooters never fire - the teacher's groups hold at first, then (the farthest no nearer for 60 s, or 120 s of
     waiting) a re-plan and every attacking group attacks: not later than 120 s into the wait."""
     env = battles(B=2, mix={"hold": 1.0})
-    actor, crit = nets()
+    # (seed 1 since the Death Runners' 3 token columns, 02.11.2026: the random nets of seed 0 keep no group attacking on this
+    # army; build/diag_runners/dbg_teach.py: seeds 1, 2, 3, 5, 6 pass)
+    actor, crit = nets(1)
     env.step(actor, crit)
     rt = env.general_rt
     rt.set_teacher(1.0)

@@ -51,7 +51,7 @@ def bits(*names):
 def test_the_columns_are_the_tokens_last():
     n = len(ob.FX_STATS) + len(ob.FIGHT)
     g43 = len(ob.FX_NEW) + len(ob.FX_STATS2) + len(ob.SIGHT) + len(ob.FX_LAST)   # (25.10.2026, line g43; 29.10: after them)
-    assert ob.NAMES[-n - g43:-g43] == ob.FX_STATS + ob.FIGHT and ob.TAIL[-8:-6] == (ob.FX_STATS, ob.FIGHT)
+    assert ob.NAMES[-n - g43:-g43] == ob.FX_STATS + ob.FIGHT and ob.TAIL[-10:-8] == (ob.FX_STATS, ob.FIGHT)
     assert len(ob.FX_STATS) == 10 and ob.FIGHT == ("under_fire", "melee_s")
 
 
@@ -61,7 +61,8 @@ def test_every_stat_the_catalogue_lays_on_a_unit_is_a_column():
     used = {(e["stat"], e["how"]) for k in effects.keys(doc) for e in (doc["effects"].get(k) or {}).get("stats") or ()
             if set(e.get("on") or ()) & {"self", "hit"}}
     assert used <= set(effects.FX_ALL)
-    assert {(s, h) for s, h in effects.FX_ALL} <= {(s, h) for s, h, _ in abilities.STATS}
+    # (a multiplier needs no scale: stat_table; the armour's x0.5 is no stat of an ability's passport)
+    assert {(s, h) for s, h in effects.FX_ALL if (s, h) != ("stat_armour", "mult")} <= {(s, h) for s, h, _ in abilities.STATS}
 
 
 def test_the_effects_on_are_numbers():

@@ -319,6 +319,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
   memmelee   melee blow by blow from the game's memory (build/diag_mem/melee; a probe with --mem): swordsmen ->
           clanrats, stormvermin (sword and shield) -> Empire spearmen, each pair fresh and with the target at 30 %,
           both sides fighting (attack at a walk from 3 m), 60 s after the contact; every man every 0.1 s - 1 battle;
+  memrunners  the same for the Death Runners (build/diag_runners): -> swordsmen and -> greatswords at a walk from 3 m, -> swordsmen at
+          a run from 40 m, both sides fighting, 60 s after the contact; every man every 0.1 s - 1 battle;
   memshot  what each projectile struck, from the game's memory (build/diag_mem/missile; a probe with --mem: the
           projectiles with their last place and the body a projectile 'in a man' is in, the men every 0.1 s): battle 1
           on the default field - archers -> the Warp Lightning Cannon 115 m, crossbowmen -> the Plagueclaw Catapult
@@ -464,6 +466,8 @@ UNITS = {
     # the spellcasters of the magic plan (tools/nn/magic_probe.py; build/magic/plan.md): heroes, not lords
     "goldwiz": ("wh3_dlc25_emp_cha_wizard_metal", 1, EMP),             # Gold Wizard, Lore of Metal (DLC Thrones of Decay)
     "warlock": ("wh2_main_skv_cha_warlock_engineer", 1, SKV),          # Warlock Engineer, Lore of Ruin
+    # the Death Runners (the memrunners plan; build/diag_runners)
+    "runners": ("wh2_main_skv_inf_death_runners_0", 72, SKV),
 }
 
 
@@ -534,7 +538,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -1121,6 +1125,14 @@ def battles(plan):
             return lane(a, t, "attack_walk", "both", gap_m=g["gap_m"], fight_s=g["fight_s"], max_s=g["max_s"],
                         kind=f"{a}_{t}_{'t30' if cut else 'full'}", **extra)
         out.append([mm(a, t, cut) for cut in (False, True) for a, t in g["pairs"]])
+    elif plan == "memrunners":
+        g = MEMMELEE
+        out.append([lane("runners", "swords", "attack_walk", "both", gap_m=g["gap_m"], fight_s=g["fight_s"], max_s=g["max_s"],
+                         kind="runners_swords_walk"),
+                    lane("runners", "gs", "attack_walk", "both", gap_m=g["gap_m"], fight_s=g["fight_s"], max_s=g["max_s"],
+                         kind="runners_gs_walk"),
+                    lane("runners", "swords", "attack_run", "both", gap_m=40, fight_s=g["fight_s"], max_s=g["max_s"] + 10,
+                         kind="runners_swords_run")])
     elif plan == "cavcharge":
         # the knights charge (attack at a run from gap_m: the last 40 m at their charge speed) held infantry, 30 m on 30 m
         c = CAVCHARGE
@@ -1887,7 +1899,7 @@ def run_config(plan, index):
         config.update(men_ms=1000, men_after_s=130, men_near_m=80)
     if plan == "cavrun":
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=0, men_near_m=0)
-    if plan == "memmelee":
+    if plan in ("memmelee", "memrunners"):
         # the men from memory every 0.1 s all the fight (dense to men_after_s after the contact)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=MEMMELEE["fight_s"] + 5, men_near_m=60)
     if plan == "memshot":
