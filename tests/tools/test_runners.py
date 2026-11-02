@@ -54,7 +54,7 @@ def test_rules_of_only_on_the_owner_and_known_rules():
 def test_only_the_bombs_have_limited_uses_or_attributes_among_the_actives():
     # (old armies stay bit for bit: nothing else fires these rules)
     ab = load("abilities.json")["abilities"]
-    assert [k for k, p in ab.items() if p["uses"] != -1] == [BOMBS]
+    assert [k for k, p in ab.items() if p["uses"] != -1] == [BOMBS, "wh3_dlc29_unit_abilities_stormfiend_seismic_snare"]
     assert [k for k, p in ab.items() if p["attributes"] and not p["passive"] and not p["auto"]] == [BOMBS]
 
 

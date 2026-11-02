@@ -41,7 +41,8 @@ def test_both_abilities_are_pressed_without_a_target():
         assert p["targets"] == {"self": False, "friends": False, "enemies": True} and p["loop_stance"]
     # the lords' own abilities stay self-cast, passives never
     assert ab["wh_main_character_abilities_rally"]["self_cast"] and not ab["wh_main_unit_passive_frenzy"]["self_cast"]
-    assert not any(p.get("loop_stance") for k, p in ab.items() if k not in (QUAKE, SNARE))
+    # (02.11.2026) the Stormfiends' Seismic Snare has the same stance
+    assert not any(p.get("loop_stance") for k, p in ab.items() if k not in (QUAKE, SNARE, "wh3_dlc29_unit_abilities_stormfiend_seismic_snare"))
 
 
 def test_warp_quake_is_the_direct_class_on_enemies_and_the_snare_cant_move():
@@ -53,7 +54,7 @@ def test_warp_quake_is_the_direct_class_on_enemies_and_the_snare_cant_move():
         35.0, 40.0, -1, True, 17.0, True)
     assert [(e["stat"], e["value"], e["on"]) for e in ab[QUAKE]["effects"]] == [("scalar_speed", 0.75, ["enemies"])]
     assert ab[SNARE]["cant_move"] and not ab[SNARE]["effects"] and "direct" not in ab[SNARE]
-    assert not any(p.get("cant_move") for k, p in ab.items() if k != SNARE)
+    assert not any(p.get("cant_move") for k, p in ab.items() if k not in (SNARE, "wh3_dlc29_unit_abilities_stormfiend_seismic_snare"))
 
 
 def test_the_simulator_models_both_with_the_default_trigger():

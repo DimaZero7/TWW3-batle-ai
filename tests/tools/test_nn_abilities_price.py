@@ -146,6 +146,9 @@ def test_our_abilities_are_data_with_every_stat_priced():
     # (02.11.2026) Concealment Bombs: attributes only (stalk + unspottable), no stat for a brick to price
     bombs = a.pop("wh2_main_unit_abilities_concealment_bombs")
     assert not bombs.parts and not bombs.unpriced
+    # (02.11.2026) the Stormfiends' Seismic Snare: as the Grinders', no stat
+    fiends = a.pop("wh3_dlc29_unit_abilities_stormfiend_seismic_snare")
+    assert not fiends.parts and not fiends.unpriced
     assert set(a) == {"wh2_main_character_abilities_verminous_valour", "wh_main_character_abilities_deadly_onslaught",
                       "wh_main_character_abilities_foe_seeker", "wh_main_character_abilities_rally",
                       "wh_main_character_abilities_stand_your_ground"}

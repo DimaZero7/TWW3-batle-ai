@@ -551,6 +551,12 @@
       "group": "wh3_default_land_ranged_infantry_main_heavy_short_range",
       "quality": "tier_2_step_5_units"
      }
+    ],
+    "wh3_dlc29_skv_mon_stormfiend_grinderfists": [
+     {
+      "group": "wh3_default_land_monsters_flanking_strong",
+      "quality": "tier_3_step_3_units"
+     }
     ]
    }
   }

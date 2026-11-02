@@ -47,7 +47,7 @@ def test_no_new_ability_or_effect_for_the_triads():
                                      "wh2_main_unit_passive_scurry_away", "wh2_main_unit_passive_strength_in_numbers"}
     assert all(k in doc["effects"] for k in doc["units"][T3])
     ab = load("abilities.json")["abilities"]
-    assert [k for k, p in ab.items() if p["uses"] != -1] == [BOMBS]
+    assert [k for k, p in ab.items() if p["uses"] != -1] == [BOMBS, "wh3_dlc29_unit_abilities_stormfiend_seismic_snare"]         # (the other: the Stormfiends', 02.11.2026)
 
 
 def test_the_triads_join_the_v3_pools_only():

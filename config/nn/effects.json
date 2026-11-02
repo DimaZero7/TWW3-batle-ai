@@ -1341,6 +1341,15 @@
    "wh3_dlc29_unit_passive_pestilent_perfection",
    "wh3_dlc29_unit_passive_unshakable_pathogen"
   ],
+  "wh3_dlc29_skv_mon_stormfiend_grinderfists": [
+   "causes_fear",
+   "guerrilla_deploy",
+   "hide_forest",
+   "moulder_monster",
+   "wallbreaker",
+   "wh2_main_unit_passive_scurry_away",
+   "wh_main_unit_passive_frenzy"
+  ],
   "wh_dlc04_emp_cav_knights_blazing_sun_0": [
    "hide_forest"
   ],

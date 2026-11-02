@@ -98,8 +98,9 @@ def test_uses_limit_off_all_unlimited():
 def test_other_abilities_have_no_limit():
     table = abilities.uses_table(P)
     names = abilities.keys(P)
-    assert table[-1] == -1 and table[names.index(BOMBS)] == 3
-    assert all(v == -1 for n, v in zip(names, table) if n != BOMBS)
+    fiends = "wh3_dlc29_unit_abilities_stormfiend_seismic_snare"
+    assert table[-1] == -1 and table[names.index(BOMBS)] == 3 and table[names.index(fiends)] == 1
+    assert all(v == -1 for n, v in zip(names, table) if n not in (BOMBS, fiends))
 
 
 def test_the_flag_lies_only_while_active_and_is_restored():

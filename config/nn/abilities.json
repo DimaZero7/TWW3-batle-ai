@@ -473,6 +473,39 @@
    "attributes": [],
    "delay_s": 10.0
   },
+  "wh3_dlc29_unit_abilities_stormfiend_seismic_snare": {
+   "active_s": 13.0,
+   "recharge_s": 60.0,
+   "initial_s": 0.0,
+   "uses": 1,
+   "vigour_per_s": 0,
+   "cp": [
+    100,
+    0
+   ],
+   "range_m": 35.0,
+   "passive": false,
+   "targets_own": false,
+   "friendly_units": 0,
+   "enemy_units": -1,
+   "self_cast": true,
+   "update_targets": true,
+   "auto": false,
+   "recharge_when": [],
+   "off_when": [],
+   "phases": [
+    "wh3_dlc29_unit_abilities_stormfiend_seismic_snare"
+   ],
+   "targets": {
+    "self": false,
+    "friends": false,
+    "enemies": true
+   },
+   "effects": [],
+   "attributes": [],
+   "loop_stance": true,
+   "cant_move": true
+  },
   "wh3_dlc29_unit_passive_pestilent_perfection": {
    "active_s": 1.0,
    "recharge_s": -1.0,

@@ -2724,6 +2724,105 @@
     }
    },
    "card_check": "no card"
+  },
+  "wh3_dlc29_skv_mon_stormfiend_grinderfists": {
+   "land_unit": "wh3_dlc29_skv_mon_stormfiend_grinderfists",
+   "caste": "monstrous_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 12,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 3,
+   "entity": "wh3_dlc29_skv_monster_stormfiends_grinderfists",
+   "spacing": {
+    "template": "wh_main_monstrous_infantry",
+    "h": 6.0,
+    "v": 6.0,
+    "scatter": 1.0,
+    "chaotic": false
+   },
+   "hp_per_man": 731,
+   "hp_total": 8772,
+   "mass": 1500.0,
+   "size": "large",
+   "height_m": 3.0,
+   "radius_m": 1.25,
+   "radii_ratio": 1.0,
+   "body_shape": "circle",
+   "knock_ignore": 20,
+   "hit_reaction_ignore": 20,
+   "speed": {
+    "walk": 2.0,
+    "run": 5.0,
+    "charge": 8.0,
+    "charge_distance": 40.0,
+    "charge_pose_distance": 35.0,
+    "acceleration": 3.5,
+    "deceleration": 5.0,
+    "turn_deg_s": 100.0
+   },
+   "melee": {
+    "attack": 38,
+    "defence": 31,
+    "charge_bonus": 45,
+    "weapon": "wh3_dlc29_skv_grinderfists_stormfiend",
+    "damage": 25,
+    "ap_damage": 80,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 3.8,
+    "splash_target_size": "large",
+    "splash_max_attacks": 3,
+    "splash_power_multiplier": 1.1,
+    "magic": true,
+    "flaming": false,
+    "contact_phase": null,
+    "weapon_length": 6.0
+   },
+   "armour": 90,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 65,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "spotting": {
+    "scrub": 80,
+    "tree": 60
+   },
+   "projectile_resistance": 3,
+   "projectile_speed_keep": 0.75,
+   "attributes": [
+    "causes_fear",
+    "guerrilla_deploy",
+    "hide_forest",
+    "moulder_monster",
+    "wallbreaker"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh3_dlc29_unit_abilities_stormfiend_seismic_snare",
+    "wh_main_unit_passive_frenzy"
+   ],
+   "multiplayer_cost": 1200,
+   "combat_potential": {
+    "melee": 1200.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
   }
  }
 }

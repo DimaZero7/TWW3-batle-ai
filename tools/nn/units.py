@@ -110,7 +110,11 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # 02.11.2026, the Death Globe Bombardiers (build/diag_roster/wh2_main_skv_inf_death_globe_bombardiers/units.md, mechanic.md):
          # the Globadiers' class by data alone, no poison, a 4 m blast of 9 + 33 with a force of 65; the Stormvermin's body. Only the
          # v3 army scheme fields them (config/nn/pools.json units_v3)
-         "wh2_main_skv_inf_death_globe_bombardiers")
+         "wh2_main_skv_inf_death_globe_bombardiers",
+         # 02.11.2026, the Stormfiends with Grinderfists (build/diag_roster/wh3_dlc29_skv_mon_stormfiend_grinderfists/units.md, mechanic.md,
+         # build/diag_stormfiend): monstrous infantry, 12 x 731, armour 90, a sweep of 3 up to large; Seismic Snare by the Warp Grinders' class,
+         # 1 use a battle by the Runners' class; no simulator code. Only the v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh3_dlc29_skv_mon_stormfiend_grinderfists")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
