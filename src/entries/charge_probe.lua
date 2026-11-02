@@ -141,6 +141,8 @@
 -- MEM_PROJ_EVERY polls 'mem_proj' {c, tick, spawn, state, gone, errors, records, other, other_hp, offsets}.
 -- config.mem_form (with config.mem; the memform plan): after each men's poll 'mem_form' {t, tick, units, new, jobs}: the
 -- units' top behaviours and machines, their groups' marks, the way's job and nodes (apps.mem.order).
+-- config.mem_morale (with config.mem; the globes2 plan): every MEM_SPARSE polls 'mem_morale' {t, tick, units = {name = morale row of apps.mem.morale}} of the lanes' targets
+-- (tools/nn/mem_probe.py load_morale): the effects a unit's morale holds, the morale probe's reading on a charge probe's lanes.
 -- config.mem_extras (with config.mem; the tacwalk plan): the lanes' extras are bound and polled like the attacker and the target.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
@@ -152,6 +154,7 @@ local map = require('apps.map.adapter')
 local services = require('apps.bridge.services')
 local winds = require('apps.battle.winds')
 local memmen = require('apps.mem.entities')
+local memmorale = require('apps.mem.morale')
 local memproj = require('apps.mem.projectiles')
 local memhits = require('apps.mem.hits')
 local memorder = require('apps.mem.order')
@@ -1000,7 +1003,12 @@ function M.main(bm, config, globals)
                 if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
                 if lane.extras and #lane.extras > 0 then
                     r.e = {}
-                    for _, e in ipairs(lane.extras) do r.e[#r.e + 1] = unit_row(state.units[e.name].unit) end
+                    for _, e in ipairs(lane.extras) do
+                        local ex = unit_row(state.units[e.name].unit)
+                        -- (the globes plan: the poison's key on the friends under the shells)
+                        if lane.morale_rows then add_morale(ex, state.units[e.name].unit) end
+                        r.e[#r.e + 1] = ex
+                    end
                 end
                 if lane.t2 then r.t2 = unit_row(lane.t2.unit) end
                 rows[#rows + 1] = r
@@ -1100,6 +1108,12 @@ function M.main(bm, config, globals)
             local f = state.mem_form.poll(names)
             f.t, f.tick = now, d.tick
             emit('mem_form', f)
+        end
+        -- (config.mem_morale, the globes2 plan) the targets' morale effects
+        if state.mem_mor and state.mem_c % MEM_SPARSE == 0 then
+            local f = state.mem_mor.R.poll(state.mem_mor.names)
+            f.t, f.tick = now, d.tick
+            emit('mem_morale', f)
         end
     end
 
@@ -1495,6 +1509,17 @@ function M.main(bm, config, globals)
                 handle.unhook()
             end
             state.mem = handle
+            if handle and config.mem_morale then
+                local R, names = memmorale.reader(_G.memreader_plus, config.mem.layout), {}
+                for _, lane in ipairs(state.lanes) do
+                    local U = handle.reader.units[lane.t.name]
+                    if U then
+                        R.add(lane.t.name, U.ptr)
+                        names[#names + 1] = lane.t.name
+                    end
+                end
+                state.mem_mor = {R = R, names = names}
+            end
             if handle and config.mem_form and config.mem.layout.form then
                 local F = memorder.reader(_G.memreader_plus, config.mem.layout, handle.reader.ids)
                 for _, name in ipairs(handle.reader.order) do F.add(name, handle.reader.units[name].ptr) end

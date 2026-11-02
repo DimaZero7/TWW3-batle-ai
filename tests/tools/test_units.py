@@ -99,7 +99,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # third wave (07.10.2026).
     # + the 5 new units of 11.10.2026, the 8 of 25.10, the 6 cavalry of 29.10, the 6 artillery of 29.10, the 3 Skaven
     # monsters of 29.10, the Pusbags and the Warp Grinders of 31.10 (no cards)
-    assert checked >= 9 and len(units.UNITS) == 56
+    assert checked >= 9 and len(units.UNITS) == 57
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -124,7 +124,8 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
                 # the artillery (29.10.2026): its guns' weapon
                 "wh_main_emp_art_mortar", "wh_main_emp_art_great_cannon", "wh_main_emp_art_helblaster_volley_gun",
                 "wh_main_emp_art_helstorm_rocket_battery", "wh2_main_skv_art_plagueclaw_catapult",
-                "wh2_main_skv_art_warp_lightning_cannon", "wh2_main_skv_inf_warpfire_thrower")
+                "wh2_main_skv_art_warp_lightning_cannon", "wh2_main_skv_inf_warpfire_thrower",
+                "wh2_main_skv_inf_poison_wind_globadiers")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)
@@ -241,9 +242,10 @@ def test_the_new_units_and_their_contact_phases():
     assert set(ph) == {"wh2_dlc12_unit_contact_suppressive_fire", "wh2_main_unit_contact_plague_monk_censer_morale",
                        "wh_main_unit_contact_poison", "wh2_dlc09_unit_contact_shieldbreaker",     # (+ the Jezzails')
                        "wh2_main_unit_contact_weeping_blade",                                      # (+ the Death Runners')
-                       "wh_main_unit_contact_morale"}                                              # (+ the Warpfire Throwers')
-    # (the weeping blade: 35 s)
-    assert all(p["duration_s"] == (35.0 if "weeping" in k else 10.0) and p["effect"] == "negative" for k, p in ph.items())
+                       "wh_main_unit_contact_morale",                                              # (+ the Warpfire Throwers')
+                       "wh2_dlc14_unit_contact_poisoned_wind"}                                     # (+ the Globadiers')
+    # (the weeping blade: 35 s; the poisoned wind: 12 s)
+    assert all(p["duration_s"] == (35.0 if "weeping" in k else 12.0 if "poisoned" in k else 10.0) and p["effect"] == "negative" for k, p in ph.items())
     assert ph["wh2_main_unit_contact_plague_monk_censer_morale"]["stats"] == [
         {"stat": "stat_morale", "how": "add", "value": -10.0}]
     assert units.phase_keys(u) == sorted(ph)
@@ -269,7 +271,7 @@ def test_contact_phases_take_the_phases_duration_effect_type_and_stats():
          "special_ability_phase_stat_effects": [{"phase": "a_contact", "stat": "scalar_speed", "how": "mult",
                                                  "value": 0.7}]}
     assert units.contact_phases(u, t) == {"a_contact": {"duration_s": 10.0, "effect": "negative", "stats": [
-        {"stat": "scalar_speed", "how": "mult", "value": 0.7}]}}
+        {"stat": "scalar_speed", "how": "mult", "value": 0.7}], "allies": False}}
 
 
 KNIGHTS = "wh_main_emp_cav_empire_knights"

@@ -358,7 +358,7 @@ def artillery_static(units, sim, effects_index, key):
            "ex_d": 0.0, "ex_ap": 0.0, "ex_f": 0.0, "ex_v": 0.0, "ex_allies": False, "ex_magic": False, "ex_fx": -1,
            "c_rad": 0.0, "c_mom": 0.0, "p_magic": False, "central": False, "rl_add": 0.0,
            "m_g": 9.81, "exp_m": 0.0, "rd": False, "cat_art": False, "p_fire": False, "ex_fire": False,
-           "p_spell": False, "ex_spell": False}
+           "p_spell": False, "ex_spell": False, "lob_el": 0.0, "land_w": 0.0}
     rd = is_round(u, sim)
     if not (sim.get("artillery") or {}).get("on") or not (eng.get("n") or rd):
         return out
@@ -367,7 +367,11 @@ def artillery_static(units, sim, effects_index, key):
         # in the database stays 9.81 here (a gun's arc was measured so; sim.json artillery.rounds.why)
         out.update(rd=True, m_g=float(m.get("gravity") or 9.81), exp_m=float(m.get("expiry_m") or 0.0),
                    p_fire=bool(m.get("flaming")), p_spell=bool(m.get("is_spell")),
-                   ex_fire=bool(m["blast"].get("flaming")), ex_spell=bool(m["blast"].get("is_spell")))
+                   ex_fire=bool(m["blast"].get("flaming")), ex_spell=bool(m["blast"].get("is_spell")),
+                   # (the Globadiers) the lob's own angle: dual_low_fixed's fixed_elevation (the game's 30 deg, a speed for the range), and
+                   # the seconds its volley's shells land over (artillery.volley_land_s; 0: all at once, the Warpfire Throwers' stream)
+                   lob_el=float(m.get("fixed_elevation") or 0.0) if m.get("trajectory") == "dual_low_fixed" else 0.0,
+                   land_w=float(((sim.get("artillery") or {}).get("volley_land_s") or {}).get(m.get("projectile"), 0.0)))
     else:
         out.update(eng0=float(eng["n"]), eng_hp=float(eng["hp"]), crew_k=float(eng.get("crew_per_engine") or 1),
                    # a gun's body (the engine's battle entity: radius, radii_ratio, height - the projectiles' hit box)

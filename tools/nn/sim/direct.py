@@ -28,10 +28,20 @@ the first tick at once when the record begins (the clock dq_t is 0 off the recor
 once), magical (the spell resistance and the ward cut it, armour and shields do not); the same ability of two owners does
 not stack (one record a unit and ability). The HP and kills are the owners' (shared evenly among the owners reaching it):
 an enemy's damage for the struck unit's casualties and the owners' kills, not in the melee's fight balance. One such
-ability a unit at a time (the lowest index on it; today only Warp-Quake). Needs torch."""
+ability a unit at a time (the lowest index on it; today only Warp-Quake).
+
+By a contact (from_contact; 02.11.2026, the Globadiers' poisoned wind: build/diag_roster/wh2_main_skv_inf_poison_wind_globadiers/mechanic.md 2.1-2.2, the game's
+program and memory, build/diag_globadiers/): a blast's contact effect with direct damage (the catalogue's direct; its timer cfx{j}_s, effects.lay) strikes the unit it lies
+on by the same formula: min(entities, its living men) random men, magical. The game's clock is a tick of 0.1 s: a strike at the record's start, every every_s since its
+start, and a new contact starts the record again - so every tick with a shell's ring on the unit is a strike (one, however many shells), then the strikes at every_s and
+2 every_s after the last, the record gone at duration_s. A ring grows over n_r = ceil(radius / (speed x 0.1)) ticks (2 m at 15 m/s: 2), so the expected ticks of this step taken
+by the shells that touch it: T (1 - exp(-n_r x touch / T)), T the step's ticks. The memory, 120 spearmen: 24 strikes a volley of 48 shells, 62 HP each (the rule 25, 2.5 HP a man).
+The HP and the dead are the one's who laid it most (cdd{j}_by; friends too: the phase's affects_allies); not 'under fire', not in the melee's balance. Different contact effects stack.
+Needs torch."""
 import torch
 
 from tools.nn.sim import abilities as sab
+from tools.nn.sim import artillery
 from tools.nn.sim import effects as innate
 from tools.nn.sim import melee
 
@@ -110,6 +120,56 @@ def enemy_top_base(params):
     vs = [math.floor(max(1.0, float(d["amount"]) * float(d.get("scale", 1.0))))
           for p in (params.abilities or {}).values() for d in [p.get("direct") or {}] if d and "enemies" in (d.get("on") or ())]
     return int(max(vs + [1]))
+
+
+def contact_rows(params):
+    """[(slot j, index in the order)] of the modelled contact effects with direct damage (only json)."""
+    eff = params.effects.get("effects") or {}
+    return [(j, i) for j, i, k in innate.contact_keys(params) if (eff.get(k) or {}).get("direct")]
+
+
+TICK_S = 0.1          # the game's tick of an effect's clock (the program; the memory's strikes 0.1 s apart)
+
+
+def from_contact(u, params, dt, touch):
+    """(hp [B, i, j], kills [B, i, j]) or (None, None): this step's strikes of the contact effects with direct damage (module doc "By a contact") on each unit j, given to who
+    laid them; touch [B, i, j]: the shells whose ring reached j this step (artillery.land info). Call before effects.lay (the timers as the last step left them). In place: cdd{j}_by,
+    cdd_sum."""
+    rows = contact_rows(params)
+    if not rows or touch is None or not on(params):
+        return None, None
+    T = innate.table(params, u["men"].device)
+    alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    men = u["men"].clamp(min=0)
+    keep = 1 - u["resist_magic"].clamp(-1.0, 0.9)
+    hp, kills = torch.zeros_like(touch), torch.zeros_like(touch)
+    ticks = dt / TICK_S
+    for j, i in rows:
+        r = T[i]
+        mine = (u["ex_fx"] == i)[:, :, None]
+        tch = torch.where(mine, touch, torch.zeros_like(touch))
+        n_r = artillery.ring_ticks(u["ex_r"], u["ex_v"])[:, :, None]
+        struck = ticks * (1 - torch.exp(-(n_r * tch).sum(1) / ticks))
+        # the record's own strikes: a multiple of every_s since its start, crossed in this step, when no ring touched it
+        left = u[f"cfx{j}_s"]
+        dur, every = r[innate.COL["duration_s"]], r[innate.COL["dd_s"]].clamp(min=1e-6)
+        was, now = dur - left, dur - (left - dt).clamp(min=0)
+        own = (left > 0) & (left - dt > 1e-6) & (torch.floor((now + 1e-6) / every) > torch.floor((was + 1e-6) / every))
+        n_tick = struck + own.float()
+        n_cap = r[innate.COL["dd_n"]].expand_as(men)
+        n = torch.where(n_cap < 0, men, torch.minimum(n_cap, men))
+        hp_hit = hit_mean(r[innate.COL["dd_base"]].expand_as(men), r[innate.COL["dd_low"]].expand_as(men), keep, top_base(params))
+        hits = n_tick * n * alive.float()
+        h = (hits * hp_hit).clamp(max=u["hp_abs"].clamp(min=0))
+        k = melee.shot_kills(hits, men, u["hp_man"], u["hp_abs"], hp_hit.clamp(min=1e-6))
+        k = torch.where((hits > 0) & (hp_hit > 0) & (u["men0"] > 1), k, torch.zeros_like(k))
+        # the owner: this step's most shells, else the last one's
+        by = torch.where(tch.sum(1) > 0, tch.argmax(1), u[f"cdd{j}_by"])
+        u[f"cdd{j}_by"] = by
+        who = torch.nn.functional.one_hot(by.clamp(min=0), touch.shape[1]).transpose(1, 2).float() * (by >= 0)[:, None, :].float()
+        hp, kills = hp + who * h[:, None, :], kills + who * k[:, None, :]
+        u["cdd_sum"] = u["cdd_sum"] + (who * h[:, None, :]).sum(1)
+    return hp, kills
 
 
 def from_abilities(u, params, dt, dist, same_side):

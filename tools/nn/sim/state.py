@@ -249,6 +249,9 @@ STATIC = {
     "p_magic": ("b", "a gun's projectile is magical (the passport's missile.magic: the Warp Lightning Cannon, the "
                      "Plagueclaw): its own hit meets the target's spell resistance, not the physical (missile.volley, "
                      "artillery.land; build/diag_skv_mon/mechanic.md M20)"),
+    "lob_el": ("f", "the angle of its lob, deg (a shell without guns of the trajectory dual_low_fixed: the Globadiers' 30; 0: the lob's "
+                    "old 45 deg of a shooter, fix_el of a gun; missile._lob_tan, artillery.launch)"),
+    "land_w": ("f", "the seconds its volley's shells land over (config/nn/sim.json artillery.volley_land_s; 0: all at once; artillery.land)"),
     "m_g": ("f", "the gravity of its projectile's arc, m/s2 (9.81; artillery.rounds: the passport's missile.gravity, 3 the "
                  "Warpfire Throwers)"),
     "exp_m": ("f", "the path after which its shell ends, blast too, m (artillery.rounds: missile.expiry_m; 0 not read)"),
@@ -344,6 +347,13 @@ INTERNAL = {
     "cfx5_s": ("f", "the sixth contact effect's"),
     "cfx6_s": ("f", "the seventh contact effect's"),
     "cfx7_s": ("f", "the eighth contact effect's"),
+    "cfx8_s": ("f", "the ninth contact effect's"),
+    "cfx9_s": ("f", "the tenth contact effect's"),
+    "cfx10_s": ("f", "the eleventh contact effect's"),
+    "cfx11_s": ("f", "the twelfth contact effect's"),
+    **{f"cdd{j}_by": ("i", "who laid the direct damage of that contact effect on it last, the most of this step's shells (slot; direct.from_contact: the HP and "
+                           "the dead are his)") for j in range(12)},
+    "cdd_sum": ("f", "bookkeeping: HP the direct damage of the contact effects on it has taken so far (direct.from_contact)"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
     "late": ("f", "share of a shooter's men whose target man died since their last shot (missile.reaim: they aim "
                   "again before the next shot): 1 - prod(1 - the target's men lost a step / its men), 0 at a volley "
@@ -508,6 +518,9 @@ INTERNAL = {
     "sh_t": ("f", "the target slot of the shells in flight (-1: none; its box stops a falling shell)"),
     "sh_k": ("f", "the shots this gun has fired at sh_kt (the zeroing-in, artillery.spread_side)"),
     "sh_kt": ("f", "the target sh_k counts (-1: none; a new target starts the count again)"),
+    "sh_lb": ("b", "that volley flies the lob's arc (lob_el; bursts: the speed that reaches sh_d at the angle)"),
+    "sh_w": ("f", "the seconds that volley lands over (land_w; 0: all at once)"),
+    "sh_left": ("f", "its shells not landed yet (a volley landing over sh_w)"),
     "art_kd": ("f", "bookkeeping: men its shells have knocked down so far"),
     "hole_m": ("f", "its men when shells that knock men down first struck it standing (artillery.holes; 0: none, its men "
                     "fill its box evenly): its box keeps that size and its men stay where they stand (cellm) until it "
@@ -688,6 +701,8 @@ def empty(B, N, device="cpu", history=0):
     u["sh_s"].fill_(-1)
     u["sh_t"].fill_(-1)
     u["sh_kt"].fill_(-1)
+    for j in range(12):
+        u[f"cdd{j}_by"].fill_(-1)
     u["fxd"].fill_(-1)
     u["snap_ab"].fill_(-1)
     for name in ("sp0", "sp1", "cq_k", "cq_t", "cast_k", "cast_t", "bm0_s", "bm0_t", "bm1_s", "bm1_t"):

@@ -184,7 +184,9 @@ CONTACT_NAMES = {"wh_main_unit_contact_poison": "Poison!",
                  "wh2_main_unit_contact_plague_monk_censer_morale": "Contaminated!",
                  "wh2_dlc12_unit_contact_suppressive_fire": "Suppressed!",
                  "wh2_dlc09_unit_contact_shieldbreaker": "Shieldbreaker",
-                 "wh2_main_unit_contact_weeping_blade": "Weeping Blade"}
+                 "wh2_main_unit_contact_weeping_blade": "Weeping Blade",
+                 "wh2_dlc14_unit_contact_poisoned_wind": "Poisoned Wind!",
+                 "wh2_dlc14_unit_contact_poisoned_wind_alt": "Pestilent Wind!"}
 KB_CONTACT = KB + "abilities.md#contact-effects"
 # The ability attributes (special_ability_phase_attribute_effects) that are rules of the simulator.
 ABILITY_ATTRIBUTE_RULES = {"unbreakable": "unbreakable", "immune_to_psychology": "immune_to_psychology",
@@ -211,7 +213,8 @@ MISSING = {
                                "Cauldron's miasma: not in the pools) - the simulator acts on an innate one on the owner "
                                "itself only (tools/nn/sim/direct.py); an ACTIVE ability's on the enemies within its range "
                                "(the Warp Grinders' Warp-Quake, since 31.10.2026) is no innate effect: "
-                               "tools/nn/sim/abilities.py",
+                               "tools/nn/sim/abilities.py; a CONTACT effect's on the unit it lies on (the Globadiers' poison, "
+                               "since 02.11.2026): direct.from_contact",
     "other vortices": "a vortex of another behaviour (vortex_per_entity, vortex_on_death), of an active ability or a spell, "
                       "a moving one, one striking its own side, several in a row or a subsequent one: the simulator acts on "
                       "a standing vortex at a man's death striking enemies only (tools/nn/sim/vortex.py)",
@@ -406,8 +409,15 @@ def contact_effect(key, phase):
     modelled = not unknown and d > 0
     parts = [f"{s['stat']} {s['how']} {s['value']:g}" for s in stats if s["sim"]]
     when = f"for {d:g} s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)"
+    # (02.11.2026, the Globadiers' poison: tools/nn/sim/direct.py from_contact) its direct damage on the unit it lies on and, with
+    # the phase's affects_allies, the blast's friends too
+    direct = phase.get("direct")
+    if direct:
+        parts.append(f"direct damage {direct['amount']} x {direct['scale']:g} to {direct['entities']} random men every "
+                     f"{direct['every_s']:g} s and each tick a blast lays it again ({direct['hit_hp']:g} HP a man)")
+    extra = {**({"direct": dict(direct)} if direct else {}), **({"allies": True} if phase.get("allies") else {})}
     return {"kind": "contact", "name": CONTACT_NAMES.get(key, name_of(key)), "rules": [], "stats": stats,
-            "range_m": 0.0, "needs": [], "off_when": [], "timed": None, "duration_s": d, "when": when,
+            "range_m": 0.0, "needs": [], "off_when": [], "timed": None, "duration_s": d, "when": when, **extra,
             "source": f"db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases "
                       f"(duration), special_ability_phase_stat_effects ({key}); config/nn/units.json contact_phases",
             "kb": KB_CONTACT, "does": None, "modelled": modelled,
@@ -416,9 +426,10 @@ def contact_effect(key, phase):
 
 
 def inflicted(unit):
-    """The contact effects a unit's weapons lay: [phase keys] (melee, then missile; none: [])."""
-    return sorted({p for p in ((unit.get("melee") or {}).get("contact_phase"),
-                               (unit.get("missile") or {}).get("contact_phase")) if p})
+    """The contact effects a unit's weapons lay: [phase keys] (its blows, its projectile, its projectile's blast; none: [])."""
+    m = unit.get("missile") or {}
+    return sorted({p for p in ((unit.get("melee") or {}).get("contact_phase"), m.get("contact_phase"),
+                               (m.get("blast") or {}).get("contact_phase")) if p})
 
 
 def build(units, abilities, previous_order=(), phases=None):

@@ -104,7 +104,9 @@ def test_the_effects_catalogue():
                                                     # the Death Runners' weeping blade (02.11.2026)
                                                     "wh2_main_unit_contact_weeping_blade",
                                                     # the Warpfire Throwers' 'Flames!' (02.11.2026)
-                                                    "wh_main_unit_contact_morale"]
+                                                    "wh_main_unit_contact_morale",
+                                                    # the Globadiers' poisoned wind (02.11.2026)
+                                                    "wh2_dlc14_unit_contact_poisoned_wind"]
 
 
 def test_the_v3_pools_add_the_new_units_and_v2_stays():

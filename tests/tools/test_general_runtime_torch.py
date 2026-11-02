@@ -321,8 +321,9 @@ def test_the_logs_targets_and_numbering():
     env.general_rt.r["t_plan"] -= 31.0
     env.step(actor, crit)
     st = env.general_rt.take_stats()
-    assert st["target_own"] + st["target_enemy"] + st["target_tile"] == pytest.approx(1.0, abs=1e-3)
-    assert st["target_group"] == pytest.approx(st["target_own"] + st["target_enemy"], abs=1e-3)
+    # (each logged to 3 places: the sum within 1.5 of the last)
+    assert st["target_own"] + st["target_enemy"] + st["target_tile"] == pytest.approx(1.0, abs=2e-3)
+    assert st["target_group"] == pytest.approx(st["target_own"] + st["target_enemy"], abs=2e-3)
     assert 0 <= st["group_churn"] <= 1 and 0 <= st["kind_switch"] <= 1
 
 

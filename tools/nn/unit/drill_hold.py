@@ -47,8 +47,10 @@ def _passports():
 # within 35 m - Warp-Quake's direct damage and Seismic Snare's no-move)
 # the Death Runners and the Eshin Triads the same (02.11.2026: hiding melee units with Concealment Bombs and the weeping blade)
 # the Warpfire Throwers the same (02.11.2026: a burst of shells with a blast; drill_shoot's shooters leave them out too)
+# the Globadiers the same (02.11.2026: a volley of shells with a blast and a poison; the Warpfire Throwers' class)
 NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags", "wh2_dlc14_skv_inf_warp_grinder_0", "wh2_main_skv_inf_death_runners_0",
-                 "wh2_dlc14_skv_inf_eshin_triads_0", "wh2_main_skv_inf_warpfire_thrower")
+                 "wh2_dlc14_skv_inf_eshin_triads_0", "wh2_main_skv_inf_warpfire_thrower",
+                 "wh2_main_skv_inf_poison_wind_globadiers")
 
 
 def roster():

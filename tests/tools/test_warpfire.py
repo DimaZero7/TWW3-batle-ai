@@ -50,14 +50,14 @@ def test_every_other_unit_keeps_gravity_and_burst_of_one():
         if not m or k == W:
             continue
         assert m["burst_size"] == 1 and m["projectile_number"] == 1 and not m["flaming"], k
-        assert m["gravity"] == (6.0 if k == "wh2_main_skv_art_warp_lightning_cannon" else 9.81), k
+        assert m["gravity"] == {"wh2_main_skv_art_warp_lightning_cannon": 6.0, "wh2_main_skv_inf_poison_wind_globadiers": 6.5}.get(k, 9.81), k
 
 
 def test_the_class_is_by_data_and_the_numbers_with_their_sources():
     p = sim_params.load()
     assert sim_params.is_round(p.units[W], p.sim)
     # nobody else of the pool: a gun with a blast is no such shell, a shooter without a blast neither
-    assert [k for k, u in p.units.items() if sim_params.is_round(u, p.sim)] == [W]
+    assert [k for k, u in p.units.items() if sim_params.is_round(u, p.sim)] == [W, "wh2_main_skv_inf_poison_wind_globadiers"]
     off = p.with_cal("artillery", rounds={"on": 0})
     assert not sim_params.is_round(off.units[W], off.sim)
     ms = p.sim["missile"]
@@ -106,7 +106,7 @@ def test_a_globadier_keeps_the_artillery_morale_by_its_category():
 
 def test_the_flames_are_a_contact_on_the_catalogues_end():
     doc = load("effects.json")
-    assert doc["order"][-1] == FLAMES and doc["inflicts"][W] == [FLAMES]
+    assert FLAMES in doc["order"] and doc["inflicts"][W] == [FLAMES]
     e = doc["effects"][FLAMES]
     assert e["modelled"] and e["duration_s"] == 10.0 and e["stats"][0]["stat"] == "stat_morale" and e["stats"][0]["value"] == -8.0
     assert FLAMES not in doc["units"][W]

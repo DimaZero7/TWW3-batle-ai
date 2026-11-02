@@ -858,7 +858,7 @@ def step(st, orders, params=None, dt=None):
             hit_now = (own > 0) & (draw < 1 - torch.exp(-own))
             artillery.morale_mark(u, params, dt, fired_at, art_info["near"] > 0, hit_now)
         keep_t = None if trunk is None else torch.where(u["fix_el"] > 0, torch.ones_like(trunk), trunk)
-        artillery.launch(u, pw, params, shots, volley_target, keep=keep_t)
+        artillery.launch(u, pw, params, shots, volley_target, keep=keep_t, lob=los.get("lob"))
         # (shells without guns: their knocks lay the men down, artillery.lie; none of them: no change)
         artillery.lie(u, params, dt, knocks_art)
         u["art_kd"] = u["art_kd"] + (knocks_art * pw["enemy"]).sum(2)
@@ -898,6 +898,11 @@ def step(st, orders, params=None, dt=None):
     if dd_on or vx_on or dq_on:
         hp_fx = torch.zeros_like(hp_melee)
         kills_fx = torch.zeros_like(hp_melee)
+        if art_on:
+            # (02.11.2026, the Globadiers' poison: direct.from_contact) a blast's contact effect with direct damage, ticks and the rings of this step
+            hp_cd, kills_cd = direct.from_contact(u, params, dt, art_info.get("touch"))
+            if hp_cd is not None:
+                hp_fx, kills_fx = hp_fx + hp_cd, kills_fx + kills_cd
         if dq_on:
             hp_dq, kills_dq = direct.from_abilities(u, params, dt, pw["dist"], same_side)
             if hp_dq is not None:
@@ -1125,7 +1130,8 @@ def step(st, orders, params=None, dt=None):
     # the enemy hit (effects.lay; friendly fire lays none); it acts from the next step
     effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t,
                 blast=None if hits_art is None else hits_art * scale[:, None, :],
-                vortex=None if hits_vx is None else hits_vx * scale[:, None, :])
+                vortex=None if hits_vx is None else hits_vx * scale[:, None, :],
+                touch=art_info.get("touch") if art_on else None)
     # the slowing from hits of gunpowder (missile.hit_slow): a hit starts its timer on the enemy hit; it acts in this
     # step's movement (below)
     missile.hit_slow_lay(u, params, dt, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
@@ -1136,7 +1142,10 @@ def step(st, orders, params=None, dt=None):
         # artillery effect, the projectile's fields never set, no -5; under warpfire the -5 was there)
         # ... a shell of the artillery's morale (cat_art): the Warpfire Throwers' blast sets the -5, the memory's record
         db_fire = db - torch.where(u["cat_art"][:, :, None], hp_art * scale[:, None, :], torch.zeros_like(hp_art))
-    shot_at = ((hp_missile + db_fire) * pw["enemy"]).sum(1) > 0     # friendly fire does not count (ume_concerned_under_friendly_fire 0)
+    # (a shell without guns of the category artillery, the Globadiers: its own hit sets no 'attacked by projectile' either - the memory's effects of the unit under them: only -8 / -10,
+    # build/diag_globadiers/morale_terms.log; as the mortar's shell)
+    hp_shot = torch.where((u["rd"] & u["cat_art"])[:, :, None], torch.zeros_like(hp_missile), hp_missile) if art_on else hp_missile
+    shot_at = ((hp_shot + db_fire) * pw["enemy"]).sum(1) > 0     # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
     # the worst side it is struck from this step (morale: attacked in the flank / rear while it lasts)

@@ -921,12 +921,13 @@ def _path_block(lo, hi, xa, xb, rk, dmin=None):
 
 
 def _lob_tan(u):
-    """[B, N, 1] tan of a lobbing shooter's arc: its fixed elevation (artillery: the Mortar's 50 deg; STATIC fix_el),
-    else 45 deg (1)."""
+    """[B, N, 1] tan of a lobbing shooter's arc: its fixed elevation (artillery: the Mortar's 50 deg; STATIC fix_el) or its lob's angle
+    (lob_el: the Globadiers' 30 deg), else 45 deg (1)."""
     if "fix_el" not in u:
         return None
-    el = u["fix_el"] * (math.pi / 180)
-    return torch.where(u["fix_el"] > 0, torch.tan(el), torch.ones_like(el))[:, :, None]
+    deg = torch.where(u["lob_el"] > 0, u["lob_el"], u["fix_el"]) if "lob_el" in u else u["fix_el"]
+    el = deg * (math.pi / 180)
+    return torch.where(deg > 0, torch.tan(el), torch.ones_like(el))[:, :, None]
 
 
 def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True):
@@ -1027,7 +1028,8 @@ def _friends(u, pw, target, params, contact=None, lob=None, men=True, rays=True)
         if arc is None:
             tan, a = dh / L, torch.zeros_like(L)                         # a straight line
         else:
-            tan = _arc_tan(v, L, dh)
+            # (the shooter's own gravity: 9.81 but for shells without guns, artillery.rounds)
+            tan = _arc_tan(v, L, dh, _arc_g(u))
             a = ((tan * L - dh) / (L * L)).clamp(min=0)                 # height hm + tan x - a x^2: through the aim
         if high is not None:
             # (the 45 deg arc; a fixed trajectory's own elevation: _lob_tan)

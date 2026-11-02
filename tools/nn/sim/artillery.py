@@ -60,6 +60,14 @@ with these differences:
               melee.front_kills, its front pool the third of the men the row most hit holds (kills.missile_front's rule: the dead
               of the shell's first men; memory: dead by depth 59 / 52 / 35 / 14 / 0 %); no fitted number
   lying       the men knocked lie artillery.rounds.lie_s (memory: 5.8 s), their unit's way and blows x the standing share (lie)
+  the ring    it ends at its last whole tick (ring_ticks: the Globadiers' 2 m at 15 m/s only 1.5 m) and is a sphere round the burst, the vector to a man's feet: a shell that bursts at the
+              height of the heads strikes nobody (exposure_round; bursts: where a rank stops it, how high). The memory's parts of a volley of 48 on spearmen: own hit 15-23 men, ring 37, poison 22 strikes
+  the lob     dual_low_fixed (lob_el: the Globadiers' 30 deg): the line closed by friends - the lob's angle at the speed that reaches the aim, else the low
+              arc at the muzzle speed (missile.clear_shot's lob; launch, flight, bursts)
+  the window  a volley of single shells lands over artillery.volley_land_s (land_w; the men's throws are not together), its aim as it left; a burst's
+              stream does not need it
+  the poison  a blast's contact effect with direct damage (the catalogue's direct: the Globadiers' poisoned wind): direct.from_contact, each 0.1 s tick with a
+              shell's ring on the unit one strike, then its own ticks; info["touch"] the shells whose ring reaches a unit's box
 Not modelled (config/nn/sim.json artillery.shell_why): the cannonball's bounce and roll, each gun's own clock (the
 battery fires as one), the rockets' extra scatter, the knocked men's pause in melee.
 Needs torch.
@@ -140,15 +148,16 @@ def theta_low(v, d, g=G):
     return 0.5 * torch.asin((d * g / (v * v).clamp(min=1e-6)).clamp(max=1.0))
 
 
-def flight(u, d):
-    """[B, N] seconds a shooter's projectile flies to d m [B, N]: the fixed arc's (fix_el > 0) sqrt(2 d tan(el) / g),
+def flight(u, d, lob=None):
+    """[B, N] seconds a shooter's projectile flies to d m [B, N]: the fixed arc's (fix_el > 0, or lob [B, N] at lob_el) sqrt(2 d tan(el) / g),
     else the low arc's d / (v cos theta)."""
     v = u["muzzle_v"].clamp(min=1.0)
-    el = u["fix_el"] * (math.pi / 180)
+    deg = u["fix_el"] if lob is None else torch.where(lob, u["lob_el"], u["fix_el"])
+    el = deg * (math.pi / 180)
     g = u["m_g"]
     fixed = torch.sqrt(2 * d.clamp(min=0) * torch.tan(el) / g)
     low = d / (v * torch.cos(theta_low(v, d, g))).clamp(min=1e-3)
-    return torch.where(u["fix_el"] > 0, fixed, low)
+    return torch.where(deg > 0, fixed, low)
 
 
 def shell(u):
@@ -236,7 +245,7 @@ ZERO_STEP, ZERO_FLOOR = 0.1, 0.5       # the zeroing-in: the area -10 % a shot, 
 AIM_H = 0.75                           # the aim point: the target man's feet + 0.75 of his height (shooting_module 2.3)
 
 
-def launch(u, pw, params, shots, target, keep=None):
+def launch(u, pw, params, shots, target, keep=None, lob=None):
     """In place: the shells of this step's volleys (shots [B, N] projectiles at target [B, N]; keep [B, N]: the share no
     trunk stopped, ground.trunk_keep) take flight - the slot sh_* of each shooter of shells that fired (land() has landed
     a volley still in flight first). The aim (build/diag_arty/mechanic.md 1; STATIC central): every gun takes the
@@ -245,7 +254,8 @@ def launch(u, pw, params, shots, target, keep=None):
     at most the target's span); the aim point is AIM_H of his height up, so the arc lands AIM_H h / tan(angle) beyond
     him; it leads the target fully (its velocity x the flight). Kept for land(): the line of fire (sh_wx, sh_wz), the
     aim's spread across (sh_aa), the spread's side (sh_r; its zeroing-in by sh_k shots at sh_kt), the distance to the
-    aim (sh_d), the launch angle (sh_el) and the target (sh_t)."""
+    aim (sh_d), the launch angle (sh_el) and the target (sh_t). lob [B, N]: the forced arc of missile.clear_shot - a shell with lob_el flies it
+    (sh_lb); None: nobody."""
     go = shell(u) & (shots > 0) & (target >= 0)
     t = target.clamp(min=0)
     d0 = pw["dist"].gather(2, t[:, :, None]).squeeze(2)
@@ -259,8 +269,10 @@ def launch(u, pw, params, shots, target, keep=None):
     near = torch.where(central, torch.zeros_like(d0), along / 2)
     d = (d0 - near).clamp(min=1.0)
     v = u["muzzle_v"].clamp(min=1.0)
-    el = torch.where(u["fix_el"] > 0, u["fix_el"] * (math.pi / 180), theta_low(v, d, u["m_g"])).clamp(min=1e-3)
-    T = flight(u, d)
+    lobbed = (u["lob_el"] > 0) & (lob if lob is not None else torch.zeros_like(u["rd"]))
+    deg = torch.where(lobbed, u["lob_el"], u["fix_el"])
+    el = torch.where(deg > 0, deg * (math.pi / 180), theta_low(v, d, u["m_g"])).clamp(min=1e-3)
+    T = flight(u, d, lobbed)
     flow = stream(u)
     # (a stream of shells: the burst's flight waited already, burst_share; what lands next step is where the target is then)
     T = torch.where(flow, torch.zeros_like(T), T)
@@ -286,7 +298,7 @@ def launch(u, pw, params, shots, target, keep=None):
     k_add = torch.where(flow, shots / (u["men"].clamp(min=1.0) * u["spv"].clamp(min=1.0)), torch.ones_like(k))
     for name, val in (("sh_s", T), ("sh_x", x), ("sh_z", z), ("sh_n", n), ("sh_wx", wx), ("sh_wz", wz), ("sh_aa", aa),
                       ("sh_r", spread_side(u, d, el, k)), ("sh_d", d), ("sh_el", el), ("sh_t", tf), ("sh_k", k + k_add),
-                      ("sh_kt", tf)):
+                      ("sh_kt", tf), ("sh_lb", lobbed), ("sh_w", u["land_w"]), ("sh_left", n)):
         u[name] = torch.where(go, val, u[name])
 
 
@@ -321,14 +333,16 @@ def line_in_box(a, phi, F, D):
     return enter <= leave, enter, leave
 
 
-def bursts(u, front, depth, b_, i_):
+def bursts(u, front, depth, b_, i_, heights=None, rank_stop=1.0):
     """[M, Q, 2] the burst points (x, z) of the landing rows' (b_, i_) shells, Q equal-weight points of the game's miss
     (build/diag_arty/mechanic.md 2): across - the aim (uniform +-sh_aa) + d tan(yaw); along - the arc turned by the
     pitch at its speed (a fixed trajectory the speed that reaches d at its angle, a low one its muzzle speed): the range
     v^2 sin 2(el + pitch) / g less the aimed one; the yaw and the pitch uniform within +-atan(sh_r / 2d). A shell coming
     down through its target's box bursts on the first man (percussive, mechanic.md 3): landing past the box's near edge
     within the shadow h / tan(el), at max(near edge, landing - shadow) (the box now, along the line; within its span
-    across)."""
+    across). heights (a list; only rows of shells without guns): [M, Q] how high each burst is over the men's feet is appended - the shell comes below the heads of any unit on its way, the
+    next rank from that box's edge stops it with the chance rank_stop (artillery.rounds.rank_stop; a low-discrepancy draw per point of the miss) or lets it pass; past the last rank, or down
+    on the ground first, it bursts at its landing, 0 high."""
     dev = u["men"].device
     M = len(b_)
     d, el, r = u["sh_d"][b_, i_], u["sh_el"][b_, i_], u["sh_r"][b_, i_]
@@ -336,7 +350,7 @@ def bursts(u, front, depth, b_, i_):
     qa = _mid(Q_AIM, dev)[None, :] * u["sh_aa"][b_, i_][:, None]                       # [M, Qa]
     yaw = _mid(Q_YAW, dev)[None, :] * half[:, None]                                       # [M, Qy]
     pit = _mid(Q_PITCH, dev)[None, :] * half[:, None]                                     # [M, Qp]
-    fixed = u["fix_el"][b_, i_] > 0
+    fixed = (u["fix_el"][b_, i_] > 0) | u["sh_lb"][b_, i_]
     g = u["m_g"][b_, i_]
     v2 = torch.where(fixed, d * g / torch.sin(2 * el).clamp(min=1e-3), u["muzzle_v"][b_, i_].clamp(min=1.0) ** 2)
     dl = v2[:, None] * (torch.sin(2 * (el[:, None] + pit).clamp(min=0.0)) - torch.sin(2 * el)[:, None]) / g[:, None]
@@ -367,7 +381,38 @@ def bursts(u, front, depth, b_, i_):
         near = torch.where(rm, o_l[:, None, None] + near_r, near)
         far = torch.where(rm, o_l[:, None, None] + far_r, far)
     stop = lat & (L >= near) & (L - shadow <= far)
-    L = torch.where(stop, torch.maximum(near, L - shadow), L).reshape(M, -1)
+    Ls = torch.where(stop, torch.maximum(near, L - shadow), L)
+    if heights is not None:
+        # (all the rows here are shells without guns: land's chunks)
+        Qn = L.shape[1] * L.shape[2]
+
+        def first_rank(j, nr, fr, sh, st, salt):
+            """[M, Qa Qy, Qp] where a rank of unit j (slots [M]) stops each shell, inf where none does: below the heads from sh before its landing."""
+            draw = ((torch.arange(Qn, device=dev, dtype=torch.float32) + 0.5 + salt) * 0.61803399) % 1.0
+            passed = torch.floor(torch.log(draw.clamp(min=1e-6)) / math.log(max(1 - rank_stop, 1e-6))).reshape(1, L.shape[1], L.shape[2])
+            v_rank = u["sp_v"][b_, j][:, None, None].clamp(min=0.1)
+            at = nr + (torch.ceil(((L - sh - nr) / v_rank).clamp(min=0) - 1e-6) + passed) * v_rank
+            return torch.where(st & (at <= torch.minimum(L, fr)), at, torch.full_like(L, float("inf")))
+        best = first_rank(t, near, far, shadow, stop, 0.0)
+        # (any other unit on the shell's way, friends too: its men stop it first - the probe's friends in melee on the line take more than the target)
+        for j_ in range(u["men"].shape[1]):
+            jj = torch.full_like(t, j_)
+            on = (u["side"][b_, jj] > 0) & (u["men"][b_, jj] > 0) & ~u["gone"][b_, jj] & (jj != t) & (jj != i_)
+            if not bool(on.any()):
+                continue
+            ox_j = u["x"][b_, jj] - u["sh_x"][b_, i_]
+            oz_j = u["z"][b_, jj] - u["sh_z"][b_, i_]
+            ol_j, oa_j = ox_j * wx + oz_j * wz, ox_j * wz - oz_j * wx
+            phi_j = u["b"][b_, jj] * (math.pi / 180) - torch.atan2(wx, wz)
+            lat_j, nr_j, fr_j = line_in_box(A - oa_j[:, None, None], phi_j[:, None, None], front[b_, jj][:, None, None], depth[b_, jj][:, None, None])
+            nr_j, fr_j = ol_j[:, None, None] + nr_j, ol_j[:, None, None] + fr_j
+            sh_j = (u["height"][b_, jj] / torch.tan(el).clamp(min=1e-3))[:, None, None]
+            st_j = lat_j & on[:, None, None] & (L >= nr_j) & (L - sh_j <= fr_j)
+            best = torch.minimum(best, first_rank(jj, nr_j, fr_j, sh_j, st_j, float(j_ + 1)))
+        Ls = torch.where(torch.isfinite(best), best, L)
+        # (a shell without guns) how high it is where it bursts: the way left to the ground x the arc's slope - the ring is a sphere round that point (ring_ticks, exposure)
+        heights.append(((L - Ls).clamp(min=0) * torch.tan(el)[:, None, None]).reshape(M, -1))
+    L = Ls.reshape(M, -1)
     A = A.reshape(M, -1)
     exp = u["exp_m"][b_, i_]
     if bool((exp > 0).any()):
@@ -392,6 +437,53 @@ def cells(u, front, depth, b_):
     x = u["x"][b_][..., None] + a * cb + l * sb
     z = u["z"][b_][..., None] - a * sb + l * cb
     return torch.stack([x, z], -1), F * D / (ca * cl)
+
+
+def ring_ticks(r_e, v):
+    """The ticks of 0.1 s a blast's ring grows (shells without guns): it lives max(duration 0, radius / speed) and takes a radius of speed x 0.1 a tick, so it ends at the last
+    whole tick - at least one (the program, artillery_rules.md 1.1; the memory, build/diag_globadiers/: the Warpfire Throwers' 3 m at 14 m/s reach 2.8 m, their least hit 6 HP
+    = 0.26 of the blast, the Globadiers' 2 m at 15 m/s only 1.5 m, their least hit 13 HP = 0.51 of it)."""
+    return torch.floor(r_e / (v.clamp(min=1e-6) * 0.1) + 1e-6).clamp(min=1.0)
+
+
+def ring_reach(r_e, v):
+    """The radius a blast's ring really reaches, m (ring_ticks): r_e where the speed fits it, else its last tick's; the damage still falls over r_e."""
+    return torch.minimum(ring_ticks(r_e, v) * v * 0.1, r_e)
+
+
+def exposure_round(P, h_b, Cx, F, D, rad, r_b, r_e, r_t, smooth):
+    """exposure() for a shell without guns, whose ring may be far smaller than a cell: (m1, m2, pk, pc), per shell, [M, N, C], with a cell's men spread evenly over the cell. The ring is a
+    sphere round the burst, h_b [M, Q] high, the vector to a man's feet (the game's program; the memory, build/diag_globadiers/mem_rule3d.py: half the men a shell strikes take no ring, it burst
+    at their heads; the rule on the real men and the real shells' heights 43 men a volley of 48, HP 760, the game's 37 and 750). On the ground it takes the men within sqrt(r_t^2 + r_b^2 - h^2);
+    the disc's overlap with a cell by the square of its area; the closeness at the mean of the disc (2 / 3 of its radius). P [M, Q, 2], Cx [M, N, C, 2], F, D, rad, r_b [M, N], r_e, r_t [M]."""
+    ca, cl = CELLS
+    dx, dz = P[:, None, None, :, 0] - Cx[..., 0, None], P[:, None, None, :, 1] - Cx[..., 1, None]      # [M, N, C, Q]
+    sb, cb = torch.sin(rad)[:, :, None, None], torch.cos(rad)[:, :, None, None]
+    a, l = dx * cb - dz * sb, dx * sb + dz * cb
+    hx, hl = (F / (2 * ca))[:, :, None, None].clamp(min=1e-3), (D / (2 * cl))[:, :, None, None].clamp(min=1e-3)
+    rb = r_b[:, :, None, None]
+    re, rt = r_e[:, None, None, None], r_t[:, None, None, None]
+    h2 = (h_b ** 2)[:, None, None, :]
+    SQ = math.sqrt(math.pi) / 2
+
+    def share(r):
+        """[M, N, C, Q] the share of a cell's men within r m of the burst on the ground."""
+        w = SQ * r
+        ov_a = (torch.minimum(a + w, hx) - torch.maximum(a - w, -hx)).clamp(min=0)
+        ov_l = (torch.minimum(l + w, hl) - torch.maximum(l - w, -hl)).clamp(min=0)
+        return ov_a * ov_l / (4 * hx * hl)
+    r_h = torch.sqrt((rt * rt + rb * rb - h2).clamp(min=0))
+    s_h = share(r_h)
+    # (the closeness: 1 at the body's skin, 0 at r_e)
+    d3 = torch.sqrt((r_h * 2 / 3) ** 2 + h2)
+    k = 1 - ((d3 - rb) / re.clamp(min=1e-6)).clamp(0, 1)
+    m1, m2 = (s_h * k).mean(-1), (s_h * k * k).mean(-1)
+    # (the knock: closeness >= 0.5)
+    r_k = torch.sqrt(((rb + re / 2) ** 2 - h2).clamp(min=0))
+    pk = share(torch.minimum(r_h, r_k)).mean(-1)
+    d = torch.sqrt(a * a + l * l)
+    pc = (d < smooth).float().mean(-1) / (math.pi * smooth * smooth)
+    return m1, m2, pk, pc
 
 
 def exposure(P, Cx, r_b, r_e, smooth):
@@ -610,8 +702,10 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
     the men they kill, the hits they land (own hits and blasts), the men knocked down; zeros when none lands. A shell in
     flight lands when its time is up within this step or its shooter fires again now (firing [B, N]). front, depth
     [B, N]: the boxes (geometry.dims). In place: the slots' clocks (sh_s -1 once landed). info (a dict): filled with
-    "near" [B, N] (> 0: a shell of the other side landed within near_m of its box's edge - the aim point: morale_mark)
-    and "own" [B, N] (its men's expected hits from the shells' own projectiles).
+    "near" [B, N] (> 0: a shell of the other side landed within near_m of its box's edge - the aim point: morale_mark),
+    "own" [B, N] (its men's expected hits from the shells' own projectiles) and "touch" [B, i, j] (the shells of i whose ring reaches j's box:
+    a blast's contact effect with direct damage, direct.from_contact; zeros without such a shell).
+    A volley with sh_w > 0 lands over that many seconds: dt / sh_w of its shells a step at its aim (sh_left: not landed yet).
     Where they burst: bursts() - the game's miss (a uniform yaw and pitch, the arc's range) round the aim launch() kept;
     each unit's men in CELLS cells of its box (cells()); a cell's men meet each shell's burst by exposure() - the
     blast's closeness moments, the knock's chance, the bursts near them (a fixed shell's own hit) - the shells of a
@@ -629,10 +723,17 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
     fly = u["sh_s"] >= 0
     left = u["sh_s"] - dt
     now = fly & ((left <= 1e-6) | firing)
-    u["sh_s"] = torch.where(now, torch.full_like(left, -1.0), torch.where(fly, left, u["sh_s"]))
+    # (land_w: the window) this step's share of the volley; the rest waits at sh_s 0 for the next step (none of them with a new volley: all now)
+    windowed = u["sh_w"] > 0
+    part = torch.where(firing, u["sh_left"], torch.minimum(u["sh_left"], u["sh_n"] * dt / u["sh_w"].clamp(min=1e-6)))
+    land_n = torch.where(windowed, part, u["sh_n"])
+    rest = windowed & now & (u["sh_left"] - part > 1e-6)
+    u["sh_left"] = torch.where(windowed & now, (u["sh_left"] - part).clamp(min=0), u["sh_left"])
+    u["sh_s"] = torch.where(rest, torch.zeros_like(left), torch.where(now, torch.full_like(left, -1.0), torch.where(fly, left, u["sh_s"])))
     if info is not None:
         info["near"] = torch.zeros((B, N), device=dev)
         info["own"] = torch.zeros((B, N), device=dev)
+        info["touch"] = torch.zeros((B, N, N), device=dev)
     if not bool(now.any()):
         return hp, kills, hits, knocks
     rules = params.battle
@@ -677,7 +778,7 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
         bb, ii = rows[lo:hi, 0], rows[lo:hi, 1]
         if rounds and lo >= n_gun:
             front, depth = F_rd, D_rd
-        nn = u["sh_n"][bb, ii]                                               # [M] shells
+        nn = land_n[bb, ii]                                                  # [M] shells
         r_e = u["ex_r"][bb, ii]
         if info is not None:
             # (morale_mark) a near miss: the aim point within near_m of a box's edge, a unit of the other side
@@ -690,9 +791,23 @@ def land(u, params, dt, front, depth, firing, noise=False, info=None):
             friend0 = u["side"][bb] == u["side"][bb, ii][:, None]
             near = present[bb] & ~friend0 & (gap <= near_m(params)) & u["cat_art"][bb, ii][:, None]
             info["near"].index_put_((bb,), near.float(), accumulate=True)
-        P = bursts(u, front, depth, bb, ii)                                  # [M, Q, 2]
+        b_h = [] if rounds and lo >= n_gun else None
+        P = bursts(u, front, depth, bb, ii, b_h, float((cal(params).get("rounds") or {}).get("rank_stop") or 1.0))    # [M, Q, 2]
+        if info is not None and rounds and bool((u["ex_fx"][bb, ii] >= 0).any()):
+            # (a blast's contact effect, direct.from_contact) the bursts whose ring + a man's body reaches a box: its first men
+            sb, cb = torch.sin(rad[bb])[..., None], torch.cos(rad[bb])[..., None]
+            dx, dz = P[:, None, :, 0] - u["x"][bb][..., None], P[:, None, :, 1] - u["z"][bb][..., None]
+            reach = (ring_reach(r_e, u["ex_v"][bb, ii])[:, None] + u["radius"][bb])[..., None]
+            ins = ((dx * cb - dz * sb).abs() <= front[bb][..., None] / 2 + reach) & ((dx * sb + dz * cb).abs() <= depth[bb][..., None] / 2 + reach)
+            tgt = present[bb] & (~(u["side"][bb] == u["side"][bb, ii][:, None]) | u["ex_allies"][bb, ii][:, None])
+            info["touch"].index_put_((bb, ii), ins.float().mean(-1) * nn[:, None] * tgt.float() * (u["ex_fx"][bb, ii] >= 0)[:, None].float(), accumulate=True)
         Cx, area = cells(u, front, depth, bb)                                # [M, N, C, 2], [M, N]
-        m1, m2, pk, pc = exposure(P, Cx, u["radius"][bb], r_e, SMOOTH_M)     # [M, N, C]
+        # (a shell without guns: the ring's last whole tick, ring_ticks; a gun's as it was)
+        r_t = ring_reach(r_e, u["ex_v"][bb, ii]) if rounds and lo >= n_gun else None
+        if rounds and lo >= n_gun:
+            m1, m2, pk, pc = exposure_round(P, b_h[0], Cx, front[bb], depth[bb], rad[bb], u["radius"][bb], r_e, r_t, SMOOTH_M)     # [M, N, C]
+        else:
+            m1, m2, pk, pc = exposure(P, Cx, u["radius"][bb], r_e, SMOOTH_M)     # [M, N, C]
         friend = u["side"][bb] == u["side"][bb, ii][:, None]
         whom = present[bb] & (~friend | u["ex_allies"][bb, ii][:, None])
         band_men = (men[bb] / C * whom.float())[..., None].expand(-1, -1, C)  # [M, N, C]: a cell's men

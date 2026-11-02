@@ -69,7 +69,8 @@ E_SIM_STATS = {**SIM_STATS, ("scalar_missile_damage_base", "mult"): "m_damage",
                ("stat_weakness_flame", "add"): "resist_flame", ("stat_resistance_flame", "add"): "resist_flame",
                ("stat_armour", "mult"): "armour"}
 RELOAD_MIN_S = 4.0  # the game's floor of a reload cut by the reload skill (max(4 s, base x (100 - skill) %))
-CONTACT_SLOTS = 8   # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx7_s; 5 used, the queue's sooner or later)
+CONTACT_SLOTS = 12  # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx11_s, cdd0_by ...; 7 used; the Stormfiends' Pestilent Wind the 8th,
+                    # the Thunder Gauntlets' the 9th: data, no code)
 
 PREDICATES =("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "not_wavering", "hp_below_half",
               "hp_below_quarter", "moving", "climbing")
@@ -88,6 +89,8 @@ HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability", "co
 # (31.10.2026, the Pusbags) the numbers of an effect's direct damage on its owner (the catalogue's direct: tools/nn/sim/
 # direct.py) and of the vortex at its owner's men's deaths (the catalogue's vortex: tools/nn/sim/vortex.py); 0 none
 DIRECT = ("dd_n", "dd_hp", "dd_s", "dd_base", "dd_low")
+# (02.11.2026, the Globadiers) a contact effect that a blast lays on its own side's men too (the phase's affects_allies)
+DIRECT = DIRECT + ("ct_allies",)
 VORTEX = ("vx_delay", "vx_r", "vx_d", "vx_ap", "vx_f", "vx_v", "vx_magic", "vx_spell", "vx_fire", "vx_ct")
 HEAD = HEAD + DIRECT + VORTEX
 COLS = HEAD + tuple(f"{w}_{p}" for w in ("need", "off", "fire", "rcg") for p in PREDICATES) + tuple(
@@ -126,8 +129,13 @@ def laid_by(params, key):
     passport's melee.contact_phase, missile.contact_phase; -1 none or not modelled)."""
     u = params.units.get(key) or {}
     idx = {k: i for _, i, k in contact_keys(params)}
+    m = u.get("missile") or {}
+    # (a shell without guns whose blast lays the same phase, the Globadiers': only the landing lays it - its own hit counts at the launch, 2-4 s before the shell
+    # lands, build/diag_roster/wh2_main_skv_inf_poison_wind_globadiers/mechanic.md C4 e)
+    from tools.nn.sim.params import is_round
+    same = is_round(u, params.sim) and m.get("contact_phase") and m.get("contact_phase") == (m.get("blast") or {}).get("contact_phase")
     return (idx.get((u.get("melee") or {}).get("contact_phase"), -1),
-            idx.get((u.get("missile") or {}).get("contact_phase"), -1))
+            -1 if same else idx.get(m.get("contact_phase"), -1))
 
 
 def unit_effects(params, key):
@@ -204,7 +212,7 @@ def row(params, key):
                range_m=float(e.get("range_m") or 0.0),
                ability=float(ab_keys.index(key)) if key in ab_keys else -1.0,
                contact=float(contact), duration_s=float(e.get("duration_s") or 0.0),
-               delay_s=float(e.get("delay_s") or 0.0))
+               delay_s=float(e.get("delay_s") or 0.0), ct_allies=float(bool(e.get("allies"))))
     d = e.get("direct") or {}
     if d:
         # dd_n: men a tick (-1: all of them), dd_hp: the mean HP of a man's hit, dd_s: the tick; dd_base, dd_low: a
@@ -609,7 +617,7 @@ def contact_on(u, params, E, alive):
     return on
 
 
-def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None, vortex=None):
+def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None, vortex=None, touch=None):
     """The contact effects laid this step (module doc), in place: each timer cfx{j}_s runs down by dt, then starts at
     the effect's duration_s on every unit an enemy weapon of it hit this step. hp_melee / hp_missile [B, i, j]: HP i's
     blows / projectiles took from j this step, mhit / shit [B, i, j] the HP a hit; enemy [B, i, j]. Hits land as
@@ -617,7 +625,9 @@ def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None, v
     morale._hash_uniform, so a replay draws the same). blast [B, i, j]: the hits of i's shells' blasts on j (artillery.land),
     which lay i's blast's contact effect (STATIC ex_fx: the Plagueclaw's -10 morale); None: none. vortex [B, i, j]: the
     men of j struck by the vortices of i's dead (tools/nn/sim/vortex.py), which lay the vortex's contact effect on the whole
-    unit (the catalogue's vortex.contact, table column vx_ct: the Pusbags' -10 morale; mechanic.md P8); None: none."""
+    unit (the catalogue's vortex.contact, table column vx_ct: the Pusbags' -10 morale; mechanic.md P8); None: none.
+    A contact effect with direct damage (the catalogue's direct: the poisoned wind) is laid by the shells whose ring reached the unit, touch [B, i, j]
+    (artillery.land), whoever's hits they are; with its phase's affects_allies (ct_allies) on the shooter's own side too."""
     keys = contact_keys(params)
     if not keys or "cfx0_s" not in u:
         return
@@ -629,10 +639,15 @@ def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t, blast=None, v
     n_m = torch.where(mhit > 0, hp_melee / mhit.clamp(min=1e-6), torch.zeros_like(hp_melee)) * enemy
     n_s = torch.where(shit > 0, hp_missile / shit.clamp(min=1e-6), torch.zeros_like(hp_missile)) * enemy
     T = table(params, u["men"].device)
-    for j, i, _ in keys:
+    for j, i, key in keys:
         hits = ((u["mfx"] == i).float()[:, :, None] * n_m).sum(1) + ((u["sfx"] == i).float()[:, :, None] * n_s).sum(1)
         if blast is not None and "ex_fx" in u:
-            hits = hits + ((u["ex_fx"] == i).float()[:, :, None] * blast * enemy).sum(1)
+            e = params.effects["effects"][key]
+            if e.get("direct") and touch is not None:
+                whom = torch.ones_like(enemy) if e.get("allies") else enemy
+                hits = hits + ((u["ex_fx"] == i).float()[:, :, None] * touch * whom).sum(1)
+            else:
+                hits = hits + ((u["ex_fx"] == i).float()[:, :, None] * blast * enemy).sum(1)
         if vortex is not None and "vx_fx" in u:
             ct = torch.where(u["vx_fx"] >= 0, T[u["vx_fx"], COL["vx_ct"]], torch.full_like(u["men"], -1.0))
             hits = hits + ((ct == float(i)).float()[:, :, None] * vortex * enemy).sum(1)

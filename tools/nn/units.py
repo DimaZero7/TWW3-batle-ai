@@ -102,7 +102,11 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # Ratling Gun's body, 32 crews; a burst of 4 slow flaming shells a crew with a 3 m blast and no guns - the class
          # "shells without guns" (tools/nn/sim/artillery.py: every field by data, the Globadiers next). Only the v3 army
          # scheme fields them (config/nn/pools.json units_v3)
-         "wh2_main_skv_inf_warpfire_thrower")
+         "wh2_main_skv_inf_warpfire_thrower",
+         # 02.11.2026, the Poisoned Wind Globadiers (build/diag_roster/wh2_main_skv_inf_poison_wind_globadiers/units.md, mechanic.md):
+         # the class "shells without guns" with a 2 m blast and a contact effect of direct damage (the poison, on friends too), the
+         # arc's fixed 30 deg lob. Only the v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh2_main_skv_inf_poison_wind_globadiers")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
@@ -115,7 +119,8 @@ SIZES = ("very_small", "small", "medium", "large", "very_large")
 TABLES = ("main_units", "land_units", "battle_entities", "mounts", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects",
-          "special_ability_phases", "projectile_penetration_junctions", "battlefield_engines", "projectiles_explosions")
+          "special_ability_phases", "projectile_penetration_junctions", "battlefield_engines", "projectiles_explosions",
+          "_kv_unit_ability_scaling_rules")
 
 # Where each passport field comes from: table.column by the RPFM schema's names (tools/nn/dbschema.py). checked:
 # compared with the unit card from battle (check_card); "ours": what we make of a named column.
@@ -315,6 +320,11 @@ PHASE_FIELDS = {
                   "fandom: contact effects last 10 s)",
     "effect": "special_ability_phases.effect_type (positive / negative)",
     "stats": "special_ability_phase_stat_effects rows of the phase: stat, how (add / mult), value",
+    "allies": "special_ability_phases.affects_allies: a blast lays it on its own side's men too (the poisoned wind; 02.11.2026)",
+    "direct": "only a phase with damage_amount != 0 (the poisoned wind): amount - damage_amount, entities - max_damaged_entities, "
+              "every_s - hp_change_frequency, scale - _kv_unit_ability_scaling_rules direct_damage_<UNIT_SIZE> (ultra 1.0), "
+              "min_unary - direct_damage_damage_scale_min_unary (0.5), hit_hp - the mean of trunc(trunc(amount x scale) x U[min_unary, 1]), "
+              "at least 1 (2.5 HP for 4); the same class as an ability's (tools/nn/abilities.py FIELDS direct, tools/nn/sim/direct.py)",
 }
 # Asked for, but not in the tables read (or not decoded): why (docs/*/training/units.md).
 MISSING = {
@@ -492,8 +502,25 @@ def contact_phases(units, t):
         stats = sorted(({"stat": r["stat"], "how": r["how"], "value": r["value"]}
                         for r in t["special_ability_phase_stat_effects"] if r["phase"] == k),
                        key=lambda r: (r["stat"], r["how"]))
-        out[k] = {"duration_s": heads[k]["duration"], "effect": heads[k]["effect_type"], "stats": stats}
+        out[k] = {"duration_s": heads[k]["duration"], "effect": heads[k]["effect_type"], "stats": stats,
+                  "allies": bool(heads[k].get("affects_allies"))}
+        d = phase_direct(heads[k], t)
+        if d:
+            out[k]["direct"] = d
     return out
+
+
+def phase_direct(head, t):
+    """A contact phase's direct damage (PHASE_FIELDS direct), None without one."""
+    amount = int(head.get("damage_amount") or 0)
+    if not amount:
+        return None
+    from tools.nn import abilities
+    kv = {r["key"]: float(r["value"]) for r in t.get("_kv_unit_ability_scaling_rules") or ()}
+    scale = kv.get(f"direct_damage_{abilities.UNIT_SIZE}", 1.0)
+    low = kv.get("direct_damage_damage_scale_min_unary", 1.0)
+    return {"amount": amount, "entities": int(head.get("max_damaged_entities") or 0), "every_s": float(head["hp_change_frequency"]),
+            "scale": scale, "min_unary": low, "hit_hp": abilities.direct_hit_mean(amount, scale, low)}
 
 
 def card(key, roster=ROSTER):
