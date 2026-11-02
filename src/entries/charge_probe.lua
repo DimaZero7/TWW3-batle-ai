@@ -51,7 +51,12 @@
 -- the go, or once the two units' centres are within at_m before the contact (an ability without a target: the Warp
 -- Grinders' Warp-Quake and Seismic Snare); perform_special_ability(key, the unit), and if that call fails
 -- perform_special_ability(key); each try is probe_ability {who 'a', key, t, d (the centres' distance), n, status used /
--- not_ready / used_no_target / failed}.
+-- not_ready / used_no_target / failed}. lane.t_casts (the triads plan) the same for the target (who 't').
+-- lane.a_on_sight (optional, the triads plan: a hidden target; an attack_run / attack_walk lane): at the go the attack order on
+-- the hidden target all the same (probe_phase 'a_try'); a_try_s later, still moving: the order stands (probe_phase 'a_try_end'
+-- kept true); standing: a move at a run to move_beyond_m behind the target's front (kept false, probe_phase 'a_move'), and the
+-- attack order once the target is visible to the attacker's alliance (probe_phase 'a_seen' with d, the centres' distance, in
+-- either case). lane.stealth_rows: the target's sample row carries hid (unit:is_hidden()) and v (is_visible_to_alliance).
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns); with lane.men_all_tg the target's and the extras' too
 -- (the artillery plan: who dies where in a block 150 m off the guns).
@@ -396,6 +401,13 @@ function M.main(bm, config, globals)
             ct = target_name(u)}
     end
 
+    -- (lane.a_on_sight, lane.stealth_rows) does the attacker's alliance see the target now?
+    local function visible_to_attacker(lane)
+        local other = state.alliances and state.alliances[lane.a.side]
+        if not other then return nil end
+        return read(function() return lane.t.unit:is_visible_to_alliance(other) end)
+    end
+
     -- A unit row's morale fields, added to it (t_morale targets, morale_rows): MoralePercent, MoraleState, the strongest
     -- effect's text, the active effects' keys, wavering.
     local function add_morale(row, u)
@@ -454,6 +466,10 @@ function M.main(bm, config, globals)
             or who == 'tg' and lane.target_mode == 'skirmish'
         local row = shooter and shooter_row(u) or unit_row(u)
         if lane.morale_rows or (who == 'tg' and lane.t_morale) then add_morale(row, u) end
+        if lane.stealth_rows and who == 'tg' then
+            row.hid = read(function() return u:is_hidden() end)
+            row.v = visible_to_attacker(lane)
+        end
         if lane.card_rows then row.cs = card_stats(u) end
         if lane.dd_rows and (who == 'a' or lane.dd_rows == 'both') then
             row.dd = round(read(cco, u, 'DamageDealt'), 0)
@@ -869,23 +885,55 @@ function M.main(bm, config, globals)
                     orders.halt(lane.t.uc)
                     emit('probe_phase', {lane = lane.name, phase = 'stop_fire', t = now - lane.t0})
                 end
-                -- lane.a_casts (the grinder plan; module comment): the attacker's own abilities by time or distance
-                for i, c in ipairs(lane.a_casts or {}) do
-                    lane.a_cast_done = lane.a_cast_done or {}
-                    if not lane.a_cast_done[i] then
+                -- lane.a_on_sight (the triads plan; module comment): a hidden target
+                if lane.sight then
+                    local v = visible_to_attacker(lane)
+                    if v and not lane.sight_seen then
+                        lane.sight_seen = true
                         local d = dist(lane.a.unit, lane.t.unit)
-                        local due = (c.at_s and now - lane.t0 >= c.at_s * 1000)
-                            or (c.at_m and not lane.contact and d and d <= c.at_m)
-                        if due then
-                            lane.a_cast_done[i] = true
-                            local ok, used = pcall(orders.use_ability_on_self, lane.a.uc, lane.a.unit, c.key)
-                            local status = ok and (used and 'used' or 'not_ready') or nil
-                            if not ok then
-                                local ok2 = pcall(function() lane.a.uc:perform_special_ability(c.key) end)
-                                status = ok2 and 'used_no_target' or 'failed'
+                        emit('probe_phase', {lane = lane.name, phase = 'a_seen', t = now - lane.t0, d = d and round(d, 1) or nil,
+                            hid = read(function() return lane.t.unit:is_hidden() end)})
+                    end
+                    if lane.sight == 'try' and now - lane.t0 >= (lane.a_try_s or 3) * 1000 then
+                        local moving = read(function() return lane.a.unit:is_moving() end)
+                        emit('probe_phase', {lane = lane.name, phase = 'a_try_end', t = now - lane.t0, kept = moving == true,
+                            tg = target_name(lane.a.unit), v = v})
+                        if moving then
+                            lane.sight = 'kept'
+                        else
+                            lane.sight = 'wait'
+                            orders.move(lane.a.uc, vec(lane.layout.tx, lane.z - lane.move_beyond_m), lane.mode ~= 'attack_walk')
+                            emit('probe_phase', {lane = lane.name, phase = 'a_move', t = now - lane.t0})
+                        end
+                    end
+                    if lane.sight == 'wait' and v then
+                        lane.sight = 'kept'
+                        attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                        emit('probe_phase', {lane = lane.name, phase = 'a_attack', t = now - lane.t0})
+                    end
+                end
+                -- lane.a_casts (the grinder plan; module comment), lane.t_casts (the triads plan): a unit's own abilities by
+                -- time or distance
+                for _, w in ipairs({{'a', lane.a_casts, lane.a}, {'t', lane.t_casts, lane.t}}) do
+                    for i, c in ipairs(w[2] or {}) do
+                        lane.cast_done_self = lane.cast_done_self or {}
+                        local mark = w[1] .. i
+                        if not lane.cast_done_self[mark] then
+                            local d = dist(lane.a.unit, lane.t.unit)
+                            local due = (c.at_s and now - lane.t0 >= c.at_s * 1000)
+                                or (c.at_m and not lane.contact and d and d <= c.at_m)
+                            if due then
+                                lane.cast_done_self[mark] = true
+                                local it = w[3]
+                                local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, c.key)
+                                local status = ok and (used and 'used' or 'not_ready') or nil
+                                if not ok then
+                                    local ok2 = pcall(function() it.uc:perform_special_ability(c.key) end)
+                                    status = ok2 and 'used_no_target' or 'failed'
+                                end
+                                emit('probe_ability', {lane = lane.name, who = w[1], key = c.key, n = i, t = now - lane.t0,
+                                    d = d and round(d) or nil, status = status})
                             end
-                            emit('probe_ability', {lane = lane.name, who = 'a', key = c.key, n = i, t = now - lane.t0,
-                                d = d and round(d) or nil, status = status})
                         end
                     end
                 end
@@ -1148,6 +1196,11 @@ function M.main(bm, config, globals)
             if lane.a_go_s and (m == 'attack_run' or m == 'attack_walk') then
                 lane.a_pending, m = true, nil
             end
+            if lane.a_on_sight and (m == 'attack_run' or m == 'attack_walk') then
+                lane.sight = 'try'
+                emit('probe_phase', {lane = lane.name, phase = 'a_try', t = 0, v = visible_to_attacker(lane),
+                    hid = read(function() return lane.t.unit:is_hidden() end)})
+            end
             if m == 'attack_run' or m == 'recharge' or m == 'withdraw' or m == 'reengage' then
                 attack(lane, lane.a, lane.t, false)
             elseif m == 'attack_walk' then
@@ -1359,6 +1412,7 @@ function M.main(bm, config, globals)
         assert(common and vector_type, 'common and battle_vector globals required')
         local sides = battle.read_sides(bm)
         state.armies = {sides[1].army, sides[2].army}
+        state.alliances = {sides[1].alliance, sides[2].alliance}
         local keep_morale = {}
         for _, l in ipairs(config.lanes) do
             if l.t_morale then keep_morale[l.target] = true end

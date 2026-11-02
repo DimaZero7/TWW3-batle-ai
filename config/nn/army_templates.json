@@ -527,6 +527,12 @@
       "group": "wh3_default_land_melee_infantry_main_flanking",
       "quality": "tier_2_step_4_units"
      }
+    ],
+    "wh2_dlc14_skv_inf_eshin_triads_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_flanking",
+      "quality": "tier_2_step_3_units"
+     }
     ]
    }
   }

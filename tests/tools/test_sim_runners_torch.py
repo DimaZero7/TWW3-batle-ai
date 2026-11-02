@@ -13,7 +13,17 @@ from tools.nn.sim.params import load  # noqa: E402
 
 P = load()
 DR, SWORD, GS = "wh2_main_skv_inf_death_runners_0", "wh_main_emp_inf_swordsmen", "wh_main_emp_inf_greatswords"
+OWNERS = (DR, "wh2_dlc14_skv_inf_eshin_triads_0")          # the same rules on the Eshin Triads: no case of a unit in the code
 BOMBS, BLADE = "wh2_main_unit_abilities_concealment_bombs", "wh2_main_unit_contact_weeping_blade"
+
+
+@pytest.fixture(params=OWNERS, autouse=True)
+def owner(request):
+    """Every rule here on both owners of the bombs and the blade."""
+    global DR
+    keep, DR = DR, request.param
+    yield DR
+    DR = keep
 
 
 def army(foes, runners, foe=SWORD):

@@ -328,6 +328,10 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           swordsmen 12 m wide 100 m; battle 2 on the Kislev plains - archers -> clanrats (no shield) 100 m half on forest
           and half on grass (3 sites: visible - under 85 % on forest), behind a 57 m forest strip, on grass; battle 3 the
           ground plan's strip (57 / 11 / 7 m) and grass lanes again (clanrats with shields, 30 m wide); 60 s each.
+  triads   the Eshin Triads (build/diag_triads; a probe with --mem), held: (knights) the knights from 150 m, (bombs) the same with
+          Concealment Bombs pressed at the go, (swords) swordsmen from 80 m, 60 s after the contact. The target hides, so
+          lane.a_on_sight: the attack order at the go all the same, a_try_s later, standing, a run to the target's front line and
+          the attack order when the target is visible - 1 battle;
   cavcharge  the Empire Knights' charge into infantry standing still (build/diag_cav/mechanic.md M6-M9, sim_gap.md 1):
           an attack at a run from 80 m on clanrats (sword and shield: no charge defence), clanrat spearmen and
           stormvermin with halberds (both braced, charge defence v large and charge reflection), held (never ordered)
@@ -406,6 +410,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan pusbags --speed 20       # the Pusbags (build/diag_pusbags)
     python -m tools.nn.charge_probe pusbags [runs...] [--sim]           # its table (--sim: + the twin, torch)
     python -m tools.nn.charge_probe artillery [runs...] [--sim]         # its table (--sim: + the twin, torch)
+    python -m tools.nn.charge_probe run --plan triads --mem --speed 20  # the Eshin Triads (build/diag_triads)
+    python -m tools.nn.charge_probe triads [runs...] [--sim]            # its table (--sim: + the twin, torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -468,6 +474,8 @@ UNITS = {
     "warlock": ("wh2_main_skv_cha_warlock_engineer", 1, SKV),          # Warlock Engineer, Lore of Ruin
     # the Death Runners (the memrunners plan; build/diag_runners)
     "runners": ("wh2_main_skv_inf_death_runners_0", 72, SKV),
+    # the Eshin Triads (the triads plan; build/diag_triads)
+    "triads": ("wh2_dlc14_skv_inf_eshin_triads_0", 72, SKV),
 }
 
 
@@ -538,7 +546,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -842,6 +850,13 @@ MEMFORM = {"gap_m": 150, "fire_s": 120, "t_w": 30, "mortar_at": (-200.0, -290.0)
            "parked": (300.0, -300.0), "back_at_s": 85, "friend_at_s": 170, "rout_at_s": 225, "max_s": 260}
 
 
+# the Eshin Triads' plan (build/diag_roster/wh2_dlc14_skv_inf_eshin_triads_0/mechanic.md 7): the kinds' gaps and fights, the
+# attack order on the hidden target tried a_try_s (lane.a_on_sight)
+BOMBS_KEY = "wh2_main_unit_abilities_concealment_bombs"
+TRIADS = {"kn_gap_m": 150, "kn_fight_s": 20, "sw_gap_m": 80, "sw_fight_s": 60, "w": 30, "a_try_s": 3,
+          "melee_s": (-1, 55), "windows_s": (10, 20, 30, 45, 60)}
+
+
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
     """One lane's spec (before it gets a place)."""
     out = {"attacker": attacker, "target": target, "mode": mode, "target_mode": target_mode, "gap_m": gap_m,
@@ -1133,6 +1148,15 @@ def battles(plan):
                          kind="runners_gs_walk"),
                     lane("runners", "swords", "attack_run", "both", gap_m=40, fight_s=g["fight_s"], max_s=g["max_s"] + 10,
                          kind="runners_swords_run")])
+    elif plan == "triads":
+        c = TRIADS
+        common = dict(answer=False, a_w=c["w"], t_w=c["w"], a_on_sight=True, a_try_s=c["a_try_s"], stealth_rows=True,
+                      morale_rows=True)
+        out.append([lane(KNIGHTS, "triads", "attack_run", "hold", gap_m=c["kn_gap_m"], fight_s=c["kn_fight_s"], kind="knights", **common),
+                    lane(KNIGHTS, "triads", "attack_run", "hold", gap_m=c["kn_gap_m"], fight_s=c["kn_fight_s"], kind="bombs",
+                         t_casts=[{"key": BOMBS_KEY, "at_s": 0}], **common),
+                    lane("swords", "triads", "attack_run", "hold", gap_m=c["sw_gap_m"], fight_s=c["sw_fight_s"], kind="swords",
+                         **common)])
     elif plan == "cavcharge":
         # the knights charge (attack at a run from gap_m: the last 40 m at their charge speed) held infantry, 30 m on 30 m
         c = CAVCHARGE
@@ -1910,6 +1934,9 @@ def run_config(plan, index):
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=600, mem_proj=True, mem_form=True)
     if plan == "cavcharge":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHARGE["men_after_s"], men_near_m=60)
+    if plan == "triads":
+        # health every 0.25 s; the men from memory every 0.1 s within 60 m all the fight
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=TRIADS["sw_fight_s"] + 5, men_near_m=60)
     if plan == "cavcheck":
         config.update(tick_ms=TURN_TICK_MS, men_ms=250, men_after_s=CAVCHECK["men_after_s"], men_near_m=60)
     if plan == "monster":
@@ -2291,7 +2318,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     rec = {"t": [], "rows": []}
     fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire", "mp", "fx_on", "run",
               "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload", "morale", "dd_sum", "dq_sum",
-              "ab_en")
+              "ab_en", "hid", "vis")
     from tools.nn.sim import effects as sim_effects
     fx_names = sim_effects.order(params)
     a_slot = {}
@@ -2312,6 +2339,25 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         casts.append({"rec": [(t_, keys.index(k_), k_) for t_, k_ in rec_ if k_ in keys],
                       "rule": [(a_s, a_m, keys.index(k_), k_) for a_s, a_m, k_ in rule if k_ in keys], "done": set(),
                       "press": []})
+    # (the triads plan) the target's own presses (lane.t_casts): at the game's recorded times, else at_s after the go
+    t_casts = []
+    for ln in meta:
+        sp = ln["spec"]
+        keys = sim_abilities.slot_keys(sp["t_key"], params.units, params.abilities)
+        rec_ = [(r_["t"] / 1000, r_["key"]) for r_ in ln.get("abilities") or ()
+                if r_.get("who") == "t" and str(r_.get("status", "")).startswith("used")]
+        rule = rec_ or [(c_["at_s"], c_["key"]) for c_ in sp.get("t_casts") or ()]
+        t_casts.append({"due": [(t_, keys.index(k_), k_) for t_, k_ in rule if k_ in keys], "done": set()})
+    # (lane.a_on_sight, the triads plan) the attacker's way to a hidden target: the game's recorded a_try_end (standing: its 'a_move'
+    # time; still moving: at once - the simulator's attack order on a hidden target is no order, so the twin always
+    # moves), else after a_try_s; the attack order when the target is seen (`vis`)
+    sight = []
+    for ln in meta:
+        sp = ln["spec"]
+        ph_ = {p_["phase"]: p_ for p_ in ln.get("phases") or ()}
+        kept = (ph_.get("a_try_end") or {}).get("kept")
+        sight.append({"move_t": 0.0 if kept else (ph_["a_move"]["t"] / 1000 if "a_move" in ph_ else float(sp.get("a_try_s") or 0)),
+                      "seen": False})
     ab_names = sim_abilities.keys(params)
 
     def policy(st):
@@ -2363,6 +2409,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     ab[b, A] = k_
                     casts[b]["press"].append({"who": "a", "key": key_, "n": j + 1, "t": t * 1000, "status": "used",
                                               "d": round(d_, 1)})
+            for j, (tc_, k_, key_) in enumerate(t_casts[b]["due"]):
+                if j not in t_casts[b]["done"] and t + t_first[b] >= tc_ - 1e-6:
+                    t_casts[b]["done"].add(j)
+                    ab[b, T] = k_
             # the attacker's own ability (Foe-Seeker) a_ability_after_s after the contact, once
             if sp.get("a_ability") and c is not None and not st_["a_ability"][b]                     and t - c >= sp.get("a_ability_after_s", 0) and a_slot.get(sp["a_key"], -1) >= 0:
                 ab[b, A] = a_slot[sp["a_key"]]
@@ -2416,6 +2466,14 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                                                                 fx, fz + back, True)
                 else:
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
+            elif sp.get("a_on_sight") and not sight[b]["seen"] and not bool(u["vis"][b, T]):
+                # (the triads plan) the target hidden: no order at first, then to its front line
+                if t + t_first[b] >= sight[b]["move_t"] - 1e-6:
+                    kind[b, A], target[b, A], x[b, A], z[b, A], run_[b, A] = (O.MOVE, -1, sp["x"], sp["z"] - sp["move_beyond_m"],
+                                                                              mode[b] == "attack_run")
+                else:
+                    sx, sz = st_["start"][b]
+                    kind[b, A], target[b, A], run_[b, A], x[b, A], z[b, A] = O.HOLD, -1, False, sx, sz
             elif mode[b] in ("attack_run", "attack_walk") and t + t_first[b] < float(sp.get("a_go_s") or 0) - 1e-6:
                 # (a_go_s, the busycharge plan) the order waits that long after the game's go: a halt where it stands
                 sx, sz = st_["start"][b]
@@ -2423,6 +2481,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             elif mode[b] in ("attack_run", "attack_walk"):
                 if sp.get("a_go_s") and not any(p_["phase"] == "a_go" for p_ in st_["phases"][b]):
                     st_["phases"][b].append({"phase": "a_go", "t": (t + t_first[b]) * 1000})
+                if sp.get("a_on_sight") and not sight[b]["seen"]:
+                    sight[b]["seen"] = True
+                    st_["phases"][b].append({"phase": "a_seen", "t": (t + t_first[b]) * 1000,
+                                             "d": round(math.hypot(ax[b] - tx[b], az[b] - tz[b]), 1)})
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
             elif mode[b] == "shoot":
                 # the new units' ratling plan (tools/nn/unit_probe.py): one ranged attack on the target at a walk
@@ -2630,6 +2692,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 for k in ("fatigue", "fat", "k"):
                     if k in r:
                         out[k] = float(r[k][b, i])
+                if "hid" in r:
+                    # hidden, and seen by the other side (the game's is_hidden, is_visible_to_alliance; stealth_rows)
+                    out["hid"], out["v"] = bool(r["hid"][b, i]), bool(r["vis"][b, i])
                 if "a" in r:
                     out["ammo"] = float(r["a"][b, i])
                 if "fire" in r:
@@ -4125,6 +4190,43 @@ def grinder_measure(lane):
     return out
 
 
+def triads_measure(lane):
+    """A triads lane (TRIADS; module doc): cavcharge_measure's HP a second 0-13 s; where the target was seen (the gap edge to edge at
+    the first sample it is visible, the last before it hidden, its hid off, and the a_seen phase's); the attack order on the hidden
+    target (kept); the swords' lane: HP a second over melee_s and HP lost by the windows, both ways."""
+    out = cavcharge_measure(lane)
+    spec, smp = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in smp])
+    gap = np.hypot(series(smp, "a", "x") - series(smp, "tg", "x"), series(smp, "a", "z") - series(smp, "tg", "z")) \
+        - (spec["a_depth"] + spec["t_depth"]) / 2
+    v = [bool((s[2] or {}).get("v")) for s in smp]
+    i = next((k for k in range(1, len(v)) if v[k] and not v[k - 1]), None)
+    out["unseen_at_start"] = bool(v) and not v[0]
+    if i is not None:
+        out["seen_t"], out["seen_gap"], out["seen_gap_before"] = float(t[i]), round(float(gap[i]), 1), round(float(gap[i - 1]), 1)
+    h = [bool((s[2] or {}).get("hid")) for s in smp]
+    j = next((k for k in range(1, len(h)) if h[k - 1] and not h[k]), None)
+    if j is not None:
+        out["hid_off_t"], out["hid_off_gap"] = float(t[j]), round(float(gap[j]), 1)
+    ph = {p["phase"]: p for p in lane.get("phases") or ()}
+    if "a_try_end" in ph:
+        out["order_kept"] = bool(ph["a_try_end"].get("kept"))
+    c = out.get("contact_s")
+    if c is not None:
+        out["contact_after_seen_s"] = round(c - out["seen_t"], 2) if i is not None else None
+        a, b = TRIADS["melee_s"]
+        for who in ("tg", "a"):
+            hp = series(smp, who, "hp")
+            ha, hb = at(t, hp, c + a), at(t, hp, c + b)
+            if np.isfinite(ha) and np.isfinite(hb):
+                out[f"{who}_hp_s_melee"] = round((ha - hb) / (b - a), 1)
+            for w in TRIADS["windows_s"]:
+                h1 = at(t, hp, c + w)
+                if np.isfinite(h1):
+                    out[f"{who}_hp_{w}"] = round(at(t, hp, c) - h1, 1)
+    return out
+
+
 def plan_report(plan, measure, run_dirs, out=None, sim=False, device="cpu", copies=4, params=None):
     """The rows of a plan's lanes (measure) and the means of each kind over its copies: prints them, writes
     build/charge-probe/<plan>.json (not in Git). With sim, the simulator's twin on the same lanes too (the new units'
@@ -4294,7 +4396,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
                                                      "shootcontact", "recontact", "pursuit", "cavalry",
-                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder"),
+                                                     "cavcheck", "monster", "artillery", "pusbags", "grinder", "triads"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -4357,6 +4459,10 @@ def main(argv=None):
         return 0
     if args.command == "grinder":
         plan_report("grinder", grinder_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
+                    sim=args.sim, device=args.device, copies=min(args.copies, 4))
+        return 0
+    if args.command == "triads":
+        plan_report("triads", triads_measure, args.runs or runs(), out=None if args.out == OUT else args.out,
                     sim=args.sim, device=args.device, copies=min(args.copies, 4))
         return 0
     if args.command == "pusbags":

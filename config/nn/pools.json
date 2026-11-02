@@ -101,7 +101,8 @@
         {"key": "wh2_dlc16_skv_mon_rat_ogre_mutant", "slot": "rat_ogre_mutant", "width": 5},
         {"key": "wh3_dlc29_skv_inf_pusbags", "slot": "pusbags", "width": 30},
         {"key": "wh2_dlc14_skv_inf_warp_grinder_0", "slot": "warp_grinder", "width": 60},
-        {"key": "wh2_main_skv_inf_death_runners_0", "slot": "death_runners", "width": 30}
+        {"key": "wh2_main_skv_inf_death_runners_0", "slot": "death_runners", "width": 30},
+        {"key": "wh2_dlc14_skv_inf_eshin_triads_0", "slot": "eshin_triads", "width": 30}
       ]
     }
   }

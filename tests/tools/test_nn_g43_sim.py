@@ -391,7 +391,7 @@ def test_the_penetration_limit_and_hiding_are_worked_out_once():
     lines = {k: u for k, u in P.units.items() if "_art_" not in k}          # (without the artillery, 29.10.2026)
     assert Params(lines, P.rules, P.sim, P.abilities, P.effects, P.spells).pen_men == 2
     old = {k: u for k, u in lines.items() if "gutter" not in k and "jezzail" not in k and "long_rifles" not in k
-           and "huntsmen" not in k and "death_runners" not in k}     # (the Death Runners' bombs give stalk: 02.11.2026)
+           and "huntsmen" not in k and "death_runners" not in k and "eshin_triads" not in k}     # (the bombs give stalk: 02.11.2026)
     q = Params(old, P.rules, P.sim, P.abilities, P.effects, P.spells)
     # (hide_forest units hide in woods: stealth is on while any unit can hide - ground.py's forest)
     assert q.pen_men == 1 and q.can_hide and stealth.on(q)

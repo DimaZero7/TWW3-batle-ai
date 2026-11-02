@@ -45,8 +45,9 @@ def _passports():
 # melee and vortices at death; the drills' fixed exam (6 x 10 x 2 x 3 = 360 battles) stays as it was until it is decided
 # whether the unit level should learn them; the Warp Grinders the same (31.10.2026: two active abilities on every enemy
 # within 35 m - Warp-Quake's direct damage and Seismic Snare's no-move)
-# the Death Runners the same (02.11.2026: a hiding melee unit with Concealment Bombs and the weeping blade)
-NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags", "wh2_dlc14_skv_inf_warp_grinder_0", "wh2_main_skv_inf_death_runners_0")
+# the Death Runners and the Eshin Triads the same (02.11.2026: hiding melee units with Concealment Bombs and the weeping blade)
+NOT_IN_DRILLS = ("wh3_dlc29_skv_inf_pusbags", "wh2_dlc14_skv_inf_warp_grinder_0", "wh2_main_skv_inf_death_runners_0",
+                 "wh2_dlc14_skv_inf_eshin_triads_0")
 
 
 def roster():

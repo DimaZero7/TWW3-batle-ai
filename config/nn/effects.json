@@ -1066,6 +1066,15 @@
    "mounted_fire_move",
    "stalk"
   ],
+  "wh2_dlc14_skv_inf_eshin_triads_0": [
+   "charge_defense_vs_large",
+   "charge_reflection",
+   "guerrilla_deploy",
+   "stalk",
+   "strider",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
   "wh2_dlc14_skv_inf_warp_grinder_0": [
    "guerrilla_deploy",
    "hide_forest",
@@ -1340,6 +1349,9 @@
   ],
   "wh2_dlc12_skv_inf_warplock_jezzails_0": [
    "wh2_dlc09_unit_contact_shieldbreaker"
+  ],
+  "wh2_dlc14_skv_inf_eshin_triads_0": [
+   "wh2_main_unit_contact_weeping_blade"
   ],
   "wh2_dlc16_skv_mon_brood_horror_0": [
    "wh_main_unit_contact_poison"

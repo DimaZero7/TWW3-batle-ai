@@ -93,7 +93,11 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # Runners' body, 72 men of 80 HP, the first hiding melee unit; the weeping blade (a contact effect: armour x0.5 for
          # 35 s) and Concealment Bombs (an active ability of attributes: stalk + unspottable, 3 uses a battle:
          # tools/nn/sim/abilities.py, stealth.py). Only the v3 army scheme fields them (config/nn/pools.json units_v3)
-         "wh2_main_skv_inf_death_runners_0")
+         "wh2_main_skv_inf_death_runners_0",
+         # 02.11.2026, the Eshin Triads (build/diag_roster/wh2_dlc14_skv_inf_eshin_triads_0/units.md, mechanic.md): the Death
+         # Runners' body, bombs and blade with a guandao against large (+15), charge reflection and charge defence against
+         # large; no rule of their own. Only the v3 army scheme fields them (config/nn/pools.json units_v3)
+         "wh2_dlc14_skv_inf_eshin_triads_0")
 # The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
 # hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
 # hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
