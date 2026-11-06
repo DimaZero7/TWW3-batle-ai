@@ -43,6 +43,7 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
     r_all = ret[d_idx, b_idx]
     pa, pc = params_of(net, critic)
     share = float(cfg()["teacher"]["share"])
+    first_w = float(cfg()["teacher"]["first_weight"])
     out = {"pi": [], "v": [], "clip": [], "kl": [], "ent": {h: [] for h in NN.HEADS}, "teach": [], "preds": [],
            "rets": [], "agree": {h: [] for h in NN.HEADS}}
     stop = False
@@ -62,12 +63,18 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
             value = critic(inp)
             vl = F.mse_loss(value, r_all[j])
             loss = pl + float(tc["vf"]) * vl - float(tc["entropy"]) * ent.mean()
-            pick = (torch.rand(j.shape[0], device=device) < share).nonzero()[:, 0]
-            if pick.numel():
+            # the teacher: on a share of the decisions with the falling weight; on every battle's first decision (the
+            # groups and the first zones are made there) with first_weight, which does not fall (config teacher)
+            first = di == 0
+            rest = (torch.rand(j.shape[0], device=device) < share) & ~first
+            for sel, w in ((first, first_w), (rest, teach_weight)):
+                pick = sel.nonzero()[:, 0]
+                if not pick.numel():
+                    continue
                 inp2, ctx2, _ = EN.rebuild(batch, di[pick], bi[pick])
                 term, st = TC.loss(net, inp2, ctx2, batch["destroy"][bi[pick]])
-                if teach_weight > 0:
-                    loss = loss + teach_weight * term
+                if w > 0:
+                    loss = loss + w * term
                 out["teach"].append(float(term.detach()))
                 for h, v in st.items():
                     if v is not None:
@@ -169,7 +176,7 @@ def main(argv=None):
                 if a.minutes > 0 and time.time() - start > a.minutes * 60:
                     break
                 t0 = time.time()
-                setup = CS.Setup(CS.specs(a.battles, gen), P, dev)
+                setup = CS.Setup(CS.specs(a.battles, gen, cases=tuple(tc["cases"])), P, dev)
                 batch, rs, rd = EN.play(setup, unit_net, net=net, critic=critic, duty=duty)
                 t1 = time.time()
                 us = update(net, critic, opt, batch, tc, dev, duty, TC.weight_at(done - teach_from, a.teach_updates))

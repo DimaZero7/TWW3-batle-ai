@@ -265,13 +265,12 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
     new_rg = torch.where(free, torch.full_like(rg, -1), rg)
     count = torch.zeros((B, G), dtype=torch.long, device=dev)
     full = int(tcfg()["max_group"])
+    spread = float(c["spread_m"])
     tok_c = tok + cmd[:, None]
     for j in range(K):
         a = free[:, j]
         if not bool(a.any()):
             continue
-        allowed = opened & (count < full)
-        a = a & allowed.any(1)
         lg = torch.einsum("bq,bgq->bg", heads.cq(units[:, j]), heads.ck(tok_c)) / Q ** 0.5
         # the prior: the distance from this unit to each group's members chosen so far (kept groups: their members)
         w = ((new_rg[:, None, :] == torch.arange(G, device=dev)[None, :, None]) & ctx.own[:, None, :]).float()
@@ -281,6 +280,9 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         gz_ = (w * jz[:, None, :]).sum(2) / nw.clamp(min=1)
         dist = torch.sqrt((gx_ - jx[:, j, None]) ** 2 + (gz_ - jz[:, j, None]) ** 2)
         lg = lg + torch.where(nw > 0, -heads.near_w * dist / 100.0, heads.empty_b * torch.ones_like(dist))
+        # closed: a full group (10); a group whose members so far stand farther than spread_m (no tactician leads it)
+        allowed = opened & (count < full) & ((nw == 0) | (dist <= spread))
+        a = a & allowed.any(1)
         lg = lg.masked_fill(~allowed, NEG)
         cj = _pick(lg, None if A["comp"] is None else A["comp"][:, j].clamp(min=0), greedy)
         score("comp", lg, cj, a, hard=None if labels is None else labels["comp"][:, j])
@@ -312,6 +314,8 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
     goal_x = new.cx.clone()
     goal_z = new.cz.clone()
     moved = torch.zeros((B, G), dtype=torch.bool, device=dev)
+    placed = new_on & ~task                       # the zones already in force this decision (kept groups), then the new
+    sep = float(c["zone_sep_m"])
     for g in range(G):
         a = task[:, g]
         if not bool(a.any()):
@@ -368,6 +372,12 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         n0 = torch.where(keep_tiles, old.n0[:, g], n_al)
         front, depth = SP.size(n0, line)
         fok = SP.field_ok(cx_, cz_, front, depth, heading, axes.field)
+        # closed too: a zone centre within zone_sep_m of another group's zone whose target is not this one's
+        other = placed.clone()
+        other[:, g] = False
+        diff = (new.target != tgt[:, None, :]).any(2)
+        dz = (cx_[:, :, None] - new.cx[:, None, :]) ** 2 + (cz_[:, :, None] - new.cz[:, None, :]) ** 2
+        fok = fok & ~((dz < sep * sep) & (other & diff)[:, None, :]).any(2)
         fok = fok | ~fok.any(1, keepdim=True)
         cov = inp["cover"]
         extra = torch.stack([torch.einsum("bk,bkhw->bhw", sel.float(), cov),
@@ -406,6 +416,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         goal_x[:, g] = torch.where(a, qx, goal_x[:, g])
         goal_z[:, g] = torch.where(a, qz, goal_z[:, g])
         moved[:, g] = a & keep_tiles
+        placed[:, g] = placed[:, g] | a
     new.target = new.target & new.on[..., None]
     return {"act": out, "lp": lp, "ent": ent, "new": new, "task": task, "moved": moved, "reformed": reformed,
             "goal_x": goal_x, "goal_z": goal_z, "teach": teach}
