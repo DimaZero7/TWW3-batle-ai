@@ -113,7 +113,7 @@ a{color:inherit}
 .snode .hit{fill:color-mix(in srgb,var(--tc) 14%,var(--panel));stroke:var(--tc);stroke-width:1.2}
 .snode:hover .hit{fill:color-mix(in srgb,var(--tc) 24%,var(--panel))}
 .snode.on .hit{fill:color-mix(in srgb,var(--tc) 30%,var(--panel));stroke:var(--tc);stroke-width:3}
-.snode.st-sketch .hit{stroke-dasharray:10 6}
+.snode.st-sketch .hit,.snode.st-later .hit{stroke-dasharray:10 6}
 .snode.st-stub .hit{stroke-dasharray:8 6;fill:color-mix(in srgb,var(--tc) 8%,var(--panel))}
 .snode:focus{outline:none}.snode:focus-visible{outline:none}.snode:focus-visible .hit{stroke:var(--open);stroke-width:2.5}
 .slab{fill:var(--ink);font-size:19px;font-weight:600}
@@ -135,7 +135,7 @@ a{color:inherit}
     <h1>Тактик: архитектура</h1>
     <span class="status">Проектирование: здесь только то, о чём договорились. Вход, совещание и первый выход уже в коде — <code>tools/nn/tactic</code>, <code>docs/ru/training/tactic.md</code>.</span>
     <p class="muted">Тактик — сеть уровня группы: ведёт группу из 1–10 своих отрядов (рабочий размер упражнений — 2–4) с одной задачей от оперативника (уровень выше). Отрядам он раздаёт приказы «займи область», дальше каждым отрядом правит сеть отряда (<a href="../unit/index.html">страница отряда</a>). Решения словами — <code>build/diag_g49/unit_base.md</code>, раздел «Заметки для старших уровней».</p>
-    <p class="muted">Сейчас на схеме (решения пользователя 30.10): <b>строка отряда</b> — три карточки (паспорт, что меняется по ходу боя, арсенал) → «Анализ отряда» → «Карточка отряда»; <b>группа</b> — посылка от оперативника → зона плитками → карта группы; <b>приказ</b> — зона (в посылке), глагол и темп; <b>совещание</b> — карточки отрядов, сводка карты, числа, глагол и темп → карточки после совещания; <b>первый выход</b> — выбор зоны отряда (размер и клетка) → рамка → посылка отряду, дальше личный уровень. Слева — набросок оперативника на схеме, справа — личная зона: сеть отряда, уже в коде. <b>Тактик не делится:</b> 1 моя группа = 1 набор целей, граница — зона; цели дальше, чем дотянуться из зоны, — сосредоточить всех на одной и ждать, пока оперативник перекроит; другие группы — только как тела. Нажми на блок — под схемой откроется описание.</p>
+    <p class="muted">Сейчас на схеме (решения пользователя 30.10): <b>строка отряда</b> — три карточки (паспорт, что меняется по ходу боя, арсенал) → «Анализ отряда» → «Карточка отряда»; <b>группа</b> — посылка от оперативника → зона плитками → карта группы; <b>приказ</b> — зона (в посылке), глагол и темп; <b>совещание</b> — карточки отрядов, сводка карты, числа, глагол и темп → карточки после совещания; <b>первый выход</b> — выбор зоны отряда (размер и клетка) → рамка → посылка отряду, дальше личный уровень. Слева — оперативник: проект 06.11, кода ещё нет; справа — личная зона: сеть отряда, уже в коде. <b>Тактик не делится:</b> 1 моя группа = 1 набор целей, граница — зона; цели дальше, чем дотянуться из зоны, — сосредоточить всех на одной и ждать, пока оперативник перекроит; другие группы — только как тела. Нажми на блок — под схемой откроется описание.</p>
     <p class="muted"><b>В коде</b> (помечено «в коде»): строки отрядов (паспорт, что меняется, арсенал), посылка, зона-плитки, окна карты, анализ отряда, карточка на карте, анализ карты, признаки карты, совещание, карточки после совещания, выбор зоны отряда, зона отряда, посылка отряду, приказы тактику. <b>Весов по коду:</b> анализ отряда 80 512, свёртки карты 110 896, весь вход 204 856; весь тактик 516 223, учатся 434 679 (без новой головы «менять или оставить»).</p>
   </header>
 
@@ -567,366 +567,409 @@ a{color:inherit}
 
 <template id="tpl-opnums">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Числа <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Числа <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Сейчас почти ничего:</b> сколько групп занято.</li>
-          <li><b>Времени до конца боя нет:</b> никогда, это правило всех уровней.</li>
+          <li><b>Занято групп / 6</b> — 1 число.</li>
+          <li><b>Времени до конца боя нет:</b> никогда.</li>
+          <li><b>Команда сверху</b> — свой блок.</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Положения, силы и зоны уже есть в строках и на карте. Новое число нужно, только если его нет там.</li>
-        </ul></details>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
       <li><b>Ветры магии:</b> нужны ли оперативнику.</li>
-      <li><b>Как входят в совещание:</b> приклеить к сводке карты (предложение) или отдельным участником.</li>
     </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-opcmd">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Команда сверху <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>Глагол 4 + темп 3 = 7</b>, словарь приказа тактику.</li>
+          <li><b>От стратега;</b> пока её даёт генератор случая.</li>
+          <li><b>Идёт в совещание</b> вместе со сводкой карты и числами, как приказ у тактика.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opprev">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Прошлые группы <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Прошлые группы <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>На каждый слот, что было на прошлом шаге:</b> номер группы моего отряда (G + «нет») и метка цели у врага (G + «никого»).</li>
-          <li><b>Сколько секунд группа живёт.</b></li>
-          <li><b>G = 6 групп</b> — предложение.</li>
+          <li><b>На слот:</b> мой отряд — группа (6 + «нет»); враг — цель каких групп (6, можно несколько, + «никого»). Всего 14.</li>
+          <li><b>Возраст группы</b> — в токене группы.</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Нужно для «менять или оставить» и памяти: без этого сеть не знает, какое решение она оставляет.</li>
+          <li>Для «менять или оставить»: сеть видит, какое решение она оставляет. Памяти нет, прошлых групп хватает.</li>
         </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>G:</b> 6 — предложение, у генерала до 10 групп на сторону.</li>
-      <li><b>Секунды жизни группы</b> нормировать как и сколько держать.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-oprows">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Строки всех отрядов <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Строки всех отрядов <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Те же строки 185 / 150 по тому же словарю:</b> паспорт, что меняется, арсенал. Карточки описаны у тактика.</li>
-          <li><b>Все мои и все видимые враги.</b> Скрытые не видны, как у игрока.</li>
-          <li><b>Отличия:</b> «кто это» только свой / враг; зоны внимания нет, видно всё поле.</li>
-          <li><b>Строк — все слоты обеих сторон.</b> В армии до 20 отрядов (19 + лорд): до 40 строк.</li>
+          <li><b>40 строк = 20 + 20</b> (армия — 20 отрядов, число в config), по слоту. Все мои живые, бегущие тоже; враги — только видимые.</li>
+          <li><b>Формула строки тактика без правки:</b> 185 у своих, 150 у врага.</li>
+          <li><b>Начало осей — сам отряд</b> (вправо / вперёд = 0, перепад = 0), оси — поля: «вверх» кратно 90° к врагу на старте, на весь бой.</li>
+          <li><b>Место отряда отдельно:</b> x, z в осях поля / 1024 м и высота / 20 м, ±4 — 3 числа в «Запись отряда».</li>
+          <li><b>Мои — «свой в группе», враги — «враг прочий».</b></li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Один словарь на все уровни: тогда работает общий «Анализ отряда».</li>
+          <li>В осях поля положения до ±10, замороженный анализ таких не видел. Так словарь строки один на всех, а место идёт в обучаемый слой.</li>
+          <li>40 на сторону у генерала — под подкрепления; это отдельное решение, меняется числом.</li>
         </ul></details>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Положения в строке.</b> У тактика они в осях зоны от её центра, / 100 м. Здесь зоны нет: в осях поля будет до ±10,2. Замороженный анализ таких чисел не видел.</li>
-      <li><b>«Кто это».</b> Позиций 5, здесь нужны 2: «свой · другой» и «враг · прочий» — предложение.</li>
-      <li><b>Слотов:</b> у генерала в коде <code>SIDE_SLOTS</code> = 40 на сторону (80 строк), у тактика не больше 32. В конфиге числа для оперативника нет.</li>
+      <li><b>Отход от решения пользователя:</b> все мои отряды помечены «свой в группе» (оперативник командует всеми), а не «свой другой».</li>
     </ul></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opmap">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Карта всего поля <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Карта всего поля <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Один размер на всё поле:</b> 32 × 32 клетки по 64 м — предложение. Оси поля, не группы.</li>
-          <li><b>Слои по образцу окон тактика:</b> мои (плотность, фронт) 3, враг 3, карточка моих 8, карточка врага 8, текущие зоны групп 1, местность 6, огонь 4 = 33.</li>
-          <li><b>Точные места не нужны:</b> для этого есть тактик.</li>
+          <li><b>32 × 32 клетки по 64 м</b> (±1024 м, поле ±1020), оси поля.</li>
+          <li><b>33 слоя:</b> мои 3, враг 3, карточка моих 8, врага 8, зоны групп 1, местность 6, огонь 4.</li>
+          <li><b>Слои строят функции окон тактика</b> (<code>densities, covers, terrain_layers, fire_layers</code>) с 32 клетками; «зоны групп» — доля клетки под зонами всех групп.</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Оперативник решает, кто куда идёт, а не как встать. Клетка 64 м примерно равна одному отряду.</li>
+          <li>Поле не поворачивается в окне: повёрнутый на 45° квадрат 2040 м в 2048 м не влезает. Обе стороны видят себя «внизу».</li>
         </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Клетка.</b> У генерала 32 × 32 по 64 м — это итог свёртки карты 128 × 128 по 16 м, а не вход. Здесь вход сразу грубый: тонкое (брод, край леса) может пропасть.</li>
-      <li><b>Поле.</b> Сетка ±1024 м, поле ±1020 м: полоска 4 м за краем, как у генерала.</li>
-      <li><b>Два отряда в клетке:</b> их карточки усредняются; в клетке 64 м это будет часто.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opanal">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Анализ отряда <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Анализ отряда <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Те же веса, что в зоне тактика:</b> 185 → 256 → 128. Линий из зоны тактика нет, подписи достаточно.</li>
+          <li><b>185 → 256 → 128,</b> те же веса, что у тактика, заморожен (<code>card8.pt</code>).</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>План страницы: один общий блок на все уровни.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Хватит ли его здесь:</b> положения в осях поля (см. «Строки всех отрядов»).</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opcard">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Карточка отряда <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Карточка отряда <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Те же веса:</b> 128 чисел на отряд, номер как у строки.</li>
+          <li><b>128 чисел на отряд.</b></li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Общий блок, своей обработки нет.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Нужна ли надстройка</b> поверх карточки: заметки 30.10 предлагают сначала её, если верху не хватит.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opucmap">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Карточка на карте <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Карточка на карте <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Те же веса 128 → 8:</b> 8 чисел в клетки под строем.</li>
+          <li><b>128 → 8,</b> заморожена; 8 чисел — в клетки под строем.</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Иначе пятно на карте без подписи: свёртка не отличит стрелков от пехоты.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Клетка 64 м:</b> у тактика строй занимает много клеток, здесь одну-две. Хватит ли этих 8 чисел, когда в клетке среднее двух отрядов.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opmapproc">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Анализ карты <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Анализ карты <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Своя свёртка на 33 слоя:</b> 33 → 48 → 64 → 64 — предложение.</li>
-          <li><b>Выход:</b> вектор 128 и карта 32 × 32 × 64.</li>
+          <li><b>33 → 48 → 64 → 64.</b></li>
+          <li><b>Вектор 128:</b> среднее и максимум.</li>
+          <li><b>Карта 64 × 32 × 32</b> — в голову «Клетка».</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Другой масштаб и другие слои, чем у окон тактика, поэтому веса не общие.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Размер:</b> окошко видит 7 клеток ≈ 450 м. Хватит ли для всего поля.</li>
-      <li><b>Нужны ли слои координат,</b> как в голове «где» у тактика.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opfeat">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Признаки карты <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Признаки карты <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>1. Вектор 128</b> → совещание, вместе с числами как сводка карты.</li>
-          <li><b>2. Карта 32 × 32 × 64</b> → «Задание группы», по клеткам.</li>
+          <li><b>1. Вектор 128</b> → сводка совещания.</li>
+          <li><b>2. Карта 64 × 32 × 32</b> → голова «Клетка» в «Задании группы».</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Как у тактика: совещанию нужна суть, выбору места — подробность.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Как сжимать вектор:</b> среднее и максимум, как у тактика, — предложение.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-oprec">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Запись группы <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Запись отряда <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Карточка отряда + прошлая группа + прошлая метка → 128.</b></li>
-          <li><b>Токен группы:</b> из отрядов каждой группы — среднее и сумма, линейный слой. Токен — участник совещания.</li>
-          <li><b>Образец</b> — «Группы» у генерала.</li>
+          <li><b>Карточка 128 + место 3 + прошлые группы 14 → 128.</b></li>
+          <li><b>До 40 записей</b> — участники совещания.</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Голове «Состав групп» нужно на что-то указывать: на токены.</li>
+          <li>Место отдельно от строки: замороженный анализ не видел осей поля, а этот слой учится.</li>
         </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Пустая группа:</b> у всех пустых токен одинаковый, указатель их не различит. Нужна своя запись на номер группы?</li>
-      <li><b>Сумма растёт с числом отрядов:</b> как нормировать.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-optoken">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Токен группы <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>6 токенов, каждый → 128:</b> вектор номера группы (свой на номер), среднее записей её отрядов, n / 10, зона (есть, центр 2, sin, cos, линия, квадрат), возраст / 60 с (до 5), среднее записей её цели.</li>
+        </ul>
+        <details class="why"><summary>Почему так</summary><ul class="small">
+          <li>Пустые группы различаются номером: иначе у всех пустых токен одинаковый и указатель их не различит.</li>
+        </ul></details>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opmeet">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Совещание <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Совещание <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Как у тактика и генерала:</b> каждый спрашивает каждого.</li>
-          <li><b>Участники:</b> все отряды, токены групп, сводка карты + числа.</li>
-          <li><b>2 слоя, ширина 128</b> — предложение.</li>
-          <li><b>Весов:</b> оценка ~0,6–0,7 млн с общими блоками, не считано кодом.</li>
+          <li><b>Council тактика:</b> 2 слоя, ширина 128, 4 головы.</li>
+          <li><b>Участники:</b> до 40 записей + 6 токенов + сводка = 47. Сводка — вектор карты, числа и команда.</li>
+          <li><b>Решает раз в 15 с</b> (тактик 5 с, отряд 1 с); в ту же секунду сначала оперативник, потом тактик.</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Оперативник сравнивает всех со всеми: кто кому угрожает, кто рядом.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Цена:</b> до 40 строк + 6 токенов + сводка = 47 участников, у тактика до 33.</li>
-      <li><b>Как часто решает оперативник:</b> предложение раз в 15 с; у тактика 5 с.</li>
-      <li><b>Что видит из разведки.</b></li>
-      <li><b>Как передаётся расстановка стратега.</b> Стратег — отдельная сеть (решение пользователя 02.11): расставляет вслепую до боя; на схеме его нет.</li>
-      <li><b>Упражнения</b> не обсуждали.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opmem">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Память <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Позже</div>
+      <div class="box later"><h2>Память <span class="chip later">позже</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>GRU над сводкой совещания</b> между шагами, 128 — предложение.</li>
+          <li><b>На этом этапе памяти нет</b> (GRU не делаем).</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Заметки 29.10: оперативник держит план на 3–5 шагов в памяти сети, а отдаёт только текущий шаг каждой группе.</li>
+          <li>Случаям 1–3 хватает нынешнего состояния (скорости есть в строках) и прошлых групп; формула тоже без памяти. Память усложнила бы пересборку входа в PPO.</li>
         </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Где память:</b> у общего вектора или у каждой группы.</li>
-      <li><b>Куда идёт:</b> в карточки после совещания — предложение; или участником следующего совещания.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opafter">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>После совещания <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>После совещания <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Карточки отрядов и групп:</b> теперь знают друг о друге, о карте и о памяти.</li>
-          <li><b>Номера те же:</b> слот отряда и номер группы не меняются.</li>
+          <li><b>Записи отрядов и токены групп,</b> 128 на каждого.</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Как «Группы после совещания» у генерала: головы читают уже обсуждённые карточки.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Ширина:</b> 128, как у совещания, — предложение.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opkeep">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Менять или оставить <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Менять или оставить <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>На каждую группу, первая голова,</b> как у тактика. При «оставить» состав и задание прежние.</li>
+          <li><b>На непустую группу, 3 варианта:</b> оставить / сдвинуть (новое задание, состав тот же) / перекроить. Уклон на «оставить».</li>
+          <li><b>Группа без живых</b> — только «перекроить».</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Перекройка дорогая: тактики начинают заново.</li>
+          <li>При «оставить» тактик получает прежнюю посылку; при «сдвинуть» плитки едут с зоной; при перекройке тактик начинает заново.</li>
         </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Соседи:</b> группа «оставить» не отдаёт отряды. Если соседняя хочет её отряд, что важнее.</li>
-      <li><b>Отдельно ли состав и задание:</b> можно менять задание, не меняя состава.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opcomp">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Состав групп <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Состав групп <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>На каждый мой отряд метка группы:</b> указатель на токены групп.</li>
-          <li><b>Отряд ровно в одной группе.</b></li>
+          <li><b>На свободный отряд, по слотам:</b> указатель на открытые группы (перекраиваемые и пустые).</li>
+          <li><b>Полная (10) группа закрыта.</b></li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Отряды и группы меняются по ходу боя, поэтому указатель, а не строка фиксированной длины.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Порядок выбора:</b> по слотам с закрытием полной группы (10) — предложение.</li>
-      <li><b>Бегущий отряд:</b> остаётся в группе или свободен (заметки 29.10: остановился далеко — свободный отряд для оперативника).</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opfoes">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Группы врага <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Цель группы <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>На каждого видимого врага метка</b> «цель группы А / Б / … / никого».</li>
-          <li><b>Нарезку делает сеть, а не алгоритм</b> (решение пользователя 29.10). Чужая группа — отряды с одной меткой.</li>
+          <li><b>На группу с новым заданием:</b> указатель на видимого врага-«зерно» или «никого».</li>
+          <li><b>Код растит цель</b> правилом квадратов (как <code>parcel.random</code>), пока рамка влезает в ближнее окно. Цель всегда связна; две мои группы могут взять одну цель.</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Тактик получает цель маской, метки ему не нужны.</li>
+          <li>Метка на каждого врага не даёт связной цели (метки ставятся по одной, правило квадратов — на всю маску) и не даёт двум группам одну цель.</li>
+          <li>Если случаям понадобится часть куска (например, только стрелки) — голова «включить / нет» на каждого врага куска.</li>
         </ul></details>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Одна метка на врага:</b> две мои группы не могут взять одну цель. Заметки этого не разбирают; разрешать ли.</li>
-      <li><b>Связность:</b> цель должна быть связной по квадратам, а метки ставятся по одной.</li>
+      <li><b>Отход от решения пользователя:</b> решение 29.10 «нарезку врага делает сеть, а не алгоритм». Сейчас сеть выбирает один вражеский отряд, остальное добавляет код.</li>
     </ul></div></div></div>
   </section>
 </template>
 
 <template id="tpl-optask">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Задание группы <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Задание группы <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>На группу, зона:</b> клетка 32 × 32 + поворот (предложение: 16 секторов) + форма линия / квадрат.</li>
-          <li><b>Глагол 4, темп 3:</b> тот же словарь, что в «Приказах тактику».</li>
-          <li><b>Клетка:</b> карта читается по клеткам напрямую, как у тактика.</li>
+          <li><b>Порядок голов:</b> форма 2 → (цель) → поворот 16 секторов по 22,5° от направления на центр цели (без цели — от «вверх» поля) → клетка 1 из 1024 → глагол 4 → темп 3.</li>
+          <li><b>Клетка</b> — куда хочу зону: цель хода, а не шаг. Шаг делает код.</li>
+          <li><b>Глагол:</b> открыт только «сдержать»; <b>темп:</b> открыт только «любой» (config).</li>
         </ul>
         <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Тот же приём, что у «Выбора зоны отряда»: варианты можно закрыть запретом.</li>
+          <li>Цель раньше поворота и клетки: поворот естественно считать от цели. Форма раньше цели: окно для рамки цели зависит от n и формы. Клетка последней: запрет «за полем» зависит от размера и поворота.</li>
+          <li>Глагол закрыт: формула тактика его не читает, движение задаёт зона.</li>
         </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Клеток останется мало:</b> зона не дальше половины окна — это ~20–45 клеток из 1024. Дальний план живёт только в памяти.</li>
-      <li><b>Поворот:</b> у посылки sin, cos, здесь 16 секторов по 22,5°.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opcheck">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Проверка посылки <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Проверка посылки <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>Весов нет, те же правила,</b> что в <code>tools/nn/tactic/parcel.py</code> и описании «Посылки от оперативника»:</li>
-          <li>отряд ровно в одной группе; группа 1–10 живых; цель связная по квадратам; зона внутри поля; новая зона не дальше половины окна от группы, иначе промежуточный шаг.</li>
-          <li><b>При нарушении</b> — запрет клеток в голове, а не отказ: предложение.</li>
+          <li><b>Запреты:</b> сектора, где цель не связна или рамка не влезает в окно; клетки, где зона вылезает за поле; полные группы.</li>
+          <li><b>Шаг к цели кодом:</b> зона дальше половины ближнего окна от центра группы ставится на отрезок «центр группы → клетка» на половину окна − 5 м, потом внутрь поля.</li>
+          <li><b><code>parcel.check</code> на каждой посылке:</b> ошибок 0; не 0 — ошибка кода.</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Сейчас плохая посылка — ошибка и остановка (<code>ParcelError</code>). Сети проще, когда плохой вариант просто нельзя выбрать.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Рамка цели:</b> в коде она ещё должна влезать в ближнее окно; оно зависит от N.</li>
-      <li><b>Порядок:</b> квадраты цели считаются в осях зоны, а поворот выбирается позже меток.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
 <template id="tpl-opsend">
   <section class="cards">
-    <div><div class="colh">Набросок, не решено</div>
-      <div class="box later"><h2>Посылки тактикам <span class="chip later">набросок</span></h2>
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Посылки тактикам <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
         <ul class="small">
-          <li><b>По одной на группу:</b> посылка + приказ, по формату блоков тактика.</li>
-          <li><b>Линии:</b> в «Посылку от оперативника» (маски, зона) и в «Приказы тактику» (глагол, темп).</li>
+          <li><b>По одной на непустую группу:</b> ровно <code>parcel.Parcel</code> (мои живые, цель, центр, sin / cos, форма, номер группы = номер токена) + приказ 7 (<code>decide.order_vec</code>).</li>
+          <li><b>«Оставить»</b> — прежняя посылка; <b>«сдвинуть»</b> с той же формой — плитки с дырами едут на новый центр и поворот; <b>перекройка или смена формы</b> — тактик заново.</li>
         </ul>
-        <details class="why"><summary>Почему так</summary><ul class="small">
-          <li>Генератор упражнений уже выдаёт тактику посылки в этом формате: тактик не знает, кто дал группу.</li>
-        </ul></details>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
-      <li><b>Группа «оставить»:</b> уходит прежняя посылка или новой нет.</li>
-      <li><b>Номер группы:</b> постоянен, пока оперативник держит группу; как считать после перекройки.</li>
-    </ul></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-opcases">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Случаи 1–3 <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>1. «Собрать»:</b> мои 2 + 1 вразброс, враг — тройка в 500–600 м. Глупость: отряды встречают врага по одному.</li>
+          <li><b>2. «Разделить»:</b> две кучки 2 + 1 в 700–900 м поперёк, у каждой своя тройка. Глупость: одна куча на две угрозы.</li>
+          <li><b>3. «Идти или стоять»:</b> 2 + 1 против 2 + 1 стоящих в 450–550 м; команда наполовину «уничтожить», наполовину «сдержать».</li>
+          <li><b>Ровное поле,</b> раскладка повёрнута и сдвинута до ±300 м. Пачка 288 боёв, по 96 на случай.</li>
+          <li><b>Награда:</b> пехота между +0,5, стрелков ударили сразу −0,5, размен в золоте × 1, своя доля по случаю; перекройка −0,05 за группу, сдвиг ≥ 40 м −0,01.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-optacenv">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Тактик (сменный) <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>По умолчанию — формула тактика</b> <code>teacher.drive</code> на всех группах; глагол она не читает.</li>
+          <li><b>Сеть run4</b> — только на экзамене, для сведения.</li>
+          <li><b>Тактик раз в 5 с,</b> под ним сеть отряда раз в 1 с.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-opteach">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Учитель <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>Формула оперативника</b> одна на все случаи: враги — связные куски по правилу квадратов; мои — кучки (связь 350 м); кучка к ближайшему куску или одна группа из всех.</li>
+          <li><b>Слагаемое на 5 % решений,</b> мягкие метки (σ = 1), вес 1 → 0 за 10 обновлений.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-opexam">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Экзамен <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>По 128 боёв на случай,</b> без учителя, сеть выбирает по вероятностям.</li>
+          <li><b>Уровень работает:</b> мера сети ≥ 0,9 × формулы и выше «сравнения» на 0,2; ошибок посылок 0; перекроек ≤ формулы + 1; размен не хуже формулы на 0,05.</li>
+          <li><b>До обучения:</b> формула ≥ 0,9 на каждом случае, сравнения ≤ 0,6.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-opcritic">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Критик <span class="chip done">решено 06.11</span></h2>
+        <div class="where">проект: <code>build/diag_operative/plan.md</code></div>
+        <ul class="small">
+          <li><b>Только в обучении:</b> одно значение на бой, свой критик. В игре не используется.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -1681,7 +1724,7 @@ a{color:inherit}
   // t caption, b [x, y, w, h], col colour token. The tactic's: every block and link + 120 left, top and right, + 105 under the order's line (its last block ends at x = 5400, the lines at y = 2950).
   var ZONES=[
     {t:"Зона тактика",b:[-120,-120,6010,3175],col:"--z-tac"},
-    {t:"Зона оперативника — набросок",b:[-4460,-120,4280,3175],col:"--z-op"},   // (left of the tactic's, a gap of 60: the flow goes left to right; its right edge stays at -180)
+    {t:"Зона оперативника",b:[-4460,-120,4280,3175],col:"--z-op"},   // (left of the tactic's, a gap of 60: the flow goes left to right; its right edge stays at -180)
     {t:"Личная зона",b:[5950,1050,4590,2005],col:"--z-unit"}   // (right of the tactic's, a gap of 60; the same bottom)
   ];
   var NODES=[
@@ -1703,26 +1746,33 @@ a{color:inherit}
     {id:"orders",code:1,t:"Приказы тактику",ty:"order",st:"agreed",b:[0,2500,360,250],pic:"orders",n:"«Приказ»: глагол 4 + темп 3 = 7 чисел, без «что дальше»",ref:"tools/nn/tactic/decide.py"},
     {id:"ucmap",code:1,t:"Карточка на карте",ty:"proc",st:"agreed",b:[1360,1310,300,230],pic:"ucmap",n:"128 → 8, один обучаемый слой для всех отрядов; 8 чисел — в клетки под строем",ref:"—"},
     {id:"unitcard",code:1,t:"Карточка отряда",ty:"out",st:"agreed",b:[960,830,340,340],pic:"unitcard",n:"128 чисел на отряд (настройка)",ref:"«Карточки отрядов» (генерал)"},
-    // the operative: a sketch of the coordinator's proposals, the user goes through it block by block
-    {id:"opnums",t:"Числа",tt:"Оперативник · Числа",ty:"in",st:"sketch",b:[-4340,20,360,170],pic:"opnums",n:"сколько групп занято; времени до конца боя нет",ref:"—"},
-    {id:"opprev",t:"Прошлые группы",tt:"Оперативник · Прошлые группы",ty:"in",st:"sketch",b:[-4340,250,360,210],pic:"opprev",n:"на слот: группа G + «нет», метка цели G + «никого»; сколько секунд группа живёт; G = 6 — предложение",ref:"—"},
-    {id:"oprows",t:"Строки всех отрядов",tt:"Оперативник · Строки всех отрядов",ty:"in",st:"sketch",b:[-4340,535,360,270],pic:"oprows",n:"те же строки 185 / 150; «кто это» только свой / враг; зоны внимания нет",ref:"tools/nn/tactic/rows.py (образец)"},
-    {id:"opmap",t:"Карта всего поля",tt:"Оперативник · Карта всего поля",ty:"in",st:"sketch",b:[-4340,1155,360,450],pic:"opmap",n:"32 × 32 клетки по 64 м, оси поля, 33 слоя — предложение",ref:"tools/nn/tactic/windows.py (образец слоёв)"},
-    {id:"opanal",t:"Анализ отряда",tt:"Оперативник · Анализ отряда",ty:"proc",st:"sketch",b:[-3850,540,300,260],pic:"opanal",n:"те же веса, что в зоне тактика: 185 → 256 → 128",ref:"tools/nn/tactic/net.py (образец)"},
-    {id:"opcard",t:"Карточка отряда",tt:"Оперативник · Карточка отряда",ty:"out",st:"sketch",b:[-3430,550,280,240],pic:"opcard",n:"те же веса: 128 чисел на отряд",ref:"—"},
-    {id:"opucmap",t:"Карточка на карте",tt:"Оперативник · Карточка на карте",ty:"proc",st:"sketch",b:[-3430,880,280,170],pic:"opucmap",n:"те же веса: 128 → 8, в клетки под строем",ref:"tools/nn/tactic/net.py (образец)"},
-    {id:"opmapproc",t:"Анализ карты",tt:"Оперативник · Анализ карты",ty:"proc",st:"sketch",b:[-3850,1220,400,320],pic:"opmapproc",n:"своя свёртка: 33 → 48 → 64 → 64 — предложение",ref:"«Анализ карты» тактика (образец)"},
-    {id:"opfeat",t:"Признаки карты",tt:"Оперативник · Признаки карты",ty:"out",st:"sketch",b:[-3310,1235,340,290],pic:"opfeat",n:"вектор 128 → совещание; карта 32 × 32 × 64 → «Задание группы»",ref:"«Признаки карты» тактика (образец)"},
-    {id:"oprec",t:"Запись группы",tt:"Оперативник · Запись группы",ty:"proc",st:"sketch",b:[-3010,510,420,320],pic:"oprec",n:"карточка + прошлая группа + прошлая метка → 128; токен группы: среднее и сумма, линейный слой",ref:"«Группы» у генерала (образец)"},
-    {id:"opmeet",t:"Совещание",tt:"Оперативник · Совещание",ty:"proc",st:"sketch",b:[-2390,500,440,340],pic:"opmeet",n:"участники: все отряды, токены групп, сводка карты + числа; 2 слоя, ширина 128 — предложение",ref:"tools/nn/tactic/decide.py (образец); совещание у генерала"},
-    {id:"opmem",t:"Память",tt:"Оперативник · Память",ty:"proc",st:"sketch",b:[-2390,1010,440,220],pic:"opmem",n:"GRU над сводкой совещания между шагами, 128 — предложение",ref:"—"},
-    {id:"opafter",t:"После совещания",tt:"Оперативник · После совещания",ty:"out",st:"sketch",b:[-1820,620,340,310],pic:"opafter",n:"карточки отрядов и групп",ref:"«Группы после совещания» у генерала (образец)"},
-    {id:"opkeep",t:"Менять или оставить",tt:"Оперативник · Менять или оставить",ty:"proc",st:"sketch",b:[-1290,300,420,230],pic:"opkeep",n:"на каждую группу, первая голова; как у тактика",ref:"голова «менять или оставить» тактика (образец)"},
-    {id:"opcomp",t:"Состав групп",tt:"Оперативник · Состав групп",ty:"proc",st:"sketch",b:[-1290,570,420,290],pic:"opcomp",n:"на каждый мой отряд метка группы: указатель на токены групп",ref:"—"},
-    {id:"opfoes",t:"Группы врага",tt:"Оперативник · Группы врага",ty:"proc",st:"sketch",b:[-1290,900,420,290],pic:"opfoes",n:"на каждого видимого врага метка «цель группы А / Б / … / никого»; решение 29.10",ref:"—"},
-    {id:"optask",t:"Задание группы",tt:"Оперативник · Задание группы",ty:"proc",st:"sketch",b:[-1290,1230,420,390],pic:"optask",n:"на группу: клетка 32 × 32 + поворот 16 секторов + форма; глагол 4; темп 3",ref:"голова «где» тактика (образец)"},
-    {id:"opcheck",t:"Проверка посылки",tt:"Оперативник · Проверка посылки",ty:"alg",st:"sketch",b:[-660,1620,360,300],pic:"opcheck",n:"весов нет; те же правила, что у посылки; нарушение — запрет клеток в голове (предложение)",ref:"tools/nn/tactic/parcel.py (образец)"},
-    {id:"opsend",t:"Посылки тактикам",tt:"Оперативник · Посылки тактикам",ty:"out",st:"sketch",b:[-660,2230,360,470],pic:"opsend",n:"по одной на группу: посылка + приказ, формат блоков тактика",ref:"tools/nn/tactic/parcel.py (образец)"},
+    // the operative (the project 06.11, build/diag_operative/plan.md; no code yet)
+    {id:"opnums",t:"Числа",tt:"Оперативник · Числа",ty:"in",st:"dec",b:[-4340,20,360,150],pic:"opnums",n:"занято групп / 6 = 1",ref:"—"},
+    {id:"opcmd",t:"Команда сверху",tt:"Оперативник · Команда сверху",ty:"in",st:"dec",b:[-3850,20,360,110],pic:"opcmd",n:"глагол 4 + темп 3 = 7; от стратега, пока генератор случая",ref:"tools/nn/tactic/decide.py order_vec (словарь)"},
+    {id:"opprev",t:"Прошлые группы",tt:"Оперативник · Прошлые группы",ty:"in",st:"dec",b:[-4340,250,360,210],pic:"opprev",n:"на слот: группа 6 + «нет», цель групп 6 + «никого» = 14",ref:"—"},
+    {id:"oprows",t:"Строки всех отрядов",tt:"Оперативник · Строки всех отрядов",ty:"in",st:"dec",b:[-4340,535,360,270],pic:"oprows",n:"40 = 20 + 20, 185 / 150; начало осей — сам отряд, оси поля",ref:"tools/nn/tactic/rows.py row (без правки)"},
+    {id:"opmap",t:"Карта всего поля",tt:"Оперативник · Карта всего поля",ty:"in",st:"dec",b:[-4340,1155,360,450],pic:"opmap",n:"32 × 32 клетки по 64 м, 33 слоя, оси поля",ref:"tools/nn/tactic/windows.py (функции слоёв)"},
+    {id:"opanal",t:"Анализ отряда",tt:"Оперативник · Анализ отряда",ty:"proc",st:"dec",b:[-3850,540,300,260],pic:"opanal",n:"185 → 256 → 128, заморожен (card8.pt)",ref:"tools/nn/tactic/net.py UnitAnalysis"},
+    {id:"opcard",t:"Карточка отряда",tt:"Оперативник · Карточка отряда",ty:"out",st:"dec",b:[-3430,550,280,240],pic:"opcard",n:"128",ref:"—"},
+    {id:"opucmap",t:"Карточка на карте",tt:"Оперативник · Карточка на карте",ty:"proc",st:"dec",b:[-3430,880,280,170],pic:"opucmap",n:"128 → 8, заморожена",ref:"tools/nn/tactic/net.py CardSqueeze, paint_cards"},
+    {id:"opmapproc",t:"Анализ карты",tt:"Оперативник · Анализ карты",ty:"proc",st:"dec",b:[-3850,1220,400,320],pic:"opmapproc",n:"33 → 48 → 64 → 64, вектор 128 (среднее и максимум)",ref:"«Анализ карты» тактика (образец)"},
+    {id:"opfeat",t:"Признаки карты",tt:"Оперативник · Признаки карты",ty:"out",st:"dec",b:[-3310,1235,340,290],pic:"opfeat",n:"вектор 128 → сводка; карта 64 × 32 × 32 → клетка",ref:"—"},
+    {id:"oprec",t:"Запись отряда",tt:"Оперативник · Запись отряда",ty:"proc",st:"dec",b:[-3010,510,420,320],pic:"oprec",n:"карточка 128 + место 3 + прошлые 14 → 128",ref:"—"},
+    {id:"optoken",t:"Токен группы",tt:"Оперативник · Токен группы",ty:"proc",st:"dec",b:[-3010,880,420,250],pic:"optoken",n:"вектор номера + среднее записей + n + зона + возраст + среднее цели → 128; 6 токенов",ref:"—"},
+    {id:"opmeet",t:"Совещание",tt:"Оперативник · Совещание",ty:"proc",st:"dec",b:[-2390,500,440,340],pic:"opmeet",n:"Council тактика: 2 слоя, 128, 4 головы; до 40 + 6 + сводка = 47",ref:"tools/nn/tactic/decide.py Council"},
+    {id:"opmem",t:"Память",tt:"Оперативник · Память",ty:"proc",st:"later",b:[-2390,1010,440,220],pic:"opmem",n:"позже: на этом этапе памяти нет",ref:"—"},
+    {id:"opafter",t:"После совещания",tt:"Оперативник · После совещания",ty:"out",st:"dec",b:[-1820,620,340,310],pic:"opafter",n:"записи отрядов и токены групп, 128",ref:"—"},
+    {id:"opkeep",t:"Менять или оставить",tt:"Оперативник · Менять или оставить",ty:"proc",st:"dec",b:[-1290,300,420,230],pic:"opkeep",n:"3 варианта: оставить / сдвинуть / перекроить; уклон на «оставить»",ref:"—"},
+    {id:"opcomp",t:"Состав групп",tt:"Оперативник · Состав групп",ty:"proc",st:"dec",b:[-1290,570,420,290],pic:"opcomp",n:"указатель на открытые группы, по слотам; полная (10) закрыта",ref:"—"},
+    {id:"opfoes",t:"Цель группы",tt:"Оперативник · Цель группы",ty:"proc",st:"dec",b:[-1290,900,420,290],pic:"opfoes",n:"указатель: зерно из видимых врагов или «никого»; код растит цель квадратами",ref:"tools/nn/tactic/parcel.py target_boxes, connected"},
+    {id:"optask",t:"Задание группы",tt:"Оперативник · Задание группы",ty:"proc",st:"dec",b:[-1290,1230,420,390],pic:"optask",n:"форма 2 → (цель) → поворот 16 от цели → клетка 1024 → глагол 4 (открыт 1) → темп 3 (открыт 1)",ref:"—"},
+    {id:"opcheck",t:"Проверка посылки",tt:"Оперативник · Проверка посылки",ty:"alg",st:"dec",b:[-660,1620,360,300],pic:"opcheck",n:"запреты: сектора, клетки за полем, полные группы; шаг к цели кодом; parcel.check, ошибок 0",ref:"tools/nn/tactic/parcel.py check"},
+    {id:"opsend",t:"Посылки тактикам",tt:"Оперативник · Посылки тактикам",ty:"out",st:"dec",b:[-660,2230,360,470],pic:"opsend",n:"Parcel + приказ 7; номер = номер токена",ref:"tools/nn/tactic/parcel.py Parcel; decide.py order_vec"},
+    {id:"opcases",t:"Случаи 1–3",tt:"Оперативник · Случаи 1–3",ty:"env",st:"dec",b:[-4340,2050,360,330],pic:"opcases",n:"«Собрать», «Разделить», «Идти или стоять»; 288 боёв, по 96 на случай",ref:"—"},
+    {id:"optacenv",t:"Тактик (сменный)",tt:"Оперативник · Тактик (сменный)",ty:"env",st:"dec",b:[-3850,2050,400,330],pic:"optacenv",n:"формула teacher.drive или сеть run4, раз в 5 с; под ним сеть отряда 1 с",ref:"tools/nn/tactic/teacher.py drive"},
+    {id:"opteach",t:"Учитель",tt:"Оперативник · Учитель",ty:"teach",st:"dec",b:[-3310,2050,400,330],pic:"opteach",n:"формула оперативника; слагаемое на 5 % решений, вес 1 → 0 за 10 обновлений",ref:"—"},
+    {id:"opexam",t:"Экзамен",tt:"Оперативник · Экзамен",ty:"test",st:"dec",b:[-2770,2050,400,330],pic:"opexam",n:"128 боёв на случай; мера ≥ 0,9 × формулы и выше сравнения на 0,2",ref:"—"},
+    {id:"opcritic",t:"Критик",tt:"Оперативник · Критик",ty:"proc",st:"dec",b:[-2230,2050,360,200],pic:"opcritic",n:"только в обучении: одно значение на бой",ref:"—"},
     // the personal level: the unit network as it is in the code (tools/nn/unit)
     {id:"uninrow",code:1,t:"Строка отряда",tt:"Личный · Строка отряда",ty:"in",st:"agreed",b:[6070,1170,360,420],pic:"uninrow",n:"до 16 строк: паспорт 69 + строка 27",ref:"tools/nn/unit/view.py ROW, K"},
     {id:"unmem",code:1,t:"Память снимков",tt:"Личный · Память снимков",ty:"in",st:"agreed",b:[6070,1630,360,220],pic:"unmem",n:"10 прошлых снимков каждой строки: 27 + «снимок есть» = 28",ref:"tools/nn/unit/view.py T"},
@@ -1774,25 +1824,28 @@ a{color:inherit}
     {from:"uzone",to:"upack",fy:.5,ty:.5,xm:4880,label:"рамка",col:"--c-out"},
     {from:"orders",to:"upack",path:[[3470,2950],[5200,2950],[5200,2167]],lp:[4400,2942],label:"темп как есть",col:"--c-order",dot:1},
     {from:"upack",to:"unorder",path:[[5400,2045],[6068,2045]],lp:[5650,2037],label:"17 чисел",col:"--c-out"},
-    // the operative (a sketch): left to right, into the tactic's parcel and order
-    {from:"oprows",to:"opanal",fy:.5,ty:.5,label:"185 / 150",col:"--c-live"},
-    {from:"opanal",to:"opcard",fy:.5,ty:.5,label:"128",col:"--c-out"},
-    {from:"opcard",to:"oprec",path:[[-3150,670],[-3012,670]],lp:[-3081,662],label:"128 на отряд",col:"--c-out"},
+    // the operative (the project 06.11): left to right, into the tactic's parcel and order
+    {from:"oprows",to:"opanal",path:[[-3980,670],[-3852,670]],lp:[-3916,662],label:"185 / 150",col:"--c-live"},
+    {from:"opanal",to:"opcard",path:[[-3550,670],[-3432,670]],lp:[-3491,662],label:"128",col:"--c-out"},
+    {from:"opcard",to:"oprec",path:[[-3150,670],[-3012,670]],lp:[-3081,662],label:"128",col:"--c-out"},
     {from:"opcard",to:"opucmap",dir:"down",label:"128",col:"--c-out"},
     {from:"opucmap",to:"opmap",path:[[-3430,965],[-4160,965],[-4160,1153]],lp:[-3795,957],label:"8 → в клетки под строем"},
-    {from:"opprev",to:"oprec",path:[[-3980,355],[-3070,355],[-3070,570],[-3012,570]],lp:[-3540,347],label:"группа, метка",col:"--c-grp"},
-    {from:"opnums",to:"opmeet",path:[[-3980,105],[-2170,105],[-2170,498]],lp:[-3140,97],label:"числа — к сводке карты"},
-    {from:"opmap",to:"opmapproc",fy:.5,ty:.5,label:"33 слоя"},
+    {from:"opprev",to:"oprec",path:[[-3980,355],[-3070,355],[-3070,570],[-3012,570]],lp:[-3540,347],label:"прошлые 14",col:"--c-grp"},
+    {from:"oprows",to:"oprec",path:[[-3980,560],[-3910,560],[-3910,500],[-3100,500],[-3100,620],[-3012,620]],lp:[-3505,492],label:"место 3",col:"--c-live"},
+    {from:"opnums",to:"opmeet",path:[[-3980,150],[-2170,150],[-2170,498]],lp:[-3140,142],label:"числа — к сводке"},
+    {from:"opcmd",to:"opmeet",path:[[-3490,75],[-2090,75],[-2090,498]],lp:[-2840,67],label:"команда 7 — к сводке",col:"--c-order"},
+    {from:"opmap",to:"opmapproc",path:[[-3980,1380],[-3852,1380]],lp:[-3916,1372],label:"33 слоя"},
     {from:"opmapproc",to:"opfeat",path:[[-3450,1380],[-3312,1380]],lp:[-3381,1372],label:"вектор и карта",col:"--c-out"},
-    {from:"oprec",to:"opmeet",path:[[-2590,670],[-2392,670]],lp:[-2491,662],label:"отряды, токены групп",col:"--c-out"},
+    {from:"oprec",to:"opmeet",path:[[-2590,670],[-2392,670]],lp:[-2491,662],label:"записи отрядов",col:"--c-out"},
+    {from:"oprec",to:"optoken",dir:"down",label:"среднее записей",col:"--c-out"},
+    {from:"optoken",to:"opmeet",path:[[-2590,1005],[-2540,1005],[-2540,740],[-2392,740]],lp:[-2466,732],label:"6 токенов",col:"--c-grp"},
     {from:"opfeat",to:"opmeet",path:[[-2970,1270],[-2500,1270],[-2500,790],[-2392,790]],lp:[-2446,782],label:"128",col:"--c-out"},
-    {from:"opfeat",to:"optask",path:[[-2970,1490],[-1292,1490]],lp:[-2140,1482],label:"карта 32 × 32 × 64",col:"--c-out"},
-    {from:"opmeet",to:"opmem",dir:"down",label:"сводка 128"},
-    {from:"opmeet",to:"opafter",path:[[-1950,670],[-1822,670]],lp:[-1886,662],label:"отряды, токены",col:"--c-out"},
-    {from:"opmem",to:"opafter",path:[[-1950,1120],[-1886,1120],[-1886,880],[-1822,880]],lp:[-1854,872],label:"память"},
+    {from:"opfeat",to:"optask",path:[[-2970,1490],[-1292,1490]],lp:[-2140,1482],label:"карта 64 × 32 × 32",col:"--c-out"},
+    {from:"opmeet",to:"opmem",kind:"stub",dir:"down",label:"позже"},
+    {from:"opmeet",to:"opafter",path:[[-1950,670],[-1822,670]],lp:[-1886,662],label:"записи, токены",col:"--c-out"},
     {from:"opafter",to:"opkeep",fy:.5,ty:.5,xm:-1390,label:"группы",col:"--c-out"},
     {from:"opafter",to:"opcomp",fy:.5,ty:.5,xm:-1390,label:"отряды",col:"--c-out"},
-    {from:"opafter",to:"opfoes",fy:.5,ty:.5,xm:-1390,label:"враги",col:"--c-out"},
+    {from:"opafter",to:"opfoes",fy:.5,ty:.5,xm:-1390,label:"группы",col:"--c-out"},
     {from:"opafter",to:"optask",fy:.5,ty:.5,xm:-1390,label:"группы",col:"--c-out"},
     {from:"opkeep",to:"opcheck",fy:.5,ty:.5,xm:-780},
     {from:"opcomp",to:"opcheck",fy:.5,ty:.5,xm:-780},
@@ -1881,7 +1934,7 @@ a{color:inherit}
   // the operative's pictures: a row (a swatch, a caption, cells, a number); units -> tokens by a pointer
   function opRow(x,y,w,t,n,col,seed,sw){var c=+n||0,tx=sw?x+31:x+14,o=sw?R(x+14,y-1,12,12,sw,3,' stroke="var(--ink)" stroke-opacity=".25"'):'';
     o+=T(tx,y+10,t,9.5);
-    for(var k=0;k<Math.min(c,7);k++)o+=R(x+w-92+k*9,y,7.5,11,M(col,25+rnd(seed,k)*60),1.5);
+    for(var k=0;k<Math.min(c,String(n).length>2?6:7);k++)o+=R(x+w-92+k*9,y,7.5,11,M(col,25+rnd(seed,k)*60),1.5);
     return o+T(x+w-14,y+10,String(n),9.5,'end','font-family:var(--f-mono)');}
   function opStack(x,y,n,col,seed,cw,ch){var o='';for(var k=0;k<n;k++)o+=R(x+k*(cw+1),y,cw,ch,M(col,25+rnd(seed,k)*60),1.2);return o;}
   function opPoint(x,y,w,hd,sw,lab,tok,map,ft){var s=T(x+w/2,y+24,hd,10.5,'middle');
@@ -2158,23 +2211,25 @@ a{color:inherit}
       s+=T(x+w/2,yb+38,'сеть отряда её уже понимает; глагола в ней нет',9.5,'middle','fill:var(--ink)');
       s+=T(x+w/2,yb+54,'зона — рамка от тактика, темп — как в приказе',9.5,'middle');
       return s;},
-    // ---- the operative (a sketch) ----
+    // ---- the operative (the project 06.11, build/diag_operative/plan.md) ----
     opnums:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'сейчас почти ничего',10.5,'middle');
-      s+=opRow(x,y+40,w,'сколько групп занято',1,'--c-grp',310);
+      s+=opRow(x,y+40,w,'занято групп / 6',1,'--c-grp',310);
       s+=T(x+14,y+72,'времени до конца боя нет: никогда',9.5,null,'fill:var(--foe)');
-      s+=T(x+14,y+92,'ветры магии — открытый вопрос',9.5,null,'fill:var(--open)');
+      s+=T(x+14,y+90,'команда — свой блок',9.5);
+      return s;},
+    opcmd:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+20,'от стратега; пока даёт генератор случая',9.5,'middle');
+      s+=opRow(x,y+30,w,'глагол',4,'--c-order',315,'var(--c-order)')+opRow(x,y+50,w,'темп',3,'--c-order',316,'var(--c-order)');
       return s;},
     opprev:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'что было на прошлом шаге · на каждый слот',10.5,'middle');
-      s+=opRow(x,y+42,w,'мой: группа (G + «нет»)',7,'--mine',320,'var(--mine)');
-      s+=opRow(x,y+64,w,'враг: метка (G + «никого»)',7,'--foe',321,'var(--foe)');
-      s+=opRow(x,y+86,w,'сколько секунд группа живёт',1,'--c-grp',322);
-      s+=T(x+w/2,y+132,'G = 6 групп — предложение',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+148,'для «менять или оставить» и памяти',9.5,'middle');
+      s+=opRow(x,y+42,w,'мой: группа (6 + «нет»)',7,'--mine',320,'var(--mine)');
+      s+=opRow(x,y+64,w,'враг: цели групп (6 + «никого»)',7,'--foe',321,'var(--foe)');
+      s+='<line x1="'+(x+14)+'" y1="'+(y+84)+'" x2="'+(x+w-14)+'" y2="'+(y+84)+'" stroke="'+M('--ink',25)+'"/>'+T(x+14,y+100,'на слот',10,null,'fill:var(--ink);font-weight:600')+T(x+w-14,y+100,'14',10,'end','fill:var(--ink);font-weight:700;font-family:var(--f-mono)');
+      s+=T(x+w/2,y+128,'у врага можно несколько групп',9.5,'middle')+T(x+w/2,y+144,'возраст группы — в токене',9.5,'middle');
       return s;},
-    oprows:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'те же, что у тактика',10.5,'middle');
+    oprows:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'40 строк = 20 + 20, по слоту',10.5,'middle');
       s+=opRow(x,y+40,w,'паспорт',69,'--c-pass',330,'var(--c-pass)')+opRow(x,y+60,w,'что меняется','92 / 65','--c-live',331,'var(--c-live)')+opRow(x,y+80,w,'арсенал','24 / 16','--c-ars',332,'var(--c-ars)');
       s+='<line x1="'+(x+14)+'" y1="'+(y+98)+'" x2="'+(x+w-14)+'" y2="'+(y+98)+'" stroke="'+M('--ink',25)+'"/>'+T(x+14,y+114,'строка',10,null,'fill:var(--ink);font-weight:600')+T(x+w-14,y+114,'185 / 150',10,'end','fill:var(--ink);font-weight:700;font-family:var(--f-mono)');
-      ['все мои и все видимые враги;','скрытые не видны, как у игрока','«кто это»: только свой / враг','зоны внимания нет: видно всё поле'].forEach(function(t,i){s+=T(x+w/2,y+142+i*16,t,9.5,'middle',i===2||i===3?'fill:var(--ink)':'');});
-      s+=T(x+w/2,y+218,'строк: все слоты обеих сторон',9.5,'middle');
+      ['начало осей — сам отряд, оси поля','мои — «свой в группе», враги — «враг прочий»','бегущие тоже; враги — только видимые','место отряда 3 — в «Запись отряда»'].forEach(function(t,i){s+=T(x+w/2,y+140+i*16,t,9.5,'middle',i<2?'fill:var(--ink)':'');});
       return s;},
     opmap:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'всё поле · 32 × 32 клетки по 64 м',10.5,'middle');
       var g=160,gx=x+w/2-g/2,gy=y+40;s+=R(gx,gy,g,g,M('--c-map',14),2,' stroke="'+M('--ink',35)+'"');
@@ -2182,12 +2237,12 @@ a{color:inherit}
       [[.2,.74],[.42,.76],[.64,.73],[.82,.8]].forEach(function(q){s+=R(gx+q[0]*g-8,gy+q[1]*g-3,16,6,M('--mine',70),1.5);});
       [[.24,.2],[.5,.18],[.74,.22]].forEach(function(q){s+=R(gx+q[0]*g-8,gy+q[1]*g-3,16,6,M('--foe',70),1.5);});
       s+=R(gx+.14*g,gy+.62*g,.4*g,.24*g,'none',2,' stroke="var(--c-grp)" stroke-width="1.3" stroke-dasharray="3 2"')+R(gx+.58*g,gy+.62*g,.32*g,.24*g,'none',2,' stroke="var(--c-grp)" stroke-width="1.3" stroke-dasharray="3 2"');
-      s+=T(x+w/2,gy+g+16,'оси поля, не группы',9,'middle');
-      [['мои: плотность, фронт',3,'--mine'],['враг: плотность, фронт',3,'--foe'],['карточка моих',8,'--c-far'],['карточка врага',8,'--c-far'],['текущие зоны групп',1,'--c-grp'],['местность',6,'--c-map'],['огонь',4,'--open']].forEach(function(q,i){s+=opRow(x,y+230+i*19,w,q[0],q[1],q[2],340+i,'var('+q[2]+')');});
+      s+=T(x+w/2,gy+g+16,'оси поля: «вверх» кратно 90° к врагу',9,'middle');
+      [['мои: плотность, фронт',3,'--mine'],['враг: плотность, фронт',3,'--foe'],['карточка моих',8,'--c-far'],['карточка врага',8,'--c-far'],['зоны групп',1,'--c-grp'],['местность',6,'--c-map'],['огонь',4,'--open']].forEach(function(q,i){s+=opRow(x,y+230+i*19,w,q[0],q[1],q[2],340+i,'var('+q[2]+')');});
       var yt=y+230+7*19;s+='<line x1="'+(x+14)+'" y1="'+(yt+1)+'" x2="'+(x+w-14)+'" y2="'+(yt+1)+'" stroke="'+M('--ink',25)+'"/>'+T(x+14,yt+17,'слоёв',10,null,'fill:var(--ink);font-weight:600')+T(x+w-14,yt+17,'33',10,'end','fill:var(--ink);font-weight:700;font-family:var(--f-mono)');
-      s+=T(x+w/2,yt+40,'точные места не нужны: для этого есть тактик',9,'middle','fill:var(--ink)');
+      s+=T(x+w/2,yt+40,'слои строят функции окон тактика',9,'middle','fill:var(--ink)');
       return s;},
-    opanal:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+26,'те же веса, что в зоне тактика',10,'middle','fill:var(--ink);font-weight:600');
+    opanal:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+26,'те же веса, заморожен (card8.pt)',10,'middle','fill:var(--ink);font-weight:600');
       s+=T(x+w/2,y+46,'185 → 256 → 128',10.5,'middle');
       [[60,92],[w/2-6,120],[w-72,70]].forEach(function(q){s+=R(x+q[0],y+60+(120-q[1])/2,14,q[1],M('--tc',45),3,' stroke="var(--tc)" stroke-width="1"');});
       s+=Pa('M'+(x+80)+' '+(y+120)+'H'+(w/2+x-12),M('--ink',45),1.3)+Pa('M'+(x+w/2+14)+' '+(y+120)+'H'+(x+w-78),M('--ink',45),1.3);
@@ -2196,82 +2251,106 @@ a{color:inherit}
     opcard:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+26,'те же веса',10,'middle','fill:var(--ink);font-weight:600')+T(x+w/2,y+44,'128 чисел на отряд',9.5,'middle');
       [['var(--mine)'],['var(--mine)'],['var(--foe)'],['var(--foe)']].forEach(function(q,i){var yy=y+60+i*26;s+=R(x+16,yy,13,13,q[0],3,' stroke="var(--ink)" stroke-opacity=".25"')+opStack(x+40,yy+1,14,'--c-out',i+350,14,11);});
       return s;},
-    opucmap:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+26,'те же веса · 128 → 8',10,'middle','fill:var(--ink);font-weight:600');
+    opucmap:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+26,'заморожена · 128 → 8',10,'middle','fill:var(--ink);font-weight:600');
       s+=opStack(x+24,y+44,16,'--c-out',360,7,14)+T(x+w-96,y+56,'→',11,'middle')+opStack(x+w-82,y+44,8,'--tc',361,7,14);
       s+=T(x+w/2,y+88,'8 чисел — в клетки под строем',9,'middle');
       return s;},
-    opmapproc:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'своя свёртка на 33 слоя',10.5,'middle');
+    opmapproc:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'свёртки на 33 слоя',10.5,'middle');
       var yy=y+64,xx=x+24,N=[33,48,64,64];
       N.forEach(function(n,i){for(var k=2;k>=0;k--)s+=R(xx+i*88+k*4,yy-k*4,56,56,M('--tc',16+k*12),3,' stroke="var(--tc)" stroke-width="1"');
         s+=T(xx+i*88+30,yy+76,String(n),9.5,'middle','fill:var(--ink);font-family:var(--f-mono)');
         if(i<3)s+=T(xx+i*88+76,yy+32,'→',11,'middle');});
-      s+=T(x+w/2,y+172,'33 → 48 → 64 → 64 — предложение',9.5,'middle','fill:var(--ink)');
-      s+=T(x+w/2,y+188,'окошко 3 × 3 трижды видит 7 клеток ≈ 450 м',9.5,'middle');
-      s+=T(x+w/2,y+216,'не те веса, что у тактика:',9.5,'middle')+T(x+w/2,y+232,'другой масштаб и другие слои',9.5,'middle');
-      s+=T(x+w/2,y+264,'выход: вектор 128 и карта 32 × 32 × 64',9.5,'middle','fill:var(--ink)');
+      s+=T(x+w/2,y+172,'33 → 48 → 64 → 64',9.5,'middle','fill:var(--ink)');
+      s+=T(x+w/2,y+192,'вектор 128: среднее и максимум',9.5,'middle')+T(x+w/2,y+208,'карта 64 × 32 × 32 → клетка',9.5,'middle');
       return s;},
     opfeat:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'два выхода «Анализа карты»',10.5,'middle');
-      s+=T(x+16,y+56,'1. вектор 128 → совещание',10,null,'fill:var(--ink);font-weight:700')+opStack(x+16,y+66,24,'--c-out',370,10,12);
-      s+=T(x+16,y+116,'2. карта 32 × 32 × 64',10,null,'fill:var(--ink);font-weight:700')+T(x+16,y+132,'→ «Задание группы», по клеткам',9);
+      s+=T(x+16,y+56,'1. вектор 128 → сводка',10,null,'fill:var(--ink);font-weight:700')+opStack(x+16,y+66,24,'--c-out',370,10,12);
+      s+=T(x+16,y+116,'2. карта 64 × 32 × 32',10,null,'fill:var(--ink);font-weight:700')+T(x+16,y+132,'→ голова «Клетка», по клеткам',9);
       var gx=x+w/2-44,gy=y+150;for(var i=3;i>=0;i--)s+=R(gx+i*5,gy+14-i*3,76,76,M('--c-out',12+i*9),2,' stroke="'+M('--c-out',60)+'" stroke-width="1"');
       return s;},
-    oprec:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'карточка 128 + группа + метка → 128',10.5,'middle');
-      var R0=[0,0,1,1,1],TK=[y+62,y+128];
-      TK.forEach(function(t,i){s+=R(x+w-132,t,116,40,M('--c-grp',22),6,' stroke="var(--c-grp)" stroke-width="1.3"')+T(x+w-74,t+25,'токен '+'АБ'[i],9.5,'middle','fill:var(--ink);font-weight:600');});
-      R0.forEach(function(g,i){var yy=y+46+i*30,ty=TK[g]+20,ex=x+w-134;s+=R(x+16,yy,13,13,'var(--mine)',3,' stroke="var(--ink)" stroke-opacity=".25"')+opStack(x+36,yy+1,12,'--c-out',i+380,8,11);
-        s+=Pa('M'+(x+150)+' '+(yy+7)+'C'+(x+190)+' '+(yy+7)+' '+(ex-40)+' '+ty+' '+ex+' '+ty,M('--c-grp',75),1.2);});
-      s+=T(x+w/2,y+216,'токен группы: среднее и сумма, линейный слой',9.5,'middle','fill:var(--ink)');
-      s+=T(x+w/2,y+232,'участники совещания — и отряды, и токены',9.5,'middle');
-      s+=T(x+w/2,y+248,'образец: «Группы» у генерала',9.5,'middle');
+    oprec:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на каждый отряд, обучаемый слой',10.5,'middle');
+      s+=opRow(x,y+42,w,'карточка отряда',128,'--c-out',380)+opRow(x,y+64,w,'место: x, z / 1024 м, высота',3,'--c-live',381)+opRow(x,y+86,w,'прошлые группы',14,'--c-grp',382);
+      s+='<line x1="'+(x+14)+'" y1="'+(y+106)+'" x2="'+(x+w-14)+'" y2="'+(y+106)+'" stroke="'+M('--ink',25)+'"/>'+T(x+14,y+122,'запись отряда',10,null,'fill:var(--ink);font-weight:600')+T(x+w-14,y+122,'128',10,'end','fill:var(--ink);font-weight:700;font-family:var(--f-mono)');
+      s+=T(x+w/2,y+156,'место идёт сюда, а не в строку:',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+172,'замороженный анализ не видел осей поля',9.5,'middle');
+      s+=T(x+w/2,y+200,'до 40 записей — участники совещания',9.5,'middle');
       return s;},
-    opmeet:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'все отряды, токены групп, сводка + числа',10.5,'middle');
-      var P=[['--mine','мой отряд'],['--mine','мой отряд'],['--foe','враг'],['--foe','враг'],['--c-grp','токен группы'],['--c-grp','токен группы'],['--c-out','сводка + числа']],y0=y+50,st=30,tx=x+134,dx=x+w-46;
+    optoken:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на каждую группу · 6 токенов → 128',10.5,'middle');
+      [['номер группы','свой вектор'],['среднее записей её отрядов','128'],['отрядов / 10','1'],['зона: есть, центр, sin, cos, форма',''],['возраст / 60 с, до 5','1'],['среднее записей её цели','128']].forEach(function(q,i){var yy=y+42+i*19;s+=T(x+14,yy+10,q[0],9.5)+T(x+w-14,yy+10,q[1],9.5,'end','font-family:var(--f-mono)');});
+      s+=T(x+w/2,y+172,'пустые группы различаются номером',9.5,'middle','fill:var(--ink)');
+      return s;},
+    opmeet:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'до 40 + 6 + сводка = 47 участников',10.5,'middle');
+      var P=[['--mine','мой отряд'],['--mine','мой отряд'],['--foe','враг'],['--foe','враг'],['--c-grp','токен группы'],['--c-grp','токен группы'],['--c-out','сводка']],y0=y+50,st=30,tx=x+134,dx=x+w-46;
       P.forEach(function(a,i){P.forEach(function(q,j){s+='<line class="cw" x1="'+(tx+58)+'" y1="'+(y0+i*st)+'" x2="'+(dx-7)+'" y2="'+(y0+j*st)+'"/>';});});
       P.forEach(function(q,i){var yy=y0+i*st;s+=R(x+14,yy-6,12,12,'var('+q[0]+')',3,' stroke="var(--ink)" stroke-opacity=".25"')+T(x+31,yy+4,q[1],9.5,null,i===6?'fill:var(--ink);font-weight:600':'');
         s+=opStack(tx,yy-3.5,8,q[0],i+390,6,7);
         s+='<polygon points="'+dx+','+(yy-7)+' '+(dx+7)+','+yy+' '+dx+','+(yy+7)+' '+(dx-7)+','+yy+'" fill="'+M(q[0],40)+'" stroke="var('+q[0]+')" stroke-width="1.2"/>';});
       var yb=y0+P.length*st+2;
-      s+=T(x+w/2,yb+6,'каждый спрашивает каждого',10,'middle','fill:var(--ink)')+T(x+w/2,yb+22,'2 слоя, ширина 128 — предложение',10,'middle');
+      s+=T(x+w/2,yb+6,'Council тактика: 2 слоя, 128, 4 головы',10,'middle','fill:var(--ink)')+T(x+w/2,yb+22,'решает раз в 15 с',10,'middle');
       return s;},
-    opmem:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'GRU над сводкой, 128 — предложение',10.5,'middle');
-      var yy=y+60,cx=x+w/2;s+=opStack(x+26,yy,10,'--tc',400,7,14)+T(x+66,yy+30,'прошлый шаг',8.5,'middle');
-      s+=Pa('M'+(x+116)+' '+(yy+7)+'H'+(cx-46),M('--ink',45),1.3)+R(cx-44,yy-12,88,38,M('--tc',30),6,' stroke="var(--tc)" stroke-width="1.3"')+T(cx,yy+12,'GRU',10.5,'middle','fill:var(--ink);font-weight:700');
-      s+=Pa('M'+(cx+46)+' '+(yy+7)+'H'+(x+w-116),M('--ink',45),1.3)+opStack(x+w-106,yy,10,'--tc',401,7,14)+T(x+w-66,yy+30,'этот шаг',8.5,'middle');
-      s+=T(cx,y+116,'план на 3–5 шагов держит сеть,',9.5,'middle','fill:var(--ink)')+T(cx,y+132,'наружу — только текущий шаг',9.5,'middle','fill:var(--ink)');
+    opmem:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'позже · на этом этапе памяти нет',10.5,'middle','fill:var(--muted)');
+      var yy=y+60,cx=x+w/2;s+=opStack(x+26,yy,10,'--ink',400,7,14)+Pa('M'+(x+116)+' '+(yy+7)+'H'+(cx-46),M('--ink',30),1.3);
+      s+=R(cx-44,yy-12,88,38,'none',6,' stroke="'+M('--ink',40)+'" stroke-width="1.3" stroke-dasharray="4 3"')+T(cx,yy+12,'GRU',10.5,'middle');
+      s+=Pa('M'+(cx+46)+' '+(yy+7)+'H'+(x+w-116),M('--ink',30),1.3)+opStack(x+w-106,yy,10,'--ink',401,7,14);
+      s+=T(cx,y+116,'случаям 1–3 хватает прошлых групп',9.5,'middle')+T(cx,y+132,'и скоростей в строках',9.5,'middle');
       return s;},
-    opafter:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'карточки отрядов и групп',10.5,'middle');
+    opafter:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'записи отрядов и токены групп',10.5,'middle');
       [['var(--mine)','--c-out'],['var(--mine)','--c-out'],['var(--foe)','--c-out'],['var(--c-grp)','--c-grp'],['var(--c-grp)','--c-grp']].forEach(function(q,i){var yy=y+44+i*26;s+=R(x+16,yy,13,13,q[0],3,' stroke="var(--ink)" stroke-opacity=".25"')+opStack(x+40,yy+1,16,q[1],i+410,15,11);});
-      s+=T(x+w/2,y+196,'теперь знают друг о друге,',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+212,'о карте и о памяти',9.5,'middle','fill:var(--ink)');
+      s+=T(x+w/2,y+196,'128 на каждого: знают друг о друге',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+212,'и о карте',9.5,'middle','fill:var(--ink)');
       return s;},
-    opkeep:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на каждую группу · первая голова',10.5,'middle');
-      ['А','Б','В'].forEach(function(g,i){var yy=y+42+i*28,keep=i!==1;s+=T(x+18,yy+15,'группа '+g,9.5)+pill(x+150,yy,110,'оставить','var(--tc)',9.5,22,false,keep)+pill(x+272,yy,110,'менять','var(--tc)',9.5,22,false,!keep);});
-      s+=T(x+w/2,y+146,'перекройка дорогая: тактики начинают заново',9.5,'middle','fill:var(--ink)');
-      s+=T(x+w/2,y+162,'при «оставить» состав и задание прежние',9.5,'middle');
+    opkeep:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на непустую группу · первая голова',10.5,'middle');
+      ['А','Б','В'].forEach(function(g,i){var yy=y+42+i*28;s+=T(x+16,yy+15,'группа '+g,9.5);['оставить','сдвинуть','перекроить'].forEach(function(t,k){s+=pill(x+116+k*96,yy,90,t,'var(--tc)',9,22,false,k===i);});});
+      s+=T(x+w/2,y+146,'уклон на «оставить»',9.5,'middle','fill:var(--ink)');
+      s+=T(x+w/2,y+162,'группа без живых — только «перекроить»',9.5,'middle');
       return s;},
-    opcomp:function(b){return opPoint(b[0],b[1],b[2],'на каждый мой отряд · метка группы','var(--mine)',['отряд 1','отряд 2','отряд 3','отряд 4'],[['токен А'],['токен Б'],['токен В']],[0,0,1,2],['указатель на токены групп','отряд ровно в одной группе']);},
-    opfoes:function(b){return opPoint(b[0],b[1],b[2],'на каждого видимого врага · цель группы','var(--foe)',['враг 1','враг 2','враг 3','враг 4'],[['цель А'],['цель Б'],['никого',1]],[0,0,2,1],['нарезку делает сеть, не алгоритм (решение 29.10)','чужая группа = отряды с одной меткой']);},
-    optask:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на каждую группу · задание',10.5,'middle');
+    opcomp:function(b){return opPoint(b[0],b[1],b[2],'на свободный отряд · по слотам','var(--mine)',['отряд 1','отряд 2','отряд 3','отряд 4'],[['группа А'],['группа Б'],['пустая В',1]],[0,0,1,2],['указатель на открытые группы','полная (10) закрыта']);},
+    opfoes:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на группу · зерно из видимых врагов',10.5,'middle');
+      var E=[['враг 1',y+50],['враг 2',y+80],['враг 3',y+110],['враг 4',y+140],['никого',y+170]],ex=x+w-150;
+      s+=R(ex-8,y+44,140,64,M('--foe',8),5,' stroke="var(--foe)" stroke-width="1.3" stroke-dasharray="4 3"');
+      E.forEach(function(q,i){var e=i===4;s+=R(ex,q[1],12,12,e?'none':'var(--foe)',3,' stroke="'+(e?M('--ink',40):'var(--ink)')+'" stroke-opacity="'+(e?1:.25)+'"'+(e?' stroke-dasharray="2 1.5"':''))+T(ex+18,q[1]+10,q[0],9.5);});
+      [['группа А',y+56,y+56],['группа Б',y+116,y+56]].forEach(function(g){s+=R(x+16,g[1]-6,96,26,M('--c-grp',24),5,' stroke="var(--c-grp)" stroke-width="1.2"')+T(x+64,g[1]+11,g[0],9.5,'middle','fill:var(--ink);font-weight:600');
+        s+=Pa('M'+(x+114)+' '+(g[1]+7)+'C'+(x+170)+' '+(g[1]+7)+' '+(ex-60)+' '+g[2]+' '+(ex-14)+' '+g[2],'var(--ink)',1.2)+'<path d="M'+(ex-15)+' '+(g[2]-4)+'L'+(ex-7)+' '+g[2]+'L'+(ex-15)+' '+(g[2]+4)+'z" fill="var(--ink)"/>';});
+      s+=T(ex+100,y+60,'код растит',8.5,'middle','fill:var(--foe)');
+      s+=T(x+w/2,y+208,'две группы могут взять одну цель',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+224,'отход от решения 29.10 — см. описание',9.5,'middle','fill:var(--open)');
+      return s;},
+    optask:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на группу с новым заданием',10.5,'middle');
       var g=128,gx=x+36,gy=y+40;s+=R(gx,gy,g,g,M('--c-map',12),2,' stroke="'+M('--ink',35)+'"');
       for(var i=1;i<8;i++)s+='<line x1="'+(gx+i*16)+'" y1="'+gy+'" x2="'+(gx+i*16)+'" y2="'+(gy+g)+'" stroke="'+M('--ink',12)+'"/><line x1="'+gx+'" y1="'+(gy+i*16)+'" x2="'+(gx+g)+'" y2="'+(gy+i*16)+'" stroke="'+M('--ink',12)+'"/>';
       s+=R(gx+64,gy+48,16,16,'var(--tc)',1);
       var cx=x+w-110,cy=gy+g/2,r=56;for(var i=0;i<16;i++){var a=i*Math.PI/8;s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+(cx+r*Math.sin(a))+'" y2="'+(cy-r*Math.cos(a))+'" stroke="'+M('--ink',22)+'"/>';}
-      s+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+M('--ink',40)+'"/><path d="M'+cx+' '+cy+'L'+(cx+r*Math.sin(Math.PI/8))+' '+(cy-r*Math.cos(Math.PI/8))+'A'+r+' '+r+' 0 0 1 '+(cx+r*Math.sin(Math.PI/4))+' '+(cy-r*Math.cos(Math.PI/4))+'Z" fill="var(--tc)"/>';
-      s+=T(gx+g/2,gy+g+15,'клетка',9,'middle')+T(cx,gy+g+15,'поворот',9,'middle');
-      [['зона: центр — клетка 32 × 32','из 1024'],['зона: поворот, 16 секторов','из 16'],['зона: форма, линия / квадрат','из 2'],['глагол: уничтожить / сдержать / связать боем / не вступать','из 4'],['темп: любой / шаг / бег','из 3']].forEach(function(q,i){var yy=y+196+i*19;s+=T(x+14,yy+10,q[0],9)+T(x+w-14,yy+10,q[1],9,'end','font-family:var(--f-mono)');});
-      s+=T(x+w/2,y+312,'карта читается по клеткам напрямую, как у тактика',9.5,'middle','fill:var(--ink)');
-      s+=T(x+w/2,y+328,'глагол — тот же словарь, что в «Приказах тактику»',9.5,'middle');
+      s+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+M('--ink',40)+'"/><path d="M'+cx+' '+cy+'L'+(cx-r*Math.sin(Math.PI/16))+' '+(cy-r*Math.cos(Math.PI/16))+'A'+r+' '+r+' 0 0 1 '+(cx+r*Math.sin(Math.PI/16))+' '+(cy-r*Math.cos(Math.PI/16))+'Z" fill="var(--tc)"/>'+R(cx-7,cy-r-14,14,7,'var(--foe)',1.5);
+      s+=T(gx+g/2,gy+g+15,'клетка: куда хочу зону',9,'middle')+T(cx,gy+g+15,'сектор 0 — лицом к цели',9,'middle');
+      [['1. форма: линия / квадрат','из 2'],['   (цель — свой блок)',''],['2. поворот: 16 секторов от цели','из 16'],['3. клетка: цель хода, не шаг','из 1024'],['4. глагол: открыт только «сдержать»','из 4'],['5. темп: открыт только «любой»','из 3']].forEach(function(q,i){var yy=y+196+i*19;s+=T(x+14,yy+10,q[0],9,null,i===1?'fill:var(--muted)':'')+T(x+w-14,yy+10,q[1],9,'end','font-family:var(--f-mono)');});
+      s+=T(x+w/2,y+330,'клетка читает карту 64 × 32 × 32 напрямую',9.5,'middle','fill:var(--ink)');
       return s;},
-    opcheck:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'весов нет · те же правила, что у посылки',10,'middle');
-      ['отряд ровно в одной группе','группа: 1–10 живых','цель связная по квадратам','зона внутри поля','новая зона не дальше половины окна'].forEach(function(t,i){var yy=y+42+i*22;s+=T(x+14,yy+10,'✓',10,null,'fill:var(--tc);font-weight:700')+T(x+32,yy+10,t,9.5);});
-      s+=T(x+w/2,y+176,'нарушение: запрет клеток в голове,',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+192,'а не отказ — предложение',9.5,'middle','fill:var(--ink)');
-      s+=T(x+w/2,y+212,'иначе промежуточный шаг',9.5,'middle');
+    opcheck:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'весов нет · запреты и проверка',10,'middle');
+      ['сектора: цель не связна или не влезает','клетки: зона за полем','группа полная (10)','шаг к цели: половина окна − 5 м','parcel.check на каждой посылке'].forEach(function(t,i){var yy=y+42+i*22;s+=T(x+14,yy+10,'✓',10,null,'fill:var(--tc);font-weight:700')+T(x+32,yy+10,t,9.5);});
+      s+=T(x+w/2,y+180,'ошибок посылок: 0',10,'middle','fill:var(--ink);font-weight:600');
+      s+=T(x+w/2,y+200,'не 0 — ошибка кода',9.5,'middle');
       return s;},
-    opsend:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'по одной на группу',10.5,'middle');
-      [['маска моих','S'],['маска цели','S'],['центр зоны',2],['поворот',2],['форма',2],['номер группы',1]].forEach(function(q,i){s+=opRow(x,y+40+i*21,w,q[0],q[1],'--c-grp',420+i,'var(--c-grp)');});
-      s+=T(x+w/2,y+192,'посылка: S + S + 7',10,'middle','fill:var(--ink);font-weight:600');
-      s+=T(x+w/2,y+236,'формат — блоки тактика:',9.5,'middle')+T(x+w/2,y+252,'«Посылка от оперативника», «Приказы тактику»',9,'middle');
+    opsend:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'по одной на непустую группу',10.5,'middle');
+      [['маска моих','S'],['маска цели','S'],['центр зоны',2],['поворот',2],['форма',2],['номер = номер токена',1]].forEach(function(q,i){s+=opRow(x,y+40+i*21,w,q[0],q[1],'--c-grp',420+i,'var(--c-grp)');});
+      s+=T(x+w/2,y+192,'Parcel: S + S + 7',10,'middle','fill:var(--ink);font-weight:600');
+      ['«оставить» — прежняя посылка','«сдвинуть» — плитки едут с зоной','перекройка — тактик заново'].forEach(function(t,i){s+=T(x+w/2,y+228+i*16,t,9.5,'middle');});
       [['глагол',4],['темп',3]].forEach(function(q,i){s+=opRow(x,y+352+i*21,w,q[0],q[1],'--c-order',430+i,'var(--c-order)');});
       s+=T(x+w/2,y+416,'приказ: 7',10,'middle','fill:var(--ink);font-weight:600');
+      return s;},
+    opcases:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'ровное поле · сдвиг и поворот до ±300 м',10,'middle');
+      [['1. «Собрать»','отряды встречают врага по одному'],['2. «Разделить»','одна куча на две угрозы'],['3. «Идти или стоять»','стоять, когда велено идти, и наоборот']].forEach(function(q,i){var yy=y+48+i*44;s+=T(x+16,yy,q[0],10,null,'fill:var(--ink);font-weight:700')+T(x+16,yy+16,'глупость: '+q[1],8.5);});
+      s+=T(x+w/2,y+196,'пачка 288 боёв, по 96 на случай',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+212,'враг — скрипт симулятора',9.5,'middle');
+      return s;},
+    optacenv:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'под оперативником, раз в 5 с',10.5,'middle');
+      ['по умолчанию — формула teacher.drive','сеть run4 — только на экзамене','под ним — сеть отряда, раз в 1 с','в ту же секунду: оперативник, потом тактик'].forEach(function(t,i){s+=T(x+16,y+54+i*22,t,9.5,null,i<2?'fill:var(--ink)':'');});
+      s+=T(x+w/2,y+160,'рамки отрядам — по номеру боя (operative/lower.py)',9,'middle');
+      return s;},
+    opteach:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'формула оперативника · одна на все случаи',10,'middle');
+      ['враги — куски по правилу квадратов','мои — кучки (связь 350 м)','форма «квадрат», сектор 0, «сдержать», «любой»','слагаемое на 5 % решений','мягкие метки: соседи, σ = 1','вес 1 → 0 за 10 обновлений'].forEach(function(t,i){s+=T(x+16,y+52+i*21,t,9.5,null,i>2?'fill:var(--ink)':'');});
+      return s;},
+    opexam:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'128 боёв на случай, без учителя',10.5,'middle');
+      ['мера сети ≥ 0,9 × формулы на каждом случае','и выше «сравнения» на 0,2','ошибок посылок 0','перекроек ≤ формулы + 1','размен не хуже формулы на 0,05'].forEach(function(t,i){s+=T(x+16,y+52+i*21,t,9.5,null,i<2?'fill:var(--ink)':'');});
+      s+=T(x+w/2,y+176,'до обучения: формула ≥ 0,9, сравнения ≤ 0,6',9,'middle');
+      return s;},
+    opcritic:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'только в обучении',10.5,'middle');
+      s+=T(x+w/2,y+52,'одно значение на бой, свой критик',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+70,'в игре не используется',9.5,'middle');
       return s;},
     // ---- the personal level (tools/nn/unit) ----
     uninrow:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на отряд зоны · до 16 строк: я + 15',10.5,'middle');
@@ -2686,7 +2765,7 @@ a{color:inherit}
   svg.addEventListener("click",function(e){if(moved){e.stopPropagation();e.preventDefault();moved=false;}},true);
 
   // the table of blocks
-  var tb=document.querySelector("#xref tbody"),rows="",nb=0,ST={agreed:"договорились",stub:"не обсуждали",sketch:"набросок"};
+  var tb=document.querySelector("#xref tbody"),rows="",nb=0,ST={agreed:"договорились",stub:"не обсуждали",sketch:"набросок",dec:"решено 06.11",later:"позже"};
   NODES.forEach(function(n){var f=bang(n.id);if(f)nb++;
     rows+='<tr data-go="'+n.id+'"><td>'+esc(n.tt||n.t)+'</td><td>'+TYPES[n.ty]+'</td><td>'+(ST[n.st]||n.st)+(n.code?' · <b style="color:var(--done)">в коде</b>':'')+'</td><td>'+esc(n.n)+'</td><td><code>'+esc(n.ref)+'</code></td><td class="num">'+(f?'<b style="color:var(--open)">!</b>':'')+'</td></tr>';});
   rows+='<tr class="tot"><td>всего блоков: '+NODES.length+'</td><td></td><td></td><td></td><td></td><td class="num">'+nb+'</td></tr>';

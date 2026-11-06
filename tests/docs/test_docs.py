@@ -9,7 +9,7 @@ from tools.docs import index_doc
 ROOT = architecture.ROOT
 DOCS = ROOT / "docs"
 # Research write-ups and the pages made since the English docs stopped (CLAUDE.md rule 13, 23.10): Russian only.
-RU_ONLY = ("research/", "training/tactic.md", "game/memreader.md", "apps/mem.md")
+RU_ONLY = ("research/", "training/tactic.md", "training/operative.md", "game/memreader.md", "apps/mem.md")
 BACK = {"ru": "[← Назад](", "en": "[← Back]("}
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 
