@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разметка</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <b>Разметка</b>
+  <nav>
+    <button id="tab-setup" class="tab on">Подготовка</button>
+    <button id="tab-battle" class="tab" disabled>Бой</button>
+  </nav>
+  <span id="clock"></span>
+  <span id="speed" class="hidden">
+    <button data-mode="pause" title="пауза (пробел)">⏸</button>
+    <button data-mode="x1" title="×1">×1</button>
+    <button data-mode="x4" title="×4">×4</button>
+    <button data-mode="decision" title="до следующего решения">⏭ до решения</button>
+    <button id="btn-stop" title="закончить бой сейчас">■ закончить</button>
+  </span>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="view">
+    <canvas id="cv"></canvas>
+    <div id="legend"></div>
+    <div id="replay" class="hidden"><input id="replay-t" type="range" min="0" max="0" value="0"><span id="replay-l"></span></div>
+  </div>
+  <aside id="panel">
+    <section id="setup">
+      <div class="row">
+        <label>Имя <input id="m-name" value="матчап"></label>
+        <label>Карта <select id="m-map"></select></label>
+      </div>
+      <div class="row">
+        <label>Предел, с <input id="m-limit" type="number" min="30" max="3600" step="30" value="600"></label>
+        <label>Враг <select id="m-enemy"><option value="attack">шагом на ближайшего</option><option value="attack_run">бегом на ближайшего</option><option value="hold">стоит</option></select></label>
+      </div>
+      <div class="row">
+        <label>Команда сверху <select id="m-verb"></select></label>
+        <label>темп <select id="m-pace"></select></label>
+      </div>
+      <div class="row sides">
+        <button id="side-1" class="side on">Свои</button>
+        <button id="side-2" class="side">Враг</button>
+        <select id="m-faction"></select>
+      </div>
+      <input id="pool-q" placeholder="поиск отряда в пуле…">
+      <div id="pool" class="list"></div>
+      <div class="row"><b>Армия</b> <span id="army-n"></span>
+        <button id="btn-layout" title="разложить армию стороны сеткой в её зоне">разложить</button>
+        <button id="btn-face" title="повернуть всех лицом к врагу">лицом к врагу</button>
+      </div>
+      <div id="army" class="list short"></div>
+      <p class="hint">Тащи отряд мышью (в полосе своей стороны), Q / E — поворот выделенного на 15°, Del — убрать.
+        Колесо — масштаб, тащить пустое место — сдвиг.</p>
+      <div class="row">
+        <button id="btn-save">Сохранить матчап</button>
+        <select id="m-list"><option value="">— загрузить —</option></select>
+      </div>
+      <hr>
+      <div class="row">
+        <label>Я играю за <select id="s-level"></select></label>
+        <label>период, с <input id="s-period" type="number" min="1" max="120"></label>
+      </div>
+      <div class="row">
+        <label id="l-upper">Над мной <select id="s-upper"><option value="formula">формула</option><option value="net">сеть run5</option></select></label>
+        <label id="l-lower">Подо мной <select id="s-lower"><option value="formula">формула тактика</option><option value="net">сеть тактика run4</option></select></label>
+      </div>
+      <button id="btn-start" class="big">Начать бой</button>
+      <div id="setup-err" class="err"></div>
+    </section>
+    <section id="battle" class="hidden">
+      <div id="b-info"></div>
+      <div id="decision" class="hidden">
+        <h3 id="d-title"></h3>
+        <div id="d-help" class="hint"></div>
+        <div id="d-body"></div>
+        <div id="d-err" class="err"></div>
+        <div id="d-warn" class="warn"></div>
+        <div class="row buttons">
+          <button id="btn-hint" title="подставить решение формулы">Подсказка формулы</button>
+          <button id="btn-reset" title="вернуть то, что в силе">Сбросить</button>
+        </div>
+        <div class="row buttons">
+          <button id="btn-keep" title="прежние посылки, ничего не менять">Оставить как есть</button>
+          <button id="btn-next" class="big" title="записать решение и дальше (Enter)">Дальше ▶</button>
+        </div>
+      </div>
+      <div id="result" class="hidden"></div>
+    </section>
+  </aside>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
