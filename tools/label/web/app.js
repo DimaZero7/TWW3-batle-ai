@@ -817,6 +817,19 @@ async function pump() {
   if (S.mode !== "pause" && S.queue.length && performance.now() - S.shownAt >= 1000 / speedOf()) { showSnap(S.queue.shift()); draw(); }
   if (!S.queue.length && S.pendingNext) { const p = S.pendingNext; S.pendingNext = null; openDecision(p); return; }
   if (!S.queue.length && S.overNext) { S.overNext = false; finish(); return; }
+  if (S.pending && S.st && S.st.game && !S.fetching && performance.now() - (S.checkedAt || 0) > 1000) {
+    // the live game: the decision may have been taken by the in-game button (label_overlay's tick)
+    S.checkedAt = performance.now(); S.fetching = true;
+    try {
+      const st = await api("state");
+      const p = st.pending;
+      if (!p || p.level !== S.pending.level || p.sec !== S.pending.sec) {
+        S.st = st; closeDecision(); renderInfo(); setMode(S.lastMode || "decision"); status("решение принято кнопкой в игре");
+      }
+    } catch (e) { /* the next try */ }
+    S.fetching = false;
+    return;
+  }
   if (S.mode === "pause" || S.pending || S.over || S.pendingNext || S.overNext || S.queue.length > 2) return;
   S.fetching = true;
   try {
@@ -844,10 +857,10 @@ async function startBattle() {
     enterBattle(st);
   } catch (e) { showSetupErr(e); status(""); }
 }
-async function startGame(task, speed) {
+async function startGame(task, speed, extra = {}) {
   try {
     status("запускаю игру…");
-    enterBattle(await api("game/start", { task, speed, name: "игра_" + task }));
+    enterBattle(await api("game/start", { task, speed, name: "игра_" + task, ...extra }));
     status("ждём игру: она запускается (1–2 минуты), потом расстановка");
   } catch (e) { showSetupErr(e); status(""); }
 }

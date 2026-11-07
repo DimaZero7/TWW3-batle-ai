@@ -59,6 +59,11 @@ def test_the_person_deploys_and_commands_the_operative_over_the_game(tmp_path):
         assert p["level"] == "strategist" and s.state()["phase"] == "deployment"
         bad = {"groups": [], "verb": "hold", "pace": "any"}
         assert not s.decide(bad)["ok"] and not (game / CD.PLAN).exists()      # no group: refused, nothing written
+        ov = (game / GM.OVERLAY).read_text(encoding="utf-8")       # the game's marks: the strategist's hint, the line
+        lines = ov.splitlines()
+        assert lines[0] == GM.OVERLAY_FORMAT and lines[-1] == "end" and lines[2].startswith("text Ты — стратег")
+        assert sum(x.startswith("mark ") for x in lines) == 7
+        assert sum(x.startswith("zone ") for x in lines) == len(p["hint"]["groups"])
         assert s.decide(p["hint"])["ok"]
         plan = (game / CD.PLAN).read_text(encoding="utf-8")
         assert plan.startswith(CD.FORMAT) and plan.count("\nplace ") == len(sp[0]["mine"])
@@ -71,7 +76,14 @@ def test_the_person_deploys_and_commands_the_operative_over_the_game(tmp_path):
                 assert q["level"] == "operative" and q["sec"] == sec and q["can_keep"]
                 time.sleep(0.1)
                 assert not answered(game, sec + 1)               # the bridge waits: no answer before the decision
-                assert s.decide({"keep": True} if sec == 0 else q["hint"])["ok"]
+                ov = (game / GM.OVERLAY).read_text(encoding="utf-8")
+                lines = ov.splitlines()
+                assert f"Пауза, t = {sec} с" in ov and "button 1" in lines and any(x.startswith("mark ") for x in lines)
+                if sec == 0:
+                    assert s.decide({"keep": True})["ok"]
+                else:                                            # the in-game button's tick: «Оставить как есть»
+                    (game / GM.CLICK).write_text("keep 9\n", encoding="utf-8")
+                    until(lambda: s.pending is None)
             until(lambda: answered(game, sec + 1))
             for _ in range(round(1.0 / P.dt)):
                 battle.step(st, opponents.nearest(st), P)
@@ -81,6 +93,8 @@ def test_the_person_deploys_and_commands_the_operative_over_the_game(tmp_path):
         done.update(batch=dep["batch"], move=17, done=True)          # the bridge keeps the last move's number
         exchange.write_atomic(game / exchange.STATE, json.dumps(done))
         until(lambda: s.over)
+        ov = (game / GM.OVERLAY).read_text(encoding="utf-8")
+        assert not any(x.startswith(("mark ", "text ")) for x in ov.splitlines())      # the end: the marks gone
     finally:
         s.stop()
     f = s.folder
@@ -88,7 +102,7 @@ def test_the_person_deploys_and_commands_the_operative_over_the_game(tmp_path):
     assert info["where"] == "game" and info["format"] == RC.FORMAT
     smp = RC.load(f)
     assert [x["level"] for x in smp] == ["strategist", "operative", "operative"]
-    assert [x["source"] for x in smp] == ["hint", "keep", "hint"] and all(x["where"] == "game" for x in smp)
+    assert [x["source"] for x in smp] == ["hint", "keep", "keep"] and all(x["where"] == "game" for x in smp)
     assert len((f / "decisions.jsonl").read_text(encoding="utf-8").splitlines()) == 3
     assert len((f / "chain.jsonl").read_text(encoding="utf-8").splitlines()) == 17
     res = json.loads((f / "result.json").read_text(encoding="utf-8"))

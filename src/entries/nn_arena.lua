@@ -68,6 +68,7 @@ local orders = require('apps.orders.adapter')
 local deploy = require('apps.bridge.deploy_adapter')
 local pause_probe = require('apps.battle.pause_probe')
 local label_pause = require('apps.battle.label_pause')
+local label_overlay = require('apps.battle.label_overlay')
 
 local M = {}
 
@@ -223,6 +224,7 @@ function M.main(bm, config, globals)
 
     local function finish(status, winner)
         if state.finished then return end
+        if state.overlay then pcall(state.overlay.stop) end
         if state.cancel_deadline then state.cancel_deadline() end
         snapshot('nn_final')
         local row = side_summary()
@@ -577,6 +579,21 @@ function M.main(bm, config, globals)
                     label_pause.start({bm = bm, every_s = 1, speed = config.speed, now_ms = function() return 0 end,
                         written = function() return 0 end, answered = function() return 0 end, poll = function() end,
                         emit = emit}).lock('deployment')
+                    -- the labelling's marks over the battle (apps.battle.label_overlay: the companion's overlay file)
+                    if not state.overlay then
+                        local by_name = {}
+                        for side = 1, 2 do
+                            for _, it in ipairs(state.sides[side]) do by_name[it.name] = it.unit end
+                        end
+                        state.overlay = label_overlay.start({bm = bm, emit = emit, flush = flush, guard = guarded,
+                            env = {core = globals.core, UIComponent = globals.UIComponent, cco = globals.cco,
+                                find_uicomponent = globals.find_uicomponent, common = common},
+                            unit_of = function(name) return by_name[name] end,
+                            vec = function(x, y, z) return map.vector(vector_type, x, y, z) end,
+                            height = function(x, z) return bm:get_terrain_height(x, z) end,
+                            now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+                            finished = function() return state.finished end})
+                    end
                 end
                 local function rows(side)
                     return function()

@@ -136,7 +136,8 @@ def start_game(body):
     if speed not in GM.SPEEDS:
         raise HU_refused([f"скорость {speed}: одна из {GM.SPEEDS}"])
     s = GM.GameSession(STATE["game"], {"unit": nets("unit")}, task=body.get("task", "hold"), speed=speed,
-                       device=STATE["device"], name=body.get("name") or "игра")
+                       device=STATE["device"], name=body.get("name") or "игра", camera=bool(body.get("camera")),
+                       catalogue=bool(body.get("catalogue")))
     STATE["session"] = s
     return s.state()
 

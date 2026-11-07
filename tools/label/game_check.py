@@ -18,13 +18,50 @@ from pathlib import Path
 from tools.label.browser_check import CHROMES, WS, Page, click_text, screen_of
 
 BANNER = "document.getElementById('banner')"
+SHOT_PS = r"""
+Add-Type -AssemblyName System.Drawing
+Add-Type -Namespace W -Name U -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
+public struct RECT { public int L; public int T; public int R; public int B; }
+'@
+[W.U]::SetProcessDPIAware() | Out-Null
+$p = Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $p) { exit 1 }
+[W.U]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
+Start-Sleep -Milliseconds 400
+$r = New-Object W.U+RECT
+[W.U]::GetWindowRect($p.MainWindowHandle, [ref]$r) | Out-Null
+$w = $r.R - $r.L; $h = $r.B - $r.T
+$bmp = New-Object System.Drawing.Bitmap $w, $h
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
+$bmp.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)
+"""
+
+
+def screen_shot(path):
+    """The game's window (brought to the front; PowerShell's CopyFromScreen of its rectangle only) -> path; True when
+    written."""
+    import os
+    import shutil
+    tmp = os.path.join(tempfile.gettempdir(), "bai_ingame_shot.png")
+    script = os.path.join(tempfile.gettempdir(), "bai_ingame_shot.ps1")
+    Path(script).write_text(SHOT_PS.replace("{path}", tmp), encoding="utf-8-sig")
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], timeout=60,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(tmp):
+        shutil.move(tmp, path)
+        return True
+    return False
 
 
 def wait_pending(page, cond, timeout):
     return page.until(f"S.pending && S.pv && !S.changing && ({cond})", timeout)
 
 
-def run(url, out, chrome, task, speed, hold_s=5.0, limit_s=1500):
+def run(url, out, chrome, task, speed, hold_s=5.0, limit_s=1500, shots=None):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     prof = tempfile.mkdtemp(prefix="label_game_chrome_")
@@ -52,23 +89,32 @@ def run(url, out, chrome, task, speed, hold_s=5.0, limit_s=1500):
         click_text(page, "▶ Игра")
         page.js(f"S.gtask={json.dumps(task)}; S.gspeed={int(speed)}; renderSetup(); true")
         page.shot(out / "game_0_tab.png")
-        click_text(page, "Запустить игру")
+        if shots is None:
+            click_text(page, "Запустить игру")
+        else:
+            # the in-game check: the camera on my army at each pause, the ground pings' types laid out at the deployment
+            page.js(f"startGame({json.dumps(task)}, {int(speed)}, {{camera: true, catalogue: true}}); true")
+        shot = (lambda name, wait=2.5: (time.sleep(wait), checked.setdefault("shots", {}).__setitem__(
+            name, screen_shot(Path(shots) / name)))) if shots else (lambda *a, **k: None)
         t0 = time.time()
         # the deployment: the strategist's pause
         wait_pending(page, "S.pending.level==='strategist'", 600)
         checked["deploy_wait_s"] = round(time.time() - t0, 1)
         checked["deploy_groups"] = page.js("S.pending.hint.groups.map(g=>g.members)")
         page.shot(out / "game_1_deploy.png")
+        shot("ingame_1_deploy.png", 4.0)
         click_text(page, "Принять подсказку", BANNER)
         # the operative at 0 s: keep the strategist's groups
         wait_pending(page, "S.pending.level==='operative' && S.pending.sec===0", 300)
         checked["op0_groups"] = page.js("S.pending.state.groups.map(g=>g.members)")
         page.shot(out / "game_2_op0.png")
+        shot("ingame_2_pause_0s.png", 3.0)
         click_text(page, "Оставить как есть", BANNER)
         # 15 s: hold the pause, then the formula's hint
         wait_pending(page, "S.pending.sec>=15", 300)
         sec = page.js("S.pending.sec")
         time.sleep(hold_s)
+        shot("ingame_3_pause_15s.png", 0.5)
         checked["held_pause_at_s"] = sec
         click_text(page, "Поменять", BANNER)
         click_text(page, "Принять подсказку")
@@ -93,6 +139,7 @@ def run(url, out, chrome, task, speed, hold_s=5.0, limit_s=1500):
         checked["edit"] = {"unit": unit, "from": big["g"], "to": to,
                            "preview": page.js("S.pv && {ok:S.pv.ok, errors:S.pv.errors, groups:(S.pv.groups||[]).map(g=>[g.g,g.members])}")}
         page.shot(out / "game_3_op_edit.png")
+        shot("ingame_4_edit_preview.png", 1.5)
         if not (checked["edit"]["preview"] or {}).get("ok"):
             checked["edit_refused_text"] = page.js("document.getElementById('d-err').innerText")
             page.js("S.edit=JSON.parse(JSON.stringify(S.pending.edit)); preview(); true")
@@ -100,6 +147,7 @@ def run(url, out, chrome, task, speed, hold_s=5.0, limit_s=1500):
         click_text(page, "Дальше ▶")
         page.until(f"!S.pending || S.pending.sec>{sec}", 60)
         checked["after_edit"] = page.js("document.getElementById('status').textContent")
+        shot("ingame_5_after_edit.png", 1.0)
         # to the end: keep
         n = 0
         while time.time() - t0 < limit_s:
@@ -138,10 +186,12 @@ def main(argv=None):
     ap.add_argument("--chrome", default=next((c for c in CHROMES if Path(c).exists()), None))
     ap.add_argument("--task", default="hold", choices=("hold", "destroy"))
     ap.add_argument("--speed", type=int, default=10)
+    ap.add_argument("--shots", default=None, help="the in-game check: screenshots of the game's screen here "
+                                                  "(ingame_*.png), the camera on my army at each pause")
     a = ap.parse_args(argv)
     import sys
     sys.stdout.reconfigure(encoding="utf-8")
-    print(json.dumps(run(a.url, a.out, a.chrome, a.task, a.speed), ensure_ascii=False, indent=1))
+    print(json.dumps(run(a.url, a.out, a.chrome, a.task, a.speed, shots=a.shots), ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":

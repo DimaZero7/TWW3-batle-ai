@@ -77,6 +77,7 @@ def bundle(src, entry, config, header=""):
     parts.append(
         "if bm then\n"
         f"    __require({json.dumps(entry)}).main(bm, {lua_literal(config)},\n"
-        "        {common = common, battle_vector = battle_vector})\n"
+        "        {common = common, battle_vector = battle_vector, core = core, UIComponent = UIComponent,\n"
+        "         find_uicomponent = find_uicomponent, cco = cco})\n"
         "end\n")
     return "".join(parts), [name for name, _ in modules]

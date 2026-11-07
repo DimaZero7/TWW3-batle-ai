@@ -56,6 +56,59 @@ OVER = ROOT / "over.json"             # game.ps1: the game has closed ({code, ru
 TASKS = ("hold", "destroy")
 SPEEDS = (1, 3, 10)
 EMPTY = {"t": 0, "units": [], "groups": [], "frames": [], "men": None}
+OVERLAY = "tww3_bai_nn_overlay.txt"   # src/apps/battle/label_overlay.lua FILE, CLICK, FORMAT
+CLICK = "tww3_bai_nn_label_click.txt"
+OVERLAY_FORMAT = "tww3_bai_nn_overlay 1"
+TEXT = {"strategist": "Ты — стратег. Расстановка: реши в окне разметки (группы и зоны — на поле)",
+        "operative": "Ты — оперативник. Пауза, t = {sec} с. Реши в окне разметки"}
+
+
+def overlay_text(version, names, groups=(), text=None, button=False, camera=None, catalogue=None, ping=None):
+    """The overlay file (label_overlay.lua's format): every group's members ('g', its number), its target ('t') and its
+    zone; the line of text, the in-game button, the camera, the probe of the ground pings' types."""
+    lines = [OVERLAY_FORMAT, f"version {int(version)}"]
+    if text:
+        lines.append("text " + " ".join(str(text).split()))
+    marked = set()                     # one icon a unit: an enemy several groups target shows the first group's number
+    for g in groups:
+        k = int(g["g"]) + 1
+        for kind, slots in (("g", g.get("members") or ()), ("t", g.get("target") or ())):
+            for s in slots:
+                if s not in marked:
+                    marked.add(s)
+                    lines.append(f"mark {names[s]} {kind} {k}")
+        if g.get("front"):
+            lines.append(f"zone {k} {g['cx']:.1f} {g['cz']:.1f} {g['heading']:.2f} {g['front']:.1f} {g['depth']:.1f}")
+    if ping is not None:
+        lines.append(f"ping {int(ping)}")
+    if button:
+        lines.append("button 1")
+    if camera is not None:
+        lines.append("camera " + " ".join(f"{v:.1f}" for v in camera))
+    if catalogue is not None:
+        lines.append("catalogue " + " ".join(f"{v:.1f}" if isinstance(v, float) else str(v) for v in catalogue))
+    lines.append("end")
+    return "\n".join(lines) + "\n"
+
+
+def camera_of(raw, back_m=170.0, height_m=110.0):
+    """(x, z, tx, tz, h): the camera behind my army's centre looking at it, along the way to the seen enemy's centre
+    (none seen: +z)."""
+    I = TR.I
+    r = raw[0]
+    alive = r[:, I["alive"]] > 0
+    mine = alive & (r[:, I["side"]] == 1)
+    foe = alive & (r[:, I["side"]] == 2) & (r[:, I["vis"]] > 0)
+    if not bool(mine.any()):
+        return None
+    mx, mz = float(r[mine, I["x"]].mean()), float(r[mine, I["z"]].mean())
+    dx, dz = 0.0, 1.0
+    if bool(foe.any()):
+        ex, ez = float(r[foe, I["x"]].mean()), float(r[foe, I["z"]].mean())
+        d = ((ex - mx) ** 2 + (ez - mz) ** 2) ** 0.5
+        if d > 1:
+            dx, dz = (ex - mx) / d, (ez - mz) / d
+    return (mx - dx * back_m, mz - dz * back_m, mx + dx * 40.0, mz + dz * 40.0, height_m)
 
 
 def units_info(doc, params):
@@ -155,7 +208,7 @@ class GameSession(SE.Session):
     """The labelling battle in the game (module doc); session.Session's methods for the operative's pause and checks."""
 
     def __init__(self, game, nets, task="hold", speed=3, device="cpu", name="игра", out=True, out_root=None,
-                 request=True, poll_s=0.005, map_root=None, allow_flat=True):
+                 request=True, poll_s=0.005, map_root=None, allow_flat=True, camera=False, catalogue=False):
         if task not in TASKS:
             raise HU.Refused([f"задача {task!r}: одна из {TASKS}"])
         self.game, self.device, self.task, self.speed = Path(game), device, task, int(speed)
@@ -185,6 +238,10 @@ class GameSession(SE.Session):
         self._stop = False
         self.last_doc = None
         self.folder, self.rec = None, None
+        self.camera, self.catalogue = bool(camera), bool(catalogue)   # (the scripted check: the camera on my army at
+        #                                                               a pause; the ground pings' types laid out once)
+        self.ov_version, self.ov_groups, self.names = 0, None, []
+        self.via = "page"
         if out:
             self.folder = RC.new_folder(name, out_root)
         self.started_at = time.time()
@@ -254,10 +311,25 @@ class GameSession(SE.Session):
         units = [u for u in unit_rows(raw_u, self.strat.laid, real) if u[1] == 1]
         self._snap({"t": 0, "units": units, "groups": [], "frames": [], "men": None})
         self._start_record(doc)
+        self.names = [u["n"] for u in doc["units"]]
+        import math
+        z = doc["zones"]["own"]
+        a = math.radians(float(z["b"]))
+        fx, fz = math.sin(a), math.cos(a)
+        rx, rz = fz, -fx
+        cam = (z["x"] - fx * 260, z["z"] - fz * 260, z["x"] + fx * 40, z["z"] + fz * 40, 200.0) if self.camera else None
+        cat = None
+        if self.catalogue:
+            x0 = z["x"] + fx * (z["depth"] / 2 - 25) - rx * 105
+            z0 = z["z"] + fz * (z["depth"] / 2 - 25) - rz * 105
+            cat = (round(x0, 1), round(z0, 1), round(rx * 14, 2), round(rz * 14, 2), 0, 15)
         with self.cv:
             self.pending = self.strat.pending()
+            hint = self.strat.result(self.strat.hint_out)
+            self._overlay(hint["groups"], TEXT["strategist"], camera=cam, catalogue=cat)
             while self.pending is not None and not self._stop:
-                self.cv.wait(0.5)
+                self.cv.wait(0.2)
+                self._click()
 
     def _start_record(self, doc):
         if self.folder is None or self.rec is not None:
@@ -287,7 +359,14 @@ class GameSession(SE.Session):
             self.phase = "battle"
         self.sec = int(round(float(doc.get("t", 0)) / 1000.0))
         t0 = time.perf_counter()
+        if not self.names:
+            self.names = [u["n"] for u in doc["units"]]
         orders, think_ms, uses = self.chain.decide(doc)
+        gs, _ = VW.groups_frames(self.chain.groups, self.chain.tac)
+        sig = json.dumps([[g["g"], g["members"], g["target"], g["cx"], g["cz"], g["heading"]] for g in gs])
+        if sig != self.ov_groups:
+            self.ov_groups = sig
+            self._overlay(gs)
         self.b.verb, self.b.pace = self.chain.verb, self.chain.pace_cmd
         self.b.destroy = self.chain.destroy
         attempts = exchange.write_atomic(self.game / exchange.ORDERS,
@@ -318,11 +397,52 @@ class GameSession(SE.Session):
         with self.cv:
             self._answer = None
             self.pending = self._op_pending(inp, ctx)
+            gs, _ = VW.groups_frames(self.chain.groups, self.chain.tac)
+            self._overlay(gs, TEXT["operative"].format(sec=self.sec), button=self.pending["can_keep"],
+                          camera=camera_of(raw) if self.camera else None)
             self.cv.notify_all()
             while self._answer is None and not self._stop:
-                self.cv.wait(0.5)
+                self.cv.wait(0.2)
+                self._click()
             out, self._answer = self._answer, None
         return out if out is not None else OTC.play_formula(inp, ctx, self.b.destroy)
+
+    def _overlay(self, groups, text=None, button=False, camera=None, catalogue=None):
+        """The overlay file for the game (label_overlay.lua): a new version each call."""
+        if not self.names:
+            return
+        with self.cv:
+            self.ov_version += 1
+            exchange.write_atomic(self.game / OVERLAY, overlay_text(self.ov_version, self.names, groups, text, button,
+                                                                    camera, catalogue))
+
+    def _click(self):
+        """The in-game button (label_overlay.lua's dialogue box: its tick) -> «Оставить как есть», or the formula's hint
+        where nothing can be kept; the click file removed."""
+        f = self.game / CLICK
+        if not f.exists():
+            return
+        try:
+            f.unlink()
+        except OSError:
+            return
+        p = self.pending
+        if p is None:
+            return
+        self.via = "game button"
+        try:
+            self.decide({"keep": True} if p.get("can_keep") else p["hint"])
+        finally:
+            self.via = "page"
+
+    def preview(self, edit):
+        """session.Session.preview; the groups it gives drawn in the game too (the person's edit seen on the field)."""
+        out = super().preview(edit)
+        p = self.pending
+        if out.get("ok") and out.get("groups") is not None and p is not None:
+            text = TEXT["strategist"] if p["level"] == "strategist" else TEXT["operative"].format(sec=p["sec"])
+            self._overlay(out["groups"], text, button=bool(p.get("can_keep")))
+        return out
 
     # ------------------------------------------------------------ the person's calls (the server's thread)
     def advance(self, seconds=None, wait_s=0.6):
@@ -355,7 +475,8 @@ class GameSession(SE.Session):
                 text_plan, made = self.strat.plan(out)
                 sample = dict(self.strat.sample(act), formula_act=pend["_hint_act"], source=source, where="game")
                 text = {"sec": 0, "level": "strategist", "source": source, "edit": filled, "groups": res["groups"],
-                        "places": res["places"], "where": "game", "plan_errors": made["errors"]}
+                        "places": res["places"], "where": "game", "plan_errors": made["errors"], "via": self.via}
+                self._overlay(res["groups"])
                 exchange.write_atomic(self.game / CD.PLAN, text_plan)
                 if self.folder is not None:
                     (self.folder / "plan.txt").write_text(text_plan, encoding="utf-8")
@@ -369,7 +490,8 @@ class GameSession(SE.Session):
                           "source": source, "where": "game"}
                 res = HU.op_result(out, ctx, self.axes)
                 text = {"sec": self.sec, "level": "operative", "source": source, "edit": filled, "groups": res["groups"],
-                        "where": "game"}
+                        "where": "game", "via": self.via}
+                self._overlay(res["groups"])
                 self._answer = out
             if self.rec is not None:
                 self.rec.add(sample, text)
@@ -394,6 +516,10 @@ class GameSession(SE.Session):
             self._stop = True
             self.pending = None
             self.over, self.why, self.phase = True, why, "over"
+            try:
+                self._overlay([])
+            except OSError:
+                pass
             left, men = {}, {}
             units = (doc or {}).get("units") or []
             for s, name in ((1, "mine"), (2, "enemy")):

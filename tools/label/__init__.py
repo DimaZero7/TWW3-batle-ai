@@ -19,6 +19,7 @@ strategist) and every decision is written as a sample for imitation learning
                  companion's chain below, the bridge pauses the battle on the operative's seconds); game.ps1 runs the
                  server with the game folder and launches the game on the page's request; game_check.py - its scripted
                  check through the page
+    icons.py     the in-game marks' pictures (the group's number over a unit; src/apps/battle/label_overlay.lua)
 """
 import json
 from functools import lru_cache

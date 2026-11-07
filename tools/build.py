@@ -291,6 +291,10 @@ def build(target, run_config, dependencies=None, scenario=None, kv=None):
         f"script\\battle\\{folder}\\{spec['packed_scenario']}": scenario_xml,
     }
     files.update(kvtable.entries(kv or {}))
+    if (run_config or {}).get("label"):
+        # the labelling's marks over the battle (src/apps/battle/label_overlay.lua): the group icons
+        from tools.label import icons
+        files.update(icons.pack_files())
     dependency_names = [d["pack"] for d in dependencies]
     blob = pfh5.pack_files(files, dependency_names)
     assert pfh5.read_pack(blob) == (files, tuple(dependency_names))
