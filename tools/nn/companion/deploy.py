@@ -81,11 +81,15 @@ def state_with(laid, places, params, device="cpu"):
 
 
 class Strategist:
-    """The deployment's decision of one battle (module doc). who: 'formula' or a strategist checkpoint (train.restore);
-    task: the battle's task from above (no strategist above yet: the companion's --strategist-task)."""
+    """The deployment's decision of one battle (module doc). who: 'default' (config/nn/strategist.json default - the
+    simulator's chain takes the same), 'formula' or a strategist checkpoint (train.restore); task: the battle's task
+    from above (no strategist above yet: the companion's --strategist-task)."""
 
-    def __init__(self, who="formula", task="hold", device="cpu", params=None, map_root=UI.MAPS, allow_flat=True):
+    def __init__(self, who="default", task="hold", device="cpu", params=None, map_root=UI.MAPS, allow_flat=True):
         assert task in TASKS, task
+        if who == "default":
+            from tools.nn.strategist import default
+            who = default()
         self.seer = SI.StrategistSeer(map_root, device, params, allow_flat)
         self.P, self.device, self.task, self.who = self.seer.P, device, task, who
         self.net = None

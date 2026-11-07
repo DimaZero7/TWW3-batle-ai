@@ -108,3 +108,23 @@ def test_the_point_sent_is_half_a_depth_ahead_of_the_centre():
             assert abs(cx - float(places["x"][b, i])) < 0.01 and abs(cz - float(places["z"][b, i])) < 0.01
             assert abs(px - (cx + half * math.sin(a_))) < 0.02 and abs(pz - (cz + half * math.cos(a_))) < 0.02
             assert rec["sent"][name] == [round(px, 2), round(pz, 2)]
+
+
+def test_the_companion_takes_the_same_default_strategist_as_the_simulator():
+    from tools.nn.strategist import cfg, default
+    pre = CS.Pre(CS.exam_specs(n=2, seed=11), P, "cpu")
+    a, _ = BT.inputs_of(pre)
+    who = default()
+    sim_net = None
+    if who != "formula":
+        from tools.nn.strategist import train as ST
+        sim_net, _, _ = ST.restore(who)
+    out, _, _ = BT.decide(pre, sim_net, greedy=True)
+    _, _, places, _ = BT.placed(pre, out, a)
+    for b in range(len(pre.sp)):
+        st = CD.Strategist(task=pre.sp[b]["task"], params=P)           # no 'who': config default
+        assert st.who == who and (st.net is None) == (cfg()["default"] == "formula")
+        _, rec = st.decide(doc_of_pre(pre, b))
+        assert rec["errors"] == 0
+        assert rec["verb"] == ("destroy" if bool(pre.destroy[b]) else "hold")
+        assert len(rec["groups"]) == int(out["plan"]["on"][b].sum())

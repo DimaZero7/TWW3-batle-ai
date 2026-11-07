@@ -304,9 +304,10 @@ def main(argv=None):
     parser.add_argument("--general-set", action="append", default=[], metavar="KEY=VALUE",
                         help="a GeneralConfig field over the checkpoint's for the game (e.g. replan_s=30); deploy is "
                              "'script' (the bridge does not move units)")
-    parser.add_argument("--strategist",
-                        help="the deployment by the strategist (tools.build nn-arena --deploy strategist): 'formula' or "
-                             "a strategist checkpoint (build/diag_strategist/run4/latest.pt), greedy; answers the "
+    parser.add_argument("--strategist", nargs="?", const="default",
+                        help="the deployment by the strategist (tools.build nn-arena --deploy strategist): no value or "
+                             "'default' - config/nn/strategist.json default (the formula), 'formula' or a strategist "
+                             "checkpoint (build/diag_strategist/run5/latest.pt), greedy; answers the "
                              "deployment document once a battle (tools/nn/companion/deploy.py)")
     parser.add_argument("--strategist-task", choices=("hold", "destroy"), default="hold",
                         help="the battle's task the strategist is given (no level above it yet)")

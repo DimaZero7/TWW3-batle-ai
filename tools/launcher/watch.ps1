@@ -18,6 +18,8 @@
 #                                         B's weights, the companion's --enemy-checkpoint; with -NoBuild and no
 #                                         -EnemyCheckpoint the build's --enemy-net-name is used, else -Checkpoint's)
 #   ... -Graphics human2k                (a graphics preset for the run, launch.ps1 -Graphics; default: BAI_GRAPHICS)
+#   ... -NoBuild -Strategist default -StrategistTask hold   (default: config/nn/strategist.json default; or formula /
+#   a checkpoint path)
 #   ... -NoBuild -Strategist formula -StrategistTask hold   (a build with --deploy strategist: the companion's strategist
 #                                         places our side - its formula or a checkpoint; any own_ai: not net -> the
 #                                         companion answers only the deployment, --no-own; docs/ru/training/strategist.md)
@@ -80,7 +82,7 @@ if ($human) {
     if ($manifest.config.own_ai -ne 'human' -or $manifest.config.enemy_ai -ne 'companion') { throw "build/human has no enemy under the companion: python -m tools.build human --enemy-ai net ..." }
 } elseif ($manifest.config.own_ai -ne 'net' -and -not $Strategist) { throw "build/$Target is not a net build; run without -NoBuild" }
 if ($Strategist -and $manifest.config.deploy -ne 'strategist') { throw "build/$Target has no strategist deployment: python -m tools.build nn-arena --deploy strategist ..." }
-if ($Strategist -and $Strategist -ne 'formula' -and -not (Test-Path -LiteralPath (Join-Path $repo $Strategist))) { throw "No strategist checkpoint $Strategist (a path inside the repository)" }
+if ($Strategist -and $Strategist -notin @('formula', 'default') -and -not (Test-Path -LiteralPath (Join-Path $repo $Strategist))) { throw "No strategist checkpoint $Strategist (a path inside the repository)" }
 $enemyScript = ''
 if ($manifest.config.enemy_ai -eq 'companion') { $enemyScript = [string]$manifest.config.enemy_script }
 if ($EnemyAi -and ($EnemyAi -ne 'game') -ne [bool]$enemyScript) { throw "build/$Target enemy ($($manifest.config.enemy_ai) $enemyScript) is not -EnemyAi $EnemyAi; build it again" }
@@ -105,7 +107,7 @@ if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
 if ($EnemyCheckpoint) { $dockerArgs += ' --enemy-checkpoint /repo/' + ($EnemyCheckpoint -replace '\\', '/') }
 if ($human) { $dockerArgs += ' --no-own' }   # a human plays side 1: nobody answers its bridge
 if ($Strategist) {
-    $who = if ($Strategist -eq 'formula') { 'formula' } else { '/repo/' + ($Strategist -replace '\\', '/') }
+    $who = if ($Strategist -in @('formula', 'default')) { $Strategist } else { '/repo/' + ($Strategist -replace '\\', '/') }
     $dockerArgs += ' --strategist ' + $who + ' --strategist-task ' + $StrategistTask
     if ($manifest.config.own_ai -ne 'net' -and -not $human) { $dockerArgs += ' --no-own' }   # only the deployment is answered
     Write-Output ("The deployment: the strategist ({0}, task {1}) in the companion" -f $Strategist, $StrategistTask)

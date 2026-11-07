@@ -71,10 +71,18 @@ def test_the_formula_groups_places_and_commands():
     out, inp, ctx = BT.decide(pre)
     pl = out["plan"]
     n_own = inp["own"].sum(1)
-    want = torch.tensor([math.ceil(int(k) / 4) for k in n_own])
+    want = torch.tensor([math.ceil(int(k) / 3) for k in n_own])                 # the operative's line: up to 3 a group
     assert bool((pl["on"].sum(1) == want).all())
     assert bool((pl["no_cell"] == 0).all())
     assert bool((pl["members"].sum(1)[inp["own"]] == 1).all())                # every unit in one group
+    # the groups side by side, touching zones allowed, none overlapping
+    from tools.nn.strategist import zones as ZS0
+    for g in range(1, int(pl["on"].sum(1).max())):
+        on = pl["on"][:, g]
+        prev = {k: pl[k][:, :g] for k in ("cx", "cz", "heading", "front", "depth")}
+        ok = ZS0.apart(pl["cx"][:, g:g + 1], pl["cz"][:, g:g + 1], pl["front"][:, g], pl["depth"][:, g],
+                       pl["heading"][:, g], prev, pl["on"][:, :g])
+        assert bool(ok[on].all())
     destroy = pl["verb"] == DC.VERBS.index("destroy")
     assert bool((destroy == pre.destroy).all())
     st, g0, places, mem = BT.placed(pre, out, inp)
@@ -145,3 +153,16 @@ def test_a_short_battle_hands_the_groups_to_the_operative():
     m = BT.measures(pre, rd)
     for v in m.values():
         assert bool(((v >= 0) & (v <= 1)).all())
+
+
+def test_the_runs_cut_as_numpy_array_split():
+    import numpy as np
+    from tools.nn.strategist import teacher as T
+    for m in range(0, 9):
+        for k in range(1, 4):
+            sel = torch.zeros((1, 12), dtype=torch.bool)
+            idx = sorted(np.random.default_rng(m * 7 + k).choice(12, m, replace=False).tolist())
+            sel[0, idx] = True
+            got = T.runs(sel, torch.tensor([k]))[0, idx].tolist()
+            want = [i for i, part in enumerate(np.array_split(np.arange(m), k)) for _ in part]
+            assert got == want, (m, k, got, want)

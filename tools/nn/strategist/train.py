@@ -4,7 +4,7 @@
        cross-entropies of net.choose(labels=...) - the 'pre-training'; minutes
     2. PPO of one decision: a batch of battles (the network samples), the reward at the end = the case's measure +
        the trade in gold (config reward), the advantage = the reward - the critic; the teacher's term with a weight
-       falling to zero; under the strategist the operative run5, the tactician's formula, the frozen unit network
+       falling to zero; under the strategist the operative (config operative: its formula, or its network), the tactician's formula, the frozen unit network
 
 Checkpoints <out>/latest.pt (kind strategist_v1), the log <out>/log.jsonl, the exam at the end <out>/exam.json.
 
@@ -148,7 +148,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-exam", action="store_true")
     ap.add_argument("--no-lock", action="store_true")
-    ap.add_argument("--op", default=None, help="the operative under: net (run5) or formula (default: config operative)")
+    ap.add_argument("--op", default=None, help="the operative under: net (config operative_ckpt) or formula (default: config operative)")
     a = ap.parse_args(argv)
     torch.manual_seed(a.seed)
     P = load()

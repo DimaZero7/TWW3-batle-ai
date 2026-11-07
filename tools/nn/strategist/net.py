@@ -8,7 +8,7 @@
     Heads        per own unit in slot order a pointer at the 6 groups (the token learns who joined it: join; a full group,
                  10, closed); per group with members, in its number's order: form (square / line) -> turn (16 sectors
                  from the bearing my zone -> the enemy's zone) -> cell (1024: the zone's centre; closed: the zone not
-                 wholly inside my deployment zone, or nearer a zone placed already than their half diagonals); then the
+                 wholly inside my deployment zone, or overlapping a zone placed already: separating axes); then the
                  battle's verb (4, open: config verbs_open) and pace (3, open: paces_open) - the operative's command
     choose()     the walk: sampling, the update (act: the same choices), the teacher's term (labels), the formula's walk
                  (bias: the formula's wishes as logits, greedy)
@@ -247,7 +247,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
     n = mem.sum(2)
     on = n > 0
     # 2. the groups' zones, in the numbers' order
-    plan = {k: torch.zeros((B, G), device=dev) for k in ("cx", "cz", "heading", "r")}
+    plan = {k: torch.zeros((B, G), device=dev) for k in ("cx", "cz", "heading", "r", "front", "depth")}
     plan["line"] = torch.zeros((B, G), dtype=torch.bool, device=dev)
     placed = torch.zeros((B, G), dtype=torch.bool, device=dev)
     cell_m = float(c["cell_m"])
@@ -283,12 +283,12 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
         front, depth = SP.size(n[:, g].clamp(min=1), line)
         r = ZS.radius(front, depth)
         ok = ZS.cells_ok(ctx.cx, ctx.cz, ctx.mine, front, depth, heading)
-        ok = ok & ZS.apart(ctx.cx, ctx.cz, r, plan["cx"], plan["cz"], plan["r"], placed)
+        ok = ok & ZS.apart(ctx.cx, ctx.cz, front, depth, heading, plan, placed)
         none = ~ok.any(1) & a
         no_cell = no_cell + none.long()
         ok = ok | ~ok.any(1, keepdim=True)
-        areas = {"x": plan["cx"], "z": plan["cz"], "b": plan["heading"], "front": plan["r"] * 2 ** 0.5,
-                 "depth": plan["r"] * 2 ** 0.5, "on": placed}
+        areas = {"x": plan["cx"], "z": plan["cz"], "b": plan["heading"], "front": plan["front"],
+                 "depth": plan["depth"], "on": placed}
         lay = W.area_layer(areas, ctx.axes.cx, ctx.axes.cz, ctx.axes.heading, cellv, C)
         extra = lay[:, None]
         lw = heads.where(h, enc["map"], extra)
@@ -309,7 +309,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
         for name, v in (("form", fo), ("turn", tr), ("cell", cl)):
             out[name][:, g] = torch.where(a, v, out[name][:, g])
         zx, zz = ctx.cx.gather(1, cl[:, None])[:, 0], ctx.cz.gather(1, cl[:, None])[:, 0]
-        for k, v in (("cx", zx), ("cz", zz), ("heading", heading), ("r", r)):
+        for k, v in (("cx", zx), ("cz", zz), ("heading", heading), ("r", r), ("front", front), ("depth", depth)):
             plan[k][:, g] = torch.where(a, v, plan[k][:, g])
         plan["line"][:, g] = a & line
         placed[:, g] = a

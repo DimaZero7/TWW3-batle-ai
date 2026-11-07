@@ -48,7 +48,7 @@ def table(pre, rd, rs, out):
             row["lost_at_contact"] = _m(rd["lost_contact"], att)
         t[case] = row
     for k in ("deploy_errors", "deploy_error_battles", "parcels", "parcel_errors", "errors", "op_reforms_per_battle",
-              "trade", "tactic_fell"):
+              "trade", "tactic_fell", "tactic_fell_share"):
         t[k] = rs[k]
     return t
 
@@ -70,7 +70,7 @@ def run(unit_net, P=None, device="cpu", net=None, mode="formula", greedy=False, 
     rd, rs = BT.play(pre, out, inp, unit_net, op_net=op_net, op_mode=op_mode, tactic_net=tactic_net)
     t = table(pre, rd, rs, out)
     t["who"] = who or (("network" + (" greedy" if greedy else "")) if net is not None else mode)
-    t["operative"] = "run5 network" if op_net is not None else "formula"
+    t["operative"] = cfg()["operative_ckpt"] if op_net is not None else "formula"
     t["tactician"] = "run4 network" if tactic_net is not None else "formula"
     t["armies"] = "arena 7 v 7" if arena else "random 3-8 with a lord"
     own_n = pre.own.sum(1).float()
@@ -98,15 +98,19 @@ def main(argv=None):
     from tools.nn.tactic import train as TT
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default=None)
-    ap.add_argument("--mode", default="formula", help="comma-separated: the formula and the plain strategies")
+    ap.add_argument("--mode", default=None, help="comma-separated: the formula and the plain strategies (no --ckpt and "
+                                                 "no --mode: config default)")
     ap.add_argument("--greedy", action="store_true")
-    ap.add_argument("--op", default=None, help="the operative: net (run5) or formula (default: config operative)")
+    ap.add_argument("--op", default=None, help="the operative: net (config operative_ckpt) or formula (default: config operative)")
     ap.add_argument("--tactic-net", action="store_true")
     ap.add_argument("--battles", type=int, default=None)
     ap.add_argument("--arena", action="store_true", help="both armies the arena's (7 v 7 Empire with a lord)")
+    ap.add_argument("--drill-cap", type=int, default=None, help="override config teacher.drill_cap (0 / 1)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=None, help="a json path; with several modes <out>_<mode>.json")
     a = ap.parse_args(argv)
+    if a.drill_cap is not None:
+        cfg()["teacher"]["drill_cap"] = bool(a.drill_cap)
     P = load()
     unit_net = TT.unit_network(a.device)
     op_net = operative_net(a.device) if (a.op or cfg()["operative"]) == "net" else None
@@ -114,6 +118,10 @@ def main(argv=None):
     if a.tactic_net:
         tnet, _, _ = TT.restore(str(project.ROOT / cfg()["tactic_ckpt"]), a.device)
         tnet.eval()
+    if a.ckpt is None and a.mode is None:
+        from tools.nn.strategist import default
+        who = default()
+        a.ckpt, a.mode = (None, "formula") if who == "formula" else (who, None)
     if a.ckpt:
         from tools.nn.strategist import train as ST
         net, _, _ = ST.restore(a.ckpt, a.device)

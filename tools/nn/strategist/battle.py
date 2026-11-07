@@ -1,7 +1,7 @@
 """The strategist's battle in the simulator (plan.md "Передача оперативнику"): the strategist's one decision -> every
 unit's place (deploy.py) -> the built state -> the groups as the operative's last groups -> second 0: the tacticians get
 the strategist's parcels (each through tactic/parcel.check), the operative its first decision; then the operative every
-15 s (its network run5 by default, or its formula), the tacticians every 5 s (the formula, or a TacticNet), the frozen
+15 s (its formula, or its network: config operative_ckpt), the tacticians every 5 s (the formula, or a TacticNet), the frozen
 unit network every second - the operative's own loop (operative/env.play) without its PPO bookkeeping.
 
     decide(pre, net=None, mode='formula', greedy=False)   (out, inp, ctx): the strategist's choice (net.choose)
@@ -272,7 +272,8 @@ def play(pre, out, inp, unit_net, op_net=None, op_mode="formula", tactic_net=Non
     lost = (m0[:, 0, 0] - m1[:, 0, 0]).clamp(min=0)
     stats.update({"battles": B, "seconds": sec, "s": round(time.time() - t0, 1), "trade": round(float(trade.mean()), 4),
                   "op_reforms_per_battle": round(stats["op_reforms"] / B, 3),
-                  "groups_start": round(float(groups_start(out).mean()), 3), "tactic_fell": tac.fell})
+                  "groups_start": round(float(groups_start(out).mean()), 3), "tactic_fell": tac.fell,
+                  "tactic_fell_share": round(tac.fell / max(tac.ticks, 1), 4)})
     readings = {"contact": rd.contact, "between": rd.watch.between, "hit": rd.watch.hit, "t3": rd.t3, "hit3": rd.hit3,
                 "flank3": rd.flank3, "t_contact": rd.watch.t_contact, "lost_contact": rd.lost_c,
                 "has3": rd.has3, "advanced": rd.advanced, "lost": lost, "trade": trade, "why": ender.why,

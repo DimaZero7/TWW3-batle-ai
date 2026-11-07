@@ -1,7 +1,7 @@
 """The strategist: the blind operative before the battle (build/diag_strategist/plan.md). Once, at the deployment, it
 cuts my army into groups, sets each group's zone in my deployment zone (a cell, a turn, a form) and gives the operative
 its starting command (verb + pace). It sees my army, the enemy's composition (as the pre-battle screen), the map and both
-deployment zones - never where the enemy stands. Under it the operative (run5 by default), the tactician's formula and
+deployment zones - never where the enemy stands. Under it the operative (its formula by default, config operative; its network for the chain), the tactician's formula and
 the frozen unit network.
 
     zones.py    the deployment zones (turned rectangles), the strategist's axes, the cells' bans
@@ -27,6 +27,12 @@ def _strip(d):
     if isinstance(d, dict):
         return {k: _strip(v) for k, v in d.items() if not k.startswith("_")}
     return d
+
+
+def default():
+    """The strategist by default (config default): 'formula' or the absolute path of a checkpoint."""
+    who = str(cfg()["default"])
+    return who if who == "formula" else str(project.ROOT / who)
 
 
 @lru_cache(maxsize=1)

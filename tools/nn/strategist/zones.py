@@ -8,7 +8,8 @@ build/maps/*/meta.json deployment_zones: x, z, width, depth, bearing_deg - of_me
                                       nearest the bearing from my zone's centre to the enemy zone's - no unit's place
     cells_ok(axes, zone, front, depth, heading)   [B, C*C] bool: a group's zone front x depth turned heading centred
                                       on the cell lies wholly inside my deployment zone
-    apart(cx, cz, r, px, pz, pr, on)  [B, C*C] bool: a circle of radius r at the cells clear of the placed ones
+    apart(cx, cz, front, depth, heading, placed, on)   [B, C*C] bool: a group's zone at the cells overlaps no zone
+                                      placed already (turned rectangles, separating axes; touching is no overlap)
 """
 import torch
 
@@ -57,12 +58,19 @@ def radius(front, depth):
     return 0.5 * torch.sqrt(front * front + depth * depth)
 
 
-def apart(cx, cz, r, px, pz, pr, on):
-    """cx, cz [B, M]; r [B]; px, pz, pr, on [B, G] the zones placed so far."""
+def apart(cx, cz, front, depth, heading, placed, on):
+    """cx, cz [B, M] the cells; front, depth, heading [B] the zone wanted; placed {cx, cz, front, depth, heading} [B, G]
+    the zones placed so far, on [B, G] which. Each zone grown by zone_gap_m / 2 a side."""
+    from tools.nn.strategist import deploy as DP
+    if not bool(on.any()):
+        return torch.ones_like(cx, dtype=torch.bool)
     gap = float(cfg()["zone_gap_m"])
-    d2 = (cx[:, :, None] - px[:, None, :]) ** 2 + (cz[:, :, None] - pz[:, None, :]) ** 2
-    need = (r[:, None, None] + pr[:, None, :] + gap) ** 2
-    return ~((d2 < need - 1e-3) & on[:, None, :]).any(2)
+    B, M = cx.shape
+    ex = lambda v: v[:, None].expand(B, M)                                       # noqa: E731
+    ca = DP.corners(cx, cz, ex(heading), ex(front) + gap, ex(depth) + gap)        # [B, M, 4, 2]
+    cb = DP.corners(placed["cx"], placed["cz"], placed["heading"], placed["front"] + gap, placed["depth"] + gap)
+    hit = DP._overlap(ca[:, :, None], cb[:, None])                              # [B, M, G]
+    return ~(hit & on[:, None, :]).any(2)
 
 
 def local(zone, x, z):
