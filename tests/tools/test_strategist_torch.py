@@ -51,19 +51,30 @@ def test_an_enemy_row_keeps_only_the_composition():
     assert bool((rows[:, :69] != 0).any())                                  # the passport stays
 
 
+def test_the_cases_give_both_sides_a_lord_and_3_to_8_units():
+    sp = CS.exam_specs(n=24, seed=5)
+    pre = CS.Pre(sp, P, "cpu")
+    u = pre.st0.u
+    for b in range(len(sp)):
+        for side in (1, 2):
+            on = u["side"][b] == side
+            assert 3 <= int(on.sum()) <= 8
+            assert int((u["lord"][b] & on).sum()) == 1
+        assert bool(((u["range"][b] > 0) & (u["side"][b] == 2)).any())       # the enemy has shooters
+    arena = CS.exam_specs(n=4, arena=True)
+    assert all(len(s["mine"]) == 7 and len(s["foes"]) == 7 for s in arena)
+
+
 def test_the_formula_groups_places_and_commands():
+    import math
     pre = pre_of(8)
     out, inp, ctx = BT.decide(pre)
     pl = out["plan"]
-    wide = pre.case == CS.CASES.index("wide")
-    assert bool((pl["on"].sum(1)[wide] == 2).all()) and bool((pl["on"].sum(1)[~wide] == 1).all())
+    n_own = inp["own"].sum(1)
+    want = torch.tensor([math.ceil(int(k) / 4) for k in n_own])
+    assert bool((pl["on"].sum(1) == want).all())
     assert bool((pl["no_cell"] == 0).all())
-    # every group: 2 infantry + 1 shooters
-    sh = inp["shooter"]
-    for g in range(2):
-        m = pl["members"][:, g]
-        on = pl["on"][:, g]
-        assert bool(((m & sh).sum(1)[on] == 1).all()) and bool(((m & ~sh).sum(1)[on] == 2).all())
+    assert bool((pl["members"].sum(1)[inp["own"]] == 1).all())                # every unit in one group
     destroy = pl["verb"] == DC.VERBS.index("destroy")
     assert bool((destroy == pre.destroy).all())
     st, g0, places, mem = BT.placed(pre, out, inp)
@@ -76,8 +87,7 @@ def test_the_formula_groups_places_and_commands():
     # 'hold' at the back, 'attack' at the front of my zone
     from tools.nn.strategist import zones as ZS
     _, f = ZS.local(pre.mine_zone, pl["cx"], pl["cz"])
-    go = ~wide
-    assert bool((f[:, 0][go & pre.destroy] > 0).all()) and bool((f[:, 0][go & ~pre.destroy] < 0).all())
+    assert bool((f[:, 0][pre.destroy] > 0).all()) and bool((f[:, 0][~pre.destroy] < 0).all())
 
 
 def test_the_plain_strategies_differ():

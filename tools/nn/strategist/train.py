@@ -148,6 +148,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-exam", action="store_true")
     ap.add_argument("--no-lock", action="store_true")
+    ap.add_argument("--op", default=None, help="the operative under: net (run5) or formula (default: config operative)")
     a = ap.parse_args(argv)
     torch.manual_seed(a.seed)
     P = load()
@@ -160,13 +161,14 @@ def main(argv=None):
     params = [p for p in net.parameters() if p.requires_grad] + [p for p in critic.parameters() if p.requires_grad]
     opt = torch.optim.Adam(params, lr=float(tc["lr"]))
     unit_net = TT.unit_network(dev)
-    op_net = EX.operative_net(dev)
+    op_net = EX.operative_net(dev) if (a.op or cfg()["operative"]) == "net" else None
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     gen = torch.Generator().manual_seed(a.seed + 1000 * done + 31)
     print(json.dumps({"weights": NN.report(net), "critic": sum(p.numel() for p in critic.parameters()),
                       "battles": a.battles, "device": dev}), flush=True)
     start = time.time()
+    first = done                       # the teacher's weight falls from this run's first update (a run from --init too)
     with TT.lock(dev, f"strategist {out.name}") if not a.no_lock else contextlib.nullcontext():
         with (out / "log.jsonl").open("a", encoding="utf-8") as logf:
             if a.imitate > 0:
@@ -188,7 +190,7 @@ def main(argv=None):
                 rw = cfg()["reward"]
                 ret = float(rw["measure"]) * meas + float(rw["trade"]) * rd["trade"]
                 t1 = time.time()
-                us = update(net, critic, opt, inp, ctx, o["act"], o["lp"].detach(), ret, tc, TC.weight_at(done))
+                us = update(net, critic, opt, inp, ctx, o["act"], o["lp"].detach(), ret, tc, TC.weight_at(done - first))
                 t2 = time.time()
                 done += 1
                 by = {cs: round(float(m[cs][pre.case == i].mean()), 3) for i, cs in enumerate(CS.CASES)

@@ -1,5 +1,5 @@
-"""The strategist's exam (plan.md "Обучение"): the fixed battles cases.exam_specs() (128 a case: wide, attack, hold), no
-teacher. The measure of each case (battle.measures); the yardstick - the same battles under the
+"""The strategist's exam (plan.md "Обучение"): the fixed battles cases.exam_specs() (config exam.cases: 192 attack + 192 hold,
+random armies 3-8 with a lord; --arena: both armies the arena's, 7 with a lord), no teacher. The measure of each case (battle.measures); the yardstick - the same battles under the
 formula; the plain strategies (teacher.MODES) show the measure tells the right from the wrong. The safeguards: the
 deployment's errors (deploy.errors + no open cell), the parcels' errors at second 0 and after, the operative's re-forms.
 
@@ -31,6 +31,8 @@ def table(pre, rd, rs, out):
     destroy = out["plan"]["verb"] == 0
     for i, case in enumerate(CS.CASES):
         sel = pre.case == i
+        if not bool(sel.any()):
+            continue
         row = {"n": int(sel.sum()), "measure": _m(m[case], sel), "contact": _m(rd["contact"], sel),
                "trade": _m(rd["trade"], sel), "groups": _m(groups, sel), "said_destroy": _m(destroy, sel)}
         if case == "wide":
@@ -52,9 +54,9 @@ def table(pre, rd, rs, out):
 
 
 def run(unit_net, P=None, device="cpu", net=None, mode="formula", greedy=False, n=None, seed=None, out_path=None,
-        who=None, op_net=None, op_mode="formula", tactic_net=None):
+        who=None, op_net=None, op_mode="formula", tactic_net=None, arena=False):
     P = P or load()
-    sp = CS.exam_specs(n=n, seed=seed)
+    sp = CS.exam_specs(n=n, seed=seed, arena=arena)
     torch.manual_seed(int(cfg()["exam"]["seed"]))
     t0 = time.time()
     pre = CS.Pre(sp, P, device)
@@ -70,6 +72,11 @@ def run(unit_net, P=None, device="cpu", net=None, mode="formula", greedy=False, 
     t["who"] = who or (("network" + (" greedy" if greedy else "")) if net is not None else mode)
     t["operative"] = "run5 network" if op_net is not None else "formula"
     t["tactician"] = "run4 network" if tactic_net is not None else "formula"
+    t["armies"] = "arena 7 v 7" if arena else "random 3-8 with a lord"
+    own_n = pre.own.sum(1).float()
+    t["own_units"] = round(float(own_n.mean()), 2)
+    t["groups_by_size"] = {int(k): _m(out["plan"]["on"].sum(1).float(), own_n == k) for k in own_n.unique().tolist()}
+    t["measure_by_size"] = {int(k): _m(BT.measure_of(pre, rd), own_n == k) for k in own_n.unique().tolist()}
     t["seconds"] = round(time.time() - t0, 1)
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -93,15 +100,16 @@ def main(argv=None):
     ap.add_argument("--ckpt", default=None)
     ap.add_argument("--mode", default="formula", help="comma-separated: the formula and the plain strategies")
     ap.add_argument("--greedy", action="store_true")
-    ap.add_argument("--op", default="net", help="the operative: net (run5) or formula")
+    ap.add_argument("--op", default=None, help="the operative: net (run5) or formula (default: config operative)")
     ap.add_argument("--tactic-net", action="store_true")
     ap.add_argument("--battles", type=int, default=None)
+    ap.add_argument("--arena", action="store_true", help="both armies the arena's (7 v 7 Empire with a lord)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=None, help="a json path; with several modes <out>_<mode>.json")
     a = ap.parse_args(argv)
     P = load()
     unit_net = TT.unit_network(a.device)
-    op_net = operative_net(a.device) if a.op == "net" else None
+    op_net = operative_net(a.device) if (a.op or cfg()["operative"]) == "net" else None
     tnet = None
     if a.tactic_net:
         tnet, _, _ = TT.restore(str(project.ROOT / cfg()["tactic_ckpt"]), a.device)
@@ -110,11 +118,12 @@ def main(argv=None):
         from tools.nn.strategist import train as ST
         net, _, _ = ST.restore(a.ckpt, a.device)
         return run(unit_net, P, a.device, net, greedy=a.greedy, n=a.battles, out_path=a.out, op_net=op_net,
-                   tactic_net=tnet)
+                   tactic_net=tnet, arena=a.arena)
     modes = a.mode.split(",")
     for mode in modes:
         path = a.out if (a.out is None or len(modes) == 1) else a.out.replace(".json", f"_{mode}.json")
-        run(unit_net, P, a.device, None, mode, n=a.battles, out_path=path, op_net=op_net, tactic_net=tnet)
+        run(unit_net, P, a.device, None, mode, n=a.battles, out_path=path, op_net=op_net, tactic_net=tnet,
+            arena=a.arena)
 
 
 if __name__ == "__main__":

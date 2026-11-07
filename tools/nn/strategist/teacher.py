@@ -1,8 +1,8 @@
 """The strategist's formula (plan.md "Формула стратега"), the plain strategies the exam compares with, the teacher's term.
 
-The formula, by code, from the strategist's own input only (the composition, the task, the zones): k groups = min(ceil
-(enemies / per_group), floor(mine / per_group)), 1 to 6; the infantry and the shooters dealt to the groups in turn (by
-slot); the groups left to right, their centres (i + 1/2 - k/2) x my zone's width x spread / k aside (two groups: +-1/3 of the width); the task 'hold' - the
+The formula, by code, from the strategist's own input only (the composition, the task, the zones): k groups = ceil(mine / per_group), 1 to
+6; the melee units (the lord too) and the shooters dealt to the groups in turn (by slot); the groups side by side, left
+to right, their centres pitch_m apart around my zone's middle (one clump for the operative); the task 'hold' - the
 group's zone at my zone's back edge, 'attack' - at its front edge (edge_m inside); a square, sector 0 (facing the enemy's
 zone); the operative's verb = the task ('destroy' / 'hold'), the pace 'any'. The cell: the open one nearest the wanted
 point (the walk with the formula's wishes as logits, greedy - so the bans are the network's own).
@@ -36,9 +36,8 @@ def wishes(inp, ctx, mode="formula"):
     elif mode == "attack":
         destroy = torch.ones_like(destroy)
     per = int(tc["per_group"])
-    n_own, n_en = own.sum(1), enemy.sum(1)
-    k = torch.minimum(torch.div(n_en + per - 1, per, rounding_mode="floor"), torch.div(n_own, per, rounding_mode="floor"))
-    k = k.clamp(1, G)
+    n_own = own.sum(1)
+    k = torch.div(n_own + per - 1, per, rounding_mode="floor").clamp(1, G)
     if mode == "blob":
         k = torch.ones_like(k)
     # the deal: the i-th infantry (the i-th shooter) of my rows, by slot, to the group i mod k
@@ -55,10 +54,10 @@ def wishes(inp, ctx, mode="formula"):
     # the wanted points, in my zone's axes
     n = (F_one(g, G) * own[..., None].float()).sum(1)                   # [B, G]
     _, depth = SP.size(n.long().clamp(min=1), torch.zeros((B, G), dtype=torch.bool, device=dev))
-    Wz, Dz = ctx.mine["front"][:, None], ctx.mine["depth"][:, None]
+    Dz = ctx.mine["depth"][:, None]
     gi = torch.arange(G, device=dev)[None].float()
     kk = k[:, None].float()
-    s = (gi + 0.5 - kk / 2) * float(tc["spread"]) * Wz / kk
+    s = (gi + 0.5 - kk / 2) * float(tc["pitch_m"])
     edge = float(tc["edge_m"])
     front = (destroy[:, None] | torch.full_like(destroy[:, None], mode == "front")) & (mode != "back")
     f = torch.where(front, Dz / 2 - depth / 2 - edge, -Dz / 2 + depth / 2 + edge)

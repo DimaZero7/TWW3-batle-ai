@@ -5,10 +5,15 @@ and played by a script of the simulator.
 
     wide  mine 2 x (2 infantry + 1 shooters); the enemy two threes of infantry at its zone's front edge, +-(340-460) m
           aside, walking at the nearest. The task 'hold'. Right: two groups, one facing each three
-    attack, hold   mine 2 infantry + 1 shooters; the enemy's shooters at its front edge (up to +-50 m aside), its 2
-          infantry 40 m behind; they stand and shoot (config cases.go). The task 'attack' / 'hold'. Right: 'attack' -
-          the command 'destroy' (from the front edge); 'hold' - the command 'hold' at the back edge, out of reach
-    wide  is no exam safeguard: the blob does as well (build/diag_strategist/formula_check.md)
+    attack, hold   random armies (config cases.army): each side a lord (its faction's, config lords) + 2-7 units of the
+          roster, my shooters 0 to half, the enemy's at least one; the enemy's shooters in a line at its front edge (up
+          to +-50 m aside), its infantry 40 m behind, its lord 40 m behind them; they stand and shoot. The task 'attack'
+          / 'hold'. Right: 'attack' - the command 'destroy' (from the front edge); 'hold' - the command 'hold' at the back
+          edge, out of reach. arena=True: both armies the arena's (config/nn/arena.json: Empire, a lord, 4 spearmen, 2
+          archers), the zones the same as the cases' (the arena's deploy_zone)
+    wide  (no lord; out of the training and the exam: the blob does as well - build/diag_strategist/formula_check.md)
+
+A lord is listed first (the scenario puts a side's general in its first slot).
 
 specs(n, gen, fixed) -> dicts; Pre(sp, P, device): the state before the deployment (my units anywhere: the input is
 blind to it), the zones, the task, the enemy's threes; army(s, mine) -> the scenario description with my places.
@@ -26,10 +31,26 @@ from tools.nn.tactic.decide import order_vec
 from tools.nn.unit import drill_hold as DH
 
 CASES = ("wide", "attack", "hold")
-H = 6
+H = 8
 
 
-def specs(n, gen, fixed=None, cases=CASES):
+def _arena_side():
+    import json
+    from tools import config as project
+    a = json.loads((project.ROOT / "config" / "nn" / "arena.json").read_text(encoding="utf-8"))
+    units = sorted(a["units"], key=lambda u: not u.get("general"))
+    return [u["key"] for u in units]
+
+
+def _army(gen, keys, lord, n, shooters):
+    """[lord, infantry..., shooters...]: n units in all, shooters of them (keys: the roster of a faction)."""
+    ri = lambda m: int(torch.randint(m, (1,), generator=gen))                    # noqa: E731
+    pick = lambda names: names[ri(len(names))]                                   # noqa: E731
+    return [lord] + [pick(keys["infantry"]) for _ in range(n - 1 - shooters)] +         [pick(keys["shooters"]) for _ in range(shooters)]
+
+
+def specs(n, gen, fixed=None, cases=None, arena=False):
+    cases = tuple(cases or cfg()["train"]["cases"])
     out = []
     u = lambda a, b: a + (b - a) * float(torch.rand(1, generator=gen))         # noqa: E731
     ri = lambda m: int(torch.randint(m, (1,), generator=gen))                    # noqa: E731
@@ -50,20 +71,28 @@ def specs(n, gen, fixed=None, cases=CASES):
             s["side"] = [u(*c["wide"]["side_m"]), u(*c["wide"]["side_m"])]
             s["foes"] = [pick(roster[theirs]["infantry"]) for _ in range(6)]
             s["task"] = "hold"
-        else:
-            s["mine"] = clump()
+        else:                                                                   # attack / hold: the same field
             s["side"] = [u(-float(c["go"]["side_m"]), float(c["go"]["side_m"]))]
-            s["foes"] = [pick(roster[theirs]["shooters"]), pick(roster[theirs]["infantry"]),
-                         pick(roster[theirs]["infantry"])]
             s["task"] = "destroy" if case == "attack" else "hold"
+            if arena:
+                s["ours"] = s["theirs"] = "emp"
+                s["mine"] = _arena_side()
+                s["foes"] = _arena_side()
+            else:
+                lo, hi = (int(v) for v in c["army"]["units"])
+                lords = c["army"]["lords"]
+                nm, ne = lo + ri(hi - lo + 1), lo + ri(hi - lo + 1)
+                s["mine"] = _army(gen, roster[ours], lords[ours], nm, ri((nm - 1) // 2 + 1))
+                s["foes"] = _army(gen, roster[theirs], lords[theirs], ne, 1 + ri(max((ne - 1) // 2, 1)))
         out.append(s)
     return out
 
 
-def exam_specs(n=None, seed=None):
+def exam_specs(n=None, seed=None, arena=False):
     c = cfg()["exam"]
     return specs(int(c["battles"] if n is None else n),
-                 torch.Generator().manual_seed(int(c["seed"] if seed is None else seed)), fixed=True)
+                 torch.Generator().manual_seed(int(c["seed"] if seed is None else seed)), fixed=True,
+                 cases=tuple(c["cases"]), arena=arena)
 
 
 def zones_local():
@@ -89,13 +118,22 @@ def foes_local(s):
                 out.append((s["foes"][3 * t + i], cx + (i - 1) * gap, z, 180.0))
                 three.append(t)
     else:
+        from tools.nn.sim.params import load
         g = c["go"]
         z = z0 + float(g["edge_m"])
-        x = s["side"][0]
-        gap = float(tcfg()["drill1"]["foe_gap_m"]) / 2
-        out += [(s["foes"][0], x, z, 180.0), (s["foes"][1], x - gap, z + float(g["behind_m"]), 180.0),
-                (s["foes"][2], x + gap, z + float(g["behind_m"]), 180.0)]
-        three += [0, 0, 0]
+        x0 = s["side"][0]
+        gap = float(tcfg()["drill1"]["foe_gap_m"])
+        P = load()
+        fac = DH.FACTIONS[s["theirs"]]
+        lord, rest = s["foes"][0], s["foes"][1:]
+        sh = [k for k in rest if float(P.static(k, fac)["range"]) > 0]
+        inf = [k for k in rest if float(P.static(k, fac)["range"]) <= 0]
+        back = float(g["behind_m"])
+        out.append((lord, x0, z + (2 * back if inf else back), 180.0))
+        for row, (keys, dz) in enumerate(((sh, 0.0), (inf, back))):
+            for i, key in enumerate(keys):
+                out.append((key, x0 + (i - (len(keys) - 1) / 2) * gap, z + dz, 180.0))
+        three += [0] * len(out)
     return out, three
 
 
@@ -117,6 +155,8 @@ def army(s, mine=None):
     foes, _ = foes_local(s)
     side2 = [{"key": key, **dict(zip(("x", "z", "b"), turn(x, z, b, s)))} for key, x, z, b in foes]
     side1 = [{"key": key, **p} for key, p in zip(s["mine"], mine)]
+    if s["case"] != "wide":                     # the lord: listed first, the scenario's general (its auras, its slot)
+        side1[0]["general"] = side2[0]["general"] = True
     return {"attacker": 2, "sides": {1: {"faction": DH.FACTIONS[s["ours"]], "units": side1},
                                      2: {"faction": DH.FACTIONS[s["theirs"]], "units": side2}}}
 
