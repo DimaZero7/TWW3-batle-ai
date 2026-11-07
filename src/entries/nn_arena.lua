@@ -50,6 +50,8 @@
 -- strategist places our side (apps.bridge.deploy_adapter: the deployment document, its plan, the teleports, the places
 -- read back - events nn_deploy, nn_deploy_check), then the phase ends; no plan within config.deploy_wait_s real seconds
 -- - as without it. Absent: the phase ends after 1 s (the battle file's places). The enemy stays where the file puts it.
+-- config.pause_probe = {at_s, real_ms, off_s} (tools.build nn-arena --pause-probe): the player's orders off and the battle
+-- paused at at_s for real_ms real ms, the orders back at at_s + off_s (apps.battle.pause_probe, events pause_probe).
 local battle = require('apps.battle.adapter')
 local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
@@ -61,6 +63,7 @@ local bridge = require('apps.bridge.adapter')
 local observer = require('apps.telemetry.observer_adapter')
 local orders = require('apps.orders.adapter')
 local deploy = require('apps.bridge.deploy_adapter')
+local pause_probe = require('apps.battle.pause_probe')
 
 local M = {}
 
@@ -274,6 +277,7 @@ function M.main(bm, config, globals)
         end
         if state.planner then lead(now) end
         if state.scripted then scripted_check(now) end
+        if state.pause_probe then state.pause_probe.tick() end
         if config.own_ai == 'attack' and now - last_reissue >= M.REISSUE_MS then
             last_reissue = now
             state.planner.attack()
@@ -487,6 +491,12 @@ function M.main(bm, config, globals)
             bm:force_battle_end(0, 'deadline', true)
         end), 'tww3_bai_nn_arena_deadline')
         state.active = true
+        if config.pause_probe then
+            -- the pause probe (apps.battle.pause_probe; build/diag_chain/part2.md)
+            state.pause_probe = pause_probe.start({bm = bm, cfg = config.pause_probe, speed = config.speed, emit = emit,
+                now_ms = function() return bm:time_elapsed_ms() - started_ms end, guard = guarded,
+                written = function() return state.net and state.net.written or 0 end})
+        end
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         if state.net or state.enemy_net then
             net_decide()

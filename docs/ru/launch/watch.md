@@ -46,10 +46,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 | `-Target nn-arena\|lord-duel\|human` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/`; `human` — [человек против сети](run.md#человек-против-сети): только с `-NoBuild`, помощник отвечает только стороне 2 (`--no-own`) |
 | `-Strategist formula\|<чекпойнт>` | нет | Сборка с `--deploy strategist`: помощник расставляет нашу сторону стратегом (`--strategist`); при `own_ai` не `net` помощник отвечает только на расстановку (`--no-own`) ([стратег, «В игре»](../training/strategist.md#в-игре)) |
 | `-StrategistTask hold\|destroy` | `hold` | Задача боя для стратега (уровня выше пока нет) |
+| `-Chain` | нет | Сборка с `--own-ai net --deploy strategist`: после расстановки нашей стороной командует цепочка оперативник → тактики → сеть отряда, а не старая сеть (помощник `--chain`; `-Checkpoint` не берётся) ([мост, «Цепочка»](../apps/bridge.md#цепочка-оперативник--тактики--сеть-отряда)) |
+| `-ChainOp net\|formula\|<чекпойнт>` | `net` | Оперативник цепочки: сеть `run8` (`config/nn/strategist.json` `operative_ckpt`), формула или путь к весам |
+| `-ChainTactic formula\|net\|<чекпойнт>` | `formula` | Тактики цепочки: формула (как в симуляторе), сеть `run4` или путь |
+| `-ChainGreedy` | нет | Все уровни цепочки берут лучший выбор (по умолчанию — по вероятностям, как цепочка симулятора) |
 | `-Container` | `tww3-bai-companion` | Имя контейнера помощника (`agent-<задача>` для агента) |
 | `-Graphics` | `BAI_GRAPHICS` | Набор графики на этот запуск (`launch.ps1 -Graphics`: `ultra`, `low`, `lowigpu`, `human2k`) |
 
 Быстрая проверка: `-Speed 20 -LingerSeconds 0`.
+
+Бой цепочки (стратег расставляет, цепочка ведёт), скорость ×10 — на ×20 три сети не успевают за секунду боя
+([мост, «Цепочка»](../apps/bridge.md#цепочка-оперативник--тактики--сеть-отряда)):
+
+```powershell
+python -m tools.build nn-arena --own-ai net --deploy strategist --speed 10 --timeout 300 --own-role defend
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1 -NoBuild -Strategist default -StrategistTask hold -Chain -Graphics low
+```
+
+В окне на каждое решение ещё строка `chain sec N: raw .. op .. tac .. unit .. ms, inside k/7` (время по уровням и
+сколько отрядов в своей области) и в секунду оперативника — `operative: g0 hold [...] -> [...] at (x, z)`.
 
 [Экзамен](gate.md#экзамен) (10 боёв) против `ai_like` вместо ИИ игры: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
 

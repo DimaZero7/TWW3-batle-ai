@@ -93,6 +93,7 @@ class Strategist:
         self.seer = SI.StrategistSeer(map_root, device, params, allow_flat)
         self.P, self.device, self.task, self.who = self.seer.P, device, task, who
         self.net = None
+        self.plans = {}          # {batch: the plan the chain starts from} (chain.groups_of_plan; companion --chain)
         if who != "formula":
             from tools.nn.strategist import train as ST
             self.net, _, _ = ST.restore(who, device)
@@ -116,6 +117,9 @@ class Strategist:
         pl = DP.places(mem, shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], width0)
         places = {names[i]: (float(pl["x"][0, i]), float(pl["z"][0, i]), float(pl["b"][0, i]), float(pl["width"][0, i]))
                   for i in range(N) if bool(own[0, i]) and bool(pl["on"][0, i])}
+        self.chain_plan = {"group": {names[i]: int(pl["group"][0, i]) for i in range(N) if bool(own[0, i])},
+                           **{k: plan[k][0].tolist() for k in ("on", "cx", "cz", "heading", "line", "n")},
+                           "verb": DC.VERBS[int(plan["verb"][0])], "pace": DC.PACES[int(plan["pace"][0])]}
         st, own_st, index = state_with(laid, places, self.P, self.device)
         member = torch.full(own_st.shape, -1, dtype=torch.long, device=self.device)
         for i in range(N):
@@ -150,6 +154,7 @@ class Strategist:
         inp, ctx, laid = self.seer.input(doc, command)
         out = self.choose(inp, ctx, self.net)
         places, errors, groups = self.places_of(doc, laid, inp, out)
+        self.plans[doc["batch"]] = self.chain_plan      # the groups the chain's operative starts from (strategist/battle)
         think_ms = (time.perf_counter() - t0) * 1000
         rows = [(n, *self.sent[n], p[2], p[3], p[0], p[1]) for n, p in places.items()]
         record = {"batch": doc["batch"], "who": "formula" if self.net is None else str(self.who), "task": self.task,

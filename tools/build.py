@@ -420,6 +420,11 @@ def nn_arena_config(args, run_config):
         # input reads are the battle file's (scenario.zones), the enemy's side stays where the battle file puts it
         run_config.update(deploy="strategist", deploy_zones={s: dict(z) for s, z in nn_scenario.zones(arena).items()},
                           deploy_wait_s=DEPLOY_WAIT_S, deploy_settle_ms=DEPLOY_SETTLE_MS)
+    if getattr(args, "pause_probe", None):
+        # the pause probe (build/diag_chain/part2.md): at at_s of battle the script disables the player's orders and
+        # pauses (speed 0) for real_ms real ms, then resumes; the orders stay disabled until at_s + off_s
+        at_s, real_ms, off_s = (float(v) for v in args.pause_probe.split(","))
+        run_config["pause_probe"] = {"at_s": at_s, "real_ms": real_ms, "off_s": off_s}
     if args.defend_radius is not None:
         run_config["defend_radius_m"] = args.defend_radius
     if args.own_ai != "human" and args.soldiers_every:
@@ -561,6 +566,10 @@ def main(argv=None):
                              "places, the phase ends after 1 s) or 'strategist' (the companion's strategist, "
                              "companion --strategist: its zones - the strategist's cases' - in the battle file; "
                              "docs/ru/training/strategist.md)")
+    parser.add_argument("--pause-probe", metavar="AT_S,REAL_MS,OFF_S", default=None,
+                        help="nn-arena: at AT_S of battle disable the player's orders (bm:disable_orders) and pause the "
+                             "battle (speed 0) for REAL_MS real ms, then resume; the orders back at AT_S + OFF_S "
+                             "(events pause_probe; build/diag_chain/part2.md)")
     parser.add_argument("--arena", default="arena",
                         help="nn-arena: 'arena' (config/nn/arena.json, the same army on both sides) "
                              "or a named arena in config/nn/arenas.json")

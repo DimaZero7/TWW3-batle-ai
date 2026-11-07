@@ -12,6 +12,9 @@
         [--strategist formula|<strategist checkpoint> --strategist-task hold|destroy]   (tools.build nn-arena --deploy
                                          strategist: the strategist answers the deployment document once a battle,
                                          tools/nn/companion/deploy.py; with --no-own it is the only one answered)
+        [--chain [--chain-op net|formula|<ckpt>] [--chain-tactic formula|net|<ckpt>] [--chain-greedy]]
+                                        (our side under the chain operative -> tacticians -> unit network, not the old
+                                         network: tools/nn/companion/chain.py; with --strategist its groups start it)
 
 One line per decision: move number, battle time, how long the network took, the orders.
 A new battle (a new batch in the state) starts the network's memory afresh (and a v2 network's commitment: its
@@ -249,8 +252,19 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
             out(f"{seat.label}move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
                 f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}{used}")
             plans = getattr(seat.owner, "plans", None) or []
+            if not isinstance(plans, list):
+                plans = []          # (the chain's plans are the strategist's, by batch: not the general's records)
             for p in plans:
                 out(f"{seat.label}{companion_general.describe(p)}")
+            chain = seat.owner.log_extra() if hasattr(seat.owner, "log_extra") else None
+            if chain is not None:
+                ms = chain["ms"]
+                out(f"{seat.label}  chain sec {chain['sec']}: raw {ms['raw_ms']:.0f} op {ms['op_ms']:.0f} "
+                    f"tac {ms['tac_ms']:.0f} unit {ms['unit_ms']:.0f} ms, inside {sum(chain['inside'].values())}"
+                    f"/{len(chain['inside'])}" + (f", leash {chain['leash']}" if chain.get("leash") else ""))
+                if chain.get("operative") is not None:
+                    from tools.nn.companion import chain as companion_chain
+                    out(f"{seat.label}  operative: {companion_chain.describe(chain['operative'])}")
             if seat.log:
                 with open(seat.log, "a", encoding="utf-8", newline="\n") as f:
                     row = {"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
@@ -261,6 +275,8 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                         row["shape_ms"] = round(shape_ms, 2)     # --shape: the shape features' cost
                     if plans:
                         row["general"] = plans                   # the general's plans made at this decision
+                    if chain is not None:
+                        row["chain"] = chain                     # --chain: the levels' ms, groups, areas, inside
                     f.write(json.dumps(row) + "\n")
         if exit_on_done and seats and all(seat.done for seat in seats[:1]):
             return
@@ -311,10 +327,28 @@ def main(argv=None):
                              "deployment document once a battle (tools/nn/companion/deploy.py)")
     parser.add_argument("--strategist-task", choices=("hold", "destroy"), default="hold",
                         help="the battle's task the strategist is given (no level above it yet)")
+    parser.add_argument("--chain", action="store_true",
+                        help="our side under the chain operative -> tacticians -> unit network (tools/nn/companion/"
+                             "chain.py), not the old network: the operative every 15 s, the tacticians every 5 s, the "
+                             "unit network every second, as the simulator's chain; with --strategist its groups start "
+                             "the battle; --checkpoint is not used")
+    parser.add_argument("--chain-op", default="net",
+                        help="the chain's operative: net (config/nn/strategist.json operative_ckpt, run8), formula, or "
+                             "an operative checkpoint")
+    parser.add_argument("--chain-tactic", default="formula",
+                        help="the chain's tacticians: formula (tactic/teacher.drive, the simulator's default), net "
+                             "(config/nn/strategist.json tactic_ckpt, run4) or a tactic checkpoint")
+    parser.add_argument("--chain-unit", default=None,
+                        help="the unit network's checkpoint (default config/nn/tactic.json train.unit_ckpt, mixmap/run2)")
+    parser.add_argument("--chain-greedy", action="store_true",
+                        help="every level of the chain takes its most likely choice (default: sampling, as the "
+                             "simulator's chain)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     torch.set_num_threads(args.threads)
+    if args.chain:
+        return main_chain(args)
     actor, what = companion_policy.load(args.checkpoint, args.seed)
     print(f"companion: {what}; {'greedy' if args.greedy else f'sampling, temperature {args.temperature}'}; "
           f"{args.threads} threads; watching {Path(args.game) / exchange.STATE}")
@@ -363,6 +397,57 @@ def main(argv=None):
             args.log,
             exit_on_done=args.exit_on_done,
             idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log, strategist=strategist)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def load_chain(op="net", tactic="formula", unit=None, greedy=False, plans=None, task="hold", device="cpu"):
+    """(Chain, description) of companion --chain (the nets frozen, evaluation only)."""
+    from tools import config as project
+    from tools.nn.companion.chain import Chain
+    from tools.nn.operative import train as OT
+    from tools.nn.strategist import cfg as scfg
+    from tools.nn.tactic import train as TT
+    root = project.ROOT
+    unit_net = TT.unit_network(device, unit)
+    op_net, op_what = None, "formula"
+    if op != "formula":
+        path = scfg()["operative_ckpt"] if op == "net" else op
+        op_net, _, _ = OT.restore(str(root / path), device)
+        op_net.eval()
+        op_what = path
+    tac_net, tac_what = None, "formula"
+    if tactic != "formula":
+        path = scfg()["tactic_ckpt"] if tactic == "net" else tactic
+        tac_net, _, _ = TT.restore(str(root / path), device)
+        tac_net.eval()
+        tac_what = path
+    from tools.nn.tactic import cfg as tcfg
+    chain = Chain(unit_net, op_net, tac_net, op_greedy=greedy, tactic_greedy=greedy, unit_greedy=greedy, plans=plans,
+                  task=task, device=device)
+    what = (f"operative {op_what}, tacticians {tac_what}, unit network {unit or tcfg()['train']['unit_ckpt']}, "
+            f"{'greedy' if greedy else 'sampling'}")
+    return chain, what
+
+
+def main_chain(args):
+    """companion --chain (load_chain): our side under the chain, the strategist's deployment if asked."""
+    strategist = None
+    if args.strategist:
+        from tools.nn.companion.deploy import Strategist
+        strategist = Strategist(args.strategist, args.strategist_task)
+        print(f"companion: the strategist ({args.strategist}, task {args.strategist_task}) answers "
+              f"{Path(args.game) / 'tww3_bai_nn_deploy.json'}")
+    chain, what = load_chain(args.chain_op, args.chain_tactic, args.chain_unit, args.chain_greedy,
+                             strategist.plans if strategist is not None else None, args.strategist_task)
+    print(f"companion: the chain commands our side: {what}; {args.threads} threads; watching "
+          f"{Path(args.game) / exchange.STATE}")
+    if args.log:
+        Path(args.log).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        run(args.game, chain, args.log, exit_on_done=args.exit_on_done, idle_exit_s=args.idle_exit,
+            strategist=strategist)
     except KeyboardInterrupt:
         pass
     return 0

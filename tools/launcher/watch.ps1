@@ -23,6 +23,10 @@
 #   ... -NoBuild -Strategist formula -StrategistTask hold   (a build with --deploy strategist: the companion's strategist
 #                                         places our side - its formula or a checkpoint; any own_ai: not net -> the
 #                                         companion answers only the deployment, --no-own; docs/ru/training/strategist.md)
+#   ... -NoBuild -Strategist default -StrategistTask hold -Chain   (a build with --own-ai net --deploy strategist: after
+#                                         the strategist's deployment the chain operative -> tacticians -> unit network
+#                                         commands our side, companion --chain; -ChainOp net|formula|<ckpt>,
+#                                         -ChainTactic formula|net|<ckpt>, -ChainGreedy; docs/ru/apps/bridge.md "Цепочка")
 #   ... -Container agent-deploy          (the companion container's name; default tww3-bai-companion)
 param(
     [ValidateSet('nn-arena', 'lord-duel', 'human')][string]$Target = 'nn-arena',
@@ -39,6 +43,10 @@ param(
     [ValidateSet('', 'ultra', 'low', 'lowigpu', 'human2k')][string]$Graphics = '',
     [string]$Strategist = '',
     [ValidateSet('hold', 'destroy')][string]$StrategistTask = 'hold',
+    [switch]$Chain,
+    [string]$ChainOp = 'net',
+    [string]$ChainTactic = 'formula',
+    [switch]$ChainGreedy,
     [string]$Container = 'tww3-bai-companion',
     [switch]$NoBuild
 )
@@ -81,6 +89,8 @@ $human = $Target -eq 'human'
 if ($human) {
     if ($manifest.config.own_ai -ne 'human' -or $manifest.config.enemy_ai -ne 'companion') { throw "build/human has no enemy under the companion: python -m tools.build human --enemy-ai net ..." }
 } elseif ($manifest.config.own_ai -ne 'net' -and -not $Strategist) { throw "build/$Target is not a net build; run without -NoBuild" }
+if ($Chain -and $manifest.config.own_ai -ne 'net') { throw "-Chain needs a build with --own-ai net (the companion commands our side)" }
+if ($Chain -and $Checkpoint) { throw "-Chain takes no -Checkpoint (its nets: -ChainOp, -ChainTactic, the unit network of config/nn/tactic.json)" }
 if ($Strategist -and $manifest.config.deploy -ne 'strategist') { throw "build/$Target has no strategist deployment: python -m tools.build nn-arena --deploy strategist ..." }
 if ($Strategist -and $Strategist -notin @('formula', 'default') -and -not (Test-Path -LiteralPath (Join-Path $repo $Strategist))) { throw "No strategist checkpoint $Strategist (a path inside the repository)" }
 $enemyScript = ''
@@ -102,6 +112,11 @@ $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${gam
     "-e PYTHONUNBUFFERED=1 snake-ai-trainer python -m tools.nn.companion --game /game --log /repo/$logRel"
 if ($Checkpoint) { $dockerArgs += ' --checkpoint /repo/' + ($Checkpoint -replace '\\', '/') }
 if ($Greedy) { $dockerArgs += ' --greedy' }
+if ($Chain) {
+    $dockerArgs += ' --chain --chain-op ' + ($ChainOp -replace '\\', '/') + ' --chain-tactic ' + ($ChainTactic -replace '\\', '/')
+    if ($ChainGreedy) { $dockerArgs += ' --chain-greedy' }
+    Write-Output ("Our side: the chain (operative {0}, tacticians {1}) in the companion" -f $ChainOp, $ChainTactic)
+}
 if ($manifest.config.soldiers_state) { $dockerArgs += ' --shape' }   # the soldiers' places come: the shape features
 if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
 if ($EnemyCheckpoint) { $dockerArgs += ' --enemy-checkpoint /repo/' + ($EnemyCheckpoint -replace '\\', '/') }
