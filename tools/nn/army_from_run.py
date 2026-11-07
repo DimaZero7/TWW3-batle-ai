@@ -52,10 +52,33 @@ def _men_of_run(run_dir):
     return {}
 
 
-def load(run_dir, swap=False, pools=None, base=None):
+def _men_of_units(key):
+    """The men of a key by config/nn/units.json (the game's database at the unit size of the project's runs); 0 unknown."""
+    f = Path(__file__).resolve().parents[2] / "config" / "nn" / "units.json"
+    try:
+        return int(json.loads(f.read_text(encoding="utf-8"))["units"][key]["men"])
+    except (OSError, KeyError, ValueError, TypeError):
+        return 0
+
+
+def _slot_of(key, taken):
+    """A slot name for a new key: its key's last two words and the first free number ('long_rifles_1')."""
+    stem = "_".join(key.split("_")[-2:])
+    stem = stem[:-2] if stem.endswith("_0") else stem
+    n = 1
+    while f"{stem}_{n}" in taken:
+        n += 1
+    return f"{stem}_{n}"
+
+
+def load(run_dir, swap=False, pools=None, base=None, replace=None):
     """(arena, army): the arena dict tools/nn/scenario.py takes, rebuilt from the run's manifest, and the
     run_config "army" entry (the old run's, plus "from_run"). swap: the sides exchanged, as --army-swap does
-    with the generator's (the network takes the other army); "army.swap" is then the old one flipped."""
+    with the generator's (the network takes the other army); "army.swap" is then the old one flipped.
+    replace {old key: new key}: every unit of old key becomes one of new key on the same place, width and side - its men
+    the pool's (else config/nn/units.json, the game's database), its slot new_key's name ('<last words>_<n>'); the
+    run's men total is then not checked (army.replaced lists the change)."""
+    replace = dict(replace or {})
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     cfg = manifest.get("config") or {}
@@ -69,7 +92,10 @@ def load(run_dir, swap=False, pools=None, base=None):
     for side in SIDES:
         units = []
         for u in cfg["units"][side]:
-            n = men.get(u["key"]) or run_men.get(u["script_name"])
+            if u["key"] in replace:
+                u = dict(u, key=replace[u["key"]], script_name=None,
+                         slot=_slot_of(replace[u["key"]], [x["slot"] for x in units] + [x["slot"] for x in cfg["units"][side]]))
+            n = men.get(u["key"]) or run_men.get(u["script_name"]) or _men_of_units(u["key"])
             if not n:
                 raise ValueError(f"{run_dir}: {side} unit {u['key']} is in no faction pool (config/nn/pools.json) "
                                  f"and not in the run's first state")
@@ -81,7 +107,7 @@ def load(run_dir, swap=False, pools=None, base=None):
             units.append(row)
         old = cfg.get("army") or {}
         want = (old.get("men") or {}).get(side)
-        if want is not None and sum(u["men"] for u in units) != want:
+        if want is not None and not replace and sum(u["men"] for u in units) != want:
             raise ValueError(f"{run_dir}: {side} has {sum(u['men'] for u in units)} men by the pools, "
                              f"the run had {want}")
         sides[side] = {"faction": cfg["factions"][side], "units": units}
@@ -93,6 +119,11 @@ def load(run_dir, swap=False, pools=None, base=None):
     arena.update(gap_m=gap_m, defend_radius_m=cfg["defend_radius_m"], name=f"{cfg['arena']}_run{run_dir.name}",
                  note=f"armies of run {run_dir.name}", sides=sides)
     army = dict(cfg.get("army") or {}, from_run=run_dir.name)
+    if replace:
+        army["replaced"] = replace
+        for side in SIDES:
+            army.setdefault("men", {})
+            army["men"] = dict(army["men"], **{side: sum(u["men"] for u in sides[side]["units"])})
     if swap:
         arena = dict(arena, name=f"{arena['name']}_swap", sides={"own": sides["enemy"], "enemy": sides["own"]})
         army["swap"] = not army.get("swap", False)

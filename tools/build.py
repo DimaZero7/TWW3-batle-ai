@@ -377,7 +377,8 @@ def nn_arena_config(args, run_config):
     if args.army_from_run is not None:
         # an old run's armies and deployment (tools/nn/army_from_run.py): its manifest, not the generator
         from tools.nn import army_from_run
-        arena, army = army_from_run.load(args.army_from_run, swap=args.army_swap)
+        arena, army = army_from_run.load(args.army_from_run, swap=args.army_swap,
+                                         replace=dict(x.split("=", 1) for x in args.army_replace or ()))
     if args.army_seed is not None:
         from tools.nn.armies import generate
         arena = generate.battle(args.army_seed, armies=args.armies)
@@ -603,6 +604,9 @@ def main(argv=None):
                              "(its manifest.json, e.g. build/nn-arena/runs/20261007-091416) instead of the "
                              "generator: a battle of an older generator again; --army-swap exchanges its sides "
                              "(tools/nn/army_from_run.py)")
+    parser.add_argument("--army-replace", action="append", default=[], metavar="OLD=NEW",
+                        help="with --army-from-run: every unit of key OLD becomes one of key NEW on the same place "
+                             "(tools/nn/army_from_run.py replace)")
     parser.add_argument("--map", default=None, metavar="NAME",
                         help="a captured map (build/maps/NAME: meta.json): the battle on it, its deployment zones "
                              "(tools/nn/arena_map.py); with --army-seed / --army-from-run")

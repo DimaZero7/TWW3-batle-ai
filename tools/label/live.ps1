@@ -15,6 +15,9 @@ param(
     [int]$TimeoutModelSeconds = 1800,
     [ValidateSet('', 'ultra', 'ultrafull', 'low', 'lowigpu', 'human2k')][string]$Graphics = 'ultrafull',
     [string[]]$ExtraMods = @('3812267837'),
+    # a key of the run's roster replaced on the same places (user 07.11: the Nuln Ironsides are no snipers - the
+    # Hochland long rifles instead)
+    [string[]]$Swap = @('wh3_dlc25_emp_inf_nuln_ironsides=wh3_dlc25_emp_inf_hochland_long_rifles'),
     [string]$Container = 'label-live'
 )
 $ErrorActionPreference = 'Stop'
@@ -41,7 +44,10 @@ if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is 
 if (Test-Path -LiteralPath $lock) { throw ("The game is held: build/steps/probe_game.lock says '{0}'" -f (Get-Content -LiteralPath $lock -Raw).Trim()) }
 if (docker ps -a --filter "name=^$Container$" --format '{{.Names}}') { throw "Container $Container exists: docker stop $Container" }
 $buildArgs = @('-m', 'tools.build', 'human', '--live-label', '--free-speed', '--timeout', $TimeoutModelSeconds)
-if ($Run) { $buildArgs += @('--army-from-run', (Join-Path $repo $Run)) } else { $buildArgs += @('--army-seed', $Seed, '--army-swap', '--armies', 'v3') }
+if ($Run) {
+    $buildArgs += @('--army-from-run', (Join-Path $repo $Run))
+    foreach ($x in $Swap) { if ($x) { $buildArgs += @('--army-replace', $x) } }
+} else { $buildArgs += @('--army-seed', $Seed, '--army-swap', '--armies', 'v3') }
 if ($Map) { $buildArgs += @('--map', $Map) }
 foreach ($m in $ExtraMods) { if ($m) { $buildArgs += @('--extra-mod', $m) } }
 & $python @buildArgs | Out-Null
