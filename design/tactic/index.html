@@ -19,7 +19,7 @@
   --bg:#f3f4f6; --panel:#ffffff; --ink:#1b2028; --muted:#5d6672; --line:#d6dbe2;
   --done:#1f8a5b; --done-bg:#e3f4ec; --open:#b07300; --open-bg:#fff3d9; --later:#5b6b86; --later-bg:#e9edf4;
   --field:#cfe3a8; --out:#7a7f88; --mine:#2b9a6a; --minev:#8fd3b2; --foe:#cc4a3f; --foev:#f0a8a1; --neutral:#eceff3;
-  --z-tac:#7d7660; --z-op:#5c7088; --z-unit:#9a5f7a; --z-str:#3f7a8c; --z-lab:#6a7d5a;
+  --z-tac:#7d7660; --z-op:#5c7088; --z-unit:#9a5f7a; --z-str:#3f7a8c; --z-lab:#6a7d5a; --z-game:#9a7440;
   --ours:#3a7bd5; --tc-test:#1a9a8a; --pass:#7b8496; --live:#3a7bd5;
   --c-pass:#6f7fd0; --c-live:#2f9488; --c-who:#4aa99c; --c-state:#237066; --c-cst:#68bdb1; --c-ars:#b0679a; --c-out:#d08a1c; --c-order:#a88a00; --c-grp:#4f86c6; --c-map:#5b8f4a; --c-water:#4aa3d8; --c-near:#c99a06; --c-far:#9156d6;
   --f-body:"Golos Text",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
@@ -28,14 +28,14 @@
   --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
-  --pass:#8a93a6; --live:#5b9bf0; --z-tac:#b9b091; --z-op:#9fb3c8; --z-unit:#cf9db4; --z-str:#8fc3d1; --z-lab:#a9bd96;
+  --pass:#8a93a6; --live:#5b9bf0; --z-tac:#b9b091; --z-op:#9fb3c8; --z-unit:#cf9db4; --z-str:#8fc3d1; --z-lab:#a9bd96; --z-game:#d6b07a;
   --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72; --c-water:#6cb8e6; --c-near:#f0c24a; --c-far:#b58ef2;
   color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
   --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
   --field:#6f8a45; --out:#4a4f58; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038;
-  --pass:#8a93a6; --live:#5b9bf0; --z-tac:#b9b091; --z-op:#9fb3c8; --z-unit:#cf9db4; --z-str:#8fc3d1; --z-lab:#a9bd96;
+  --pass:#8a93a6; --live:#5b9bf0; --z-tac:#b9b091; --z-op:#9fb3c8; --z-unit:#cf9db4; --z-str:#8fc3d1; --z-lab:#a9bd96; --z-game:#d6b07a;
   --c-pass:#8d9bec; --c-live:#4fb8aa; --c-who:#6fcabd; --c-state:#3a978a; --c-cst:#8ed8cd; --c-ars:#d58fc0; --c-out:#e8a54a; --c-order:#e2c64c; --c-grp:#7aa9e6; --c-map:#86bb72; --c-water:#6cb8e6; --c-near:#f0c24a; --c-far:#b58ef2;
   color-scheme:dark}
 *{box-sizing:border-box}
@@ -113,7 +113,7 @@ a{color:inherit}
 .snode .hit{fill:color-mix(in srgb,var(--tc) 14%,var(--panel));stroke:var(--tc);stroke-width:1.2}
 .snode:hover .hit{fill:color-mix(in srgb,var(--tc) 24%,var(--panel))}
 .snode.on .hit{fill:color-mix(in srgb,var(--tc) 30%,var(--panel));stroke:var(--tc);stroke-width:3}
-.snode.st-sketch .hit,.snode.st-later .hit{stroke-dasharray:10 6}
+.snode.st-sketch .hit,.snode.st-later .hit,.snode.st-todo .hit{stroke-dasharray:10 6}
 .snode.st-stub .hit{stroke-dasharray:8 6;fill:color-mix(in srgb,var(--tc) 8%,var(--panel))}
 .snode:focus{outline:none}.snode:focus-visible{outline:none}.snode:focus-visible .hit{stroke:var(--open);stroke-width:2.5}
 .slab{fill:var(--ink);font-size:19px;font-weight:600}
@@ -135,7 +135,7 @@ a{color:inherit}
     <h1>Тактик: архитектура</h1>
     <span class="status">Проектирование: здесь только то, о чём договорились. Вход, совещание и первый выход уже в коде — <code>tools/nn/tactic</code>, <code>docs/ru/training/tactic.md</code>.</span>
     <p class="muted">Тактик — сеть уровня группы: ведёт группу из 1–10 своих отрядов (рабочий размер упражнений — 2–4) с одной задачей от оперативника (уровень выше). Отрядам он раздаёт приказы «займи область», дальше каждым отрядом правит сеть отряда (<a href="../unit/index.html">страница отряда</a>). Решения словами — <code>build/diag_g49/unit_base.md</code>, раздел «Заметки для старших уровней».</p>
-    <p class="muted">Сейчас на схеме (решения пользователя 30.10): <b>строка отряда</b> — три карточки (паспорт, что меняется по ходу боя, арсенал) → «Анализ отряда» → «Карточка отряда»; <b>группа</b> — посылка от оперативника → зона плитками → карта группы; <b>приказ</b> — зона (в посылке), глагол и темп; <b>совещание</b> — карточки отрядов, сводка карты, числа, глагол и темп → карточки после совещания; <b>первый выход</b> — выбор зоны отряда (размер и клетка) → рамка → посылка отряду, дальше личный уровень. Четыре уровня слева направо: стратег → оперативник → тактик → отряд, все в коде; внизу — разметка (человек вместо уровня). Оперативник — проект 06.11; справа — личная зона: сеть отряда, уже в коде. <b>Тактик не делится:</b> 1 моя группа = 1 набор целей, граница — зона; цели дальше, чем дотянуться из зоны, — сосредоточить всех на одной и ждать, пока оперативник перекроит; другие группы — только как тела. Нажми на блок — под схемой откроется описание.</p>
+    <p class="muted">Сейчас на схеме (решения пользователя 30.10): <b>строка отряда</b> — три карточки (паспорт, что меняется по ходу боя, арсенал) → «Анализ отряда» → «Карточка отряда»; <b>группа</b> — посылка от оперативника → зона плитками → карта группы; <b>приказ</b> — зона (в посылке), глагол и темп; <b>совещание</b> — карточки отрядов, сводка карты, числа, глагол и темп → карточки после совещания; <b>первый выход</b> — выбор зоны отряда (размер и клетка) → рамка → посылка отряду, дальше личный уровень. Четыре уровня слева направо: стратег → оперативник → тактик → отряд, все в коде; внизу — разметка (человек вместо уровня) и «В игре»: мост, где та же цепочка играет настоящий бой. Оперативник — проект 06.11; справа — личная зона: сеть отряда, уже в коде. <b>Тактик не делится:</b> 1 моя группа = 1 набор целей, граница — зона; цели дальше, чем дотянуться из зоны, — сосредоточить всех на одной и ждать, пока оперативник перекроит; другие группы — только как тела. Нажми на блок — под схемой откроется описание.</p>
     <p class="muted"><b>В коде</b> (помечено «в коде»): строки отрядов (паспорт, что меняется, арсенал), посылка, зона-плитки, окна карты, анализ отряда, карточка на карте, анализ карты, признаки карты, совещание, карточки после совещания, выбор зоны отряда, зона отряда, посылка отряду, приказы тактику. <b>Весов по коду:</b> анализ отряда 80 512, свёртки карты 110 896, весь вход 204 856; весь тактик 516 223, учатся 434 679 (без новой головы «менять или оставить»).</p>
   </header>
 
@@ -759,6 +759,7 @@ a{color:inherit}
         <ul class="small">
           <li><b>«Атаковать»:</b> касание до конца боя. <b>«Держать»:</b> касания нет, потеряно ≤ 3 % здоровья за 180 с. <b>«Ширина»</b> — справка.</li>
           <li><b>Ровное поле,</b> зоны 1200 × 360 м; враг — скрипт симулятора.</li>
+          <li><b>Армии 3–8 с лордом.</b></li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
@@ -788,6 +789,8 @@ a{color:inherit}
         <div class="where">подробно: <code>docs/ru/training/strategist.md</code> · код: <code>tools/nn/strategist/exam.py</code></div>
         <ul class="small">
           <li><b>384 одних и тех же боя,</b> без учителя, сеть выбирает по вероятностям.</li>
+          <li><b>По умолчанию — формула по 3</b> (группы как у оперативника), сеть run5 — ключом.</li>
+          <li><b>Над оперативником run8:</b> формула 1,00 / 0,98, сеть 1,00 / 0,97.</li>
         </ul>
         <div class="ptwrap"><table class="ptab"><thead><tr><th>Случай</th><th class="num">Формула</th><th class="num">Плохая</th><th class="num">Сеть run4</th><th class="num">Нужно</th></tr></thead><tbody>
           <tr><td>Атаковать</td><td class="num">1,00</td><td class="num">0,03</td><td class="num">1,00</td><td class="num">0,90</td></tr>
@@ -822,6 +825,7 @@ a{color:inherit}
           <li><b>Пул с поиском,</b> карта, расстановка мышью, команда сверху, враг.</li>
           <li><b>Матчап — json</b> (<code>build/label/matchups/</code>), чтобы разметить несколько раз.</li>
           <li><b>Запуск:</b> <code>bash tools/label/serve.sh</code> → http://localhost:8790.</li>
+          <li><b>v2 по-русски,</b> 5 шагов подготовки.</li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
@@ -836,6 +840,7 @@ a{color:inherit}
         <ul class="small">
           <li><b>Пауза на уровне человека:</b> оперативник раз в 15 с, тактик раз в 5 с, стратег один раз до боя.</li>
           <li><b>Экран</b> — ровно то, что видит уровень.</li>
+          <li><b>Карточки отрядов из игры,</b> бойцы точками.</li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
@@ -865,6 +870,159 @@ a{color:inherit}
         <ul class="small">
           <li><b>Числа входа бит в бит</b> (как хранит PPO), выборы человека и подсказка формулы, повтор боя.</li>
           <li><b>Обучение подражанием на записях</b> — отдельная задача; формат и чтение готовы.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igdoc">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Документ расстановки <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>От моста до боя:</b> мои отряды целиком, враг только составом, 2 зоны расстановки.</li>
+          <li><b>Запуск:</b> <code>loop.py --chain</code>, <code>watch.ps1 -Chain</code>.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igstrat">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Стратег <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>По умолчанию — формула по 3</b> (группы как у оперативника); сеть run5 — ключом.</li>
+          <li><b>Над оперативником run8:</b> формула 1,00 / 0,98, сеть 1,00 / 0,97.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igplan">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>План <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>На отряд:</b> место, поворот, ширина. <b>На группу:</b> группы секунды 0.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igbr1">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Мост: перенос, проверка мест <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Перенос</b> (<code>teleport_to_location</code>) и проверка мест.</li>
+          <li><b>В двух боях отклонение 0–1,09 м.</b></li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igsnap">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Снимок раз в 1 с <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Документ моста раз в 1 с</b> → сырое состояние, как у симулятора.</li>
+          <li><b>Справка:</b> скорость игры ×10; шаг 19 мс, худший 99 мс; точка «идти» совпала 94–98 %; 2 боя против ИИ игры, итог по золоту −0,06 и −0,51.</li>
+          <li><b>Запуск:</b> <code>loop.py --chain</code>, <code>watch.ps1 -Chain</code>.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igop">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Оперативник run8 <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Основная сеть run8,</b> раз в 15 с.</li>
+          <li><b>Тот же код,</b> вход один в один.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igman">
+  <section class="cards">
+    <div><div class="colh">Делается</div>
+      <div class="box later"><h2>Человек на паузе <span class="chip later">делается</span></h2>
+        <ul class="small">
+          <li><b>Человек вместо оперативника на паузе.</b></li>
+          <li><b>Делается:</b> пауза <code>modify_battle_speed(0)</code>, запрет приказов игрока <code>disable_orders</code>.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igtac">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Тактики <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Раз в 5 с,</b> на каждую группу. Тот же код, вход один в один.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igunit">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Сеть отряда <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Каждую секунду,</b> своя копия на отряд. Тот же код, вход один в один.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igleash">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Поводок <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Каждый шаг:</b> атака не уводит отряд из его зоны.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-igbr2">
+  <section class="cards">
+    <div><div class="colh">Решено</div>
+      <div class="box done"><h2>Мост: приказы <span class="chip done">решено 07.11</span> <span class="chip done">в коде</span></h2>
+        <ul class="small">
+          <li><b>Идти / атаковать / стоять,</b> поворот, ширина.</li>
+          <li><b>Справка:</b> скорость игры ×10; шаг 19 мс, худший 99 мс; точка «идти» совпала 94–98 %; 2 боя против ИИ игры, итог по золоту −0,06 и −0,51.</li>
+          <li><b>Запуск:</b> <code>loop.py --chain</code>, <code>watch.ps1 -Chain</code>.</li>
+        </ul>
+      </div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-lbgame">
+  <section class="cards">
+    <div><div class="colh">Делается</div>
+      <div class="box later"><h2>Режим игры <span class="chip later">делается</span></h2>
+        <ul class="small">
+          <li><b>Разметка в настоящей игре</b> — делается.</li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
@@ -1213,9 +1371,12 @@ a{color:inherit}
           <li><b>3 случая:</b> собрать / разделить / идти или стоять.</li>
           <li><b>Доли:</b> в обучении 1 : 1 : 2, на экзамене поровну.</li>
           <li><b>Ровное поле,</b> раскладка повёрнута и сдвинута; враг — скрипт симулятора.</li>
+          <li><b>Плюс «Разделить» и «Идти или стоять» на армиях 3–8 с лордом.</b></li>
         </ul>
       </div></div>
-    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box open"><ul class="small">
+      <li><b>«Разделить» на армиях:</b> метания 2,8 перекройки за бой — учим потом на разметке.</li>
+    </ul></div></div></div>
   </section>
 </template>
 
@@ -1241,6 +1402,7 @@ a{color:inherit}
           <li><b>Формула оперативника.</b></li>
           <li><b>Первое решение боя:</b> все бои, вес 1 без спада.</li>
           <li><b>Остальные решения:</b> 50 % решений, спад за 20 обновлений.</li>
+          <li><b>Группа больше 3</b> режется на линию групп по 3 через 160 м.</li>
         </ul>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
@@ -1261,6 +1423,12 @@ a{color:inherit}
           <tr><td>идти или стоять</td><td class="num">0,93</td><td class="num">0,50</td><td class="num">0,45</td><td class="num">0,883</td><td class="num">0,84</td></tr>
         </tbody></table></div>
         <p class="small">run5: страховка выполнена на всех трёх; цепочка run5 → тактик run4 → отряд 0,99 / 0,965 / 0,91, ошибок посылок 0.</p>
+        <p class="small"><b>Армии</b> (3–8 с лордом):</p>
+        <div class="ptwrap"><table class="ptab"><thead><tr><th>Случай</th><th class="num">Формула</th><th class="num">Плохой</th><th class="num">Сеть run8</th><th class="num">Нужно</th></tr></thead><tbody>
+          <tr><td>разделить</td><td class="num">1,00</td><td class="num">0,01</td><td class="num">0,849</td><td class="num">0,90</td></tr>
+          <tr><td>идти или стоять</td><td class="num">0,97</td><td class="num">0,50</td><td class="num">0,964</td><td class="num">0,87</td></tr>
+        </tbody></table></div>
+        <p class="small">Цепочка со стратегом «держать»: 0,99. Основная сеть — run8.</p>
       </div></div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
@@ -2031,8 +2199,9 @@ a{color:inherit}
   var ZONES=[
     {t:"Зона тактика",b:[-120,-120,6010,3175],col:"--z-tac"},
     {t:"Зона стратега",sub:"538 778 весов, учатся 458 266 · в коде",b:[-8140,-120,3620,3175],col:"--z-str"},   // (left of the operative's, a gap of 60)
+    {t:"В игре",sub:"мост · loop.py --chain, watch.ps1 -Chain",b:[-8140,3735,18680,760],col:"--z-game"},   // (the bridge: a band under the labelling)
     {t:"Разметка",sub:"bash tools/label/serve.sh → http://localhost:8790",b:[-8140,3115,18680,560],col:"--z-lab"},   // (a band under every level)
-    {t:"Зона оперативника",sub:"639 368 весов, учатся 557 824 · в коде",b:[-4460,-120,4280,3175],col:"--z-op"},   // (left of the tactic's, a gap of 60: the flow goes left to right; its right edge stays at -180)
+    {t:"Зона оперативника",sub:"639 368 весов, учатся 557 824 · в коде · основная сеть run8",b:[-4460,-120,4280,3175],col:"--z-op"},   // (left of the tactic's, a gap of 60: the flow goes left to right; its right edge stays at -180)
     {t:"Личная зона",b:[5950,1050,4590,2005],col:"--z-unit"}   // (right of the tactic's, a gap of 60; the same bottom)
   ];
   var NODES=[
@@ -2076,6 +2245,19 @@ a{color:inherit}
     {id:"lbfight",code:1,t:"Бой по секундам",tt:"Разметка · Бой по секундам",ty:"env",st:"dec7",b:[-7480,3235,420,320],pic:"lbfight",n:"пауза на уровне человека: оперативник 15 с, тактик 5 с, стратег один раз",ref:"tools/label/session.py"},
     {id:"lbedit",code:1,t:"Правка → выборы сети",tt:"Разметка · Правка → выборы сети",ty:"alg",st:"dec7",b:[-6940,3235,420,320],pic:"lbedit",n:"те же головы, запреты, parcel.check, что у сети",ref:"tools/label/human.py, strategist.py"},
     {id:"lbrec",code:1,t:"Запись",tt:"Разметка · Запись",ty:"out",st:"dec7",b:[-6400,3235,420,320],pic:"lbrec",n:"числа входа бит в бит, выборы человека и формулы, повтор",ref:"tools/label/record.py"},
+    // in the game: the bridge plays the same chain
+    {id:"igdoc",code:1,t:"Документ расстановки",tt:"В игре · Документ расстановки",ty:"in",st:"dec7",b:[-6500,3855,400,300],pic:"igdoc",n:"мои отряды целиком, враг только составом, 2 зоны",ref:"tools/nn/companion"},
+    {id:"igstrat",code:1,t:"Стратег",tt:"В игре · Стратег",ty:"proc",st:"dec7",b:[-5300,3855,400,300],pic:"igstrat",n:"по умолчанию формула по 3; сеть run5 — ключом",ref:"tools/nn/strategist"},
+    {id:"igplan",code:1,t:"План",tt:"В игре · План",ty:"out",st:"dec7",b:[-4780,3855,400,300],pic:"igplan",n:"место, поворот, ширина + группы секунды 0",ref:"tools/nn/strategist/deploy.py"},
+    {id:"igbr1",code:1,t:"Мост: перенос, проверка мест",tt:"В игре · Мост: перенос, проверка мест",ty:"alg",st:"dec7",b:[-4260,3855,400,300],pic:"igbr1",n:"teleport_to_location; в двух боях отклонение 0–1,09 м",ref:"src/apps/bridge"},
+    {id:"igsnap",code:1,t:"Снимок раз в 1 с",tt:"В игре · Снимок раз в 1 с",ty:"in",st:"dec7",b:[-3740,3855,400,300],pic:"igsnap",n:"→ сырое состояние (tactic/raw.py)",ref:"tools/nn/companion"},
+    {id:"igop",code:1,t:"Оперативник run8",tt:"В игре · Оперативник run8",ty:"proc",st:"dec7",b:[-3220,3855,400,300],pic:"igop",n:"раз в 15 с",ref:"tools/nn/operative"},
+    {id:"igman",t:"Человек на паузе",tt:"В игре · Человек на паузе",ty:"proc",st:"todo",b:[-3220,4215,400,160],pic:"igman",n:"делается: пауза modify_battle_speed(0), запрет приказов игрока disable_orders",ref:"—"},
+    {id:"igtac",code:1,t:"Тактики",tt:"В игре · Тактики",ty:"proc",st:"dec7",b:[2700,3855,400,300],pic:"igtac",n:"раз в 5 с",ref:"tools/nn/tactic"},
+    {id:"igunit",code:1,t:"Сеть отряда",tt:"В игре · Сеть отряда",ty:"proc",st:"dec7",b:[6600,3855,400,300],pic:"igunit",n:"каждую секунду",ref:"tools/nn/unit"},
+    {id:"igleash",code:1,t:"Поводок",tt:"В игре · Поводок",ty:"alg",st:"dec7",b:[7120,3855,400,300],pic:"igleash",n:"атака не уводит из зоны",ref:"tools/nn/unit/decode.py Leash"},
+    {id:"igbr2",code:1,t:"Мост: приказы",tt:"В игре · Мост: приказы",ty:"out",st:"dec7",b:[7640,3855,400,300],pic:"igbr2",n:"идти / атаковать / стоять, поворот, ширина",ref:"src/apps/bridge"},
+    {id:"lbgame",t:"Режим игры",tt:"Разметка · Режим игры",ty:"env",st:"todo",b:[-5860,3235,420,320],pic:"lbgame",n:"делается",ref:"—"},
     // the operative (the project 06.11, build/diag_operative/plan.md; no code yet)
     {id:"opnums",code:1,t:"Числа",tt:"Оперативник · Числа",ty:"in",st:"dec",b:[-3850,20,360,130],pic:"opnums",n:"занято групп / 6 — 1",ref:"tools/nn/operative/inputs.py"},
     {id:"opcmd",code:1,t:"Команда сверху",tt:"Оперативник · Команда сверху",ty:"in",st:"dec",b:[-4340,20,360,110],pic:"opcmd",n:"глагол + темп, в сводку и в каждую голову — 7",ref:"tools/nn/operative/inputs.py"},
@@ -2179,6 +2361,21 @@ a{color:inherit}
     {from:"lbedit",kind:"stub",path:[[-6730,3235],[-6730,3000]],lp:[-6720,3080],la:"start",label:"человек вместо стратега"},
     {from:"lbedit",kind:"stub",path:[[-6730,3235],[-6730,3175],[-2500,3175],[-2500,3000]],lp:[-2490,3080],la:"start",label:"человек вместо оперативника"},
     {from:"lbedit",kind:"stub",path:[[-6730,3235],[-6730,3175],[2600,3175],[2600,3000]],lp:[2610,3080],la:"start",label:"человек вместо тактика"},
+    // in the game
+    {from:"igdoc",to:"igstrat",path:[[-6100,4005],[-5302,4005]],lp:[-5701,3997],label:"документ",col:"--c-out"},
+    {from:"igstrat",to:"igplan",path:[[-4900,4005],[-4782,4005]],lp:[-4841,3997],label:"план",col:"--c-out"},
+    {from:"igplan",to:"igbr1",path:[[-4380,4005],[-4262,4005]],lp:[-4321,3997],label:"места",col:"--c-out"},
+    {from:"igbr1",to:"igsnap",path:[[-3860,4005],[-3742,4005]],lp:[-3801,3997],label:"бой",col:"--c-out"},
+    {from:"igsnap",to:"igop",path:[[-3340,4005],[-3222,4005]],lp:[-3281,3997],label:"сырое",col:"--c-out"},
+    {from:"igop",to:"igtac",path:[[-2820,4005],[2698,4005]],lp:[-61,3997],label:"посылки и приказы — раз в 15 с",col:"--c-out"},
+    {from:"igtac",to:"igunit",path:[[3100,4005],[6598,4005]],lp:[4849,3997],label:"посылки отрядам — раз в 5 с",col:"--c-out"},
+    {from:"igunit",to:"igleash",path:[[7000,4005],[7118,4005]],lp:[7059,3997],label:"приказы",col:"--c-out"},
+    {from:"igleash",to:"igbr2",path:[[7520,4005],[7638,4005]],lp:[7579,3997],label:"в силе",col:"--c-out"},
+    {from:"igman",kind:"stub",path:[[-3020,4215],[-3020,4157]],lp:[-3010,4193],la:"start",label:"человек вместо оперативника на паузе"},
+    {from:"igstrat",kind:"stub",path:[[-5100,3855],[-5100,3000]],lp:[-5090,3110],la:"start",label:"тот же код, вход один в один"},
+    {from:"igop",kind:"stub",path:[[-3020,3855],[-3020,3000]],lp:[-3010,3110],la:"start",label:"тот же код, вход один в один"},
+    {from:"igtac",kind:"stub",path:[[2900,3855],[2900,3000]],lp:[2910,3110],la:"start",label:"тот же код, вход один в один"},
+    {from:"igunit",kind:"stub",path:[[6800,3855],[6800,3000]],lp:[6810,3110],la:"start",label:"тот же код, вход один в один"},
     // the operative (the project 06.11): left to right, into the tactic's parcel and order
     {from:"oprows",to:"opanal",path:[[-3980,670],[-3852,670]],lp:[-3916,662],label:"185 / 150",col:"--c-live"},
     {from:"opanal",to:"opcard",path:[[-3550,670],[-3432,670]],lp:[-3491,662],label:"128",col:"--c-out"},
@@ -2638,7 +2835,7 @@ a{color:inherit}
       return s;},
     stcases:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'ровное поле, зоны 1200 × 360 м',10,'middle');
       [['«Атаковать»','касание до конца боя'],['«Держать»','касания нет, потеряно ≤ 3 %'],['«Ширина» (справка)','две тройки врага вбок']].forEach(function(q,i){var yy=y+52+i*42;s+=T(x+16,yy,q[0],10,null,'fill:var(--ink);font-weight:700')+T(x+16,yy+16,q[1],9);});
-      s+=T(x+w/2,y+196,'нет случая, где решают группы стратега',9.5,'middle','fill:var(--open)');
+      s+=T(x+w/2,y+196,'нет случая, где решают группы стратега',9.5,'middle','fill:var(--open)')+T(x+w/2,y+216,'армии 3–8 с лордом',9.5,'middle','fill:var(--ink)');
       return s;},
     stteach:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'формула стратега',10.5,'middle');
       ['1. подражание без боёв: 6144 случая','   3000 шагов, ~3 мин','2. PPO: одно решение на бой','   пачка 384 боя, награда в конце','   учитель 0,5 → 0 за 10 обновлений'].forEach(function(t,i){s+=T(x+16,y+52+i*20,t,9.5,null,i===0||i===2?'fill:var(--ink)':'');});
@@ -2648,16 +2845,17 @@ a{color:inherit}
       H.forEach(function(h,j){s+=T(x+cx[j],y+52,h,9,null,'fill:var(--muted)');});
       R2.forEach(function(r,i){r.forEach(function(c,j){s+=T(x+cx[j],y+74+i*20,c,9.5,null,j===0?'':'font-family:var(--f-mono);fill:var(--ink)');});});
       s+=T(x+w/2,y+158,'цепочка стратег run4 → оперативник run5 →',9,'middle')+T(x+w/2,y+174,'тактик run4 → отряд: 1,00 / 1,00 / 0,996, ошибок 0',9,'middle');
+      s+=T(x+w/2,y+204,'по умолчанию — формула по 3; сеть run5 — ключом',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+222,'над оперативником run8: формула 1,00 / 0,98, сеть 1,00 / 0,97',9,'middle');
       return s;},
     stcritic:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'только в обучении',10.5,'middle');
       s+=T(x+w/2,y+52,'тот же вход, оценка 128 → 1',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+70,'455 201 вес',9.5,'middle');
       return s;},
-    lbprep:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'матчап в браузере',10.5,'middle');
-      ['пул с поиском, до 20 на сторону','карта: ровное поле или снятая','расстановка мышью','команда сверху, поведение врага','матчап — json'].forEach(function(t,i){s+=T(x+16,y+52+i*20,t,9.5,null,'fill:var(--ink)');});
+    lbprep:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'v2 по-русски, 5 шагов подготовки',10.5,'middle');
+      ['пул с поиском, до 20 на сторону','карта: ровное поле или снятая','расстановка мышью','команда сверху, поведение врага','матчап — json'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<5?'fill:var(--ink)':'');});
       return s;},
     lbfight:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'наш симулятор, пауза на уровне человека',10,'middle');
       [['оперативник','раз в 15 с'],['тактик','раз в 5 с'],['стратег','один раз до боя']].forEach(function(q,i){var yy=y+52+i*22;s+=T(x+16,yy,q[0],10,null,'fill:var(--ink);font-weight:600')+T(x+w-16,yy,q[1],9.5,'end');});
-      s+=T(x+w/2,y+140,'экран — ровно то, что видит уровень',9.5,'middle');
+      s+=T(x+w/2,y+140,'экран — ровно то, что видит уровень',9.5,'middle')+T(x+w/2,y+160,'карточки отрядов из игры, бойцы точками',9.5,'middle','fill:var(--ink)');
       return s;},
     lbedit:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'та же проверка, что у сети',10.5,'middle');
       ['правка мышью → выборы обхода','те же головы и запреты','parcel.check на каждой посылке','ошибка — красным, не пишется'].forEach(function(t,i){s+=T(x+16,y+52+i*20,t,9.5,null,i<3?'fill:var(--ink)':'');});
@@ -2665,6 +2863,43 @@ a{color:inherit}
     lbrec:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'build/label/<дата>_<имя>/',10,'middle','font-family:var(--f-mono)');
       ['числа входа бит в бит','выборы человека и формулы','повтор боя ползунком'].forEach(function(t,i){s+=T(x+16,y+52+i*20,t,9.5,null,'fill:var(--ink)');});
       s+=T(x+w/2,y+136,'обучение подражанием — отдельная задача',9,'middle');
+      return s;},
+    // ---- in the game (the bridge) ----
+    igdoc:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'до боя, от моста',10.5,'middle');
+      ['мои отряды целиком','враг только составом','2 зоны расстановки'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<3?'fill:var(--ink)':'');});
+      return s;},
+    igstrat:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'один раз, на расстановке',10.5,'middle');
+      ['по умолчанию — формула по 3','(группы как у оперативника)','сеть run5 — ключом'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<1?'fill:var(--ink)':'');});
+      return s;},
+    igplan:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'на отряд и на группу',10.5,'middle');
+      ['место, поворот, ширина','группы секунды 0'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<2?'fill:var(--ink)':'');});
+      return s;},
+    igbr1:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'teleport_to_location',10.5,'middle');
+      ['перенос отрядов','проверка мест','в двух боях отклонение 0–1,09 м'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<2?'fill:var(--ink)':'');});
+      return s;},
+    igsnap:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'из игры, раз в 1 с',10.5,'middle');
+      ['документ моста →','сырое состояние, как у симулятора'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<1?'fill:var(--ink)':'');});
+      return s;},
+    igop:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'раз в 15 с',10.5,'middle');
+      ['основная сеть run8','группы, цели, зоны'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<1?'fill:var(--ink)':'');});
+      return s;},
+    igman:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'делается',10.5,'middle');
+      ['пауза modify_battle_speed(0)','запрет приказов игрока disable_orders'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<0?'fill:var(--ink)':'');});
+      return s;},
+    igtac:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'раз в 5 с',10.5,'middle');
+      ['на каждую группу','зоны отрядов → посылки отрядам'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<1?'fill:var(--ink)':'');});
+      return s;},
+    igunit:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'каждую секунду',10.5,'middle');
+      ['своя копия на отряд','клетка, фронт, цель, темп, ширина'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<1?'fill:var(--ink)':'');});
+      return s;},
+    igleash:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'каждый шаг',10.5,'middle');
+      ['атака не уводит из зоны'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<1?'fill:var(--ink)':'');});
+      return s;},
+    igbr2:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'в игру',10.5,'middle');
+      ['идти / атаковать / стоять','поворот, ширина','точка «идти» совпала 94–98 %'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<2?'fill:var(--ink)':'');});
+      return s;},
+    lbgame:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'делается',10.5,'middle');
+      ['разметка в настоящей игре'].forEach(function(t,i){s+=T(x+16,y+54+i*21,t,9.5,null,i<0?'fill:var(--ink)':'');});
       return s;},
     // ---- the operative (the project 06.11, build/diag_operative/plan.md) ----
     opnums:function(b){var x=b[0],y=b[1],w=b[2],s=opRow(x,y+22,w,'занято групп / 6',1,'--c-grp',310);
@@ -2794,17 +3029,19 @@ a{color:inherit}
     opcases:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'ровное поле · сдвиг и поворот до ±300 м',10,'middle');
       [['1. «Собрать»','отряды встречают врага по одному'],['2. «Разделить»','одна куча на две угрозы'],['3. «Идти или стоять»','стоять, когда велено идти, и наоборот']].forEach(function(q,i){var yy=y+48+i*44;s+=T(x+16,yy,q[0],10,null,'fill:var(--ink);font-weight:700')+T(x+16,yy+16,'глупость: '+q[1],8.5);});
       s+=T(x+w/2,y+196,'доли: обучение 1 : 1 : 2, экзамен поровну',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+212,'враг — скрипт симулятора',9.5,'middle');
+      s+=T(x+w/2,y+236,'плюс «Разделить» и «Идти или стоять»: армии 3–8',9,'middle','fill:var(--ink)')+T(x+w/2,y+252,'«Разделить» на армиях: 2,8 перекройки за бой',9,'middle','fill:var(--open)');
       return s;},
     optacenv:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'под оперативником, раз в 5 с',10.5,'middle');
       ['по умолчанию — формула teacher.drive','сеть run4 — только на экзамене','под ним — сеть отряда, раз в 1 с','в ту же секунду: оперативник, потом тактик'].forEach(function(t,i){s+=T(x+16,y+54+i*22,t,9.5,null,i<2?'fill:var(--ink)':'');});
       s+=T(x+w/2,y+160,'рамки отрядам — по номеру боя (operative/lower.py)',9,'middle');
       return s;},
     opteach:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'формула оперативника · одна на все случаи',10,'middle');
-      ['враги — куски по правилу квадратов','мои — кучки (связь 350 м)','форма «квадрат», сектор 0, «сдержать», «любой»','первое решение: все бои, вес 1 без спада','остальные: 50 %, спад за 20 обновлений'].forEach(function(t,i){s+=T(x+16,y+52+i*21,t,9.5,null,i>2?'fill:var(--ink)':'');});
+      ['враги — куски по правилу квадратов','мои — кучки (связь 350 м)','форма «квадрат», сектор 0, «сдержать», «любой»','первое решение: все бои, вес 1 без спада','остальные: 50 %, спад за 20 обновлений','группа > 3 → линия групп по 3 через 160 м'].forEach(function(t,i){s+=T(x+16,y+52+i*21,t,9.5,null,i>2?'fill:var(--ink)':'');});
       return s;},
     opexam:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'384 боя: по 128 на случай, без учителя',10.5,'middle');
       ['мера сети ≥ 0,9 × формулы на каждом случае','и выше «сравнения» на 0,2','ошибок посылок 0','перекроек ≤ формулы + 1','размен не хуже формулы на 0,05'].forEach(function(t,i){s+=T(x+16,y+52+i*21,t,9.5,null,i<2?'fill:var(--ink)':'');});
       s+=T(x+w/2,y+176,'до обучения: формула ≥ 0,9, сравнения ≤ 0,6',9,'middle');
+      s+=T(x+w/2,y+202,'армии: run8 — разделить 0,849, идти или стоять 0,964',9,'middle','fill:var(--ink)')+T(x+w/2,y+218,'основная сеть — run8',9,'middle');
       return s;},
     opcritic:function(b){var x=b[0],y=b[1],w=b[2],s=T(x+w/2,y+24,'только в обучении',10.5,'middle');
       s+=T(x+w/2,y+52,'одно значение на бой, свой критик',9.5,'middle','fill:var(--ink)')+T(x+w/2,y+70,'513 257 весов; в игре не используется',9.5,'middle');
@@ -3223,7 +3460,7 @@ a{color:inherit}
   svg.addEventListener("click",function(e){if(moved){e.stopPropagation();e.preventDefault();moved=false;}},true);
 
   // the table of blocks
-  var tb=document.querySelector("#xref tbody"),rows="",nb=0,ST={agreed:"договорились",stub:"не обсуждали",sketch:"набросок",dec:"решено 06.11",later:"позже",dec7:"решено 07.11"};
+  var tb=document.querySelector("#xref tbody"),rows="",nb=0,ST={agreed:"договорились",stub:"не обсуждали",sketch:"набросок",dec:"решено 06.11",later:"позже",dec7:"решено 07.11",todo:"делается"};
   NODES.forEach(function(n){var f=bang(n.id);if(f)nb++;
     rows+='<tr data-go="'+n.id+'"><td>'+esc(n.tt||n.t)+'</td><td>'+TYPES[n.ty]+'</td><td>'+(ST[n.st]||n.st)+(n.code?' · <b style="color:var(--done)">в коде</b>':'')+'</td><td>'+esc(n.n)+'</td><td><code>'+esc(n.ref)+'</code></td><td class="num">'+(f?'<b style="color:var(--open)">!</b>':'')+'</td></tr>';});
   rows+='<tr class="tot"><td>всего блоков: '+NODES.length+'</td><td></td><td></td><td></td><td></td><td class="num">'+nb+'</td></tr>';
