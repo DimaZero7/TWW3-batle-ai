@@ -62,7 +62,7 @@ class Frame:
         self.gap = d
 
     def local(self, x, z):
-        """(right, forward) m of a world point. The game's world is left-handed seen from above (x, height y, z): facing
+        """(right, forward) m of a world point. The game's axes x, height y, z are right-handed: facing
         +x, +z is on the right - the person's own words agree (M1: "shooters on the right flank, the forest on the
         left": the shooters stood at +z, the forest at -z)."""
         dx, dz = x - self.cx, z - self.cz

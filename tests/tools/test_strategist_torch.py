@@ -91,7 +91,7 @@ def test_the_formula_groups_places_and_commands():
     step = 360.0 / DP.SECTORS
     b = places["b"][pre.own]
     assert bool(((b / step - torch.floor(b / step) - 0.5).abs() < 1e-3).all())     # the sector's middle, as the game
-    assert bool((places["width"][pre.own] <= 74.0 + 1e-4).all())
+    assert bool((places["width"][pre.own] == pre.width0[pre.own]).all())        # the unit's own frontage
     # 'hold' at the back, 'attack' at the front of my zone
     from tools.nn.strategist import zones as ZS
     _, f = ZS.local(pre.mine_zone, pl["cx"], pl["cz"])
@@ -166,3 +166,54 @@ def test_the_runs_cut_as_numpy_array_split():
             got = T.runs(sel, torch.tensor([k]))[0, idx].tolist()
             want = [i for i, part in enumerate(np.array_split(np.arange(m), k)) for _ in part]
             assert got == want, (m, k, got, want)
+
+
+GAME_ZONES = {"own": {"x": -184.0, "z": 0.0, "b": 90.0, "front": 416.0, "depth": 176.0},
+              "enemy": {"x": 184.0, "z": 0.0, "b": 270.0, "front": 416.0, "depth": 176.0}}
+ROSTER_20 = (["wh_main_emp_cha_general_0"] + ["wh_main_emp_inf_greatswords"] * 6 + ["wh_main_emp_inf_halberdiers"] * 5
+             + ["wh_main_emp_inf_swordsmen"] * 2 + ["wh2_dlc13_emp_inf_huntsmen_0"] * 2
+             + ["wh3_dlc25_emp_inf_hochland_long_rifles"] * 2 + ["wh_main_emp_art_mortar"] * 2)
+
+
+def game_zone_doc(task_zones=GAME_ZONES):
+    """The bridge's deployment document of 20 Empire units against 20 Skaven in the game's zones of ksl_plains_01
+    (terrain/deployment east / west: 416 x 176 m, fronts 192 m apart)."""
+    from tests.tools import test_tactic_bridge_parity_torch as TP
+    from tools.nn.sim import scenario
+    rows = lambda keys, x: [{"key": k, "x": x, "z": -190.0 + 20.0 * i, "b": 90.0 if x < 0 else 270.0}   # noqa: E731
+                            for i, k in enumerate(keys)]
+    skv = ["wh2_main_skv_cha_warlord_0"] + ["wh2_main_skv_inf_clanrats_0"] * 19
+    st = scenario.build([{"attacker": 2, "sides": {1: {"faction": "wh_main_emp_empire", "units": rows(ROSTER_20, -184.0)},
+                                                   2: {"faction": "wh2_main_skv_skaven", "units": rows(skv, 184.0)}}}],
+                        P, device="cpu", per_side=20)
+    d = TP.doc_of_sim(st, 0, 0)
+    units = [r if r["side"] == 1 else dict({k: r[k] for k in ("n", "side", "key", "men", "hp")}, v=True)
+             for r in d["units"]]
+    return dict(d, units=units, deploy=True, zones=task_zones, batch="game_zone", attacker=2,
+                factions={"own": "wh_main_emp_empire", "enemy": "wh2_main_skv_skaven"})
+
+
+@pytest.mark.parametrize("task", ["hold", "destroy"])
+def test_the_formula_fits_20_units_into_the_games_zone(task):
+    """The game's zone 416 x 176 m holds 20 units: the groups' zones are their units' slots (deploy.footprint), the
+    formula lays 6 groups in two rows, every unit inside the zone, none overlapping, facing the enemy (07.11: with the
+    tactician's 80 m tile a unit the formula had 16 of 20 out of the zone)."""
+    from tools.nn.companion import deploy as CD
+    _, rec = CD.Strategist("formula", task, params=P).decide(game_zone_doc())
+    assert rec["errors"] == 0 and len(rec["places"]) == 20
+    assert len(rec["groups"]) == 6
+    for n, (x, z, b, w) in rec["places"].items():
+        assert -272.0 <= x <= -96.0 and -208.0 <= z <= 208.0, (n, x, z)
+        assert abs(b - 92.8125) < 1e-3                                            # facing the enemy (east), 64 sectors
+    # 'hold' - the first row at the back edge, 'attack' - at the front
+    xs = [g["cx"] for g in rec["groups"][:3]]
+    assert all(x < -184.0 for x in xs) if task == "hold" else all(x > -184.0 for x in xs)
+
+
+def test_a_groups_slot_is_its_widest_formation():
+    m = torch.tensor([[[True, True, False], [False, False, True]]])
+    front, depth = torch.tensor([[30.0, 50.0, 20.0]]), torch.tensor([[10.0, 8.0, 12.0]])
+    w, d = DP.slot(m, front, depth)
+    assert torch.allclose(w, torch.tensor([[56.0, 26.0]])) and torch.allclose(d, torch.tensor([[16.0, 18.0]]))
+    fw, fd = DP.footprint(torch.tensor([[4, 3]]), torch.tensor([[False, True]]), w, d)
+    assert torch.allclose(fw, torch.tensor([[112.0, 78.0]])) and torch.allclose(fd, torch.tensor([[32.0, 18.0]]))

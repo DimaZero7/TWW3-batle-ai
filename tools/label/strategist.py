@@ -207,7 +207,7 @@ class Level:
         b = self.s.b
         mem = SB.slots_of(out["plan"], self.inp, b.st.N)
         return DP.places(mem, b.shooter, out["plan"]["cx"], out["plan"]["cz"], out["plan"]["heading"],
-                         out["plan"]["line"], b.st.u["width"])
+                         out["plan"]["line"], b.st.u["width"], DP.slot_of(out["plan"]))
 
     def matchup_after(self, out):
         """The matchup with my units on the strategist's places (and widths)."""

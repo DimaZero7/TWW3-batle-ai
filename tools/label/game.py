@@ -167,7 +167,7 @@ class GameStrategist(LS.Level):
         width0 = torch.tensor([[float(u.get("ow") or 0.0) for u in self.laid["units"]]], device=raw.device)
         plan = out["plan"]
         mem = SB.slots_of(plan, self.inp, raw.shape[1])
-        return DP.places(mem, shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], width0)
+        return DP.places(mem, shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], width0, DP.slot_of(plan))
 
     def deploy_errors(self, out):
         sent = getattr(self.cd, "sent", None)

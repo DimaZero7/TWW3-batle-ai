@@ -73,7 +73,8 @@ def placed(pre, out, inp):
     plan = out["plan"]
     N = pre.st0.N
     mem = slots_of(plan, inp, N)
-    pl = DP.places(mem, pre.shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], pre.width0)
+    pl = DP.places(mem, pre.shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], pre.width0,
+                   DP.slot_of(plan))
     armies = []
     for b, s in enumerate(pre.sp):
         mine = []

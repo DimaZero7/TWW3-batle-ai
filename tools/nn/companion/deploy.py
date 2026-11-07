@@ -114,7 +114,7 @@ class Strategist:
         width0 = torch.tensor([[float(u.get("ow") or 0.0) for u in laid["units"]]], device=self.device)
         plan = out["plan"]
         mem = BT.slots_of(plan, inp, N)
-        pl = DP.places(mem, shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], width0)
+        pl = DP.places(mem, shooter, plan["cx"], plan["cz"], plan["heading"], plan["line"], width0, DP.slot_of(plan))
         places = {names[i]: (float(pl["x"][0, i]), float(pl["z"][0, i]), float(pl["b"][0, i]), float(pl["width"][0, i]))
                   for i in range(N) if bool(own[0, i]) and bool(pl["on"][0, i])}
         self.chain_plan = {"group": {names[i]: int(pl["group"][0, i]) for i in range(N) if bool(own[0, i])},

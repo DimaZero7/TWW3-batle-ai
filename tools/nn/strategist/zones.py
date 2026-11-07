@@ -8,6 +8,12 @@ build/maps/*/meta.json deployment_zones: x, z, width, depth, bearing_deg - of_me
                                       nearest the bearing from my zone's centre to the enemy zone's - no unit's place
     cells_ok(axes, zone, front, depth, heading)   [B, C*C] bool: a group's zone front x depth turned heading centred
                                       on the cell lies wholly inside my deployment zone
+    pushed(cx, cz, zone, front, depth, heading)   (x, z, ok) [B, C*C]: the zone's centre of each cell pushed inside my
+                                      deployment zone (operative/step.inside: the least shift along the zone's axes);
+                                      ok - it fits there and the shift is at most half a cell along each axis (the
+                                      centre stays in its cell). The game's zone is 416 x 176 m: on the 64 m cells
+                                      only two rows of centres lie 32 m or more inside its depth - a group zone
+                                      deeper than 64 m had one row, the third row of groups none (07.11)
     apart(cx, cz, front, depth, heading, placed, on)   [B, C*C] bool: a group's zone at the cells overlaps no zone
                                       placed already (turned rectangles, separating axes; touching is no overlap)
 """
@@ -52,6 +58,20 @@ def as_area(zone):
 def cells_ok(cx, cz, zone, front, depth, heading):
     """cx, cz [B, M] the cells' centres; front, depth, heading [B]."""
     return SP.field_ok(cx, cz, front, depth, heading, zone)
+
+
+def pushed(cx, cz, zone, front, depth, heading):
+    """cx, cz [B, M] the cells' centres; front, depth, heading [B] (module doc)."""
+    B, M = cx.shape
+    ex = lambda v: v[:, None].expand(B, M).reshape(-1)                         # noqa: E731
+    zz = {k: ex(v) for k, v in zone.items()}
+    px, pz = SP.inside(cx.reshape(-1), cz.reshape(-1), ex(front), ex(depth), ex(heading), zz)
+    px, pz = px.view(B, M), pz.view(B, M)
+    half = float(cfg()["cell_m"]) / 2 + SP.TOL
+    ds, df = local(zone, px, pz)
+    s0, f0 = local(zone, cx, cz)
+    near = ((ds - s0).abs() <= half) & ((df - f0).abs() <= half)
+    return px, pz, near & SP.field_ok(px, pz, front, depth, heading, zone)
 
 
 def radius(front, depth):

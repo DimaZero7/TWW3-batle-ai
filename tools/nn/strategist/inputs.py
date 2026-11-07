@@ -88,6 +88,10 @@ def build(raw, card, side, axes, mine_zone, enemy_zone, command, bounds=None, K=
     rows = blind(torch.where(mask[..., None], out, torch.zeros((), device=raw.device)), own_rows, enemy_rows)
     numbers = torch.stack([own_rows.sum(1).float() / 20.0, enemy_rows.sum(1).float() / 20.0], 1)
     shooter = (J[..., I["range"]] > 0) & mask
+    # my formations' front / depth at their own frontage (the walk's slots, deploy.slot); not a network input
+    zero = torch.zeros((), device=raw.device)
+    front = torch.where(own_rows, J[..., I["front"]], zero)
+    depth = torch.where(own_rows, J[..., I["depth"]], zero)
     return {"rows": rows, "mask": mask, "slot": slot, "who": who, "own": own_rows, "enemy": enemy_rows,
             "shooter": shooter, "map": build_map(axes, raw, mine_zone, enemy_zone, bounds), "numbers": numbers,
-            "command": command}
+            "command": command, "front": front, "depth": depth}

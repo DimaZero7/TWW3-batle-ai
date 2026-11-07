@@ -131,7 +131,7 @@ def rel(p):
 
 def compass(b):
     """The side of the world a bearing looks to, as in the game's view from above (replay.py: x right, z down - the
-    game's world is left-handed): 'north' is up the picture, -z; a bearing b looks along (sin b, cos b)."""
+    game's x, z with the height y up are right-handed: facing +x, +z is on the right): 'north' is up the picture, -z; a bearing b looks along (sin b, cos b)."""
     words = ("север", "северо-восток", "восток", "юго-восток", "юг", "юго-запад", "запад", "северо-запад")
     return words[int((((180.0 - b) % 360) + 22.5) // 45) % 8]
 

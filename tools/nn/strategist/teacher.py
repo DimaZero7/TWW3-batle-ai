@@ -5,9 +5,10 @@ the tactician's drill groups (operative/teacher.line_of, its numbers config/nn/o
 k groups = ceil(mine / line_units), 1 to 6; the melee units (the lord too) cut by slot into k runs as even as can be
 (numpy array_split), the shooters the same, run i to group i (up to 2 infantry + 1 shooters: what the tactician's formula
 places; the operative cuts by place, the strategist by slot - it has no places); the groups side by side, left to
-right, their centres line_m apart around my zone's middle (one clump for the operative); the task 'hold' - the
-group's zone at my zone's back edge, 'attack' - at its front edge (edge_m inside); a square, sector 0 (facing the enemy's
-zone); the operative's verb = the task ('destroy' / 'hold'), the pace 'any'. The cell: the open one nearest the wanted
+right, their centres line_m apart around my zone's middle (one clump for the operative) - closer when my zone is
+narrower, and in rows when one row does not hold them (a group's zone at the deployment: its units' slots,
+strategist/deploy.footprint); the task 'hold' - the first row at my zone's back edge, the next in front of it,
+'attack' - from its front edge back (edge_m inside); a square, sector 0 (facing the enemy's zone); the operative's verb = the task ('destroy' / 'hold'), the pace 'any'. The cell: the open one nearest the wanted
 point (the walk with the formula's wishes as logits, greedy - so the bans are the network's own).
 
 The plain strategies (mode): 'blob' - one group of all in the middle; 'front' - every zone at the front edge whatever the
@@ -16,8 +17,8 @@ task; 'back' - every zone at the back edge; 'hold' / 'attack' - the formula unde
 import torch
 
 from tools.nn.operative import cfg as ocfg
-from tools.nn.operative import step as SP
 from tools.nn.strategist import cfg
+from tools.nn.strategist import deploy as DP
 from tools.nn.strategist import net as NN
 from tools.nn.strategist import zones as ZS
 from tools.nn.tactic import decide as DC
@@ -58,16 +59,30 @@ def wishes(inp, ctx, mode="formula"):
     form[..., NN.SQUARE] = BIG
     turn = torch.zeros((B, G, S), device=dev)
     turn[..., 0] = BIG
-    # the wanted points, in my zone's axes
-    n = (F_one(g, G) * own[..., None].float()).sum(1)                   # [B, G]
-    _, depth = SP.size(n.long().clamp(min=1), torch.zeros((B, G), dtype=torch.bool, device=dev))
-    Dz = ctx.mine["depth"][:, None]
-    gi = torch.arange(G, device=dev)[None].float()
-    kk = k[:, None].float()
-    s = (gi + 0.5 - kk / 2) * float(ocfg()["teacher"]["line_m"])
+    # the wanted points, in my zone's axes: the groups' zones at the deployment (their units' slots, deploy.footprint)
+    # side by side line_m apart - closer if my zone is narrower, and in rows from the task's edge inwards if one row
+    # does not hold them (the game's zone 416 x 176 m: 6 groups of 3-4 in two rows of 3)
+    mem = F_one(g, G).transpose(1, 2).bool() & own[:, None, :]          # [B, G, K]
+    n = mem.sum(2)
+    sw, sd = DP.slot(mem, inp["front"], inp["depth"])
+    fw, fd = DP.footprint(n.clamp(min=1), torch.zeros((B, G), dtype=torch.bool, device=dev), sw, sd)
+    on = n > 0
+    fw = torch.where(on, fw, torch.zeros_like(fw)).amax(1)               # [B] the widest, the deepest
+    fd = torch.where(on, fd, torch.zeros_like(fd)).amax(1)
     edge = float(tc["edge_m"])
+    room = (ctx.mine["front"] - 2 * edge).clamp(min=0)
+    per = torch.minimum(torch.floor(room / fw.clamp(min=1.0)).clamp(min=1), k.float())   # groups a row holds
+    sp = torch.where(per > 1, torch.minimum(torch.full_like(fw, float(ocfg()["teacher"]["line_m"])),
+                                            (room - fw).clamp(min=0) / (per - 1).clamp(min=1)), torch.zeros_like(fw))
+    gi = torch.arange(G, device=dev)[None].float()
+    row = torch.floor(gi / per[:, None])
+    j = gi - row * per[:, None]
+    kr = torch.minimum(per[:, None], k[:, None].float() - row * per[:, None])          # the groups in this row
+    s = (j + 0.5 - kr / 2) * sp[:, None]
+    Dz = ctx.mine["depth"][:, None]
     front = (destroy[:, None] | torch.full_like(destroy[:, None], mode == "front")) & (mode != "back")
-    f = torch.where(front, Dz / 2 - depth / 2 - edge, -Dz / 2 + depth / 2 + edge)
+    back = -Dz / 2 + fd[:, None] / 2 + edge + row * fd[:, None]
+    f = torch.where(front, -back, back)
     gx, gz = ZS.world(ctx.mine, s, f)
     verb = torch.zeros((B, len(DC.VERBS)), device=dev)
     verb[torch.arange(B, device=dev), torch.where(destroy, DC.VERBS.index("destroy"), DC.VERBS.index("hold"))] = BIG

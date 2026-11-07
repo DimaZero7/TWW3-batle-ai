@@ -58,8 +58,8 @@ class View:
         self.cx, self.cz, self.s = cx, cz, (W - 40) / span
 
     def __call__(self, x, z):
-        # (z down the picture: the game's view from above - its world is left-handed, facing +x the +z is on the right;
-        # with z up the picture would be the battle in a mirror)
+        # (z down the picture: the game's view from above - its axes x, height y, z are right-handed, facing +x the +z
+        # is on the right; with z up the picture would be the battle in a mirror)
         return (W / 2 + (x - self.cx) * self.s, H / 2 + (z - self.cz) * self.s)
 
 

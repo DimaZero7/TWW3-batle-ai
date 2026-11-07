@@ -1,13 +1,21 @@
 """The deployment by code (plan.md "Расстановка — кодом", "Перенос в игру"): the groups' zones -> every unit's place.
 
-A group's zone is the tactician's tiles (tactic/zone.grid of n and the form, tile_m = 80 m) centred on the chosen cell,
-turned by the chosen sector. The melee units fill the rows of tiles from the front, the shooters after them (each
-kind by slot); a row's units are centred in it; a unit stands on its place's centre facing the zone's turn. The result
-is per unit exactly the game's teleport_to_location(position, bearing, width_m): x, z, the bearing - the middle of its
-sector of the engine's 64 (docs/ru/game/units/commands.md; round_bearing), the width - the unit's own frontage, at most a tile less
-gap_m (the neighbours never overlap).
+A group's zone at the deployment is its units' slots (operative/groups.grid of n and the form: cols x rows) centred on
+the chosen cell, turned by the chosen sector. A slot is as wide as the group's widest formation + GAP_M and as deep as
+its deepest + ROW_GAP_M (the formations at their own frontage: the raw state's front / depth - slot()), so the group
+stands as tight as the person stands his (build/diag_label/human_rules.md: ~23 m a unit along the line; the game's
+zone 416 x 176 m holds 20 units); was the tactician's tile, 80 x 80 m a unit - 20 units need 128 000 m2, the game's zone
+has 73 000 (07.11, build/diag_chain/zone_fix). The melee units fill the rows of slots from the front, the shooters after
+them (each kind by slot); a row's units are centred in it; a unit stands on its place's centre facing the zone's turn.
+The result is per unit exactly the game's teleport_to_location(position, bearing, width_m): x, z, the bearing - the
+middle of its sector of the engine's 64 (docs/ru/game/units/commands.md; round_bearing), the width - the unit's own
+frontage (a slot is wider by GAP_M: the neighbours never overlap).
 
-    places(members, shooter, cx, cz, heading, line, width0)   {x, z, b, width, on} [B, N]
+    slot(members, front, depth)          (across, deep) [B, G] m: a group's slot (above); members [B, G, K]
+    footprint(n, line, across, deep)     (front, depth) [B, G] m: the group's zone at the deployment (cols x rows slots)
+    places(members, shooter, cx, cz, heading, line, width0, slot)   {x, z, b, width, on} [B, N]; slot (across, deep)
+                                      [B, G] the walk's (net.choose plan slot_w, slot_d: slot_of(plan)); None - the
+                                      tactician's tile_m (the old layout)
     errors(st, own, zone, spacing)    [B] long: the deployment's errors on the built state - an own unit in no group or
                                       in two, a unit's formation (geometry.dims) not wholly inside my deployment zone,
                                       two own formations overlapping (separating axes)
@@ -20,6 +28,7 @@ from tools.nn.unit import zmap as Z
 
 SECTORS = 64              # the engine keeps a unit's bearing in 64 sectors
 GAP_M = 6.0               # tools/nn/armies/place.py LATERAL_GAP_M: between neighbours in a row
+ROW_GAP_M = 6.0           # between a row of slots and the next (as across)
 
 
 def round_bearing(b):
@@ -30,12 +39,35 @@ def round_bearing(b):
     return torch.remainder((torch.floor(torch.remainder(b, 360.0) / step) + 0.5) * step, 360.0)
 
 
-def places(members, shooter, cx, cz, heading, line, width0):
+def slot(members, front, depth):
+    """(across, deep) [B, G] (module doc): members [B, G, K] bool, front, depth [B, K] the formations' (m)."""
+    m = members.float()
+    across = (m * front[:, None, :]).amax(2) + GAP_M
+    deep = (m * depth[:, None, :]).amax(2) + ROW_GAP_M
+    return across, deep
+
+
+def footprint(n, line, across, deep):
+    rows, cols = grid(n, line)
+    return cols.float() * across, rows.float() * deep
+
+
+def slot_of(plan):
+    return plan["slot_w"], plan["slot_d"]
+
+
+def places(members, shooter, cx, cz, heading, line, width0, slot=None):
     """members [B, G, N] bool; shooter [B, N]; cx, cz, heading [B, G]; line [B, G] bool; width0 [B, N] the units' own
-    frontage (m)."""
+    frontage (m); slot (module doc)."""
     B, G, N = members.shape
     dev = members.device
     tile = float(tcfg()["tile_m"])
+    if slot is None:
+        sw = sd = torch.full((B, G), tile, device=dev)
+        wmax = torch.full((B, N), tile - GAP_M, device=dev)
+    else:
+        sw, sd = slot
+        wmax = torch.full((B, N), 1e9, device=dev)
     n = members.sum(2)
     rows, cols = grid(n, line)
     slot = torch.arange(N, device=dev, dtype=torch.float32)
@@ -44,8 +76,8 @@ def places(members, shooter, cx, cz, heading, line, width0):
     r = torch.div(rank, cols[..., None], rounding_mode="floor")
     i = rank % cols[..., None]
     k = torch.minimum(cols[..., None], n[..., None] - r * cols[..., None])
-    s = (i.float() + 0.5 - k.float() / 2) * tile
-    f = (rows[..., None].float() / 2 - r.float() - 0.5) * tile
+    s = (i.float() + 0.5 - k.float() / 2) * sw[..., None]
+    f = (rows[..., None].float() / 2 - r.float() - 0.5) * sd[..., None]
     x, z = Z.world(s, f, cx[..., None], cz[..., None], heading[..., None])
     on = members.any(1)
     g = members.float().argmax(1)                                        # [B, N] each unit's group
@@ -53,7 +85,7 @@ def places(members, shooter, cx, cz, heading, line, width0):
     b = round_bearing(heading.gather(1, g))
     return {"x": torch.where(on, pick(x), torch.zeros(B, N, device=dev)),
             "z": torch.where(on, pick(z), torch.zeros(B, N, device=dev)), "b": torch.where(on, b, torch.zeros_like(b)),
-            "width": torch.where(on, width0.clamp(max=tile - GAP_M), width0), "on": on, "group": torch.where(on, g, -1)}
+            "width": torch.where(on, torch.minimum(width0, wmax), width0), "on": on, "group": torch.where(on, g, -1)}
 
 
 def corners(x, z, b, front, depth):
