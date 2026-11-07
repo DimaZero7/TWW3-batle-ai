@@ -36,6 +36,8 @@ M.HIGHLIGHTED = 'IsHighlighted'
 -- build/diag_chain/strip_cco.png, strip_uc2.png)
 M.LIT_MODE = 'ring'
 M.CHAT_KEEP = 20
+M.CMD_KEEP = 30
+M.ORDER_READ_MS = 400
 M.RING_IMAGE = 'ui/bai/label/pick_ring.png'
 M.CLEAR_IMAGE = 'ui/bai/label/clear.png'
 M.PING_LAYOUT = 'ui/battle ui/unit_ping_indicator.twui.xml'
@@ -347,6 +349,11 @@ function M.start(opts)
             -- click_banner <unit>: the unit's banner over the field (unit_id_holder's component of its id)
             local it = by_name[w[2]]
             row.result = click(it and f(env.core:get_ui_root(), 'unit_id_holder', tostring(it.unit:unique_ui_id())))
+        elseif verb == 'click_ui' then
+            -- click_ui <name> [<name>...]: a click on a game component found by its names (the orders panel's buttons)
+            local path = {}
+            for i = 2, #w do path[#path + 1] = w[i] end
+            row.result = click(f(env.core:get_ui_root(), unpack(path)))
         elseif verb == 'chat_say' and h.chat then
             -- chat_say <text>: the field filled and sent (the person types it)
             pcall(function() h.chat.entry:SetStateText(line:match('^chat_say%s+(.+)$')) end)
@@ -431,21 +438,46 @@ function M.start(opts)
         local ok, id = pcall(function() return tostring(u:unique_ui_id()) end)
         return ok and (uid_name[id] or id) or nil
     end
-    M.COMMANDS = {'Double Click', 'Entity Hit', 'Double Click Unit Card', 'Group Created', 'Group Destroyed',
-        'Move Orientation Width', 'Move Rotation Angle', 'Change Speed', 'Attack Unit', 'Change Skirmish', 'Change Melee',
-        'Change Formation', 'Special Ability', 'Fire At Will'}
+    -- The player's orders, as the game hands them to a script (battle:register_command_handler: a command of the
+    -- player's, never a script's or the AI's; Entity Hit - the combat's hits - left out): each numbered with the moment,
+    -- the command's own values (bool1, string1, unit: an attack's target) and the own units selected then; M.ORDER_READ_MS
+    -- later what the order set on each of them (ordered position, bearing, width: the script's unit). In the state
+    -- document as doc.commands (the last M.CMD_KEEP; tools/label/live.py -> commands.jsonl).
+    M.COMMANDS = {'Move Orientation Width', 'Move Rotation Angle', 'Attack Unit', 'Attack Building', 'Change Speed',
+        'Change Skirmish', 'Change Melee', 'Change Formation', 'Fire At Will', 'Special Ability', 'Shot Type',
+        'Group Created', 'Group Destroyed', 'Double Click', 'Double Click Unit Card'}
+    h.cmd_log = {}
+    local function ordered(it)
+        local u = it.unit
+        local out = {}
+        pcall(function() local p = u:ordered_position(); out.ox, out.oz = p:get_x(), p:get_z() end)
+        pcall(function() out.ob = u:ordered_bearing() end)
+        pcall(function() out.ow = u:ordered_width() end)
+        pcall(function() out.fast = u:is_moving_fast() end)
+        return out
+    end
     h.game_events = {}
-    -- (the check only: Entity Hit is the combat's hits, some 170 a minute; the selection - the own units only; an enemy's
-    -- select_in_ui is ignored - the check battle 07.11 18:43)
-    for _, name in ipairs(opts.test and M.COMMANDS or {}) do
+    for _, name in ipairs(M.COMMANDS) do
         local ok, err = pcall(function()
             opts.bm:register_command_handler_callback(name, function(ctx)
-                local row = {t = opts.now_ms(), name = name}
+                local row = {n = #h.cmd_log + 1, t = opts.now_ms(), name = name}
                 pcall(function() row.bool1 = ctx:get_bool1() end)
                 pcall(function() row.string1 = ctx:get_string1() end)
                 pcall(function() row.unit = unit_name(ctx:get_unit()) end)
+                row.selection = selection()
+                h.cmd_log[#h.cmd_log + 1] = row
                 tell('game_cmd', row)
-                if h.on_game_cmd then pcall(h.on_game_cmd, row) end
+                -- what the order set, a moment later (the game applies it after the command)
+                pcall(function()
+                    opts.bm:real_callback(function()
+                        local after = {}
+                        for _, n in ipairs(row.selection or {}) do
+                            local it = by_name_all[n]
+                            if it then after[n] = ordered(it) end
+                        end
+                        row.after = after
+                    end, M.ORDER_READ_MS, 'bai_live_cmd_after')
+                end)
             end, 'bai_live_' .. name)
         end)
         h.game_events[name] = ok and 'ok' or tostring(err)
@@ -515,6 +547,10 @@ function M.start(opts)
         if #h.chat_log > 0 then
             doc.chat = {}
             for i = math.max(1, #h.chat_log - M.CHAT_KEEP + 1), #h.chat_log do doc.chat[#doc.chat + 1] = h.chat_log[i] end
+        end
+        if #h.cmd_log > 0 then
+            doc.commands = {}
+            for i = math.max(1, #h.cmd_log - M.CMD_KEEP + 1), #h.cmd_log do doc.commands[#doc.commands + 1] = h.cmd_log[i] end
         end
         if not okg then doc.groups_error = tostring(own) end
         exchange.write(M.STATE, json.encode(doc))

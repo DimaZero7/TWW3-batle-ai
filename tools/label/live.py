@@ -116,8 +116,9 @@ class LiveRecorder:
         self.folder = RC.new_folder(name, out_root)
         self.rec, self.batch, self.win, self.sec = None, None, None, 0
         self.stats = {"windows": 0, "human": 0, "keep": 0, "none": 0, "refused": 0, "seconds": 0, "orders_rows": 0,
-                      "chat": 0}
+                      "chat": 0, "commands": 0}
         self.chat_seen = 0
+        self.cmd_seen = 0
         self.ov_version, self.ov_sig = 0, None
         self.last_doc = None
 
@@ -162,6 +163,28 @@ class LiveRecorder:
             self.close(r, own, enemy, sig, doc)
             self.open(r, own, enemy, sig, doc)
         self.chat(doc)
+        self.commands(doc)
+
+    def commands(self, doc):
+        """The player's orders as the game handed them to the bridge (src/apps/battle/live_label.lua M.COMMANDS; doc.commands,
+        numbered n): each to commands.jsonl once it carries what the order set (after: each ordered unit's ordered
+        position ox, oz, bearing ob, width ow, fast) or once it is 2 s old - with the battle's second and the window:
+        name, target (an attack's unit), bool1 / string1 (the command's own values), units (the own selection then)."""
+        for m in doc.get("commands") or []:
+            n = int(m.get("n") or 0)
+            if n <= self.cmd_seen:
+                continue
+            t = float(m.get("t") or 0)
+            if "after" not in m and float(doc.get("t") or 0) - t < 2000:
+                break                          # (in order: wait for it)
+            self.cmd_seen = n
+            row = {"n": n, "sec": round(t / 1000.0, 1), "window": self.stats["windows"] + 1,
+                   "window_sec": self.win["sec"] if self.win else None, "name": m.get("name"), "target": m.get("unit"),
+                   "bool1": m.get("bool1"), "string1": m.get("string1"), "units": m.get("selection") or [],
+                   "ordered": m.get("after") or {}}
+            with open(self.folder / "commands.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + chr(10))
+            self.stats["commands"] += 1
 
     def chat(self, doc):
         """The person's chat messages (src/apps/battle/label_chat.lua; doc.chat, numbered n): each new one to chat.jsonl

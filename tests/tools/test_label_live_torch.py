@@ -41,6 +41,15 @@ def test_windows_decisions_skips_and_the_orders_stream(tmp_path):
             doc["chat"] = [{"n": 1, "t": 21500, "text": "фланг слева держит", "groups": groups, "selection": ["u0"]}]
         if sec >= 33:
             doc["chat"].append({"n": 2, "t": 32800, "text": "ждём их пушки", "groups": groups, "selection": []})
+        # the player's orders (live_label.lua M.COMMANDS): kept once what they set is there (after) or 2 s on
+        if sec >= 25:
+            atk = {"n": 1, "t": 24600, "name": "Attack Unit", "unit": "u5", "bool1": False, "selection": ["u0", "u1"]}
+            if sec >= 26:
+                atk["after"] = {"u0": {"ox": 10.0, "oz": 5.0, "ob": 90.0, "ow": 30.0, "fast": False}}
+            doc["commands"] = [atk]
+        if sec >= 35:
+            doc["commands"].append({"n": 2, "t": 34900, "name": "Move Orientation Width", "bool1": True,
+                                    "selection": ["u2"], "after": {"u2": {"ox": -40.0, "oz": 0.0, "ob": 0.0, "ow": 24.0}}})
         exchange.write_atomic(game / exchange.STATE, json.dumps(doc))
         t0 = time.time()
         while rec.stats["seconds"] < min(sec + 1, 46) and time.time() - t0 < 10:
@@ -66,6 +75,11 @@ def test_windows_decisions_skips_and_the_orders_stream(tmp_path):
         (1, 2, 15, "фланг слева держит"), (2, 3, 30, "ждём их пушки")]
     assert chat[0]["selection"] == ["u0"] and chat[0]["groups"]["own"][0][0] == 1
     assert [m["n"] for m in dec[1]["chat"]] == [1] and [m["n"] for m in dec[2]["chat"]] == [2]
+    cmds = [json.loads(x) for x in (f / "commands.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(c["n"], c["name"], c["target"], c["window"]) for c in cmds] == [
+        (1, "Attack Unit", "u5", 2), (2, "Move Orientation Width", None, 3)]
+    assert cmds[0]["units"] == ["u0", "u1"] and cmds[0]["ordered"]["u0"]["ow"] == 30.0
+    assert cmds[1]["bool1"] is True and cmds[1]["ordered"]["u2"]["ox"] == -40.0
     res = json.loads((f / "result.json").read_text(encoding="utf-8"))
     assert res["mode"] == "live" and res["human"] == 1 and res["keep"] == 1 and res["none"] == 1 and res["chat"] == 2
     info = json.loads((f / "session.json").read_text(encoding="utf-8"))
