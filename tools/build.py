@@ -393,6 +393,11 @@ def nn_arena_config(args, run_config):
     if args.deploy == "strategist":
         arena = strategist_zone(arena if (args.army_seed is not None or args.army_from_run is not None)
                                 else nn_scenario.load_arena(args.arena))
+    if getattr(args, "map", None):
+        # a captured map (tools/nn/arena_map.py): its battle file, catchment and deployment zones; the places are moved
+        # onto the zones after the battle file is written
+        from tools.nn import arena_map
+        arena = arena_map.on_map(arena, args.map)
     if args.army_seed is not None or args.army_from_run is not None:
         if args.army_add or args.army_remove:
             # our side's army changed by hand (tools/nn/army_edit.py): a battle for the game only
@@ -403,6 +408,9 @@ def nn_arena_config(args, run_config):
         path = project.BUILD / args.target / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
         nn_scenario.write_scenario(defender, arena, path, duration_s, labels)
+        if arena.get("origin"):
+            from tools.nn import arena_map
+            arena_map.shift_xml(path, arena["origin"])
         run_config["army"] = dict(army, cost={s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
                                   men={s: sum(u["men"] for u in arena["sides"][s]["units"])
                                        for s in nn_scenario.SIDES})
@@ -484,7 +492,23 @@ def nn_arena_config(args, run_config):
     if args.enemy_ai == "net" and args.enemy_net_name.lower().endswith(".pt"):
         # the enemy network's checkpoint for the companion (watch.ps1 passes it as --enemy-checkpoint)
         run_config["enemy_checkpoint"] = args.enemy_net_name.replace("\\", "/")
+    if arena.get("origin"):
+        # the captured map's zones sit off the map's centre: the places and the zones as the battle file has them
+        from tools.nn import arena_map
+        arena_map.shift_config(run_config, arena["origin"])
+        run_config["map_name"] = arena["map_name"]
     return path
+
+
+def extra_mod(workshop_id):
+    """{pack, workshop_id, sha256} of a Workshop mod's one pack (the launcher's dependency entry)."""
+    import hashlib
+    folder = Path(project.load()["workshop_dir"]) / str(workshop_id)
+    packs = sorted(folder.glob("*.pack"))
+    if len(packs) != 1:
+        raise SystemExit(f"--extra-mod {workshop_id}: {len(packs)} packs in {folder}")
+    h = hashlib.sha256(packs[0].read_bytes()).hexdigest()
+    return {"pack": packs[0].name, "workshop_id": str(workshop_id), "sha256": h}
 
 
 def charge_plans():
@@ -579,6 +603,13 @@ def main(argv=None):
                              "(its manifest.json, e.g. build/nn-arena/runs/20261007-091416) instead of the "
                              "generator: a battle of an older generator again; --army-swap exchanges its sides "
                              "(tools/nn/army_from_run.py)")
+    parser.add_argument("--map", default=None, metavar="NAME",
+                        help="a captured map (build/maps/NAME: meta.json): the battle on it, its deployment zones "
+                             "(tools/nn/arena_map.py); with --army-seed / --army-from-run")
+    parser.add_argument("--extra-mod", action="append", default=[], metavar="WORKSHOP_ID",
+                        help="human: one more Workshop mod for this battle (its pack from the Workshop folder, pinned by "
+                             "its SHA-256 now; the launcher copies it into data/ and removes it after) - the person's own "
+                             "mods for his battle, never the network's runs")
     parser.add_argument("--army-add", action="append", metavar="KEY[=N]",
                         help="nn-arena --army-seed: add N (1) units of KEY (a unit of the side's pool, "
                              "config/nn/pools.json) to our side (after --army-swap), deployed again by the "
@@ -839,6 +870,10 @@ def main(argv=None):
     if args.target in ARENA_TARGETS and scenario_file and not args.scenario:
         args.scenario = str(scenario_file)
     dependencies = None
+    if args.extra_mod:
+        if args.target != "human":
+            parser.error("--extra-mod is for the human target (a battle the person plays)")
+        dependencies = project.required_mods() + [extra_mod(i) for i in args.extra_mod]
     if args.mem:
         from tools import mem_sites
         exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"

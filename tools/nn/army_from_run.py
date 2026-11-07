@@ -37,6 +37,21 @@ def _men_by_key(pools):
     return out
 
 
+def _men_of_run(run_dir):
+    """{script name: men} of the run's first nn_sample (events.jsonl); {} without one."""
+    f = Path(run_dir) / "events.jsonl"
+    if not f.exists():
+        return {}
+    with open(f, encoding="utf-8") as fh:
+        for line in fh:
+            if '"nn_sample"' not in line:
+                continue
+            d = json.loads(line)
+            if d.get("event") == "nn_sample":
+                return {u["n"]: int(u.get("men") or 0) for u in d.get("units") or []}
+    return {}
+
+
 def load(run_dir, swap=False, pools=None, base=None):
     """(arena, army): the arena dict tools/nn/scenario.py takes, rebuilt from the run's manifest, and the
     run_config "army" entry (the old run's, plus "from_run"). swap: the sides exchanged, as --army-swap does
@@ -44,18 +59,22 @@ def load(run_dir, swap=False, pools=None, base=None):
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     cfg = manifest.get("config") or {}
-    if manifest.get("target") != "nn-arena" or not cfg.get("units") or not cfg.get("factions"):
-        raise ValueError(f"{run_dir}: not an nn-arena run with units and factions in its manifest")
+    if manifest.get("target") not in ("nn-arena", "human") or not cfg.get("units") or not cfg.get("factions"):
+        raise ValueError(f"{run_dir}: not an nn-arena / human run with units and factions in its manifest")
     men = _men_by_key(pools or P.load())
+    # a key in no pool (a battle the person played: any key the game knows): its men as the run's first state had them
+    run_men = _men_of_run(run_dir)
     gap_m = cfg["gap_m"]
     sides = {}
     for side in SIDES:
         units = []
         for u in cfg["units"][side]:
-            if u["key"] not in men:
-                raise ValueError(f"{run_dir}: {side} unit {u['key']} is in no faction pool (config/nn/pools.json)")
+            n = men.get(u["key"]) or run_men.get(u["script_name"])
+            if not n:
+                raise ValueError(f"{run_dir}: {side} unit {u['key']} is in no faction pool (config/nn/pools.json) "
+                                 f"and not in the run's first state")
             forward, lateral = side_frame(side, u["x"], u["z"], gap_m)
-            row = {"slot": u["slot"], "key": u["key"], "men": men[u["key"]], "forward": forward, "lateral": lateral,
+            row = {"slot": u["slot"], "key": u["key"], "men": n, "forward": forward, "lateral": lateral,
                    "width": u["width"]}
             if u["slot"] == LORD_SLOT:
                 row["general"] = True

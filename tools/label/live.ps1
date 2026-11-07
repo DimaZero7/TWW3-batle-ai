@@ -1,13 +1,20 @@
 ﻿# Разметка вживую (docs/ru/training/label.md "Разметка вживую", tools/label/live.py): a battle the person plays as usual
-# (his own orders, his speed and pause) on the user's 25.10 roster generator (seed 1000702579 swapped, armies v3: 20 v 20,
-# Empire v Skaven, the game's AI on Normal), the enemy's cards in the bottom strip, the groups recorded in 15 s windows.
+# (his own orders, his speed and pause): the exact roster of his battle of 25.10 19:21 (build/human/runs/20261025-192124:
+# Empire v Skaven, 20 v 20, the game's AI on Normal; tools/nn/army_from_run.py) on the captured Kislev plains
+# (build/maps/ksl_plains_01 and its deployment zones; tools/nn/arena_map.py), 'ultra' full screen on the RTX, his mod of
+# the 3D models at any distance (Workshop 3812267837, !!!wh3_cinematic_lod_remover.pack) for this battle only. The
+# game's deployment, the enemy's cards in the bottom strip, the groups recorded in 15 s windows.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools/label/live.ps1
-#   ... -Seed 1000702579 -Timeout 1800 -Graphics low
+#   ... -Run build/human/runs/20261025-192124 -Map ksl_plains_01 -Graphics ultrafull -ExtraMods 3812267837
+#   ... -Run '' -Seed 1000702579   (the generator's armies instead of a run's)
 param(
+    [string]$Run = 'build/human/runs/20261025-192124',
     [int]$Seed = 1000702579,
+    [string]$Map = 'ksl_plains_01',
     [int]$TimeoutModelSeconds = 1800,
-    [ValidateSet('', 'ultra', 'low', 'lowigpu', 'human2k')][string]$Graphics = '',
+    [ValidateSet('', 'ultra', 'ultrafull', 'low', 'lowigpu', 'human2k')][string]$Graphics = 'ultrafull',
+    [string[]]$ExtraMods = @('3812267837'),
     [string]$Container = 'label-live'
 )
 $ErrorActionPreference = 'Stop'
@@ -33,7 +40,11 @@ function Clear-Exchange {
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
 if (Test-Path -LiteralPath $lock) { throw ("The game is held: build/steps/probe_game.lock says '{0}'" -f (Get-Content -LiteralPath $lock -Raw).Trim()) }
 if (docker ps -a --filter "name=^$Container$" --format '{{.Names}}') { throw "Container $Container exists: docker stop $Container" }
-& $python -m tools.build human --army-seed $Seed --army-swap --armies v3 --live-label --free-speed --timeout $TimeoutModelSeconds | Out-Null
+$buildArgs = @('-m', 'tools.build', 'human', '--live-label', '--free-speed', '--timeout', $TimeoutModelSeconds)
+if ($Run) { $buildArgs += @('--army-from-run', (Join-Path $repo $Run)) } else { $buildArgs += @('--army-seed', $Seed, '--army-swap', '--armies', 'v3') }
+if ($Map) { $buildArgs += @('--map', $Map) }
+foreach ($m in $ExtraMods) { if ($m) { $buildArgs += @('--extra-mod', $m) } }
+& $python @buildArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 Set-Content -LiteralPath $lock -Value ("label live, начало {0}" -f (Get-Date -Format 'HH:mm')) -Encoding utf8
 Clear-Exchange

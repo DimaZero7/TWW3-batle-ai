@@ -43,6 +43,14 @@ $GraphicsPresets.human2k['y_res'] = 1440
 $GraphicsPresets.human2k['gfx_fullscreen'] = 'true'
 $GraphicsPresets.human2k['gfx_resolution_scale'] = '1.0'
 
+# 'ultrafull': a battle the user plays himself (live labelling, tools/label/live.ps1, user 07.11): 'ultra', full screen,
+# the RTX (the game on the RTX only); the resolution and its scale are the user's own.
+$GraphicsPresets.ultrafull = [ordered]@{}
+foreach ($k in $GraphicsPresets.ultra.Keys) { $GraphicsPresets.ultrafull[$k] = $GraphicsPresets.ultra[$k] }
+$GraphicsPresets.ultrafull['gfx_fullscreen'] = 'true'
+$GraphicsPresets.ultrafull['gfx_gpu'] = '""NVIDIA GeForce RTX 5070 Ti""'
+$GraphicsPresets.ultrafull['gfx_gpu_select'] = 0
+
 function Set-PreferenceValues {
     param([Parameter(Mandatory = $true)][string]$Text, [Parameter(Mandatory = $true)]$Values)
     foreach ($key in $Values.Keys) {
