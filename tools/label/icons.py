@@ -92,10 +92,24 @@ def frame(w=60, h=130, t=3, colour=(255, 214, 90, 255)):
     return png(px, w, h)
 
 
+def pick_ring(size=SIZE, colour=(255, 214, 90)):
+    """The enemy's pick over its unit on the field (src/apps/battle/live_label.lua RING_IMAGE): a yellow ring, as the
+    ring the game puts round a selected own unit's banner."""
+    px = [[(0, 0, 0, 0)] * size for _ in range(size)]
+    m, r0 = size / 2 - 0.5, size / 2 - 1.0
+    for y in range(size):
+        for x in range(size):
+            d = ((x - m) ** 2 + (y - m) ** 2) ** 0.5
+            if r0 - 5 <= d <= r0:
+                px[y][x] = colour + (255,)
+    return png(px, size, size)
+
+
 def pack_files():
     out = {f"{FOLDER}\\sep.png": separator(), f"{FOLDER}\\pick.png": frame(),
            f"{FOLDER}\\hover.png": frame(colour=(255, 255, 255, 150)),
-           f"{FOLDER}\\clear.png": png([[(0, 0, 0, 0)] * 4 for _ in range(4)], 4, 4)}
+           f"{FOLDER}\\clear.png": png([[(0, 0, 0, 0)] * 4 for _ in range(4)], 4, 4),
+           f"{FOLDER}\\pick_ring.png": pick_ring()}
     for k, colour in enumerate(cfg()["group_colors"][:6], start=1):
         out[f"{FOLDER}\\g{k}.png"] = icon(k, colour)
         out[f"{FOLDER}\\gf{k}.png"] = frame(colour=_rgb(colour) + (255,))

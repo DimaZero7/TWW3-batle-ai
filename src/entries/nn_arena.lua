@@ -386,7 +386,7 @@ function M.main(bm, config, globals)
         end
         state.live = live_label.start({bm = bm, env = env, own = own, enemy = enemy, rows = shared_rows, emit = emit,
             now_ms = function() return bm:time_elapsed_ms() - started_ms end, test = config.live_test == true,
-            orders = orders, army = state.own_army, vec = vec,
+            orders = orders, army = state.own_army, enemy_army = state.enemy_army, vec = vec,
             meta = {batch = state.batch, factions = config.factions, attacker = config.enemy_role == 'defend' and 1 or 2,
                 map = config.map, decide_ms = 1000}})
         if not state.overlay then

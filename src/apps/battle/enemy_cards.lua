@@ -87,6 +87,39 @@ function M.order(names, groups, G)
     return out
 end
 
+-- A click's pick, as the files in Windows Explorer (pure: tests): pick {[name] = true}, order the cards' names as they
+-- stand, mods {ctrl, shift} -> the new pick, the new anchor (the range's start for Shift):
+--   a click - only this unit; Ctrl - this unit added or taken out, the rest kept; Shift - the cards from the anchor to this
+--   one (with Ctrl: added to the pick); Shift with no anchor - as Ctrl.
+function M.click(pick, order, name, mods, anchor)
+    local out = {}
+    local ia, ib = nil, nil
+    for i, n in ipairs(order) do
+        if n == anchor then ia = i end
+        if n == name then ib = i end
+    end
+    if mods.shift and ia and ib then
+        if mods.ctrl then for n in pairs(pick) do out[n] = true end end
+        for i = math.min(ia, ib), math.max(ia, ib) do out[order[i]] = true end
+        return out, anchor
+    end
+    if mods.ctrl or mods.shift then
+        for n in pairs(pick) do out[n] = true end
+        out[name] = (not pick[name]) or nil
+        return out, name
+    end
+    out[name] = true
+    return out, name
+end
+
+-- A box's or a group's pick (pure): add (Ctrl / Shift held) - joined to the pick; else the pick is these.
+function M.merge(pick, names, add)
+    local out = {}
+    if add then for n in pairs(pick) do out[n] = true end end
+    for _, n in ipairs(names) do out[n] = true end
+    return out
+end
+
 -- opts: bm, env {core, UIComponent, find_uicomponent}, own = {{name, unit}}, enemy = {{name, unit, key}}, emit, now_ms,
 -- highlight(names, on) (optional)
 function M.start(opts)
@@ -260,6 +293,7 @@ function M.start(opts)
         local names = {}
         for _, e in ipairs(h.cards) do names[#names + 1] = e.name end
         local order = M.order(names, h.groups, M.GROUPS)
+        h.order = order
         local key = table.concat({w, hh, sep[1], sep[2], places[1][1], places[1][2], #h.cards,
             table.concat(order, ' ')}, ',')
         if key == placed and not force then return nil end
@@ -408,6 +442,23 @@ function M.start(opts)
         end
     end
 
+    -- the highlight on the field follows the pick (and the card under the mouse): only the units whose state changes are
+    -- touched (a unit picked again is not switched off and on - it blinked: the person's battle 07.11 18:16)
+    h.lit = {}
+    local function sync()
+        if not opts.highlight then return end
+        local on, off = {}, {}
+        for _, e in ipairs(h.cards) do
+            local want = h.pick[e.name] == true or h.hovered == e.name
+            if want and not h.lit[e.name] then on[#on + 1] = e.name end
+            if not want and h.lit[e.name] then off[#off + 1] = e.name end
+            h.lit[e.name] = want or nil
+        end
+        if #off > 0 then pcall(opts.highlight, off, false) end
+        if #on > 0 then pcall(opts.highlight, on, true) end
+    end
+    h.sync = sync
+
     function h.hover(name, on)
         local e = h.by_name[name]
         if not e then return end
@@ -415,57 +466,88 @@ function M.start(opts)
         if not c then return end
         if on and geom[name] then put(c, geom[name]) end
         pcall(function() c:SetVisible(on) end)
-        if opts.highlight and not h.pick[name] then pcall(opts.highlight, {name}, on) end
+        if on then h.hovered = name elseif h.hovered == name then h.hovered = nil end
+        sync()
     end
 
-    local function highlight(names, on)
-        if opts.highlight and #names > 0 then pcall(opts.highlight, names, on) end
+    local function unpick_all()
+        for _, name in ipairs(picked_names()) do
+            h.pick[name] = nil
+            show_pick(h.by_name[name])
+        end
+    end
+
+    -- the modifier keys now (opts.keys: the host's helper, tools/label/keys.ps1; none known - none held)
+    local function keys()
+        local ok, k = pcall(function() return opts.keys and opts.keys() end)
+        return ok and type(k) == 'table' and k or {}
+    end
+    h.keys = keys
+
+    -- the pick becomes new: only the cards whose state changes are redrawn
+    local function apply(new)
+        for _, e in ipairs(h.cards) do
+            local want = new[e.name] == true
+            if want ~= (h.pick[e.name] == true) then
+                h.pick[e.name] = want or nil
+                show_pick(e)
+            end
+        end
+        sync()
+        show_button()
+    end
+
+    -- a click on an enemy (its card, or its unit on the field: field - Shift as Ctrl), as Explorer (M.click)
+    function h.click_unit(name, why, field)
+        if not h.by_name[name] then return end
+        local k = keys()
+        local mods = {ctrl = k.ctrl == true, shift = k.shift == true and not field}
+        if field and k.shift then mods.ctrl = true end
+        local new, anchor = M.click(h.pick, h.order or {}, name, mods, h.anchor)
+        h.anchor = anchor
+        apply(new)
+        opts.emit('enemy_pick', {t = opts.now_ms(), unit = name, on = h.pick[name] == true, why = why,
+            ctrl = mods.ctrl or nil, shift = mods.shift or nil, picked = #picked_names(), keys = k.text})
     end
 
     function h.toggle(name, why)
         local e = h.by_name[name]
         if not e then return end
-        h.pick[name] = not h.pick[name] or nil
-        show_pick(e)
-        highlight({name}, h.pick[name] == true)
-        show_button()
+        local new = {}
+        for n in pairs(h.pick) do new[n] = true end
+        new[name] = (not h.pick[name]) or nil
+        h.anchor = name
+        apply(new)
         opts.emit('enemy_pick', {t = opts.now_ms(), unit = name, on = h.pick[name] == true, why = why})
     end
 
-    function h.clear_pick()
-        local names = picked_names()
-        for _, name in ipairs(names) do
-            h.pick[name] = nil
-            show_pick(h.by_name[name])
+    function h.clear_pick(why)
+        if why then
+            -- a click on the field or an own unit: with Ctrl / Shift held the own selection grows - the pick stays
+            local k = keys()
+            if k.ctrl or k.shift then return end
         end
-        highlight(names, false)
+        local had = #picked_names()
+        unpick_all()
+        sync()
         show_button()
+        if why and had > 0 then opts.emit('enemy_pick_clear', {t = opts.now_ms(), why = why, units = had}) end
     end
 
-    -- a box over the field (apps.battle.box_pick): the pick is the box's enemies (none: the pick stays)
+    -- a box over the field (apps.battle.box_pick): the pick is the box's enemies (none: the pick goes, as the own
+    -- selection); with Ctrl / Shift held they are added
     function h.box_pick(names, why)
-        if #names == 0 then return end
-        h.clear_pick()
-        for _, name in ipairs(names) do
-            if h.by_name[name] then
-                h.pick[name] = true
-                show_pick(h.by_name[name])
-            end
-        end
-        highlight(names, true)
-        show_button()
-        opts.emit('enemy_pick_box', {t = opts.now_ms(), units = names, why = why})
+        local k = keys()
+        local add = k.ctrl == true or k.shift == true
+        apply(M.merge(h.pick, names, add))
+        opts.emit('enemy_pick_box', {t = opts.now_ms(), units = names, why = why, add = add or nil,
+            picked = #picked_names()})
     end
 
-    -- a group's frame clicked: the pick is that group
+    -- a group's tab clicked: the pick is that group (with Ctrl / Shift: added)
     function h.pick_group(k, why)
-        h.clear_pick()
-        for _, name in ipairs(h.groups[k] or {}) do
-            h.pick[name] = true
-            show_pick(h.by_name[name])
-        end
-        highlight(h.groups[k] or {}, true)
-        show_button()
+        local m = keys()
+        apply(M.merge(h.pick, h.groups[k] or {}, m.ctrl == true or m.shift == true))
         opts.emit('enemy_pick_group', {t = opts.now_ms(), group = k, why = why})
     end
 
@@ -578,7 +660,7 @@ function M.start(opts)
                 opts.emit('enemy_click', {t = opts.now_ms(), string = s, ours = id})
             end
             if id and by_card[id] then
-                h.toggle(by_card[id].name, 'click ' .. s)
+                h.click_unit(by_card[id].name, 'click ' .. s)
             elseif id == 'bai_enemy_sep' then
                 h.clear_pick()
             elseif id == 'bai_enemy_group_button' then

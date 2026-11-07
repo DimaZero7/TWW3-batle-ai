@@ -24,7 +24,7 @@ if (Test-Path -LiteralPath $localConfig) {
 $game = (Resolve-Path -LiteralPath $settings.game_dir).Path
 $lock = Join-Path $repo 'build\steps\probe_game.lock'
 $exchange = @('tww3_bai_nn_state.json', 'tww3_bai_nn_state.json.tmp', 'tww3_bai_nn_overlay.txt', 'tww3_bai_nn_overlay.txt.tmp',
-    'tww3_bai_live_cmd.txt', 'tww3_bai_nn_label_click.txt')
+    'tww3_bai_live_cmd.txt', 'tww3_bai_nn_label_click.txt', 'tww3_bai_keys.txt')
 function Clear-Exchange {
     if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { return }
     foreach ($n in $exchange) { $p = Join-Path $game $n; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p } }
@@ -40,7 +40,11 @@ Clear-Exchange
 $runArgs = @('run', '-d', '--rm', '--init', '--name', $Container, '--cpus', '2', '-e', 'OMP_NUM_THREADS=2',
     '-v', "${repo}:/repo", '-v', "${game}:/game", '-w', '/repo', '-e', 'PYTHONPATH=/repo', '-e', 'PYTHONUNBUFFERED=1',
     'snake-ai-trainer', 'python', '-m', 'tools.label.live', '--game', '/game', '--idle-exit', '1800')
+$keys = $null
 try {
+    # Ctrl / Shift for the enemy's pick (tools/label/keys.ps1: reads the two keys only, ends with the game)
+    $keys = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile',
+        '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f (Join-Path $repo 'tools\label\keys.ps1')), '-Game', ('"{0}"' -f $game))
     & docker @runArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'The recorder did not start' }
     $graphicsArgs = @{}
@@ -51,6 +55,7 @@ try {
 } finally {
     $ErrorActionPreference = 'Continue'
     docker stop -t 10 $Container 2>$null | Out-Null
+    if ($keys -and -not $keys.HasExited) { Stop-Process -Id $keys.Id -ErrorAction SilentlyContinue }
     Clear-Exchange
     if (Test-Path -LiteralPath $lock) { Remove-Item -LiteralPath $lock }
     # the recorder's folder: build/label/<date>_<time>_live (not matchups/ or the other folders there)
