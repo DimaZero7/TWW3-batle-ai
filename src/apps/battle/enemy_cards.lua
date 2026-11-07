@@ -18,6 +18,7 @@ local M = {}
 M.CARD_LAYOUT = 'ui/common ui/land_unit_card'
 M.FRAME_LAYOUT = 'ui/battle ui/group_frame'
 M.BUTTON_LAYOUT = 'ui/templates/round_small_button'
+M.GROUP_ICON = 'ui/skins/default/icon_group.png'   -- the game's own group icon
 M.PING_LAYOUT = 'ui/battle ui/unit_ping_indicator.twui.xml'
 M.SEP_IMAGE = 'ui/bai/label/sep.png'
 M.PICK_IMAGE = 'ui/bai/label/pick.png'     -- the pick's frame over a card (the card's own 'selected' look is the game's,
@@ -444,12 +445,22 @@ function M.start(opts)
 
     -- the highlight on the field follows the pick (and the card under the mouse): only the units whose state changes are
     -- touched (a unit picked again is not switched off and on - it blinked: the person's battle 07.11 18:16)
+    -- One enemy picked: the game's own look of a selected enemy (opts.native(name): the white ring on its banner, the
+    -- red outline under its men - the CCO Select; the own selection goes, as when the game's enemy is clicked). More than
+    -- one: the ring over each (opts.highlight). The switch only when the native one changes (no blinking).
     h.lit = {}
     local function sync()
+        local picked = {}
+        for _, e in ipairs(h.cards) do if h.pick[e.name] then picked[#picked + 1] = e.name end end
+        local native = (opts.native and #picked == 1) and picked[1] or nil
+        if native ~= h.native then
+            local ok = pcall(opts.native, native, h.native)
+            h.native = ok and native or nil
+        end
         if not opts.highlight then return end
         local on, off = {}, {}
         for _, e in ipairs(h.cards) do
-            local want = h.pick[e.name] == true or h.hovered == e.name
+            local want = (h.pick[e.name] == true or h.hovered == e.name) and e.name ~= h.native
             if want and not h.lit[e.name] then on[#on + 1] = e.name end
             if not want and h.lit[e.name] then off[#off + 1] = e.name end
             h.lit[e.name] = want or nil
@@ -643,6 +654,7 @@ function M.start(opts)
     end
     local okb, berr = pcall(function()
         h.button = env.UIComponent(root():CreateComponent('bai_enemy_group_button', M.BUTTON_LAYOUT))
+        pcall(function() h.button:SetImagePath(M.GROUP_ICON, 0) end)
         pcall(function() h.button:SetTooltipText('Вражеская группа из выбранных карточек (как Ctrl+G)', true) end)
         pcall(function() h.button:RegisterTopMost() end)
     end)

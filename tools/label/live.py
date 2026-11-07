@@ -115,7 +115,9 @@ class LiveRecorder:
         self.side = torch.ones(1, dtype=torch.long, device=device)
         self.folder = RC.new_folder(name, out_root)
         self.rec, self.batch, self.win, self.sec = None, None, None, 0
-        self.stats = {"windows": 0, "human": 0, "keep": 0, "none": 0, "refused": 0, "seconds": 0, "orders_rows": 0}
+        self.stats = {"windows": 0, "human": 0, "keep": 0, "none": 0, "refused": 0, "seconds": 0, "orders_rows": 0,
+                      "chat": 0}
+        self.chat_seen = 0
         self.ov_version, self.ov_sig = 0, None
         self.last_doc = None
 
@@ -159,6 +161,25 @@ class LiveRecorder:
         elif self.sec >= self.win["sec"] + self.window_s:
             self.close(r, own, enemy, sig, doc)
             self.open(r, own, enemy, sig, doc)
+        self.chat(doc)
+
+    def chat(self, doc):
+        """The person's chat messages (src/apps/battle/label_chat.lua; doc.chat, numbered n): each new one to chat.jsonl
+        with the battle's second, the window it falls in (its number and start) and the groups, the selection and the
+        enemy's pick at the moment it was sent; the window's decision keeps their numbers and texts."""
+        for m in doc.get("chat") or []:
+            n = int(m.get("n") or 0)
+            if n <= self.chat_seen:
+                continue
+            self.chat_seen = n
+            row = {"n": n, "sec": round(float(m.get("t") or 0) / 1000.0, 1), "window": self.stats["windows"] + 1,
+                   "window_sec": self.win["sec"] if self.win else None, "text": m.get("text"),
+                   "groups": m.get("groups"), "selection": m.get("selection"), "enemy_pick": m.get("enemy_pick")}
+            with open(self.folder / "chat.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + chr(10))
+            if self.win is not None:
+                self.win.setdefault("chat", []).append({"n": n, "sec": row["sec"], "text": row["text"]})
+            self.stats["chat"] += 1
 
     def open(self, r, own, enemy, sig, doc):
         full, _ = with_rest(own, doc, self.G)
@@ -212,7 +233,7 @@ class LiveRecorder:
                 self.stats["refused"] += 1
         self.stats[source] += 1
         text = {"sec": w["sec"], "until": self.sec, "level": "operative", "mode": "live", "where": "game",
-                "source": source, "changed": changed, "groups": human, "errors": errs}
+                "source": source, "changed": changed, "groups": human, "errors": errs, "chat": w.get("chat") or []}
         if source == "none":
             with open(self.folder / "decisions.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps(text, ensure_ascii=False) + "\n")

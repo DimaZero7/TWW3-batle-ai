@@ -18,6 +18,7 @@ local json = require('apps.core.json')
 local services = require('apps.bridge.services')
 local enemy_cards = require('apps.battle.enemy_cards')
 local box_pick = require('apps.battle.box_pick')
+local label_chat = require('apps.battle.label_chat')
 
 local M = {}
 
@@ -34,6 +35,7 @@ M.HIGHLIGHTED = 'IsHighlighted'
 -- on and off about once a second - the picked enemies blinked (the check battles 07.11 18:30, 18:33:
 -- build/diag_chain/strip_cco.png, strip_uc2.png)
 M.LIT_MODE = 'ring'
+M.CHAT_KEEP = 20
 M.RING_IMAGE = 'ui/bai/label/pick_ring.png'
 M.CLEAR_IMAGE = 'ui/bai/label/clear.png'
 M.PING_LAYOUT = 'ui/battle ui/unit_ping_indicator.twui.xml'
@@ -176,8 +178,36 @@ function M.start(opts)
         end
         opts.emit('live_highlight', {t = opts.now_ms(), on = on, results = res})
     end
+    -- the one picked enemy in the game's own selected look (CCO Select on it; the native one gone -> the selection
+    -- cleared only while that enemy still holds it: the person's own click has replaced it otherwise). The own selection
+    -- changes with it: the field watcher is told it is ours (box_pick card_clicked), so the pick does not go.
+    local function native(name, was)
+        if h.box then pcall(h.box.card_clicked) end
+        local res
+        if name then
+            local it = by_name_all[name]
+            local ok, err = pcall(function()
+                return env.common.call_context_command('CcoBattleUnit', tostring(it.unit:unique_ui_id()), 'Select')
+            end)
+            res = 'select ' .. name .. ': ' .. (ok and 'ok' or tostring(err))
+        elseif was then
+            local it = by_name_all[was]
+            local okr, still = pcall(function()
+                return env.common.get_context_value('CcoBattleUnit', tostring(it.unit:unique_ui_id()), 'IsSelected')
+            end)
+            if okr and still == true then
+                local ok, err = pcall(function()
+                    return env.common.call_context_command('CcoBattleRoot', '', 'SelectionContext.DeselectAll()')
+                end)
+                res = 'deselect ' .. was .. ': ' .. (ok and 'ok' or tostring(err))
+            else
+                res = 'deselect ' .. was .. ': not selected any more'
+            end
+        end
+        opts.emit('live_native', {t = opts.now_ms(), result = res})
+    end
     h.cards = enemy_cards.start({bm = opts.bm, env = env, own = opts.own, enemy = opts.enemy, emit = opts.emit,
-        now_ms = opts.now_ms, highlight = highlight, keys = M.keys})
+        now_ms = opts.now_ms, highlight = highlight, keys = M.keys, native = native})
     -- the box over the field picks enemies too (apps.battle.box_pick)
     local all = {}
     for _, it in ipairs(opts.own) do all[#all + 1] = it end
@@ -317,6 +347,13 @@ function M.start(opts)
             -- click_banner <unit>: the unit's banner over the field (unit_id_holder's component of its id)
             local it = by_name[w[2]]
             row.result = click(it and f(env.core:get_ui_root(), 'unit_id_holder', tostring(it.unit:unique_ui_id())))
+        elseif verb == 'chat_say' and h.chat then
+            -- chat_say <text>: the field filled and sent (the person types it)
+            pcall(function() h.chat.entry:SetStateText(line:match('^chat_say%s+(.+)$')) end)
+            row.result = tostring(h.chat.send('test'))
+        elseif verb == 'chat_open' and h.chat then
+            h.chat.show(w[2] ~= 'off')
+            row.result = 'ok'
         elseif verb == 'field_click' and h.box then
             -- field_click: a click on the field where the helper's file puts the cursor (the release's path)
             row.result = tostring(h.box.field_click(M.cursor(env), 'test'))
@@ -424,6 +461,33 @@ function M.start(opts)
     end
     if opts.test then opts.emit('game_events', {t = opts.now_ms(), registered = h.game_events}) end
 
+    -- the chat (apps.battle.label_chat): every message with the moment's groups and selection, in the state document
+    -- (doc.chat: the last M.CHAT_KEEP, numbered - the recorder keeps each once)
+    h.chat_log = {}
+    local function groups_now()
+        local okg, own = pcall(M.read_own, env, opts.own)
+        local enemy = {}
+        for k = 1, enemy_cards.GROUPS do
+            local g = h.cards.groups[k]
+            if g and #g > 0 then enemy[#enemy + 1] = {k, g} end
+        end
+        return {own = okg and own or {}, enemy = enemy}
+    end
+    local okc, chat = pcall(label_chat.start, {bm = opts.bm, env = env, emit = opts.emit, now_ms = opts.now_ms,
+        place = function()
+            local b = h.cards.button
+            if not b then return nil end
+            local x, y = b:Position()
+            return x + 40, y
+        end,
+        on_message = function(text)
+            local picked = {}
+            for _, e in ipairs(h.cards.cards) do if h.cards.pick[e.name] then picked[#picked + 1] = e.name end end
+            h.chat_log[#h.chat_log + 1] = {n = #h.chat_log + 1, t = opts.now_ms(), text = text, groups = groups_now(),
+                selection = selection(), enemy_pick = picked}
+        end})
+    if okc then h.chat = chat else opts.emit('chat_made', {error = tostring(chat)}) end
+
     function h.tick()
         if opts.test then
             local text = exchange.read(M.CMD)
@@ -436,6 +500,7 @@ function M.start(opts)
             end
         end
         h.cards.tick()
+        if h.chat then pcall(h.chat.place) end
         h.move = h.move + 1
         local okg, own = pcall(M.read_own, env, opts.own)
         local enemy = {}
@@ -447,6 +512,10 @@ function M.start(opts)
         doc.live = true
         doc.groups = {own = okg and own or {}, enemy = enemy}
         doc.selection = selection()
+        if #h.chat_log > 0 then
+            doc.chat = {}
+            for i = math.max(1, #h.chat_log - M.CHAT_KEEP + 1), #h.chat_log do doc.chat[#doc.chat + 1] = h.chat_log[i] end
+        end
         if not okg then doc.groups_error = tostring(own) end
         exchange.write(M.STATE, json.encode(doc))
         return doc
@@ -454,8 +523,13 @@ function M.start(opts)
 
     function h.finish()
         if h.box then h.box.stop() end
+        if h.chat then h.chat.stop() end
         local doc = services.state_document(opts.meta, h.move, opts.now_ms(), opts.rows(), true, {}, {}, nil)
         doc.live = true
+        if #h.chat_log > 0 then
+            doc.chat = {}
+            for i = math.max(1, #h.chat_log - M.CHAT_KEEP + 1), #h.chat_log do doc.chat[#doc.chat + 1] = h.chat_log[i] end
+        end
         exchange.write(M.STATE, json.encode(doc))
     end
 

@@ -36,6 +36,11 @@ def test_windows_decisions_skips_and_the_orders_stream(tmp_path):
             groups = {"own": [[1, ["u0", "u1"]], [2, ["u2"]]], "enemy": [[1, ["u5"]]]}
         doc = TP.doc_of_sim(st, 0, 1000 * sec, own=1)
         doc.update(batch="live", move=sec + 1, live=True, groups=groups, selection=[], done=sec == 46)
+        # the person's chat (label_chat.lua): cumulative, numbered - each kept once, in its window
+        if sec >= 22:
+            doc["chat"] = [{"n": 1, "t": 21500, "text": "фланг слева держит", "groups": groups, "selection": ["u0"]}]
+        if sec >= 33:
+            doc["chat"].append({"n": 2, "t": 32800, "text": "ждём их пушки", "groups": groups, "selection": []})
         exchange.write_atomic(game / exchange.STATE, json.dumps(doc))
         t0 = time.time()
         while rec.stats["seconds"] < min(sec + 1, 46) and time.time() - t0 < 10:
@@ -56,8 +61,13 @@ def test_windows_decisions_skips_and_the_orders_stream(tmp_path):
     assert len(rows) == 46 and set(json.loads(rows[0])["units"]) == {"u0", "u1", "u2", "u3", "u4"}
     ov = (game / GM.OVERLAY).read_text(encoding="utf-8").splitlines()
     assert ov[-1] == "end"
+    chat = [json.loads(x) for x in (f / "chat.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(c["n"], c["window"], c["window_sec"], c["text"]) for c in chat] == [
+        (1, 2, 15, "фланг слева держит"), (2, 3, 30, "ждём их пушки")]
+    assert chat[0]["selection"] == ["u0"] and chat[0]["groups"]["own"][0][0] == 1
+    assert [m["n"] for m in dec[1]["chat"]] == [1] and [m["n"] for m in dec[2]["chat"]] == [2]
     res = json.loads((f / "result.json").read_text(encoding="utf-8"))
-    assert res["mode"] == "live" and res["human"] == 1 and res["keep"] == 1 and res["none"] == 1
+    assert res["mode"] == "live" and res["human"] == 1 and res["keep"] == 1 and res["none"] == 1 and res["chat"] == 2
     info = json.loads((f / "session.json").read_text(encoding="utf-8"))
     assert info["mode"] == "live" and info["where"] == "game"
 

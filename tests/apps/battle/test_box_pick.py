@@ -43,3 +43,14 @@ def test_a_click_on_the_field_hits_the_unit_whose_region_holds_it():
         assert(bp.hit(pts, 230, 180, reg) == nil)
         assert(bp.hit(pts, 100, 50, reg) == nil)       -- above the banner
     """)
+
+
+def test_a_chat_message_is_one_trimmed_line():
+    lua = new_runtime()
+    lua.globals().lc = load(lua, "apps.battle.label_chat")
+    lua.execute("""
+        assert(lc.clean('  hold the flank\\r\\n') == 'hold the flank')
+        assert(lc.clean('a\\nb') == 'a b')
+        assert(lc.clean('   ') == nil and lc.clean(nil) == nil)
+        assert(#lc.clean(string.rep('x', 1000)) == lc.MAX)
+    """)
