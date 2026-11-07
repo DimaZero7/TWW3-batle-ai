@@ -125,6 +125,8 @@ class Heads(nn.Module):
         # for a group with members, a bias for an empty one; at the start 'join a group within join_m, else a new one'
         self.near_w = nn.Parameter(torch.tensor(1.0))
         self.empty_b = nn.Parameter(torch.tensor(-float(c["teacher"]["join_m"]) / 100.0))
+        # and the members so far x a learned weight (start 0: as run5): the formula cuts an army into groups of 3 (07.11)
+        self.count_w = nn.Parameter(torch.tensor(0.0))
         self.cmd = nn.Linear(len(DC.VERBS) + len(DC.PACES), W)
         self.where_b = nn.Conv2d(32, 1, 1)
         self.verb = nn.Linear(W, len(DC.VERBS))
@@ -279,7 +281,8 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         gx_ = (w * jx[:, None, :]).sum(2) / nw.clamp(min=1)
         gz_ = (w * jz[:, None, :]).sum(2) / nw.clamp(min=1)
         dist = torch.sqrt((gx_ - jx[:, j, None]) ** 2 + (gz_ - jz[:, j, None]) ** 2)
-        lg = lg + torch.where(nw > 0, -heads.near_w * dist / 100.0, heads.empty_b * torch.ones_like(dist))
+        lg = lg + torch.where(nw > 0, -heads.near_w * dist / 100.0 + heads.count_w * nw,
+                              heads.empty_b * torch.ones_like(dist))
         # closed: a full group (10); a group whose members so far stand farther than spread_m (no tactician leads it)
         allowed = opened & (count < full) & ((nw == 0) | (dist <= spread))
         a = a & allowed.any(1)
@@ -375,7 +378,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         # closed too: a zone centre within zone_sep_m of another group's zone whose target is not this one's
         other = placed.clone()
         other[:, g] = False
-        diff = (new.target != tgt[:, None, :]).any(2)
+        diff = ~(new.target & tgt[:, None, :]).any(2)            # (no common enemy: another target)
         dz = (cx_[:, :, None] - new.cx[:, None, :]) ** 2 + (cz_[:, :, None] - new.cz[:, None, :]) ** 2
         fok = fok & ~((dz < sep * sep) & (other & diff)[:, None, :]).any(2)
         fok = fok | ~fok.any(1, keepdim=True)
@@ -469,6 +472,7 @@ class NullHeads:
 
     near_w = 0.0
     empty_b = 0.0
+    count_w = 0.0
 
     def join(self, x):
         return torch.zeros_like(x)

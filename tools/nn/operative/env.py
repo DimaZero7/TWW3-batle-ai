@@ -65,9 +65,10 @@ def play(setup, unit_net, net=None, critic=None, mode="formula", greedy=False, k
     script = CS.Script(setup.stands)
     sim_step = battle.stepper(dev)
     m0 = reward.measure(st)
-    gather_case = setup.case == CS.CASES.index("gather")
-    go = setup.case == CS.CASES.index("go")
+    gather_case = (setup.case == CS.CASES.index("gather")) | (setup.case == CS.CASES.index("gather_a"))
+    go = (setup.case == CS.CASES.index("go")) | (setup.case == CS.CASES.index("go_a"))
     go_hold, go_destroy = go & ~setup.destroy, go & setup.destroy
+    split_a = setup.case == CS.CASES.index("split_a")
     axes = None
     store = {"raw": [], "groups": [], "act": []}
     lp_old = torch.zeros((Dmax, B), device=dev)
@@ -158,7 +159,9 @@ def play(setup, unit_net, net=None, critic=None, mode="formula", greedy=False, k
                 now = reward.measure(st)
                 trade = (m0[:, 1, 3] - now[:, 1, 3]) - (m0[:, 0, 3] - now[:, 0, 3])
                 passive = go_destroy & ~rd.contact
-                r_acc = r_acc + (float(rw["trade"]) * trade - float(rw["passive"]) * passive.float()) * finished.float()
+                stayed = rd.stayed_share(float(c["cases"]["army"]["stayed_m"])) * split_a.float()
+                r_acc = r_acc + (float(rw["trade"]) * trade - float(rw["passive"]) * passive.float()
+                                 + float(rw["between"]) * stayed) * finished.float()
         units.end_second()
         t_sim += time.time() - t0
         if duty is not None:
@@ -177,7 +180,8 @@ def play(setup, unit_net, net=None, critic=None, mode="formula", greedy=False, k
                       "groups_mean": round(stats["groups_on"] / n, 2), "tactic_fell": tac.fell,
                       "tactic_fell_share": round(tac.fell / max(tac.ticks, 1), 4), "unit_decisions": units.n,
                       "ent": {k: round(v / n, 3) for k, v in stats["ent"].items()}, "trade": round(float(trade.mean()), 4)})
-    readings = {"contact": rd.contact, "between": rd.between_share(), "hit": rd.hit_share(), "gathered": rd.gathered,
+    readings = {"contact": rd.contact, "between": rd.between_share(),
+                "stayed": rd.stayed_share(float(c["cases"]["army"]["stayed_m"])), "hit": rd.hit_share(), "gathered": rd.gathered,
                 "advanced": rd.advanced, "trade": trade, "why": ender.why, "t_contact": rd.watch[0].t_contact,
                 "groups": groups}
     batch = None
@@ -207,4 +211,11 @@ def measures(setup, rd):
     gathered = torch.nan_to_num(rd["gathered"], nan=0.0)
     obey = torch.where(setup.destroy, rd["contact"] & (rd["between"] > 0.5),
                        ~rd["contact"] & ~rd["advanced"]).float()
-    return {"gather": gathered, "split": rd["between"], "go": obey}
+    by = {"gather": gathered, "split": rd["between"], "go": obey}
+    out = {c: by[CS.base(c)] for c in CS.CASES}
+    # the armies (cases.ARMY): 'the infantry between' needs a shooter in the clump - an army's clump often has none
+    # (army_check.md); split_a - the share of the clumps that met their enemy where they stood (within stayed_m);
+    # go_a - as the command says without the tactician's 'between': 'destroy' a contact, 'hold' no contact, no advance
+    out["split_a"] = rd["stayed"]
+    out["go_a"] = torch.where(setup.destroy, rd["contact"], ~rd["contact"] & ~rd["advanced"]).float()
+    return out

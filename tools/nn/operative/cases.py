@@ -10,6 +10,16 @@ of the simulator. My groups in every case are 2 infantry + 1 lobbing shooters - 
             command 'destroy' (half the battles): one group, the zone stepping to the enemy until the contact; 'hold':
             the zone where it stands
 
+gather_a, split_a, go_a   the same three with armies (config cases.army, as the strategist's cases): each side a lord of
+            its faction (listed first: the scenario's general) + roster units, 3-8 in all; my shooters 0 to half of the
+            rest; the enemy's in the go case at least one. A lord is a melee unit of its group (as everywhere: range 0).
+            gather_a: my units on the circle 360 / n apart (+-15 deg), the enemy army in rows (infantry, shooters 40 m
+            behind, the lord 40 m behind them) walking at the nearest; split_a: my army in two clumps (the lord in the
+            first, ceil(n / 2) and the rest), the enemy's likewise, one before each clump; go_a: my army in one clump, the
+            enemy standing as the strategist's (shooters in front, infantry 40 m behind, the lord 40 m behind them).
+            A clump of an army: its infantry in rows of up to 4 across (70 m apart, rows 50 m), its shooters a row 60 m
+            behind - or in front (the drill's two starts)
+
 specs(n, gen, fixed) -> dicts; build(sp, P, device) -> Setup-like tensors (the state, my / the enemy's masks, the
 shooters, the clumps (the readings' groups: which of my units started together), the command, the limits).
 """
@@ -24,13 +34,47 @@ from tools.nn.tactic import drill1 as DR
 from tools.nn.tactic.decide import order_vec
 from tools.nn.unit import drill_hold as DH
 
-CASES = ("gather", "split", "go")
-H = 6                      # slots a side (the split's 6)
+CASES = ("gather", "split", "go", "gather_a", "split_a", "go_a")
+OLD = CASES[:3]
+ARMY = ("split_a", "go_a")   # (gather_a is built but out of the exam and the training: its measure - within 150 m of the
+                             # first contact - is a group of 3's; an army's line is wider. build/diag_operative/army_check.md)
+H = 8                      # slots a side (an army of 8)
+
+
+def base(case):
+    """'gather' of 'gather' and 'gather_a'."""
+    return case.split("_")[0]
+
+
+def _army_keys(gen, roster, lord, n, shooters):
+    """{inf: [lord, infantry...], sh: [shooters...]}: n units in all (as strategist/cases._army)."""
+    ri = lambda m: int(torch.randint(m, (1,), generator=gen))                    # noqa: E731
+    pick = lambda names: names[ri(len(names))]                                   # noqa: E731
+    return {"inf": [lord] + [pick(roster["infantry"]) for _ in range(n - 1 - shooters)],
+            "sh": [pick(roster["shooters"]) for _ in range(shooters)]}
+
+
+def _halves(a):
+    """Two clumps of an army {inf, sh}: the lord and ceil(n / 2) - 1 more in the first, alternating."""
+    units = [(k, False) for k in a["inf"]] + [(k, True) for k in a["sh"]]
+    rest = units[1:]
+    first = [units[0]] + rest[1::2]
+    second = rest[0::2]
+    n1 = (len(units) + 1) // 2
+    while len(first) > n1:
+        second.append(first.pop())
+    while len(first) < n1:
+        first.append(second.pop())
+
+    def pack(us):
+        return {"inf": [k for k, sh in us if not sh], "sh": [k for k, sh in us if sh]}
+    return pack(first), pack(second)
 
 
 def specs(n, gen, fixed=None, cases=CASES):
     """n random battles; fixed: cycle the cases (and the go's commands) in order (the exam)."""
     out = []
+    ca = cfg()["cases"]["army"]
     u = lambda a, b: a + (b - a) * float(torch.rand(1, generator=gen))         # noqa: E731
     ri = lambda m: int(torch.randint(m, (1,), generator=gen))                    # noqa: E731
     roster = tcfg()["drill1"]["roster"]
@@ -44,6 +88,40 @@ def specs(n, gen, fixed=None, cases=CASES):
                          "shooters": pick(roster[ours]["shooters"]), "start": DR.STARTS[ri(2)],
                          "shooter_slot": ri(3)}
         s = {"case": case, "ours": ours, "theirs": theirs, "rot": u(0.0, 360.0), "sx": u(-sp, sp), "sz": u(-sp, sp)}
+        if case in ARMY:
+            lo, hi = (int(v) for v in ca["units"])
+            nm, ne = lo + ri(hi - lo + 1), lo + ri(hi - lo + 1)
+            mine = _army_keys(gen, roster[ours], ca["lords"][ours], nm, ri((nm - 1) // 2 + 1))
+            foe_sh = 1 + ri(max((ne - 1) // 2, 1)) if case == "go_a" else ri((ne - 1) // 2 + 1)
+            foes = _army_keys(gen, roster[theirs], ca["lords"][theirs], ne, foe_sh)
+            s["army"] = True
+            s["start"] = [DR.STARTS[ri(2)], DR.STARTS[ri(2)]]
+            c = cfg()["cases"][base(case)]
+            if case == "gather_a":
+                s["clumps"] = [mine]
+                s["a0"] = u(0.0, 360.0)
+                s["r"] = [u(*c["radius_m"]) for _ in range(nm)]
+                s["da"] = [u(-15.0, 15.0) for _ in range(nm)]
+                s["face"] = [u(-45.0, 45.0) for _ in range(nm)]
+                s["dist"] = [u(*c["dist_m"])]
+                s["foes"] = [foes]
+                s["command"] = "hold"
+            elif case == "split_a":
+                s["clumps"] = list(_halves(mine))
+                s["apart"] = u(*c["apart_m"])
+                s["dist"] = [u(*c["dist_m"]), u(*c["dist_m"])]
+                s["foes"] = list(_halves(foes))
+                s["command"] = "hold"
+            else:
+                s["clumps"] = [mine]
+                s["dist"] = [u(*c["dist_m"])]
+                s["foes"] = [foes]
+                if fixed:
+                    s["command"] = "destroy" if (k // len(cases)) % 2 == 0 else "hold"
+                else:
+                    s["command"] = "destroy" if float(torch.rand(1, generator=gen)) < 0.5 else "hold"
+            out.append(s)
+            continue
         if case == "gather":
             c = cfg()["cases"]["gather"]
             s["clumps"] = [clump()]
@@ -73,10 +151,51 @@ def specs(n, gen, fixed=None, cases=CASES):
     return out
 
 
-def exam_specs(n=None, seed=None):
+def exam_specs(n=None, seed=None, cases=OLD):
+    """The fixed exam: the old cases (OLD) or the armies' (ARMY: config exam.army_seed)."""
     c = cfg()["exam"]
-    return specs(int(c["battles"] if n is None else n), torch.Generator().manual_seed(int(c["seed"] if seed is None
-                                                                                          else seed)), fixed=True)
+    if seed is None:
+        seed = c["army_seed"] if tuple(cases) == ARMY else c["seed"]
+    return specs(int(c["battles"] if n is None else n), torch.Generator().manual_seed(int(seed)), fixed=True,
+                 cases=tuple(cases))
+
+
+def _block(a, start, x0, z0):
+    """[(key, x, z, 0)] of an army's clump {inf, sh} facing +z (module doc): infantry in rows of up to 4 (70 m), the
+    shooters a row 60 m behind (start 'shooters_front': 60 m in front)."""
+    gap, row = 70.0, 50.0
+    inf, sh = a["inf"], a["sh"]
+    front = start == "shooters_front" and bool(sh)
+    out = []
+    for i, key in enumerate(inf):
+        r, c = divmod(i, 4)
+        n_row = min(4, len(inf) - 4 * r)
+        z = (-30.0 - row * r) if front else (30.0 - row * r)
+        out.append((key, x0 + (c - (n_row - 1) / 2) * gap, z0 + z, 0.0))
+    zs = 30.0 if front else (30.0 - row * ((len(inf) - 1) // 4) - 60.0)
+    for i, key in enumerate(sh):
+        out.append((key, x0 + (i - (len(sh) - 1) / 2) * gap, z0 + zs, 0.0))
+    return out
+
+
+def _foe_rows(a, x0, z0, standing):
+    """[(key, x, z, 180)] of an enemy army {inf, sh} ahead at z0 facing back, the lord first: standing (the go case)
+    shooters in front, infantry 40 m behind, the lord 40 m behind them (strategist/cases.foes_local); walking:
+    infantry in front, the shooters 40 m behind, the lord 40 m behind them. A clump without infantry (the lord in the
+    other half): its shooters in one row."""
+    gap, back = 70.0, 40.0
+    inf, sh = a["inf"], a["sh"]
+    out = []
+    lord = inf[0] if inf else None
+    others = inf[1:] if inf else []
+    rows = ((sh, 0.0), (others, back)) if standing else ((others, 0.0), (sh, back))
+    rows = [r for r in rows if r[0]]
+    if lord is not None:
+        out.append((lord, x0, z0 + (max(dz for _, dz in rows) + back if rows else 0.0), 180.0))
+    for keys, dz in rows:
+        for i, key in enumerate(keys):
+            out.append((key, x0 + (i - (len(keys) - 1) / 2) * gap, z0 + dz, 180.0))
+    return out
 
 
 def _clump_units(cl, x0, z0, b0):
@@ -93,6 +212,37 @@ def local_layout(s):
     own frame (my centre at the origin, the enemy ahead: +z)."""
     gap = float(cfg()["cases"]["gather"]["foe_gap_m"])
     mine, clumps, foes, fg = [], [], [], []
+    if s.get("army"):
+        if s["case"] == "gather_a":
+            a = s["clumps"][0]
+            keys = a["inf"] + a["sh"]
+            n = len(keys)
+            for i, key in enumerate(keys):
+                ang = math.radians(s["a0"] + 360.0 / n * i + s["da"][i])
+                mine.append((key, s["r"][i] * math.sin(ang), s["r"][i] * math.cos(ang), s["face"][i] % 360))
+                clumps.append(0)
+            for f in _foe_rows(s["foes"][0], 0.0, s["dist"][0], False):
+                foes.append(f)
+                fg.append(0)
+        elif s["case"] == "split_a":
+            for c, a in enumerate(s["clumps"]):
+                x0 = (c - 0.5) * s["apart"]
+                for u_ in _block(a, s["start"][c], x0, 0.0):
+                    mine.append(u_)
+                    clumps.append(c)
+            for c, a in enumerate(s["foes"]):
+                x0 = (c - 0.5) * s["apart"]
+                for f in _foe_rows(a, x0, s["dist"][c], False):
+                    foes.append(f)
+                    fg.append(c)
+        else:
+            for u_ in _block(s["clumps"][0], s["start"][0], 0.0, 0.0):
+                mine.append(u_)
+                clumps.append(0)
+            for f in _foe_rows(s["foes"][0], 0.0, s["dist"][0], True):
+                foes.append(f)
+                fg.append(0)
+        return mine, foes, clumps, fg
     if s["case"] == "gather":
         cl = s["clumps"][0]
         keys = [k for k, _, _ in DR.layout(cl)]
@@ -132,8 +282,11 @@ def _turn(x, z, b, s):
 def army(s):
     mine, foes, _, _ = local_layout(s)
     side = lambda units: [{"key": k, **dict(zip(("x", "z", "b"), _turn(x, z, b, s)))} for k, x, z, b in units]  # noqa
-    return {"attacker": 2, "sides": {1: {"faction": DH.FACTIONS[s["ours"]], "units": side(mine)},
-                                     2: {"faction": DH.FACTIONS[s["theirs"]], "units": side(foes)}}}
+    s1, s2 = side(mine), side(foes)
+    if s.get("army"):                         # the lords: listed first, the scenario's generals (their auras, their slot)
+        s1[0]["general"] = s2[0]["general"] = True
+    return {"attacker": 2, "sides": {1: {"faction": DH.FACTIONS[s["ours"]], "units": s1},
+                                     2: {"faction": DH.FACTIONS[s["theirs"]], "units": s2}}}
 
 
 class Setup:
@@ -156,9 +309,9 @@ class Setup:
         self.case = torch.tensor([CASES.index(s["case"]) for s in sp], device=device)
         self.destroy = torch.tensor([s["command"] == "destroy" for s in sp], device=device)
         self.command = torch.cat([order_vec(1, s["command"], "any", device) for s in sp])
-        self.stands = self.case == CASES.index("go")
-        self.limit = torch.tensor([float(c["go"]["hold_limit_s"]) if s["case"] == "go" and s["command"] == "hold"
-                                   else float(c[s["case"]]["limit_s"]) for s in sp], device=device)
+        self.stands = torch.tensor([base(s["case"]) == "go" for s in sp], device=device)
+        self.limit = torch.tensor([float(c["go"]["hold_limit_s"]) if base(s["case"]) == "go" and s["command"] == "hold"
+                                   else float(c[base(s["case"])]["limit_s"]) for s in sp], device=device)
         self.side = torch.ones(B, dtype=torch.long, device=device)
         from tools.nn.unit import train as UT
         self.card = UT.cards(self.st, device).float()

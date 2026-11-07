@@ -198,6 +198,7 @@ def main(argv=None):
                 save(out / "latest.pt", net, critic, opt, tc, done)
     if not a.no_exam:
         EX.run(unit_net, P, dev, net=net, n=a.exam_battles, out_path=out / "exam.json", who="network")
+        EX.run(unit_net, P, dev, net=net, n=a.exam_battles, out_path=out / "exam_army.json", who="network", army=True)
     print(json.dumps({"updates": done, "minutes": round((time.time() - start) / 60, 1)}), flush=True)
 
 

@@ -24,7 +24,7 @@ from tools.nn.tactic import raw as TR  # noqa: E402
 P = load()
 
 
-def setup_of(n=6, seed=0, cases=CS.CASES):
+def setup_of(n=6, seed=0, cases=CS.OLD):
     sp = CS.specs(n, torch.Generator().manual_seed(seed), fixed=True, cases=cases)
     s = CS.Setup(sp, P, "cpu")
     return s, TR.Seer(P).raw(s.st)
@@ -98,7 +98,8 @@ def test_grow_takes_the_touching_piece_only_and_fits_the_window():
     near = SP.near(torch.full((B,), 3), torch.zeros(B, dtype=torch.bool))
     t = TG.grow(raw, torch.arange(B), seed, enemy, gx, gz, near)
     assert bool((t.sum(1) == 3).all())                      # the first three (one piece), not the far three
-    assert bool((t[:, 6:9]).all()) and not bool(t[:, 9:].any())
+    H = CS.H
+    assert bool((t[:, H:H + 3]).all()) and not bool(t[:, H + 3:].any())
     base = TG.base_heading(raw, torch.arange(B), t, gx, gz, torch.zeros(B))
     ok = TG.turn_ok(raw, torch.arange(B), t, base, near, gx, gz)
     assert bool(ok[:, 0].all())
@@ -167,3 +168,30 @@ def test_the_teachers_term_is_finite_and_agrees_with_itself():
     term.backward()
     assert net.heads.where_b.weight.grad is not None and float(net.heads.where_b.weight.grad.abs().sum()) > 0
     assert st["comp"] is not None and st["cell"] is not None
+
+
+def test_the_armies_cases_have_a_lord_first_and_the_formula_groups_them():
+    sp = CS.specs(12, torch.Generator().manual_seed(9), fixed=True, cases=CS.ARMY)
+    setup = CS.Setup(sp, P, "cpu")
+    raw = TR.Seer(P).raw(setup.st)
+    B, N = raw.shape[:2]
+    lords = cfg()["cases"]["army"]["lords"]
+    for b, s in enumerate(sp):
+        n = int(setup.own[b].sum())
+        assert 3 <= n <= 8
+        assert setup.st.keys[b][0] == lords[s["ours"]] and setup.st.keys[b][CS.H] == lords[s["theirs"]]
+        assert bool(setup.st.u["lord"][b, 0]) and bool(setup.st.u["lord"][b, CS.H])
+        assert float(setup.st.u["range"][b, 0]) == 0.0                   # the lord: a melee unit of its group
+    axes = FR.Axes.of(raw, setup.side, setup.st.bounds)
+    groups = GR.Groups.empty(B, N)
+    inp = IN.build(raw, setup.card, setup.side, axes, groups, setup.command, bounds=setup.st.bounds, K=N)
+    ctx = NN.ctx_of(inp, raw, axes, groups)
+    out = TC.play_formula(inp, ctx, setup.destroy, "formula")
+    for b, s in enumerate(sp):
+        mem = out["new"].members()[b] & out["new"].on[b][:, None]
+        assert bool((mem.sum(0)[setup.own[b]] == 1).all())               # every unit of mine in one group
+        if s["case"] == "split_a":
+            assert int(out["new"].on[b].sum()) >= 2
+    tac = LW.Tacticians(B, N, int(cfg()["groups"]), "cpu")
+    p, idx = tac.apply(out["new"], out["task"], out["moved"], raw)
+    assert not any(PC.check(raw, p, EN.field_dict(axes, None)))

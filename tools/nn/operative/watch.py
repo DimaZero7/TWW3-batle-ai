@@ -42,6 +42,13 @@ class Readings:
         self.ux, self.uz = ex / d, ez / d
         r = cfg()["reward"]
         self.gather_m, self.advance_m = float(r["gather_m"]), float(r["advance_m"])
+        # each clump's centre at the start and at its first contact (the armies' split: did it stay where it stood)
+        self.c0 = torch.zeros((B, CLUMPS, 2), device=dev)
+        self.cc = torch.full((B, CLUMPS, 2), float("nan"), device=dev)
+        for k in range(CLUMPS):
+            m = (setup.clump == k).float()
+            n = m.sum(1).clamp(min=1)
+            self.c0[:, k, 0], self.c0[:, k, 1] = (u["x"] * m).sum(1) / n, (u["z"] * m).sum(1) / n
 
     def step(self, st, was, dt, area=None):
         """(between [B] float: the share of the clumps that got 'between' now, hit [B] float the same of 'hit', gathered
@@ -52,8 +59,16 @@ class Readings:
         hit = torch.zeros(B, device=dev)
         nclumps = sum(h.float() for h in self.has).clamp(min=1)
         first_before = self.watch[0].contact.clone()
-        for w, h in zip(self.watch, self.has):
+        u = st.u
+        for k, (w, h) in enumerate(zip(self.watch, self.has)):
+            before = w.contact.clone()
             _, got, ht = w.step(st, was, dt, area)
+            nk = w.contact & ~before
+            if bool(nk.any()):
+                m = ((self.setup.clump == k) & (u["men"] > 0) & ~u["gone"]).float()
+                n = m.sum(1).clamp(min=1)
+                c = torch.stack([(u["x"] * m).sum(1) / n, (u["z"] * m).sum(1) / n], 1)
+                self.cc[:, k] = torch.where(nk[:, None], c, self.cc[:, k])
             between = between + (got & h).float()
             hit = hit + (ht & h).float()
         u = st.u
@@ -94,6 +109,13 @@ class Readings:
         """[B] the share of the clumps with 'between' at their contact."""
         n = sum(h.float() for h in self.has).clamp(min=1)
         return sum((w.between & h).float() for w, h in zip(self.watch, self.has)) / n
+
+    def stayed_share(self, within_m):
+        """[B] the share of the clumps that met the enemy (their first contact) within within_m of where they started."""
+        n = sum(h.float() for h in self.has).clamp(min=1)
+        d = (self.cc - self.c0).norm(dim=2)                                   # nan: no contact
+        ok = torch.nan_to_num(d, nan=1e9) <= within_m
+        return sum((ok[:, k] & h).float() for k, h in enumerate(self.has)) / n
 
     def hit_share(self):
         n = sum(h.float() for h in self.has).clamp(min=1)

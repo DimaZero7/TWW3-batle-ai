@@ -9,6 +9,9 @@ Form 'square', turn sector 0 (facing the target), verb 'hold', pace 'any'. The g
 group's centre (set once: then 'keep', the turn mended when the target's bearing moved more than turn_deg); 'destroy'
 - a point approach_m short of the target's centre on the line from the group's centre ('move' when the zone the step
 gives is move_m or more from the one in force). A cell the zone would leave the field from: the nearest open one.
+A group of more than line_units (an army) is cut into a line of the tactician's drill groups (line_of): side by side
+line_m apart across the way to the target, around the centre of the group it was cut from; such a group moves its zone
+under 'hold' too, until it stands in its place.
 
 The plain operators (mode): 'each' - every unit its own group where it stands; 'blob' - one group of all on my centre;
 'stay' / 'go' - the formula under the command 'hold' / 'destroy' whatever the case says.
@@ -120,6 +123,11 @@ def formula(inp, ctx, destroy, mode="formula"):
     gxy = np.zeros((B, G, 2), dtype=np.float32)
     txy = np.zeros((B, G, 2), dtype=np.float32)
     has_t = np.zeros((B, G), dtype=bool)
+    axy = np.zeros((B, G, 2), dtype=np.float32)          # the line's anchor: the centre of the group it was cut from
+    rxy = np.zeros((B, G, 2), dtype=np.float32)          # the line's right
+    off = np.zeros((B, G), dtype=np.float32)             # the group's place in the line (m right of the anchor)
+    rng = ctx.J[..., I["range"]].cpu().numpy()
+    line_n, lat_m = int(tc["line_units"]), float(tc["line_m"])
     for b in range(B):
         mine = [j for j in range(K) if own[b, j]]
         if not mine:
@@ -132,18 +140,24 @@ def formula(inp, ctx, destroy, mode="formula"):
                 return None
             return int(np.argmin([math.hypot(*(p - xy)) for p in pc_xy]))
         if mode == "each":
-            W = [([j], nearest(J[b, j])) for j in mine]
+            W = [([j], nearest(J[b, j])) for j in mine[:G]]
+            for j in mine[G:]:                           # (more units than groups: the nearest one's)
+                k = min(range(len(W)), key=lambda i: math.hypot(*(J[b, W[i][0][0]] - J[b, j])))
+                W[k][0].append(j)
         else:
             cl = [[mine[i] for i in k] for k in clumps([J[b, j] for j in mine], float(tc["join_m"]))]
             if mode != "blob" and len(pcs) >= 2 and len(cl) >= 2:
                 W = [(k, nearest(np.mean([J[b, j] for j in k], 0))) for k in cl]
             else:
                 W = [(mine, nearest(np.mean([J[b, j] for j in mine], 0)))]
-        W.sort(key=lambda w: min(w[0]))
+        cut = line_n if mode in ("formula", "stay", "go") else 10 ** 6     # (the plain operators keep their groups)
         have = {g: set(j for j in mine if rg[b, j] == g) for g in range(G) if on[b, g]}
+        W = [line_of(b, rows, pc, J, rng, pc_xy, axes, cut, lat_m, have) for rows, pc in W]
+        W = [w for ws in W for w in ws]
+        W.sort(key=lambda w: min(w[0]))
         taken = set()
         index = []
-        for rows, _ in W:
+        for rows, *_ in W:
             rs = set(rows)
             g = next((g for g, m in have.items() if m == rs and g not in taken), None)
             if g is None:
@@ -154,7 +168,8 @@ def formula(inp, ctx, destroy, mode="formula"):
                          next(g for g in range(G) if g not in taken))
             taken.add(g)
             index.append(g)
-        for (rows, pc), g in zip(W, index):
+        for (rows, pc, anchor, o, right), g in zip(W, index):
+            axy[b, g], off[b, g], rxy[b, g] = anchor, o, right
             want[b, g] = True
             ident[b, g] = bool(on[b, g]) and have.get(g) == set(rows)
             gxy[b, g] = np.mean([J[b, j] for j in rows], 0)
@@ -173,17 +188,19 @@ def formula(inp, ctx, destroy, mode="formula"):
                 comp_l[b, j] = g
     T = lambda a, dt=None: torch.as_tensor(a, device=dev, dtype=dt)               # noqa: E731
     want, ident, changed_t, has_t = T(want), T(ident), T(changed_t), T(has_t)
-    gxy, txy = T(gxy), T(txy)
+    gxy, txy, axy, rxy, off = T(gxy), T(txy), T(axy), T(rxy), T(off)
+    in_line = off.abs() > 1e-6
     # phase B: the goals, the cells, keep or move (tensors over B x G)
     gx, gz, tx, tz = gxy[..., 0], gxy[..., 1], txy[..., 0], txy[..., 1]
     up = axes.heading[:, None].expand(B, G)
     base = torch.where(has_t, TG.bearing(gx, gz, tx, tz), up)
-    dx, dz = tx - gx, tz - gz
+    ax, az = axy[..., 0], axy[..., 1]
+    dx, dz = tx - ax, tz - az
     d = torch.sqrt(dx * dx + dz * dz).clamp(min=1e-6)
     ap = float(tc["approach_m"])
     go = destroy[:, None] & has_t
-    qx = torch.where(go, tx - dx / d * torch.minimum(torch.full_like(d, ap), d), gx)
-    qz = torch.where(go, tz - dz / d * torch.minimum(torch.full_like(d, ap), d), gz)
+    qx = torch.where(go, tx - dx / d * torch.minimum(torch.full_like(d, ap), d), ax) + off * rxy[..., 0]
+    qz = torch.where(go, tz - dz / d * torch.minimum(torch.full_like(d, ap), d), az) + off * rxy[..., 1]
     members_n = torch.zeros((B, G), dtype=torch.long, device=dev)
     cl_t = T(comp_l)
     for g in range(G):
@@ -207,7 +224,10 @@ def formula(inp, ctx, destroy, mode="formula"):
     dturn = (torch.remainder(base - old.heading + 180.0, 360.0) - 180.0).abs()
     far = (zx - old.cx) ** 2 + (zz - old.cz) ** 2 >= float(tc["move_m"]) ** 2
     turned = dturn > float(tc["turn_deg"])
-    need = changed_t | turned | (destroy[:, None] & far)
+    # (a group of a line moves under 'hold' only while it takes its place - its first place_s: its anchor is its army's
+    # centre now, which creeps forward as the infantry goes to the front rows)
+    placing = in_line & (old.age < float(tc["place_s"]))
+    need = changed_t | turned | ((destroy[:, None] | placing) & far)
     keepT = torch.where(ident & ~need, GR.KEEP, torch.where(ident, GR.MOVE, GR.REFORM))
     keepT = torch.where(old.on, keepT, torch.full_like(keepT, GR.REFORM))
     # the act and the labels
@@ -219,6 +239,44 @@ def formula(inp, ctx, destroy, mode="formula"):
     labels = dict(act)
     labels["target"] = T(tgt_rows)
     return act, labels
+
+
+def line_of(b, rows, pc, J, rng, pc_xy, axes, line_n, lat_m, have=None):
+    """[(rows, piece, anchor xy, offset m, right xy)]: a group of more than line_n units cut into a line of groups of
+    the tactician's drill (up to 2 infantry + 1 shooters; a lord is infantry), side by side lat_m apart across the way to
+    its target (plan.md; 07.11: the tactician's formula places 2 infantry and 1 shooters - an army of 8 in one group sent
+    it to its last resort on 17 % of its decisions). Neighbours by place: the infantry and the shooters each sorted
+    from left to right and cut into k runs."""
+    c = np.mean([J[b, j] for j in rows], 0)
+    if pc is not None:
+        f = pc_xy[pc] - c
+    else:
+        h = math.radians(float(axes.heading[b]))
+        f = np.array([math.sin(h), math.cos(h)])
+    f = f / max(float(np.hypot(*f)), 1e-6)
+    right = np.array([f[1], -f[0]], dtype=np.float32)
+    if len(rows) <= line_n:
+        return [(rows, pc, c, 0.0, right)]
+    k = math.ceil(len(rows) / line_n)
+    side = lambda j: float((J[b, j] - c) @ right)                                       # noqa: E731
+    # the line in force kept: the groups now cover exactly these units, each of up to line_n, as many as needed - the
+    # same groups in their order from left to right (a cut again by places would re-form them as units shift: the
+    # formula re-formed 0.84 times a battle on the armies' exam, 07.11)
+    rs = set(rows)
+    now = [m for m in (have or {}).values() if m and m <= rs]
+    if now and set().union(*now) == rs and all(len(m) <= line_n for m in now) and len(now) == k:
+        now.sort(key=lambda m: float(np.mean([side(j) for j in m])))
+        return [(sorted(m), pc, c, (i - (k - 1) / 2) * lat_m, right) for i, m in enumerate(now)]
+    inf = sorted([j for j in rows if rng[b, j] <= 0], key=side)
+    sh = sorted([j for j in rows if rng[b, j] > 0], key=side)
+    runs_i = np.array_split(np.array(inf, dtype=np.int64), k)
+    runs_s = np.array_split(np.array(sh, dtype=np.int64), k)
+    out = []
+    for i in range(k):
+        g = [int(v) for v in runs_i[i]] + [int(v) for v in runs_s[i]]
+        if g:
+            out.append((g, pc, c, (i - (k - 1) / 2) * lat_m, right))
+    return out
 
 
 def play_formula(inp, ctx, destroy, mode="formula"):
