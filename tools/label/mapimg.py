@@ -1,5 +1,7 @@
 """The page's background of a captured map (numpy + Pillow, no torch): build/maps/<name>/ -> a PNG over the map's
-height grid (x0..x0 + (C - 1) step, z0..; the top row the largest z), cached in build/label/maps/<name>.png.
+height grid (x0..x0 + (C - 1) step, z0..; the top row the smallest z: the game's view from above - its axes x,
+height y, z are right-handed, facing +x the +z is on the right; with the largest z on top the map was a mirror),
+cached in build/label/maps/<name>_game.png.
 
     the ground's height as grey (low dark, high light) with a light hill shade, contour lines every 10 m,
     forest green, shallow water light blue, deep water blue, 'cannot stand' (passable.npz) dark red, the trunks dots
@@ -16,6 +18,7 @@ from tools.label import matchup as MU
 from tools.label import pool as PL
 
 SIZE = 768
+VIEW = "_game"         # (the cache's mark: the pictures since 08.11 are in the game's view, z down - before mirrored)
 COLORS = {"forest": (60, 110, 50), "shallow_water": (110, 160, 210), "deep_water": (40, 80, 160),
           "mud": (120, 100, 70), "snow": (235, 235, 240), "rock": (140, 130, 120), "sharp_stones": (150, 140, 120)}
 
@@ -54,7 +57,7 @@ def _render(folder):
         iz = ((t["z"] - float(d["z0"])) / (step * k)).astype(int)
         ok = (ix >= 0) & (ix < rgb.shape[1]) & (iz >= 0) & (iz < rgb.shape[0])
         rgb[iz[ok], ix[ok]] = (25, 60, 25)
-    img = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)[::-1])     # the top row: the largest z
+    img = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8))           # the top row: the smallest z (the game's view)
     buf = io.BytesIO()
     img.save(buf, "PNG")
     ext = {"min_x": float(d["x0"]), "max_x": float(d["x0"]) + (cols - 1) * step, "min_z": float(d["z0"]),
@@ -67,7 +70,7 @@ def picture(name):
         raise ValueError(f"bad map name {name!r}")
     folder = PL.MAPS / name
     cache = project.ROOT / cfg()["out"] / "maps"
-    png, js = cache / f"{name}.png", cache / f"{name}.json"
+    png, js = cache / f"{name}{VIEW}.png", cache / f"{name}{VIEW}.json"
     src = folder / "heights.npz"
     if png.exists() and js.exists() and png.stat().st_mtime >= src.stat().st_mtime:
         return png.read_bytes(), json.loads(js.read_text(encoding="utf-8"))

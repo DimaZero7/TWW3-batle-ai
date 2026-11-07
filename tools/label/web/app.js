@@ -95,8 +95,10 @@ function resize() {
 }
 const W = () => cv.width / (window.devicePixelRatio || 1);
 const H = () => cv.height / (window.devicePixelRatio || 1);
-const toS = (x, z) => [(x - S.cam.x) * S.cam.scale + W() / 2, -(z - S.cam.z) * S.cam.scale + H() / 2];
-const toW = (sx, sy) => [(sx - W() / 2) / S.cam.scale + S.cam.x, -(sy - H() / 2) / S.cam.scale + S.cam.z];
+// The game's view from above: x to the right, z DOWN the screen. The game's axes x, height y, z are right-handed (facing +x, +z is on
+// the right); with z up the page showed the battle in a mirror (tools/label/replay.py draws the same way).
+const toS = (x, z) => [(x - S.cam.x) * S.cam.scale + W() / 2, (z - S.cam.z) * S.cam.scale + H() / 2];
+const toW = (sx, sy) => [(sx - W() / 2) / S.cam.scale + S.cam.x, (sy - H() / 2) / S.cam.scale + S.cam.z];
 function fitTo(points, pad = 120) {
   if (!points.length) return;
   let a = [1e9, -1e9, 1e9, -1e9];
@@ -113,7 +115,7 @@ function fitField() {
 
 function rect(x, z, b, w, d, o = {}) {
   const [sx, sy] = toS(x, z);
-  g2.save(); g2.translate(sx, sy); g2.rotate(b * Math.PI / 180);
+  g2.save(); g2.translate(sx, sy); g2.rotate((180 - b) * Math.PI / 180);
   const pw = Math.max(w * S.cam.scale, 2), pd = Math.max(d * S.cam.scale, 2);
   if (o.alpha !== undefined) g2.globalAlpha = o.alpha;
   if (o.dash) g2.setLineDash(o.dash);
@@ -152,7 +154,7 @@ function arrow(a, b, c, lw = 3) {
 
 function drawGrid() {
   const step = S.cam.scale > 0.9 ? 50 : (S.cam.scale > 0.25 ? 100 : 200);
-  const [x0, z1] = toW(0, 0), [x1, z0] = toW(W(), H());
+  const [x0, z0] = toW(0, 0), [x1, z1] = toW(W(), H());
   g2.save(); g2.strokeStyle = css("--muted"); g2.lineWidth = 1;
   for (let x = Math.floor(x0 / step) * step; x <= x1; x += step) {
     g2.globalAlpha = x % (step * 2) === 0 ? 0.22 : 0.1;
@@ -177,7 +179,7 @@ function drawField(strips) {
     const im = icon(mp.preview);
     if (im) {
       const e = mp.extent || f;
-      const [x0, y0] = toS(e.min_x, e.max_z), [x1, y1] = toS(e.max_x, e.min_z);
+      const [x0, y0] = toS(e.min_x, e.min_z), [x1, y1] = toS(e.max_x, e.max_z);
       g2.globalAlpha = 0.9; g2.drawImage(im, x0, y0, x1 - x0, y1 - y0); g2.globalAlpha = 1;
     }
   }
@@ -190,7 +192,7 @@ function drawField(strips) {
     const r = mp[k];
     rect((r.min_x + r.max_x) / 2, (r.min_z + r.max_z) / 2, 0, r.max_x - r.min_x, r.max_z - r.min_z,
       { fill: c + "1c", stroke: c, dash: [6, 4], lw: 2 });
-    const [sx, sy] = toS(r.min_x, r.max_z);
+    const [sx, sy] = toS(r.min_x, r.min_z);
     text(sx + 6, sy + 16, `${t} · ${Math.round(r.max_x - r.min_x)} × ${Math.round(r.max_z - r.min_z)} м`, c, 13, true, "left");
   }
 }
@@ -350,7 +352,7 @@ function drawBattle() {
   if (P && P.level === "strategist") {
     for (const [k, z] of P.zones.entries()) {
       rect(z.x, z.z, z.b, z.front, z.depth, { fill: sideColor(k + 1) + "18", stroke: sideColor(k + 1), dash: [6, 4], lw: 2 });
-      wtext(z.x, z.z + z.depth / 2, k === 0 ? "Моя зона расстановки" : "Зона врага (где он — не видно)", sideColor(k + 1), -6, 13, true);
+      wtext(z.x, z.z - z.depth / 2, k === 0 ? "Моя зона расстановки" : "Зона врага (где он — не видно)", sideColor(k + 1), -6, 13, true);
     }
   }
   if (!opLike) for (const g of snap.groups)
@@ -387,7 +389,7 @@ function drawTacticEdit() {
     const c = color(row.g);
     rect(row.cx, row.cz, row.heading, row.near, row.near, { stroke: c + "66", dash: [2, 6] });
     for (const t of row.tiles) rect(t[0], t[1], row.heading, 80, 80, { fill: c + "12", stroke: c + "bb", dash: [4, 4], lw: 1.5 });
-    wtext(row.cx, row.cz + row.depth / 2, `Группа ${row.g + 1}`, c, -6, 14, true);
+    wtext(row.cx, row.cz - row.depth / 2, `Группа ${row.g + 1}`, c, -6, 14, true);
     if (S.showHint && S.hintPv && S.hintPv.frames) {
       const hf = S.hintPv.frames[String(row.g)] || {};
       for (const f of Object.values(hf)) rect(f.x, f.z, row.heading, f.w, f.d, { stroke: css("--ink"), dash: [2, 3], alpha: 0.6 });
@@ -414,7 +416,7 @@ function frameLoop() { if (S.screen === "battle" && (S.mode !== "pause" || S.dra
 // ------------------------------------------------------------------ the mouse
 
 function hitRect(x, z, b, w, d, wx, wz, pad = 3) {
-  const a = -b * Math.PI / 180, dx = wx - x, dz = wz - z;
+  const a = b * Math.PI / 180, dx = wx - x, dz = wz - z;
   const s = dx * Math.cos(a) - dz * Math.sin(a), f = dx * Math.sin(a) + dz * Math.cos(a);
   return Math.abs(s) <= w / 2 + pad && Math.abs(f) <= d / 2 + pad;
 }
@@ -516,7 +518,7 @@ window.addEventListener("mousemove", (e) => {
   const [wx, wz] = toW(sx, sy);
   const d = S.drag;
   if (!d) { hover(sx, sy, wx, wz, e); return; }
-  if (d.kind === "pan") { S.cam.x = d.cx - (sx - d.sx) / S.cam.scale; S.cam.z = d.cz + (sy - d.sy) / S.cam.scale; }
+  if (d.kind === "pan") { S.cam.x = d.cx - (sx - d.sx) / S.cam.scale; S.cam.z = d.cz - (sy - d.sy) / S.cam.scale; }
   else if (d.kind === "move") {
     for (const [k, x0, z0] of d.start) {
       const u = S.m.sides[S.side].units[k];
