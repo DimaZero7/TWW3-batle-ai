@@ -91,12 +91,12 @@ def test_a_banned_decision_is_refused_and_not_written(unit_net, tmp_path):
     # a zone goal far outside the field: the walk's cell is the nearest cell, the step by code; a unit in no group
     bad = {"groups": [{"g": 0, "members": [0, 2], "task": None}]}
     r = s.decide(bad)
-    assert not r["ok"] and any("без группы" in e for e in r["errors"])
+    assert not r["ok"] and any("есть группа" in e for e in r["errors"])
     # two groups whose zones would stand 240 m apart or less with different targets: zone_sep_m's ban
     sep = {"groups": [{"g": 0, "members": [0, 2], "task": {"seed": -1, "goal": [0, -200], "form": "line", "turn": 0}},
                       {"g": 1, "members": [1], "task": None}]}
     r = s.decide(sep)
-    assert not r["ok"] and any("zone_sep_m" in e for e in r["errors"])
+    assert not r["ok"] and any("240 м" in e for e in r["errors"])
     # an enemy unit as a member
     r = s.decide({"groups": [{"g": 0, "members": [0, 1, 2, 3], "task": None}]})
     assert not r["ok"]
@@ -118,7 +118,7 @@ def test_picks_are_watched_and_bans_found(unit_net, tmp_path):
     act, plan, _ = HU.op_act(s.pending["hint"], ctx, s.axes)
     act["verb"][:] = 0                                      # 'destroy': closed (verbs_open: hold)
     _, errs = HU.op_walk(inp, ctx, act, plan)
-    assert any("глагол" in e for e in errs)
+    assert any("приказ" in e for e in errs)
 
 
 def test_operative_sample_rebuilds_exactly_and_teaches(unit_net, tmp_path):
@@ -202,3 +202,21 @@ def test_strategist_level(unit_net, tmp_path):
         s.advance()
         assert s.pending is None                                                # the battle plays itself after
     assert s.parcels >= 1 and s.parcel_errors == []
+
+
+def test_men_of_the_fighters_lab_and_their_patches_end_with_the_battle(unit_net, tmp_path):
+    from tools.nn.sim import battle
+    plain = battle.step
+    s = SE.Session(copy.deepcopy(MATCH), level="operative", nets={"unit": unit_net}, out_root=tmp_path, men=True)
+    assert battle.step is not plain                                       # the lab's step while the battle lives
+    s.advance()
+    s.decide(s.pending["hint"])
+    snaps = s.advance(3)
+    men = snaps[-1]["men"]
+    own = [u for u in snaps[-1]["units"] if u[1] == 1]
+    assert men and all(len(men[u[0]]) == 2 * u[7] for u in own)          # a point a living man
+    s.stop()
+    assert battle.step is plain                                           # and gone with it
+    assert RC.load(s.folder)[0]["level"] == "operative"
+    info = s.state()["units"]
+    assert info[0]["name"] and info[0]["kind"] in ("infantry", "shooters", "lord", "cavalry", "monster", "artillery")

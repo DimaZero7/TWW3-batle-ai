@@ -1,0 +1,84 @@
+{
+ "name": "река_кислева",
+ "title": "Река Кислева",
+ "about": "Снятая карта с рекой и лесом: рыцари, пушка и пехота против скавенов с крысоограми; враг стоит.",
+ "map": "ksl_river_01",
+ "limit_s": 420,
+ "command": {
+  "verb": "destroy",
+  "pace": "any"
+ },
+ "enemy": "hold",
+ "sides": {
+  "1": {
+   "faction": "wh_main_emp_empire",
+   "units": [
+    {
+     "key": "wh_main_emp_inf_spearmen_1",
+     "x": -80,
+     "z": -260,
+     "b": 0
+    },
+    {
+     "key": "wh_main_emp_inf_greatswords",
+     "x": 20,
+     "z": -260,
+     "b": 0
+    },
+    {
+     "key": "wh_main_emp_inf_crossbowmen",
+     "x": -30,
+     "z": -330,
+     "b": 0
+    },
+    {
+     "key": "wh_main_emp_cav_empire_knights",
+     "x": 160,
+     "z": -300,
+     "b": 0
+    },
+    {
+     "key": "wh_main_emp_art_great_cannon",
+     "x": -150,
+     "z": -360,
+     "b": 0
+    }
+   ]
+  },
+  "2": {
+   "faction": "wh2_main_skv_skaven",
+   "units": [
+    {
+     "key": "wh2_main_skv_inf_clanrats_1",
+     "x": -60,
+     "z": 260,
+     "b": 180
+    },
+    {
+     "key": "wh2_main_skv_inf_clanrat_spearmen_0",
+     "x": 60,
+     "z": 260,
+     "b": 180
+    },
+    {
+     "key": "wh2_main_skv_mon_rat_ogres",
+     "x": 0,
+     "z": 300,
+     "b": 180
+    },
+    {
+     "key": "wh2_dlc12_skv_inf_warplock_jezzails_0",
+     "x": 0,
+     "z": 350,
+     "b": 180
+    },
+    {
+     "key": "wh2_main_skv_inf_plague_monks",
+     "x": 150,
+     "z": 280,
+     "b": 180
+    }
+   ]
+  }
+ }
+}

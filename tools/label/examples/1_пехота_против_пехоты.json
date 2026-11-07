@@ -1,0 +1,60 @@
+{
+ "name": "пехота_против_пехоты",
+ "title": "Пехота против пехоты",
+ "about": "3 на 3 на ровном поле, враг идёт на ближайшего. Самый простой бой.",
+ "map": "flat",
+ "limit_s": 300,
+ "command": {
+  "verb": "hold",
+  "pace": "any"
+ },
+ "enemy": "attack",
+ "sides": {
+  "1": {
+   "faction": "wh_main_emp_empire",
+   "units": [
+    {
+     "key": "wh_main_emp_inf_spearmen_1",
+     "x": -60,
+     "z": -270,
+     "b": 0
+    },
+    {
+     "key": "wh_main_emp_inf_swordsmen",
+     "x": 60,
+     "z": -270,
+     "b": 0
+    },
+    {
+     "key": "wh_main_emp_inf_crossbowmen",
+     "x": 0,
+     "z": -330,
+     "b": 0
+    }
+   ]
+  },
+  "2": {
+   "faction": "wh2_main_skv_skaven",
+   "units": [
+    {
+     "key": "wh2_main_skv_inf_clanrat_spearmen_0",
+     "x": -70,
+     "z": 260,
+     "b": 180
+    },
+    {
+     "key": "wh2_main_skv_inf_clanrats_1",
+     "x": 70,
+     "z": 260,
+     "b": 180
+    },
+    {
+     "key": "wh2_main_skv_inf_skavenslave_slingers_0",
+     "x": 0,
+     "z": 320,
+     "b": 180
+    }
+   ]
+  }
+ }
+}

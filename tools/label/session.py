@@ -114,14 +114,31 @@ class Script:
 
 
 class Session:
-    def __init__(self, m, level="operative", period=None, upper="formula", lower="formula", nets=None, device="cpu",
-                 name=None, out=True, out_root=None):
+    def __init__(self, *a, **k):
+        try:
+            self._init(*a, **k)
+        except BaseException:
+            lab = getattr(self, "lab", None)
+            if lab is not None:
+                lab.close()                      # (the fighters lab's patches never outlive a battle that did not start)
+            raise
+
+    def _init(self, m, level="operative", period=None, upper="formula", lower="formula", nets=None, device="cpu",
+                 name=None, out=True, out_root=None, men=False):
         errs = MU.check(m)
         if errs:
             raise HU.Refused(errs)
         if level not in LEVELS:
             raise HU.Refused([f"уровень {level!r}: один из {LEVELS}"])
         nets = nets or {}
+        import contextlib
+        self.lab = contextlib.ExitStack()
+        self.men = bool(men)
+        if self.men:
+            # the fighters lab (tools/nn/fighters): every man a point of his own inside the simulator's step; installed
+            # for this battle (the simulator's functions patched until the battle ends: _finish closes it)
+            from tools.nn.fighters import hook as FH
+            self.lab.enter_context(FH.installed(compile=False))
         self.m, self.level, self.device = m, level, device
         self.upper, self.lower = upper, lower
         self.nets = nets
@@ -162,7 +179,8 @@ class Session:
                 "upper": upper if level == "tactic" else ("none" if level == "strategist" else "matchup command"),
                 "lower": "person" if level == "tactic" else lower, "unit": "frozen unit network (greedy)",
                 "nets": {k: cfg()["nets"][k] for k in ("operative", "tactic", "unit")}, "slots": self.b.slots,
-                "keys": list(st.keys[0]), "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+                "keys": list(st.keys[0]), "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "fighters_lab": self.men}
         self.info = info
         self.rec = None
         if out:
@@ -192,6 +210,7 @@ class Session:
         self.m0 = reward.measure(st)
         self.K = min(int(ocfg()["rows"]), N)
         self.Kt = min(int(tcfg()["rows"]), N)
+        self.units_info = VW.units_info(self)
         self.last_snap = VW.snapshot(self)
         self.replay = [self.last_snap]
 
@@ -522,8 +541,15 @@ class Session:
         self.result = {"why": why, "seconds": self.sec, "winner": int(st.winner[0]), "trade_gold": round(trade, 4),
                        "left": left, "decisions": self.n_decisions, "parcels": self.parcels,
                        "parcel_errors": len(self.parcel_errors), "level": self.level, "period_s": self.period}
+        lost = {}
+        for s_, name in ((1, "mine"), (2, "enemy")):
+            sel = (u["side"][0] == s_)
+            lost[name] = {"men0": int(u["men0"][0][sel].sum()), "men": int(u["men"][0][sel].clamp(min=0).sum())}
+        self.result["men"] = lost
         if self.rec is not None:
-            self.rec.finish(self.result, {"slots": self.b.slots, "keys": list(st.keys[0]), "snaps": self.replay})
+            self.rec.finish(self.result, {"slots": self.b.slots, "keys": list(st.keys[0]),
+                                          "snaps": VW.for_replay(self.replay)})
+        self.lab.close()
 
     # ------------------------------------------------------------ the page's view
 
@@ -553,4 +579,4 @@ class Session:
                 "level": self.level, "period": self.period, "folder": self._rel(self.folder),
                 "decisions": self.n_decisions, "snap": VW.for_page(self.last_snap), "keys": self.info["keys"],
                 "limit": self.b.limit, "map": self.m.get("map", "flat"), "field": self.field(),
-                "command": {"verb": self.b.verb, "pace": self.b.pace}}
+                "command": {"verb": self.b.verb, "pace": self.b.pace}, "units": self.units_info, "men": self.men}

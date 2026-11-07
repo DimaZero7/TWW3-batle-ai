@@ -3,13 +3,11 @@ websocket client here; no playwright on this machine). The server must run (bash
 
     python -m tools.label.browser_check [--url http://localhost:8790] [--out build/diag_label] [--chrome PATH]
 
-The scenario: build a matchup (3 + 3 from the pool, placed by dragging one unit), save it, start as the operative,
-on the first pause take the formula's hint, then at the next pause re-cut the groups with the mouse (a box over two
-units -> group 2) and drag group 2's zone, decide, run to the end at "until the decision" with 'keep', and read the
-record's folder back; then the tactician on the captured map ksl_plains_01 (the enemy at a run): the formula's frames
-at the first pause, one frame dragged and shrunk at the second, 'keep' to the end. Screenshots: setup.png,
-decision.png, end.png, decision_tactic.png, decision_strategist.png in --out (the strategist
-at the end: the formula's deployment with group 1's zone moved 120 m left); a json of what was checked on stdout.
+The scenario, through the page's own buttons and the mouse: the setup's five steps (the first example, halberdiers
+added by the search and '+', the map, a unit dragged and widened by its edge, the role, the summary), the operative
+(the formula's hint taken at 0 s; at 15 s 'Поменять', a box over two units -> group 2 by the key, its zone dragged, its
+arrow turned; then 'Оставить как есть' to the end), the tactician on ksl_river_01 (a frame dragged and shrunk), the
+strategist (a group's zone dragged). Screenshots v2_*.png in --out; a json of what was checked on stdout.
 """
 import argparse
 import base64
@@ -134,16 +132,51 @@ def screen_of(page, x, z):
     return page.js(f"(()=>{{const r=cv.getBoundingClientRect();const [sx,sy]=toS({x},{z});return [r.left+sx,r.top+sy];}})()")
 
 
+def click_text(page, text, scope="document"):
+    """Clicks the first visible button whose text starts with text (a real click at its middle)."""
+    r = page.js(f"""(()=>{{const b=[...{scope}.querySelectorAll('button')].find(b=>b.offsetParent&&!b.disabled&&
+        b.textContent.trim().startsWith({json.dumps(text)}));if(!b)return null;b.scrollIntoView({{block:'center'}});
+        const r=b.getBoundingClientRect();
+        return [r.left+r.width/2,r.top+r.height/2];}})()""")
+    if r is None:
+        raise RuntimeError(f"no button {text!r}")
+    page.click(*r)
+    time.sleep(0.25)
+
+
+def unit_screen(page, slot):
+    return page.js(f"(()=>{{const o=S.drawn.find(o=>o.slot==={slot});const r=cv.getBoundingClientRect();"
+                   f"const [x,y]=toS(o.x,o.z);return [r.left+x,r.top+y];}})()")
+
+
+def play_to_end(page, checked, key, limit=900):
+    t0 = time.time()
+    n = 0
+    while time.time() - t0 < limit:
+        if page.js("!!document.querySelector('#result:not(.hidden)')"):
+            break
+        if page.js("!!S.pending && !!S.pv && !S.changing"):
+            if page.js("S.pending.can_keep"):
+                click_text(page, "Оставить как есть", "document.getElementById('banner')")
+            else:
+                click_text(page, "Принять подсказку", "document.getElementById('banner')")
+            n += 1
+        time.sleep(0.4)
+    checked[key] = page.js("S.st.result")
+    checked[key + "_clicks"] = n
+
+
 def run(url, out, chrome):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     prof = tempfile.mkdtemp(prefix="label_chrome_")
     port = 9333
     proc = subprocess.Popen([chrome, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={prof}",
-                             "--window-size=1500,900", "--force-device-scale-factor=1", "--no-first-run",
+                             "--window-size=1600,950", "--force-device-scale-factor=1", "--no-first-run",
                              "--no-default-browser-check", "about:blank"], stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     checked = {}
+    page = None
     try:
         for _ in range(60):
             try:
@@ -154,143 +187,127 @@ def run(url, out, chrome):
         tab = next(t for t in tabs if t.get("type") == "page")
         page = Page(WS(tab["webSocketDebuggerUrl"]))
         page.ws.call("Page.enable")
-        page.ws.call("Emulation.setDeviceMetricsOverride", width=1500, height=900, deviceScaleFactor=1, mobile=False)
+        page.ws.call("Emulation.setDeviceMetricsOverride", width=1600, height=950, deviceScaleFactor=1, mobile=False)
         page.ws.call("Page.navigate", url=url)
-        page.until("typeof S!=='undefined' && S.pool!==null && S.m.sides[1].units.length===3")
-        # the matchup: one more unit from the pool search, one unit dragged, saved
-        page.js("document.getElementById('pool-q').value='halberd'; renderPool(); "
-                "document.querySelector('#pool .item').click(); true")
-        u = page.js("S.m.sides[1].units[0]")
+        page.until("typeof S!=='undefined' && S.pool && S.m && S.m.sides[1].units.length===3", 60)
+        time.sleep(1.0)
+        # 1. the armies: the first example is in; add halberdiers to mine by the search and '+'
+        page.js("(()=>{const i=document.querySelector('.col.mine input');i.value='алебард';i.dispatchEvent(new Event('input'));})()")
+        time.sleep(0.3)
+        page.js("document.querySelectorAll('.col.mine .list')[1].querySelector('button').click()")
+        time.sleep(0.4)
+        checked["armies"] = page.js("[S.m.sides[1].units.map(u=>u.key), S.m.sides[2].units.length, gold(1), gold(2)]")
+        page.shot(out / "v2_1_armies.png")
+        # 2. the map
+        click_text(page, "Дальше")
+        time.sleep(0.6)
+        page.shot(out / "v2_2_map.png")
+        # 3. the deployment: drag the first unit, then widen it by its edge handle
+        click_text(page, "Дальше")
+        time.sleep(0.6)
+        u = page.js("S.m.sides[1].units[1]")
         a = screen_of(page, u["x"], u["z"])
-        page.drag(a, (a[0] - 40, a[1] - 20))
-        moved = page.js("S.m.sides[1].units[0]")
-        checked["dragged_m"] = round(((moved["x"] - u["x"]) ** 2 + (moved["z"] - u["z"]) ** 2) ** 0.5, 1)
-        page.js("document.getElementById('m-name').value='проверка'; document.getElementById('m-limit').value=150; "
-                "document.getElementById('btn-save').click(); true")
-        page.until("document.getElementById('m-list').value==='проверка'", 20)
-        checked["saved"] = page.js("document.getElementById('m-list').value")
-        page.shot(out / "setup.png")
-        # start as the operative; the first pause: the formula's hint
-        page.js("document.getElementById('s-level').value='operative'; levelChanged(); "
-                "document.getElementById('btn-start').click(); true")
-        page.until("S.pending && S.pending.sec===0 && S.pv", 120)
-        checked["first_pause_s"] = page.js("S.pending.sec")
-        page.js("document.getElementById('btn-hint').click(); true")
-        page.until("S.pv && S.pv.ok", 30)
-        page.js("document.getElementById('btn-next').click(); true")
-        page.until("S.pending && S.pending.sec===15 && S.pv", 180)
-        checked["second_pause_s"] = page.js("S.pending.sec")
-        # re-cut: a box over my two right-most units -> group 2 (the key '2'); drag group 2's goal forward
-        mine = page.js("S.shown.units.filter(u=>u[1]===1&&u[10]).map(u=>[u[0],u[2],u[3]]).sort((a,b)=>b[1]-a[1])")
+        page.drag(a, (a[0] + 50, a[1] - 15))
+        u2 = page.js("S.m.sides[1].units[1]")
+        checked["dragged_m"] = round(((u2["x"] - u["x"]) ** 2 + (u2["z"] - u["z"]) ** 2) ** 0.5, 1)
+        o = page.js("(()=>{const o=setupUnits().find(o=>o.side===1&&o.i===1);return {h:widthHandles(o),front:o.front};})()")
+        h = screen_of(page, *o["h"][0])
+        page.drag(h, (h[0] + 30 * page.js("S.cam.scale"), h[1]))
+        checked["width_before_after"] = [round(o["front"], 1),
+                                         page.js("Math.round(setupUnits().find(o=>o.side===1&&o.i===1).front)")]
+        page.shot(out / "v2_3_deploy.png")
+        # 4. the role, 5. the summary
+        click_text(page, "Дальше")
+        page.js("S.level='operative'; S.period=15; S.m.limit_s=90; renderSetup(); true")
+        page.shot(out / "v2_4_role.png")
+        click_text(page, "Дальше")
+        time.sleep(0.4)
+        page.shot(out / "v2_5_go.png")
+        click_text(page, "В бой")
+        # the operative: the first pause - take the formula's hint
+        page.until("S.pending && S.pending.sec===0 && S.pv && S.hintPv", 240)
+        page.shot(out / "v2_6_op_first.png")
+        click_text(page, "Принять подсказку", "document.getElementById('banner')")
+        page.until("S.pending && S.pending.sec===15 && S.pv", 300)
+        page.shot(out / "v2_7_op_pause.png")
+        click_text(page, "Поменять", "document.getElementById('banner')")
+        # a box over my two right-most units -> group 2 (key '2'), then drag group 2's zone and its arrow
+        mine = page.js("S.drawn.filter(o=>o.side===1).map(o=>[o.slot,o.x,o.z]).sort((a,b)=>b[1]-a[1])")
         two = mine[:2]
-        xs = [p[1] for p in two]
-        zs = [p[2] for p in two]
-        p0 = screen_of(page, min(xs) - 25, max(zs) + 25)
-        p1 = screen_of(page, max(xs) + 25, min(zs) - 25)
+        xs, zs = [p[1] for p in two], [p[2] for p in two]
+        # (from below the units: their cards stand above them and a press on a card selects that unit)
+        p0 = screen_of(page, min(xs) - 30, min(zs) - 40)
+        p1 = screen_of(page, max(xs) + 30, max(zs) + 12)
         page.drag(p0, p1)
         checked["box_selected"] = page.js("[...S.sel]")
         page.ws.call("Input.dispatchKeyEvent", type="keyDown", key="2", text="2")
         page.ws.call("Input.dispatchKeyEvent", type="keyUp", key="2")
         page.until("S.pv && S.pv.groups && S.pv.groups.some(g=>g.g===1)", 30)
+        time.sleep(0.5)
         g1 = page.js("S.pv.groups.find(g=>g.g===1)")
-        gl = g1["goal"] or [g1["cx"], g1["cz"]]
-        a = screen_of(page, gl[0], gl[1])
-        page.js("S.activeG=1; true")
-        page.click(a[0] + 0, a[1] - 60, button="right")          # the right button: the goal 60 px forward
-        page.until("S.pv && S.pv.groups && S.pv.groups.find(g=>g.g===1) && S.pv.groups.find(g=>g.g===1).goal", 30)
-        time.sleep(0.6)
-        checked["preview_ok"] = page.js("S.pv.ok")
-        checked["preview_errors"] = page.js("S.pv.errors")
-        checked["groups_after"] = page.js("S.pv.groups.map(g=>({g:g.g,members:g.members,cx:g.cx,cz:g.cz,task:g.task}))")
-        page.shot(out / "decision.png")
-        if not checked["preview_ok"]:
-            # the preview names the ban (e.g. zone_sep_m): take the zone back where the group stands
-            page.js("for(const e of S.edit.groups){if(e.task) e.task.goal=null;} preview(); true")
-            time.sleep(1.5)
-            checked["preview_ok_retry"] = page.js("S.pv.ok")
-        page.js("document.getElementById('btn-next').click(); true")
-        page.until("!S.pending || S.pending.sec>15", 60)
-        checked["after_decide_status"] = page.js("document.getElementById('status').textContent")
-        # to the end: 'keep' at every pause
-        page.js("S.lastMode='decision'; setMode('decision'); true")
-        t0 = time.time()
-        while time.time() - t0 < 900:
-            if page.js("!!document.querySelector('#result:not(.hidden)')"):
-                break
-            if page.js("!!S.pending && !!S.pv"):
-                page.js("document.getElementById('btn-keep').click(); true")
-            time.sleep(0.4)
-        checked["result"] = page.js("S.st.result")
-        checked["folder"] = page.js("S.st.folder")
-        page.js("const r=document.getElementById('replay-t'); r.value=Math.floor(r.max/2); r.oninput({target:r}); true")
-        time.sleep(0.3)
-        page.shot(out / "end.png")
-        # the tactician on a captured map: the same matchup on ksl_plains_01, enemy at a run, 60 s
-        page.js("showTab('setup'); document.getElementById('m-map').value='ksl_plains_01'; setMap('ksl_plains_01'); "
-                "document.getElementById('m-enemy').value='attack_run'; document.getElementById('m-limit').value=60; "
-                "document.getElementById('s-level').value='tactic'; levelChanged(); "
-                "document.getElementById('btn-start').click(); true")
-        page.until("S.st && S.st.level==='tactic' && S.pending && S.pending.sec===0 && S.pv", 180)
-        checked["tactic_first_pause"] = page.js("({sec:S.pending.sec, rows:S.pending.rows.length, can_keep:S.pending.can_keep})")
-        page.js("document.getElementById('btn-next').click(); true")
-        page.until("S.pending && S.pending.level==='tactic' && S.pending.sec===5 && S.pv", 120)
-        # drag the first unit's frame 30 m to the right and shrink it to 48 x 48
-        r0 = page.js("S.pending.rows[0]")
-        e0 = page.js("S.edit.rows[0].units[0]")
-        page.js("S.edit.rows[0].units[0].w=48; S.edit.rows[0].units[0].d=48; S.edit.rows[0].units[0].keep=false; true")
-        a = screen_of(page, e0["x"], e0["z"])
-        page.drag(a, (a[0] + 30 * page.js("S.cam.scale"), a[1]))
+        a = screen_of(page, g1["cx"], g1["cz"])
+        page.drag(a, (a[0] + 60, a[1]))
         time.sleep(1.0)
-        page.until("S.pv && S.pv.frames", 30)
-        checked["tactic_edit"] = page.js("S.edit.rows[0].units[0]")
-        checked["tactic_preview"] = page.js("({ok:S.pv.ok, errors:S.pv.errors, warnings:S.pv.warnings, "
-                                            "frame:S.pv.frames[String(S.pending.rows[0].g)]})")
-        checked["tactic_zone"] = {k: r0[k] for k in ("g", "cx", "cz", "heading", "front", "depth")}
+        g1 = page.js("S.pv.groups.find(g=>g.g===1)")
+        tip = page.js(f"zoneArrow(S.pv.groups.find(g=>g.g===1))")
+        t = screen_of(page, *tip)
+        page.drag(t, (t[0] + 18, t[1] + 4))
+        time.sleep(1.2)
+        checked["op_edit"] = page.js("({ok:S.pv.ok, errors:S.pv.errors, groups:S.pv.groups.map(g=>({g:g.g,members:g.members,"
+                                     "cx:g.cx,cz:g.cz,heading:g.heading})), did:S.did})")
+        page.shot(out / "v2_8_op_edit.png")
+        if not checked["op_edit"]["ok"]:
+            page.shot(out / "v2_8b_op_refused.png")
+            checked["op_refused_text"] = page.js("document.getElementById('d-err').innerText")
+            page.js("for(const e of S.edit.groups){if(e.task){e.task.goal=null; e.task.turn=0;}} preview(); true")
+            time.sleep(1.5)
+            checked["op_edit_retry_ok"] = page.js("S.pv.ok")
+        click_text(page, "Дальше ▶")
+        page.until("!S.pending || S.pending.sec>15", 60)
+        checked["after_decide"] = page.js("document.getElementById('status').textContent")
+        page.js("S.lastMode='decision'; setMode('decision'); true")
+        play_to_end(page, checked, "op_result")
+        checked["op_folder"] = page.js("S.st.folder")
+        page.shot(out / "v2_9_result.png")
+        # the tactician on the river map
+        page.js("toSetup(); setMap('ksl_river_01'); S.m.enemy='attack_run'; S.level='tactic'; S.period=5; "
+                "S.m.limit_s=40; true")
+        page.js("startBattle(); true")
+        page.until("S.st && S.st.level==='tactic' && S.pending && S.pending.sec===0 && S.pv", 240)
+        click_text(page, "Принять подсказку", "document.getElementById('banner')")
+        page.until("S.pending && S.pending.level==='tactic' && S.pending.sec===5 && S.pv", 240)
+        click_text(page, "Поменять", "document.getElementById('banner')")
+        e0 = page.js("S.edit.rows[0].units[0]")
+        page.js("S.edit.rows[0].units[0].w=48; S.edit.rows[0].units[0].d=48; true")
+        a = screen_of(page, e0["x"], e0["z"])
+        page.drag(a, (a[0] - 15 * page.js("S.cam.scale"), a[1]))
+        time.sleep(1.2)
+        checked["tactic_preview"] = page.js("({ok:S.pv.ok, errors:S.pv.errors})")
+        page.shot(out / "v2_10_tactic.png")
         if not checked["tactic_preview"]["ok"]:
-            # refused (the frame laps over its neighbour): drag it back past its place, 15 m to the left of the start
-            e1 = page.js("S.edit.rows[0].units[0]")
-            a = screen_of(page, e1["x"], e1["z"])
-            page.drag(a, (a[0] - 45 * page.js("S.cam.scale"), a[1]))
-            time.sleep(1.0)
-            checked["tactic_preview_retry"] = page.js("({ok:S.pv.ok, errors:S.pv.errors, "
-                                                      "frame:S.pv.frames[String(S.pending.rows[0].g)]})")
-        page.shot(out / "decision_tactic.png")
-        page.js("document.getElementById('btn-next').click(); true")
-        page.until("!S.pending || S.pending.sec>5", 60)
-        t0 = time.time()
-        while time.time() - t0 < 900:
-            if page.js("!!document.querySelector('#result:not(.hidden)')"):
-                break
-            if page.js("!!S.pending && !!S.pv"):
-                page.js("document.getElementById('btn-keep').click(); true")
-            time.sleep(0.4)
-        checked["tactic_result"] = page.js("S.st.result")
-        checked["tactic_folder"] = page.js("S.st.folder")
-        # the strategist on the flat field: the formula's deployment, group 1's zone moved by the right button
-        page.js("showTab('setup'); document.getElementById('m-map').value='flat'; setMap('flat'); "
-                "document.getElementById('m-enemy').value='attack_run'; document.getElementById('m-limit').value=60; "
-                "document.getElementById('s-level').value='strategist'; levelChanged(); "
-                "document.getElementById('btn-start').click(); true")
-        page.until("S.st && S.st.level==='strategist' && S.pending && S.pending.level==='strategist' && S.pv", 180)
+            page.js("S.edit=JSON.parse(JSON.stringify(S.pending.edit)); preview(); true")
+            time.sleep(1.2)
+        click_text(page, "Дальше ▶")
+        play_to_end(page, checked, "tactic_result")
+        # the strategist on the flat field
+        page.js("toSetup(); setMap('flat'); S.m.enemy='attack'; S.level='strategist'; S.m.limit_s=40; true")
+        page.js("startBattle(); true")
+        page.until("S.st && S.st.level==='strategist' && S.pending && S.pv", 240)
+        click_text(page, "Поменять", "document.getElementById('banner')")
         g0 = page.js("S.pv.groups[0]")
-        page.js(f"S.activeG={g0['g']}; true")
-        a = screen_of(page, g0["cx"] - 120.0, g0["cz"])
-        page.click(a[0], a[1], button="right")
+        a = screen_of(page, g0["cx"], g0["cz"])
+        page.drag(a, (a[0] - 80, a[1]))
         time.sleep(1.5)
-        page.until("S.pv && S.pv.places", 30)
-        checked["strategist_preview"] = page.js("({ok:S.pv.ok, errors:S.pv.errors, groups:S.pv.groups.map(g=>"
-                                                "({g:g.g,members:g.members,cx:g.cx,cz:g.cz}))})")
-        page.shot(out / "decision_strategist.png")
-        page.js("document.getElementById('btn-next').click(); true")
-        page.until("!!document.querySelector('#result:not(.hidden)')", 600)
-        checked["strategist_result"] = page.js("S.st.result")
-        checked["strategist_folder"] = page.js("S.st.folder")
+        checked["strategist_preview"] = page.js("({ok:S.pv.ok, errors:S.pv.errors, groups:S.pv.groups.map(g=>({g:g.g,cx:g.cx,cz:g.cz}))})")
+        page.shot(out / "v2_11_strategist.png")
+        click_text(page, "Дальше ▶")
+        play_to_end(page, checked, "strategist_result")
     except Exception as e:                       # what was checked so far, the error and the page's own messages
         checked["error"] = f"{type(e).__name__}: {e}"
         try:
-            checked["page_errors"] = page.js("document.getElementById('d-err').textContent + ' | ' + "
+            checked["page_errors"] = page.js("document.getElementById('d-err').innerText + ' | ' + "
                                              "document.getElementById('status').textContent")
-            page.shot(out / "failed.png")
+            page.shot(out / "v2_failed.png")
         except Exception:
             pass
     finally:

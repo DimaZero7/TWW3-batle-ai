@@ -5,6 +5,8 @@
 
 GET  /api/pool          factions and their units (pool.factions), maps (pool.maps), the deployment strips
 GET  /api/config        the levels with their periods, the enemy's modes, the verbs and paces, the group colours
+GET  /api/examples      the ready matchups (tools/label/examples/*.json)
+GET  /icons/<key>.png   a unit's card from the game (build/label_icons, tools/label/gameart.py)
 GET  /api/matchups      the saved matchups' names;  GET /api/matchup?name=...   one
 POST /api/matchup       save (checked: matchup.check)
 POST /api/check         a matchup's errors (nothing saved)
@@ -79,12 +81,24 @@ def config_info():
 
 def pool_info():
     from tools.label import mapimg
+    from tools.label import view as VW
+    facs = {}
+    for name, f in PL.factions().items():
+        facs[name] = {"lord": f["lord"], "units": [dict(u, **VW.unit_entry(u["key"])) for u in f["units"]]}
     maps = []
     for m in PL.maps():
         d = dict(m, **PL.field(m["name"]))
         d["extent"] = mapimg.picture(m["name"])[1] if m["name"] != "flat" else None
         maps.append(d)
-    return {"factions": PL.factions(), "maps": maps}
+    return {"factions": facs, "maps": maps, "faction_names": FACTION_NAMES}
+
+
+FACTION_NAMES = {"wh_main_emp_empire": "Империя", "wh2_main_skv_skaven": "Скавены"}
+EXAMPLES = Path(__file__).parent / "examples"
+
+
+def examples():
+    return [json.loads(f.read_text(encoding="utf-8")) for f in sorted(EXAMPLES.glob("*.json"))]
 
 
 def start(body):
@@ -102,7 +116,8 @@ def start(body):
     period = body.get("period")
     period = int(period) if period else None
     s = SE.Session(body["matchup"], level=level, period=period, upper=upper, lower=lower, nets=n,
-                   device=STATE["device"], name=body.get("name") or body["matchup"].get("name"))
+                   device=STATE["device"], name=body.get("name") or body["matchup"].get("name"),
+                   men=bool(body.get("men", True)))
     STATE["session"] = s
     return s.state()
 
@@ -113,6 +128,8 @@ def api(method, path, q, body):
         return pool_info()
     if path == "/api/config":
         return config_info()
+    if path == "/api/examples":
+        return {"examples": examples()}
     if path == "/api/matchups":
         return {"names": MU.names()}
     if path == "/api/matchup" and method == "GET":
@@ -158,6 +175,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _static(self, path):
+        if path.startswith("/icons/") and path.endswith(".png"):
+            from tools.label import view as VW
+            name = path[len("/icons/"):-4]
+            f = VW.ICONS / f"{name}.png"
+            if MU.safe(name) == name and f.exists():
+                return self._send(200, f.read_bytes(), "image/png")
+            return self._send(404, {"error": "no icon"})
         if path.startswith("/mapimg/") and path.endswith(".png"):
             from tools.label import mapimg
             name = path[len("/mapimg/"):-4]
