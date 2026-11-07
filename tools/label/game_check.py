@@ -23,12 +23,15 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace W -Name U -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c);
+[DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
 public struct RECT { public int L; public int T; public int R; public int B; }
 '@
 [W.U]::SetProcessDPIAware() | Out-Null
 $p = Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $p) { exit 1 }
+if ([W.U]::IsIconic($p.MainWindowHandle)) { [W.U]::ShowWindow($p.MainWindowHandle, 9) | Out-Null; Start-Sleep -Milliseconds 800 }
 [W.U]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
 Start-Sleep -Milliseconds 400
 $r = New-Object W.U+RECT
@@ -39,6 +42,51 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
 $bmp.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)
 """
+
+
+QUIET_PS = r"""
+Add-Type -AssemblyName System.Drawing
+Add-Type -Namespace W -Name Q -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+[DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint flags);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
+[DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c);
+public struct RECT { public int L; public int T; public int R; public int B; }
+'@
+[W.Q]::SetProcessDPIAware() | Out-Null
+$p = Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $p) { exit 1 }
+$h = $p.MainWindowHandle
+$was = [W.Q]::IsIconic($h)
+if ($was) { [W.Q]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Milliseconds 900 }
+$r = New-Object W.Q+RECT
+[W.Q]::GetWindowRect($h, [ref]$r) | Out-Null
+$w = $r.R - $r.L; $hh = $r.B - $r.T
+$bmp = New-Object System.Drawing.Bitmap $w, $hh
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$dc = $g.GetHdc()
+[W.Q]::PrintWindow($h, $dc, 2) | Out-Null
+$g.ReleaseHdc($dc)
+$bmp.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)
+if ($was) { [W.Q]::ShowWindow($h, 7) | Out-Null }
+"""
+
+
+def screen_shot_quiet(path):
+    """The game's window without taking the focus or the mouse (PrintWindow with PW_RENDERFULLCONTENT; a minimised
+    window is shown without activation for the shot and minimised again) -> path; True when written."""
+    import os
+    import shutil
+    tmp = os.path.join(tempfile.gettempdir(), "bai_ingame_quiet.png")
+    script = os.path.join(tempfile.gettempdir(), "bai_ingame_quiet.ps1")
+    Path(script).write_text(QUIET_PS.replace("{path}", tmp), encoding="utf-8-sig")
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], timeout=60,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(tmp):
+        shutil.move(tmp, path)
+        return True
+    return False
 
 
 def screen_shot(path):

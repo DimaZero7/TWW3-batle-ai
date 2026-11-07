@@ -65,8 +65,29 @@ def icon(k, colour, ring=False, size=SIZE):
     return png(px, size, size)
 
 
-def pack_files():
+def separator(w=10, h=120):
+    """The enemy cards' separator: a gold bar with a dark edge."""
+    px = [[(40, 30, 20, 255) if x in (0, w - 1) else (214, 170, 70, 255) for x in range(w)] for _ in range(h)]
+    return png(px, w, h)
+
+
+UNITS_FOLDER = "ui\\bai\\units"
+
+
+def unit_files(keys):
+    """{pack path: bytes} of the units' card pictures (build/label_icons/<key>.png, tools/label/gameart.py) - the enemy
+    cards' picture (src/apps/battle/enemy_cards.lua UNIT_IMAGE); a key without a picture is left out."""
+    from tools import config as project
     out = {}
+    for k in keys:
+        f = project.ROOT / "build" / "label_icons" / f"{k}.png"
+        if f.exists():
+            out[f"{UNITS_FOLDER}\\{k}.png"] = f.read_bytes()
+    return out
+
+
+def pack_files():
+    out = {f"{FOLDER}\\sep.png": separator()}
     for k, colour in enumerate(cfg()["group_colors"][:6], start=1):
         out[f"{FOLDER}\\g{k}.png"] = icon(k, colour)
         out[f"{FOLDER}\\t{k}.png"] = icon(k, colour, ring=True)

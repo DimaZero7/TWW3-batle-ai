@@ -69,6 +69,8 @@ local deploy = require('apps.bridge.deploy_adapter')
 local pause_probe = require('apps.battle.pause_probe')
 local label_pause = require('apps.battle.label_pause')
 local label_overlay = require('apps.battle.label_overlay')
+local group_probe = require('apps.battle.group_probe')
+local live_label = require('apps.battle.live_label')
 
 local M = {}
 
@@ -225,6 +227,7 @@ function M.main(bm, config, globals)
     local function finish(status, winner)
         if state.finished then return end
         if state.overlay then pcall(state.overlay.stop) end
+        if state.live then pcall(state.live.finish) end
         if state.cancel_deadline then state.cancel_deadline() end
         snapshot('nn_final')
         local row = side_summary()
@@ -263,6 +266,7 @@ function M.main(bm, config, globals)
     end
 
     local scripted_check   -- below, with the scripted side's helpers
+    local live_start       -- below, after the rows
 
     local function tick()
         if not state.active then return end
@@ -366,6 +370,38 @@ function M.main(bm, config, globals)
         if config.enemy_ai == 'companion' then enemy_start() end
     end
 
+    -- The live labelling (config.live_label, own_ai 'human'; apps.battle.live_label): the person plays, his groups and the
+    -- enemy's groups on the enemy cards go out with the state every second; the marks the companion draws
+    -- (apps.battle.label_overlay).
+    function live_start()
+        local env = {core = globals.core, UIComponent = globals.UIComponent, cco = globals.cco,
+            find_uicomponent = globals.find_uicomponent, common = common}
+        local own, enemy, by_name = {}, {}, {}
+        for side = 1, 2 do
+            for _, it in ipairs(state.sides[side]) do
+                local row = {name = it.name, unit = it.unit, key = it.key}
+                if side == 1 then own[#own + 1] = row else enemy[#enemy + 1] = row end
+                by_name[it.name] = it.unit
+            end
+        end
+        state.live = live_label.start({bm = bm, env = env, own = own, enemy = enemy, rows = shared_rows, emit = emit,
+            now_ms = function() return bm:time_elapsed_ms() - started_ms end, test = config.live_test == true,
+            orders = orders, army = state.own_army, vec = vec,
+            meta = {batch = state.batch, factions = config.factions, attacker = config.enemy_role == 'defend' and 1 or 2,
+                map = config.map, decide_ms = 1000}})
+        if not state.overlay then
+            state.overlay = label_overlay.start({bm = bm, emit = emit, flush = flush, guard = guarded, env = env,
+                unit_of = function(name) return by_name[name] end,
+                vec = function(x, y, z) return map.vector(vector_type, x, y, z) end,
+                height = function(x, z) return bm:get_terrain_height(x, z) end,
+                now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+                finished = function() return state.finished end})
+        end
+        bm:repeat_callback(guarded(function() if state.active then state.live.tick() end end), 1000,
+            'tww3_bai_live_label')
+        emit('live_label', {cards = #state.live.cards.cards, test = config.live_test == true})
+    end
+
     -- Both bridges at a decision, ours first (the same state for both).
     local function net_decide()
         if state.net then state.net.decide() end
@@ -459,6 +495,7 @@ function M.main(bm, config, globals)
         if config.own_ai == 'human' then
             observe(config.soldiers_every)
             emit('own_ai', {mode = 'human', own_ai = config.own_ai, soldiers_every = config.soldiers_every})
+            if config.live_label then live_start() end
             if config.enemy_ai == 'companion' then enemy_start() end
             return
         end
@@ -512,6 +549,18 @@ function M.main(bm, config, globals)
             state.pause_probe = pause_probe.start({bm = bm, cfg = config.pause_probe, speed = config.speed, emit = emit,
                 now_ms = function() return bm:time_elapsed_ms() - started_ms end, guard = guarded,
                 written = function() return state.net and state.net.written or 0 end})
+        end
+        if config.group_probe then
+            -- the probe of the game's own grouping (apps.battle.group_probe; research)
+            local all = {}
+            for side = 1, 2 do
+                for _, it in ipairs(state.sides[side]) do all[#all + 1] = {name = it.name, unit = it.unit, side = side} end
+            end
+            group_probe.start({bm = bm, emit = emit, flush = flush, guard = guarded, units = all,
+                env = {core = globals.core, UIComponent = globals.UIComponent, cco = globals.cco,
+                    find_uicomponent = globals.find_uicomponent, common = common},
+                now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+                finished = function() return state.finished end})
         end
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         if state.net or state.enemy_net then

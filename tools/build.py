@@ -291,10 +291,13 @@ def build(target, run_config, dependencies=None, scenario=None, kv=None):
         f"script\\battle\\{folder}\\{spec['packed_scenario']}": scenario_xml,
     }
     files.update(kvtable.entries(kv or {}))
-    if (run_config or {}).get("label"):
-        # the labelling's marks over the battle (src/apps/battle/label_overlay.lua): the group icons
+    if (run_config or {}).get("label") or (run_config or {}).get("group_probe") or (run_config or {}).get("live_label"):
+        # the labelling's marks over the battle (src/apps/battle/label_overlay.lua): the group icons; the enemy cards'
+        # pictures (src/apps/battle/enemy_cards.lua) by the units' keys
         from tools.label import icons
         files.update(icons.pack_files())
+        keys = {u.get("key") for side in ("own", "enemy") for u in ((run_config.get("units") or {}).get(side) or [])}
+        files.update(icons.unit_files(k for k in keys if k))
     dependency_names = [d["pack"] for d in dependencies]
     blob = pfh5.pack_files(files, dependency_names)
     assert pfh5.read_pack(blob) == (files, tuple(dependency_names))
@@ -432,6 +435,14 @@ def nn_arena_config(args, run_config):
         from tools.nn.operative import cfg as ocfg
         run_config["label"] = {"every_s": int(ocfg()["decide_s"])}
         run_config["deploy_wait_s"] = LABEL_WAIT_S
+    if getattr(args, "live_label", False):
+        # the live labelling (src/apps/battle/live_label.lua, tools/label/live.py): the person's groups and the enemy
+        # cards' groups out with the state every second; live_test: the scripted check's commands
+        run_config["live_label"] = True
+        if args.live_test:
+            run_config["live_test"] = True
+    if getattr(args, "group_probe", False):
+        run_config["group_probe"] = True     # src/apps/battle/group_probe.lua (research: the game's own grouping)
     if getattr(args, "pause_probe", None):
         # the pause probe (build/diag_chain/part2.md): at at_s of battle the script disables the player's orders and
         # pauses (speed 0) for real_ms real ms, then resumes; the orders stay disabled until at_s + off_s
@@ -582,6 +593,14 @@ def main(argv=None):
                         help="nn-arena --own-ai net --deploy strategist: the labelling over the live battle "
                              "(tools/label/game.py): the player's orders off, the battle paused on every operative "
                              "second until the companion's answer (the person's decision); docs/ru/training/label.md")
+    parser.add_argument("--live-label", action="store_true",
+                        help="human: the live labelling - the enemy's cards, the person's groups out with the state "
+                             "every second (src/apps/battle/live_label.lua, tools/label/live.py)")
+    parser.add_argument("--live-test", action="store_true",
+                        help="human --live-label: the scripted check's commands (tww3_bai_live_cmd.txt in the game folder)")
+    parser.add_argument("--group-probe", action="store_true",
+                        help="nn-arena: the probe of the game's own grouping (src/apps/battle/group_probe.lua): CCO "
+                             "reads every second, commands from tww3_bai_probe_cmd.txt in the game folder")
     parser.add_argument("--pause-probe", metavar="AT_S,REAL_MS,OFF_S", default=None,
                         help="nn-arena: at AT_S of battle disable the player's orders (bm:disable_orders) and pause the "
                              "battle (speed 0) for REAL_MS real ms, then resume; the orders back at AT_S + OFF_S "
@@ -663,6 +682,8 @@ def main(argv=None):
         parser.error("--skirmish is for nn-arena --own-ai net and human --enemy-ai (the bridge's units)")
     if args.label_game and not (net_arena and args.deploy == "strategist"):
         parser.error("--label-game is for nn-arena --own-ai net --deploy strategist")
+    if args.live_label and args.target != "human":
+        parser.error("--live-label is for the human target")
     if args.free_speed and args.target != "human":
         parser.error("--free-speed is for the human target")
     if args.soldiers_every is not None and args.soldiers_every < 0:
