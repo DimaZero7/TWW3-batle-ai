@@ -71,7 +71,11 @@ class Tacticians:
     def apply(self, groups, task, moved, raw):
         """The operative's decision: groups (groups.Groups after), task [B, G] (a new parcel), moved [B, G] (the same
         tiles may stay). Returns the parcels sent (tactic Parcel of the rows with a task)."""
-        G = self.G
+        groups = groups.padded(self.G)                # (fewer groups than places: the strategist's 6)
+        task = torch.cat([task, torch.zeros((task.shape[0], self.G - task.shape[1]), dtype=torch.bool,
+                                            device=task.device)], 1)
+        moved = torch.cat([moved, torch.zeros((moved.shape[0], self.G - moved.shape[1]), dtype=torch.bool,
+                                              device=moved.device)], 1)
         alive = (raw[..., TR.I["alive"]] > 0)
         t = task.reshape(-1)
         mv = moved.reshape(-1) & t

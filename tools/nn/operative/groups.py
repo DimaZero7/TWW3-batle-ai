@@ -22,7 +22,8 @@ from tools.nn.tactic import raw as TR
 from tools.nn.tactic import zone as ZN
 
 KEEP, MOVE, REFORM = 0, 1, 2           # the 'keep / move / re-form' head's choices
-PREV = 14                              # per row: my unit's group G + 'none', an enemy's target-of G + 'nobody' (G = 6)
+GMAX = int(cfg()["groups"])            # the most groups (config groups; a Groups of fewer - the strategist's - pads)
+PREV = 2 * (GMAX + 1)                  # per row: my unit's group GMAX + 'none', an enemy's target-of GMAX + 'nobody'
 NUMBERS = 10                           # per group: on, centre right / forward, sin, cos, line, square, age, n, n0
 
 
@@ -53,6 +54,20 @@ class Groups:
     @property
     def G(self):
         return self.on.shape[1]
+
+    def padded(self, G):
+        """The same groups in G places (G >= self.G: the places past self.G empty) - a Groups of the strategist's 6
+        handed to code sized by config groups."""
+        if G == self.G:
+            return self
+        e = Groups.empty(self.member.shape[0], self.member.shape[1], G, self.member.device)
+        for f in fields(self):
+            if f.name == "member":
+                continue
+            v, w = getattr(self, f.name), getattr(e, f.name)
+            w[:, :self.G] = v
+        e.member = self.member.clone()
+        return e
 
     def clone(self):
         return Groups(*(getattr(self, f.name).clone() for f in fields(self)))
@@ -93,10 +108,11 @@ class Groups:
         G = self.G
         s0 = slot.clamp(min=0)
         grp = self.member.gather(1, s0)
-        own = torch.zeros((B, K, G + 1), device=slot.device)
-        own.scatter_(2, torch.where(grp >= 0, grp, torch.full_like(grp, G))[..., None], 1.0)
+        own = torch.zeros((B, K, GMAX + 1), device=slot.device)
+        own.scatter_(2, torch.where(grp >= 0, grp, torch.full_like(grp, GMAX))[..., None], 1.0)
         tg = self.target.transpose(1, 2).gather(1, s0[..., None].expand(B, K, G)).float()       # [B, K, G]
         tg = tg * self.on[:, None, :].float()
+        tg = torch.cat([tg, torch.zeros((B, K, GMAX - G), device=slot.device)], 2)              # (fewer groups: padded)
         foe = torch.cat([tg, (tg.sum(2, keepdim=True) == 0).float()], 2)
         out = torch.cat([own * own_rows[..., None].float(), foe * enemy_rows[..., None].float()], 2)
         return out

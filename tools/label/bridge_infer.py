@@ -12,7 +12,7 @@ under the groups he made. This module reads, per operative window (15 s), which 
                 differing by <= SAME_M
       line      neither moved and they stand within LINE_M at the window's end (a held line)
     the groups  the links' connected components; a component over MAX_GROUP (10, the tactician's) is cut in two along its
-                longest side, over and over; more than G (6, the operative's) groups: the two nearest merged until G;
+                longest side, over and over; more than G (the operative's, config groups) groups: the two nearest merged until G;
                 the numbers kept from window to window by the largest overlap
     the targets per group the enemies its members attacked or fought in the window (counted; the seed the most often)
     the area    the box round its members' places over the window and their ordered points, along the group's facing
@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tools.label import digest as DG
+from tools.nn.operative import cfg as ocfg
 
 ORDER_COMMANDS = ("Attack Unit", "Move Orientation Width")
 MOVE_M = 20.0          # m in a window: the unit moved
@@ -41,7 +42,7 @@ NEAR_M = 60.0          # m: two units together
 SAME_M = 25.0          # m: two moves the same
 LINE_M = 45.0          # m: neighbours of a held line (formations 20-40 m wide side by side)
 MAX_GROUP = 10         # the tactician's group (config/nn/tactic.json max_group)
-G = 6                  # the operative's groups (config/nn/operative.json groups)
+G = int(ocfg()["groups"])  # the operative's groups (config/nn/operative.json groups)
 MOVED_UNITS = 2        # units in other groups than in the window before: a decision of the groups
 
 

@@ -113,8 +113,9 @@ def test_the_map_and_the_groups_numbers():
     pv = inp["prev"][0]
     assert torch.equal(pv[own][:, 0], torch.ones(int(own.sum())))
     en = inp["enemy"][0]
-    assert torch.equal(pv[en][:, 7], torch.ones(int(en.sum())))
-    assert float(inp["prev"][1][inp["enemy"][1]][:, 13].min()) == 1.0
+    assert torch.equal(pv[en][:, GR.GMAX + 1], torch.ones(int(en.sum())))
+    assert float(inp["prev"][1][inp["enemy"][1]][:, 2 * GR.GMAX + 1].min()) == 1.0
     assert inp["members"][0, 0].sum() == 3 and inp["targets"][0, 0].sum() == en.sum()
     assert inp["tokens"][0, 0, 0] == 1.0 and float(inp["tokens"][1].abs().max()) == 0.0
-    assert math.isclose(float(inp["numbers"][0, 0]), 1 / 6, rel_tol=1e-5)
+    assert math.isclose(float(inp["numbers"][0, 0]), 1 / GR.GMAX, rel_tol=1e-5)
+    assert inp["prev"].shape[-1] == GR.PREV == 2 * (int(cfg()["groups"]) + 1)

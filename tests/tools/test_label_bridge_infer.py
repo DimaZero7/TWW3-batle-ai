@@ -76,4 +76,5 @@ def test_limits():
     parts = BI._cut(sorted(pos), pos)
     assert all(len(p) <= BI.MAX_GROUP for p in parts) and sum(map(len, parts)) == 23
     groups = [[f"u{i}"] for i in range(9)]
-    assert len(BI._merge_to(groups, pos)) == BI.G
+    assert len(BI._merge_to(groups, pos, limit=6)) == 6
+    assert len(BI._merge_to(groups, pos)) == min(9, BI.G)          # (BI.G: the operative's config groups, 40)

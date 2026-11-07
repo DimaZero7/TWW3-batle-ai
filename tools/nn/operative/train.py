@@ -121,6 +121,11 @@ def restore(path, device="cpu"):
     if ck.get("kind") != KIND:
         raise ValueError(f"not a {KIND} checkpoint: {path}")
     net, critic = NN.OperativeNet().to(device), NN.OperativeCritic().to(device)
+    G = int(cfg()["groups"])
+    have = tuple(ck["net"]["enc.number"].shape)
+    if have[0] != G:
+        # (the groups' number is the network's size: run5 - run8 were built for 6; config groups 40 since 07.11)
+        raise ValueError(f"{path}: a network of {have[0]} groups, config groups {G} - it does not load; build anew")
     ck["padded"] = False
     for mod, key in ((net, "net"), (critic, "critic")):
         own, sd = mod.state_dict(), dict(ck[key])

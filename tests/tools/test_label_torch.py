@@ -92,11 +92,12 @@ def test_a_banned_decision_is_refused_and_not_written(unit_net, tmp_path):
     bad = {"groups": [{"g": 0, "members": [0, 2], "task": None}]}
     r = s.decide(bad)
     assert not r["ok"] and any("есть группа" in e for e in r["errors"])
-    # two groups whose zones would stand 240 m apart or less with different targets: zone_sep_m's ban
+    # two groups side by side, one of them without a target: allowed since 07.11 (zone_sep_m bans only another target
+    # within 80 m - tests/tools/test_operative_decide_torch.py); seen through preview, nothing written
     sep = {"groups": [{"g": 0, "members": [0, 2], "task": {"seed": -1, "goal": [0, -200], "form": "line", "turn": 0}},
                       {"g": 1, "members": [1], "task": None}]}
-    r = s.decide(sep)
-    assert not r["ok"] and any("240 м" in e for e in r["errors"])
+    pv = s.preview(sep)
+    assert not any("80 м" in e for e in pv.get("errors", []))
     # an enemy unit as a member
     r = s.decide({"groups": [{"g": 0, "members": [0, 1, 2, 3], "task": None}]})
     assert not r["ok"]

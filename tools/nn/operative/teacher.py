@@ -93,7 +93,7 @@ def formula(inp, ctx, destroy, mode="formula"):
     """(act, labels): destroy [B] bool the command (mode 'stay' / 'go' override it)."""
     c = cfg()
     tc = c["teacher"]
-    G = int(c["groups"])
+    G = ctx.groups.G
     raw, axes, old = ctx.raw, ctx.axes, ctx.groups
     B, K = ctx.slot.shape
     dev = raw.device
@@ -213,10 +213,8 @@ def formula(inp, ctx, destroy, mode="formula"):
     cx_, cz_ = SP.cells(axes)
     cxr, czr = cx_.repeat_interleave(G, 0), cz_.repeat_interleave(G, 0)
     hd = base.reshape(-1)
-    fok = SP.field_ok(cxr, czr, front, depth, hd, axes.take(torch.arange(B, device=dev).repeat_interleave(G)).field)
-    fok = fok | ~fok.any(1, keepdim=True)
     d2 = (cxr - qx.reshape(-1, 1)) ** 2 + (czr - qz.reshape(-1, 1)) ** 2
-    cell = d2.masked_fill(~fok, 1e18).argmin(1)
+    cell = d2.argmin(1)                                   # (the step pushes a zone over the edge inside: step.clamp)
     cqx, cqz = cxr.gather(1, cell[:, None])[:, 0], czr.gather(1, cell[:, None])[:, 0]
     fld = axes.take(torch.arange(B, device=dev).repeat_interleave(G)).field
     zx, zz = SP.clamp(gx.reshape(-1), gz.reshape(-1), cqx, cqz, SP.near(n, line), front, depth, hd, fld)
@@ -285,7 +283,7 @@ def play_formula(inp, ctx, destroy, mode="formula"):
     """The walk with the formula's choices and no network: net.choose's output."""
     act, _ = formula(inp, ctx, destroy, mode)
     B, K = ctx.slot.shape
-    G = int(cfg()["groups"])
+    G = ctx.groups.G
     enc = NN.null_enc(B, K, G, ctx.raw.device)
     return NN.choose(enc, inp, ctx, NN.NullHeads(B, K, G, ctx.raw.device), act=act)
 

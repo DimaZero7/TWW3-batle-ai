@@ -82,12 +82,19 @@ class Encoder(nn.Module):
         s = self.summary(torch.cat([vec, inp["numbers"], inp["command"]], 1))
         B, K = mask.shape
         x = torch.cat([rec, tok], 1)
-        mm = torch.cat([mask, torch.ones(tok.shape[:2], dtype=torch.bool, device=mask.device)], 1)
+        # the council: the rows, the groups with a task and the summary; an empty group's token sits out (it carries only
+        # its number) and keeps its own vector for the pointers - the council grows with the groups in use, not with
+        # config groups (40)
+        busy = inp["tokens"][..., 0] > 0.5
+        mm = torch.cat([mask, busy], 1)
         after, sm = self.council(x, s, mm)
-        return {"units": after[:, :K], "tokens": after[:, K:], "summary": sm, "map": fmap, "mask": mask}
+        toks = torch.where(busy[..., None], after[:, K:], tok)
+        return {"units": after[:, :K], "tokens": toks, "summary": sm, "map": fmap, "mask": mask}
 
     def tokens(self, rec, members, targets, numbers):
-        return F.relu(self.token(torch.cat([_mean(rec, members), _mean(rec, targets), numbers], -1))) + self.number[None]
+        G = numbers.shape[1]                        # (the groups given: up to config groups)
+        return F.relu(self.token(torch.cat([_mean(rec, members), _mean(rec, targets), numbers], -1))) + \
+            self.number[None, :G]
 
 
 def _mean(x, sel):
@@ -178,6 +185,17 @@ def to_slots(v, slot, N, fill):
     return out[:, :N]
 
 
+def sep_ok(cx, cz, new, tgt, other, sep):
+    """[B, C*C] bool: the cells (centres cx, cz [B, C*C]) a group with the target tgt [B, N] may set its zone on - not
+    within sep m of the zone of another group in force (other [B, G]) with another target: both have one and no enemy in
+    common. Groups on one target may stand side by side (separate groups, not merged); a group without a target (holding)
+    beside any (07.11: 117 of the 121 pairs under 80 m in the live battle had one). No cell open: all open."""
+    diff = ~(new.target & tgt[:, None, :]).any(2) & new.target.any(2) & tgt.any(1)[:, None]
+    d2 = (cx[:, :, None] - new.cx[:, None, :]) ** 2 + (cz[:, :, None] - new.cz[:, None, :]) ** 2
+    ok = ~((d2 < sep * sep) & (other & diff)[:, None, :]).any(2)
+    return ok | ~ok.any(1, keepdim=True)
+
+
 def ctx_of(inp, raw, axes, groups):
     return Ctx(raw, axes, groups, inp["slot"], inp["own"], inp["enemy"], inp["J"])
 
@@ -213,8 +231,8 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
     members: the tactician's tiles may stay), reformed [B, G] (the members changed by the network's choice), goal_x,
     goal_z [B, G] (the cell chosen), teach (with labels): the term and its agreement counts}."""
     c = cfg()
-    G = int(c["groups"])
     raw, axes, old = ctx.raw, ctx.axes, ctx.groups
+    G = old.G                                         # (up to config groups: the strategist hands its own number)
     B, K = ctx.slot.shape
     N = raw.shape[1]
     dev = raw.device
@@ -376,14 +394,10 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         keep_tiles = on[:, g] & same[:, g] & (line == old.line[:, g])
         n0 = torch.where(keep_tiles, old.n0[:, g], n_al)
         front, depth = SP.size(n0, line)
-        fok = SP.field_ok(cx_, cz_, front, depth, heading, axes.field)
-        # closed too: a zone centre within zone_sep_m of another group's zone whose target is not this one's
+        # (a zone over the field's edge is not closed: the step pushes it inside - step.clamp; the decision of 07.11)
         other = placed.clone()
         other[:, g] = False
-        diff = ~(new.target & tgt[:, None, :]).any(2)            # (no common enemy: another target)
-        dz = (cx_[:, :, None] - new.cx[:, None, :]) ** 2 + (cz_[:, :, None] - new.cz[:, None, :]) ** 2
-        fok = fok & ~((dz < sep * sep) & (other & diff)[:, None, :]).any(2)
-        fok = fok | ~fok.any(1, keepdim=True)
+        fok = sep_ok(cx_, cz_, new, tgt, other, sep)
         cov = inp["cover"]
         extra = torch.stack([torch.einsum("bk,bkhw->bhw", sel.float(), cov),
                              torch.einsum("bk,bkhw->bhw", trows.float(), cov)], 1).clamp(max=1.0)

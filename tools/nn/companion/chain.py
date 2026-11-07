@@ -125,20 +125,22 @@ class GameUnits(LW.Units):
 
 def groups_of_plan(plan, names, N, G, device="cpu"):
     """The strategist's groups as the operative's last groups (strategist/battle.placed): plan {names: {unit: group},
-    on, cx, cz, heading, line, n [G]} -> GR.Groups [1, G] (verb hold, pace any, age 0)."""
-    g = GR.Groups.empty(1, N, G, device)
+    on, cx, cz, heading, line, n [Gp]} -> GR.Groups [1, G] (verb hold, pace any, age 0; the plan's Gp groups - the
+    strategist's 6 - in the first places, the rest empty: the operative's config groups since 07.11)."""
+    G, Gp = int(G), min(int(G), len(plan["on"]))
+    g = GR.Groups.empty(1, N, Gp, device)
     for i, n in enumerate(names):
         k = plan["group"].get(n, -1)
         if k is not None and k >= 0:
             g.member[0, i] = int(k)
-    t = lambda k, dt=torch.float32: torch.as_tensor(plan[k], dtype=dt, device=device)[None, :G]  # noqa: E731
+    t = lambda k, dt=torch.float32: torch.as_tensor(plan[k], dtype=dt, device=device)[None, :Gp]  # noqa: E731
     g.on = t("on", torch.bool).clone()
     g.cx, g.cz, g.heading = t("cx").clone(), t("cz").clone(), t("heading").clone()
     g.line = t("line", torch.bool).clone()
     g.n0 = t("n", torch.long).clone()
-    g.verb = torch.full((1, G), DC.VERBS.index("hold"), dtype=torch.long, device=device)
-    g.pace = torch.full((1, G), DC.PACES.index("any"), dtype=torch.long, device=device)
-    return g
+    g.verb = torch.full((1, Gp), DC.VERBS.index("hold"), dtype=torch.long, device=device)
+    g.pace = torch.full((1, Gp), DC.PACES.index("any"), dtype=torch.long, device=device)
+    return g.padded(G)
 
 
 def command_of(verb, pace, device="cpu"):
