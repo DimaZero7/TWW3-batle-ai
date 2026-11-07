@@ -57,6 +57,19 @@ function M.covered_by_region(rect, points, reg)
     return out
 end
 
+-- The unit a click at x, y hits (pure: tests): of those whose region holds the point, the nearest banner; nil - none.
+function M.hit(points, x, y, reg)
+    reg = reg or M.REGION
+    local best, bd = nil, nil
+    for _, p in ipairs(points) do
+        if x >= p[2] + reg.left and x <= p[2] + reg.right and y >= p[3] + reg.top and y <= p[3] + reg.bottom then
+            local d = (x - p[2]) ^ 2 + (y - p[3] - (reg.top + reg.bottom) / 2) ^ 2
+            if not bd or d < bd then best, bd = p[1], d end
+        end
+    end
+    return best
+end
+
 -- a formation's depth (pure): men, ordered width -> m
 function M.depth(men, width)
     if not (men and width and width > 0) then return 6 end
@@ -308,6 +321,22 @@ function M.start(opts)
     end
 
     function h.stop() h.stopped = true end
+
+    -- a click on the field (no box): the enemy under the cursor (its region round its banner, the nearest banner) ->
+    -- opts.on_unit(name); none or no cursor known -> opts.on_clear (the pick goes, as the own selection)
+    function h.field_click(at, why)
+        local name = nil
+        if type(at) == 'table' and at.x then name = M.hit(h.points(), at.x, at.y) end
+        opts.emit('field_pick', {t = opts.now_ms(), why = why, at = type(at) == 'table' and {at.x, at.y} or nil,
+            unit = name})
+        if name then
+            h.card_ms = real()
+            pcall(opts.on_unit, name)
+        else
+            pcall(opts.on_clear, why)
+        end
+        return name
+    end
     -- a click on our enemy card (apps.battle.enemy_cards): the own selection may change with it, the pick must not go
     function h.card_clicked() h.card_ms = real() end
 
@@ -329,8 +358,10 @@ function M.start(opts)
                 return
             end
             if M.FIELD[s] then
+                -- (the cursor's place is read now: the release's; whether it ended a box is known a moment later)
+                local at = opts.cursor and select(2, pcall(opts.cursor)) or nil
                 opts.bm:real_callback(function()
-                    if not h.seen and real() - h.box_ms > M.AFTER_BOX_MS then pcall(opts.on_clear, 'field click') end
+                    if not h.seen and real() - h.box_ms > M.AFTER_BOX_MS then h.field_click(at, 'field click') end
                 end, 150, 'bai_box_pick_click')
             end
         end, true)

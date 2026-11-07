@@ -28,3 +28,18 @@ def test_a_box_takes_a_unit_by_its_region_under_the_banner():
         -- above the banners: nothing
         assert(#bp.covered_by_region({x = 0, y = 0, w = 400, h = 80}, pts, reg) == 0)
     """)
+
+
+def test_a_click_on_the_field_hits_the_unit_whose_region_holds_it():
+    lua = new_runtime()
+    lua.globals().bp = load(lua, "apps.battle.box_pick")
+    lua.execute("""
+        local reg = {left = -40, right = 40, top = 15, bottom = 170}
+        local pts = {{'a', 100, 100}, {'b', 160, 100}, {'c', 300, 100}}
+        assert(bp.hit(pts, 300, 200, reg) == 'c')
+        -- in two regions: the nearer banner's column
+        assert(bp.hit(pts, 120, 180, reg) == 'a')
+        assert(bp.hit(pts, 145, 180, reg) == 'b')
+        assert(bp.hit(pts, 230, 180, reg) == nil)
+        assert(bp.hit(pts, 100, 50, reg) == nil)       -- above the banner
+    """)

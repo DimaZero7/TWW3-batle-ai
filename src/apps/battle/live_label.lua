@@ -46,7 +46,19 @@ M.KEYS = 'tww3_bai_keys.txt'
 function M.keys()
     local text = exchange.read(M.KEYS)
     if not text or text == '' then return {} end
-    return {ctrl = text:match('ctrl=(%d)') == '1', shift = text:match('shift=(%d)') == '1', text = text}
+    return {ctrl = text:match('ctrl=(%d)') == '1', shift = text:match('shift=(%d)') == '1', text = text,
+        x = tonumber(text:match(' x=(%-?%d+)')), y = tonumber(text:match(' y=(%-?%d+)')),
+        w = tonumber(text:match(' w=(%d+)')), h = tonumber(text:match(' h=(%d+)'))}
+end
+
+-- The cursor on the game's screen (the helper's place in the game window's client area, scaled to the game's screen:
+-- the UI's coordinates) -> {x, y} or nil
+function M.cursor(env)
+    local k = M.keys()
+    if not (k.x and k.y and k.w and k.h and k.w > 0 and k.h > 0) then return nil end
+    local ok, sw, sh = pcall(function() return env.core:get_screen_resolution() end)
+    if not ok or not sw then sw, sh = k.w, k.h end
+    return {x = k.x * sw / k.w, y = k.y * sh / k.h}
 end
 
 local function box(uic)
@@ -147,6 +159,8 @@ function M.start(opts)
             elseif it and h.lit_mode == 'uc' and opts.enemy_army then
                 local ok, err = pcall(function() uc_of(it):highlight(on) end)
                 res[#res + 1] = name .. ' uc ' .. tostring(on) .. ': ' .. (ok and 'ok' or tostring(err))
+            elseif it and h.lit_mode == 'none' then
+                res[#res + 1] = name .. ' none'
             elseif it then
                 local id = tostring(it.unit:unique_ui_id())
                 local okr, now = pcall(function() return env.common.get_context_value('CcoBattleUnit', id, M.HIGHLIGHTED) end)
@@ -171,7 +185,8 @@ function M.start(opts)
     local okb, box = pcall(box_pick.start, {bm = opts.bm, env = env, units = opts.enemy, all = all, emit = opts.emit,
         now_ms = opts.now_ms, on_box = function(names) h.cards.box_pick(names, 'box') end,
         on_clear = function(why) h.cards.clear_pick(why) end,
-        on_unit = function(name) h.cards.click_unit(name, 'field banner', true) end})
+        on_unit = function(name) h.cards.click_unit(name, 'field', true) end,
+        cursor = function() return M.cursor(env) end})
     if okb then h.box = box else opts.emit('box_probe', {error = tostring(box)}) end
     local by_name = {}
     for _, it in ipairs(opts.own) do by_name[it.name] = it end
@@ -239,6 +254,17 @@ function M.start(opts)
             end
             local ok, a1, a2 = pcall(function() return it.unit[w[3]](it.unit, unpack(args)) end)
             row.result = ok and (tostring(a1) .. (a2 ~= nil and (' ' .. tostring(a2)) or '')) or ('error: ' .. tostring(a1))
+        elseif verb == 'bcallu' then
+            -- bcallu <method> <unit> [args]: a method of the battle with the script unit as its first argument
+            local it = by_name[w[3]]
+            local args = {it.unit}
+            for i = 4, #w do
+                local a = w[i]
+                if a == 'true' then a = true elseif a == 'false' then a = false elseif tonumber(a) then a = tonumber(a) end
+                args[#args + 1] = a
+            end
+            local ok, a1 = pcall(function() local b = opts.bm.battle; return b[w[2]](b, unpack(args)) end)
+            row.result = ok and tostring(a1) or ('error: ' .. tostring(a1))
         elseif verb == 'bcall' then
             -- bcall <method> [args]: a method of the battle (bm.battle)
             local args = {}
@@ -291,6 +317,24 @@ function M.start(opts)
             -- click_banner <unit>: the unit's banner over the field (unit_id_holder's component of its id)
             local it = by_name[w[2]]
             row.result = click(it and f(env.core:get_ui_root(), 'unit_id_holder', tostring(it.unit:unique_ui_id())))
+        elseif verb == 'field_click' and h.box then
+            -- field_click: a click on the field where the helper's file puts the cursor (the release's path)
+            row.result = tostring(h.box.field_click(M.cursor(env), 'test'))
+        elseif verb == 'uccall' then
+            -- uccall <unit> <method> [args]: a method of a unit controller of the enemy's army holding the unit (never
+            -- taking control) - the probe of the selection's look (add_animated_selection_proxy ...)
+            local it = by_name[w[2]]
+            local args = {}
+            for i = 4, #w do
+                local a = w[i]
+                if a == 'true' then a = true elseif a == 'false' then a = false elseif tonumber(a) then a = tonumber(a) end
+                args[#args + 1] = a
+            end
+            local ok, a1 = pcall(function()
+                local uc = uc_of(it)
+                return uc[w[3]](uc, unpack(args))
+            end)
+            row.result = ok and tostring(a1) or ('error: ' .. tostring(a1))
         elseif verb == 'root_click' then
             row.result = click(env.core:get_ui_root())
         elseif verb == 'box_units' and h.box then
