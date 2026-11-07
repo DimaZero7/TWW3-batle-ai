@@ -52,6 +52,9 @@
 -- - as without it. Absent: the phase ends after 1 s (the battle file's places). The enemy stays where the file puts it.
 -- config.pause_probe = {at_s, real_ms, off_s} (tools.build nn-arena --pause-probe): the player's orders off and the battle
 -- paused at at_s for real_ms real ms, the orders back at at_s + off_s (apps.battle.pause_probe, events pause_probe).
+-- config.label = {every_s} (tools.build nn-arena --label-game, with own_ai 'net' and deploy 'strategist'; tools/label/game.py):
+-- a person labels the operative over the live battle - the player's orders, pause and speed controls off from the
+-- deployment on, the battle paused on every operative second until the companion's answer (apps.battle.label_pause).
 local battle = require('apps.battle.adapter')
 local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
@@ -64,6 +67,7 @@ local observer = require('apps.telemetry.observer_adapter')
 local orders = require('apps.orders.adapter')
 local deploy = require('apps.bridge.deploy_adapter')
 local pause_probe = require('apps.battle.pause_probe')
+local label_pause = require('apps.battle.label_pause')
 
 local M = {}
 
@@ -348,12 +352,22 @@ function M.main(bm, config, globals)
                 attacker = config.enemy_role == 'defend' and 1 or 2, map = config.map}})
         emit('own_ai', {mode = 'net', own_ai = config.own_ai, decide_ms = config.decide_ms,
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
+        if config.label then
+            -- the labelling over the live battle (apps.battle.label_pause)
+            state.label = label_pause.start({bm = bm, every_s = config.label.every_s, speed = config.speed,
+                now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+                written = function() return state.net.written end, answered = function() return state.net.answered end,
+                poll = function() state.net.poll() end, emit = emit, flush = flush, guard = guarded,
+                finished = function() return state.finished end})
+            state.label.lock('battle')
+        end
         if config.enemy_ai == 'companion' then enemy_start() end
     end
 
     -- Both bridges at a decision, ours first (the same state for both).
     local function net_decide()
         if state.net then state.net.decide() end
+        if state.label then state.label.after_decide() end
         if state.enemy_net then state.enemy_net.decide() end
     end
     local function net_poll()
@@ -558,6 +572,12 @@ function M.main(bm, config, globals)
         local function deployment()
             if config.deploy == 'strategist' then
                 if state.deploy then return end
+                if config.label then
+                    -- the person must not move the units by hand in the deployment either (apps.battle.label_pause)
+                    label_pause.start({bm = bm, every_s = 1, speed = config.speed, now_ms = function() return 0 end,
+                        written = function() return 0 end, answered = function() return 0 end, poll = function() end,
+                        emit = emit}).lock('deployment')
+                end
                 local function rows(side)
                     return function()
                         local out = {}

@@ -211,14 +211,17 @@ class Level:
         if int(out["plan"]["no_cell"][0]) > 0:
             errs.append("одной из групп нет места в зоне расстановки")
         if not errs:
-            m2, pl = self.matchup_after(out)
-            from tools.label import session as SE
-            st = SE.Battle(m2, self.s.P, dev).st
-            spacing = self.s.P.sim["formation"]["spacing_m"]
-            n = int(DP.errors(st, self.s.b.own, pl["group"], self.mine, spacing)[0])
-            if n:
-                errs.append(f"расстановка: {n} ошибок (отряд вне зоны расстановки или строи наезжают)")
+            errs += self.deploy_errors(out)
         return out, errs
+
+    def deploy_errors(self, out):
+        """strategist/deploy.errors on the battle built with my units on the walk's places (the game: game.py's own)."""
+        m2, pl = self.matchup_after(out)
+        from tools.label import session as SE
+        st = SE.Battle(m2, self.s.P, self.s.device).st
+        spacing = self.s.P.sim["formation"]["spacing_m"]
+        n = int(DP.errors(st, self.s.b.own, pl["group"], self.mine, spacing)[0])
+        return [f"расстановка: {n} ошибок (отряд вне зоны расстановки или строи наезжают)"] if n else []
 
     def apply(self, act, out):
         """The battle rebuilt on the places; returns the sample's numbers."""

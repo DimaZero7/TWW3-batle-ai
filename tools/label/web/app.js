@@ -675,6 +675,22 @@ function renderSetup() {
     const mc = el("input", { type: "checkbox", onchange: (e) => { S.men = e.target.checked; } }); mc.checked = S.men;
     p.append(el("div", { class: "row" }, el("label", {}, mc, " Бойцы поштучно (лаборатория бойцов: видно ряды и разрывы строя; бой считается ~в 3 раза дольше)")));
     p.append(nav(3, 5));
+  } else if (S.step === 6) {
+    p.append(el("h2", {}, "Бой в игре"),
+      el("div", { class: "hint" }, "Настоящий бой в Total War: WARHAMMER III против ИИ игры (нормальная сложность), арена 7 на 7 Империи. " +
+        "Ты — стратег на расстановке и оперативник раз в 15 с: игра встаёт на паузу и ждёт тебя, снимает паузу только «Дальше». " +
+        "Под тобой — тактики (формула) и сеть отряда. Мышью и клавишами в игре отряды не командуются."));
+    if (!S.cfg.game) {
+      p.append(el("div", { class: "err" }, "Сервер запущен без игры. Закрой его и запусти: powershell -NoProfile -ExecutionPolicy Bypass -File tools/label/game.ps1"));
+      return;
+    }
+    S.gtask = S.gtask || "hold"; S.gspeed = S.gspeed || 3;
+    p.append(el("div", { class: "row" }, "Задача боя: ",
+      fillSelect(el("select", { onchange: (e) => { S.gtask = e.target.value; } }), [["hold", "держать (враг атакует)"], ["destroy", "уничтожить (враг защищается)"]], S.gtask)),
+      el("div", { class: "row" }, "Скорость игры между паузами: ",
+        fillSelect(el("select", { onchange: (e) => { S.gspeed = +e.target.value; } }), [[1, "×1"], [3, "×3"], [10, "×10"]], S.gspeed)),
+      el("button", { class: "big go wide", id: "btn-game", onclick: () => startGame(S.gtask, S.gspeed) }, "Запустить игру ▶"),
+      el("div", { id: "setup-err", class: "err hidden" }));
   } else if (S.step === 5) {
     const lv = S.cfg.levels.find((l) => l.name === S.level);
     p.append(el("h2", {}, "5. В бой"), el("table", { class: "res" },
@@ -807,6 +823,12 @@ async function pump() {
     const r = await api("advance", { seconds: S.mode === "decision" ? null : 2 });
     S.queue.push(...r.snaps); S.snaps.push(...r.snaps);
     S.st = r.state;
+    if (r.state.game) {
+      // the live game: the latest second at once (the game keeps its own pace), the units known once it sent them
+      if (S.queue.length > 1) S.queue = S.queue.slice(-1);
+      if (r.state.units && r.state.units.length) S.info = r.state.units;
+      if (!S.pending) banner();
+    }
     if (r.state.pending) S.pendingNext = r.state.pending;
     if (r.state.over) { S.over = true; S.overNext = true; }
   } catch (e) { status(e.message); setMode("pause"); }
@@ -819,6 +841,18 @@ async function startBattle() {
     status("строю бой…");
     const st = await api("start", { matchup: S.m, level: S.level, period: S.level === "strategist" ? null : S.period,
       upper: S.upper, lower: S.lower, name: S.m.name, men: S.men });
+    enterBattle(st);
+  } catch (e) { showSetupErr(e); status(""); }
+}
+async function startGame(task, speed) {
+  try {
+    status("запускаю игру…");
+    enterBattle(await api("game/start", { task, speed, name: "игра_" + task }));
+    status("ждём игру: она запускается (1–2 минуты), потом расстановка");
+  } catch (e) { showSetupErr(e); status(""); }
+}
+function enterBattle(st) {
+  {
     S.st = st; S.info = st.units; S.snaps = [st.snap]; S.queue = []; S.prev = null; showSnap(st.snap);
     S.pending = null; S.pendingNext = null; S.over = false; S.overNext = false; S.edit = null; S.pv = null; S.hintPv = null;
     S.replayAt = null; S.sel.clear(); S.zoomed = false; S.screen = "battle";
@@ -831,7 +865,7 @@ async function startBattle() {
     renderInfo(); keysLine(); banner();
     if (st.pending) openDecision(st.pending);
     else setMode(S.lastMode);
-  } catch (e) { showSetupErr(e); status(""); }
+  }
 }
 function renderInfo() {
   const st = S.st;
@@ -840,7 +874,15 @@ function renderInfo() {
 }
 function banner() {
   const b = $("banner"); b.innerHTML = "";
-  const P = S.pending, who = LEVEL_RU[S.st.level];
+  const P = S.pending, who = LEVEL_RU[(P && P.level) || S.st.level];
+  if (!P && S.st.game) {
+    const ph = { "waiting for the game": "Ждём игру: она запускается, потом расстановка.", deployment: "Расстановка…",
+      deployed: "Расстановка отдана, бой начинается.", battle: `Бой идёт в игре. Пауза — каждые ${S.st.period} с: игра встанет и ждёт тебя.`,
+      over: "Бой окончен." }[S.st.phase] || S.st.phase;
+    b.append(el("div", { class: "big-t" }, "Ты — стратег и оперативник (игра)."), el("div", { class: "hint" }, ph));
+    if (S.st.error) b.append(el("div", { class: "err" }, "Ошибка: " + S.st.error));
+    return;
+  }
   if (!P) {
     b.append(el("div", { class: "big-t" }, `Ты — ${who}.`), el("div", { class: "hint" },
       S.over ? "Бой окончен." : `Бой идёт. Пауза будет ${S.st.level === "strategist" ? "только перед боем" : `каждые ${S.st.period} с`}. Скорость — кнопками сверху.`));
@@ -1062,7 +1104,8 @@ function finish() {
     ...[["Время боя", `${r.seconds} с`], ["Мои потери", lost("mine")], ["Потери врага", lost("enemy")],
       ["Свои стоят", `${r.left.mine.standing} из ${r.left.mine.units} отрядов`], ["Враги стоят", `${r.left.enemy.standing} из ${r.left.enemy.units} отрядов`],
       ["Решений записано", String(r.decisions)], ["Запись", S.st.folder]].map(([k, v]) => el("tr", {}, el("td", {}, k), el("td", {}, el("b", {}, v))))),
-  el("button", { class: "big go wide", onclick: startBattle }, "Ещё раз этот матчап"),
+  el("button", { class: "big go wide", onclick: S.st.game ? () => { toSetup(); goStep(6); } : startBattle },
+    S.st.game ? "Ещё бой в игре" : "Ещё раз этот матчап"),
   el("button", { class: "wide", onclick: toSetup }, "К подготовке"));
   const rp = $("replay-t");
   rp.max = S.snaps.length - 1; rp.value = rp.max; $("replay").classList.remove("hidden");

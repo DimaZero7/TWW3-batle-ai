@@ -96,7 +96,6 @@ def men_of(st):
 
 
 def snapshot(sess):
-    from tools.nn.operative import step as SP
     from tools.nn.unit import view as V
     st = sess.b.st
     raw = V.raw(st, sess.P.sim["formation"]["spacing_m"])[0]
@@ -112,8 +111,14 @@ def snapshot(sess):
                       _r(raw[s, I["hp"]], 3), int(float(raw[s, I["r"]]) > 0), int(float(raw[s, I["alive"]]) > 0),
                       int(float(raw[s, I["vis"]]) > 0), _r(float(u["a"][0, s]) / a0, 2) if a0 > 0 else None,
                       int(float(raw[s, I["m"]]) > 0), int(float(raw[s, I["mv"]]) > 0), int(float(raw[s, I["fire"]]) > 0)])
-    g = sess.groups
-    tac = sess.tac
+    groups, frames = groups_frames(sess.groups, sess.tac)
+    return {"t": sess.sec, "units": units, "groups": groups, "frames": frames, "men": men_of(st)}
+
+
+def groups_frames(g, tac):
+    """(groups, frames) of a snapshot: the operative's groups (members, target, zone with its tiles) and the units' frames
+    from their tacticians (operative/lower.Tacticians) - the simulator's battle and the game's chain alike."""
+    from tools.nn.operative import step as SP
     groups = []
     for k in range(g.G):
         if not bool(g.on[0, k]):
@@ -136,7 +141,7 @@ def snapshot(sess):
         for s in w["on"][row].nonzero()[:, 0].tolist():
             frames.append([s, row, _r(w["x"][row, s]), _r(w["z"][row, s]), _r(w["b"][row, s]), _r(w["front"][row, s]),
                            _r(w["depth"][row, s])])
-    return {"t": sess.sec, "units": units, "groups": groups, "frames": frames, "men": men_of(st)}
+    return groups, frames
 
 
 def for_page(snap):
@@ -154,4 +159,4 @@ def for_replay(snaps, every=5):
     return [s if s.get("men") is None or s["t"] % every == 0 else {**s, "men": None} for s in snaps]
 
 
-__all__ = ["snapshot", "for_page", "units_info", "unit_entry", "kind_of", "names_ru"]
+__all__ = ["snapshot", "groups_frames", "for_page", "units_info", "unit_entry", "kind_of", "names_ru"]

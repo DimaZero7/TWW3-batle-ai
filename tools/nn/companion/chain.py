@@ -164,6 +164,8 @@ class Chain:
         self.unit_net, self.op_net, self.tactic_net = unit_net, op_net, tactic_net
         self.op_greedy, self.tactic_greedy, self.unit_greedy = op_greedy, tactic_greedy, unit_greedy
         self.op_mode = op_mode
+        self.op_decide = None          # callable (inp, ctx, raw) -> the walk's output: the operative's decision by
+        #                                someone else (the labelling over the game: the person, tools/label/game.py)
         self.plans = plans if plans is not None else {}
         self.task, self.device, self.own, self.check = task, device, own, check
         self.every, self.t_every = int(ocfg()["decide_s"]), int(tcfg()["decide_s"])
@@ -217,7 +219,9 @@ class Chain:
         g.drop_dead(r)
         inp = OIN.build(r, self.card, self.side, self.axes, g, self.order, bounds=self.bounds, K=self.K)
         ctx = ONN.ctx_of(inp, r, self.axes, g)
-        if self.op_net is not None:
+        if self.op_decide is not None:
+            o = self.op_decide(inp, ctx, r)          # a person in the operative's seat (tools/label/game.py)
+        elif self.op_net is not None:
             o, _ = self.op_net(inp, ctx, greedy=self.op_greedy)
         else:
             o = OTC.play_formula(inp, ctx, self.destroy, self.op_mode)

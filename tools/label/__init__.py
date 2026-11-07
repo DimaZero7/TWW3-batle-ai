@@ -15,6 +15,10 @@ strategist) and every decision is written as a sample for imitation learning
     view.py      what the page draws: the units, the groups, the zones, the targets, the frames (hidden enemies left out)
     server.py    the HTTP server: the page (web/) and the JSON API; serve.sh runs it in the container
     browser_check.py   the scripted check of the page through Chrome's DevTools protocol (host python, stdlib)
+    game.py      Разметка в игре: the person as the strategist and the operative of a live battle in the game (the
+                 companion's chain below, the bridge pauses the battle on the operative's seconds); game.ps1 runs the
+                 server with the game folder and launches the game on the page's request; game_check.py - its scripted
+                 check through the page
 """
 import json
 from functools import lru_cache

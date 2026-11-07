@@ -210,6 +210,7 @@ TIMEOUT_MARGIN_S = 60
 # nn-arena --deploy strategist: real seconds the deployment waits for the companion's plan (then as before: no plan),
 # and real ms after the teleports before the places are read (the 26.09.2026 check read them 1000 ms after).
 DEPLOY_WAIT_S = 120
+LABEL_WAIT_S = 3600      # --label-game: the person's deployment (real s) and the battle's real-time deadline by default
 DEPLOY_SETTLE_MS = 1000
 # human: every soldier's position every this many ticks (a reading of all men takes ~50 ms).
 HUMAN_SOLDIERS_EVERY = 5
@@ -420,6 +421,13 @@ def nn_arena_config(args, run_config):
         # input reads are the battle file's (scenario.zones), the enemy's side stays where the battle file puts it
         run_config.update(deploy="strategist", deploy_zones={s: dict(z) for s, z in nn_scenario.zones(arena).items()},
                           deploy_wait_s=DEPLOY_WAIT_S, deploy_settle_ms=DEPLOY_SETTLE_MS)
+    if getattr(args, "label_game", False):
+        # the labelling over the live battle (tools/label/game.py, src/apps/battle/label_pause.lua): the battle pauses on
+        # every operative second until the person's decision; the deployment waits for the person as long as the battle
+        # may last
+        from tools.nn.operative import cfg as ocfg
+        run_config["label"] = {"every_s": int(ocfg()["decide_s"])}
+        run_config["deploy_wait_s"] = LABEL_WAIT_S
     if getattr(args, "pause_probe", None):
         # the pause probe (build/diag_chain/part2.md): at at_s of battle the script disables the player's orders and
         # pauses (speed 0) for real_ms real ms, then resumes; the orders stay disabled until at_s + off_s
@@ -566,6 +574,10 @@ def main(argv=None):
                              "places, the phase ends after 1 s) or 'strategist' (the companion's strategist, "
                              "companion --strategist: its zones - the strategist's cases' - in the battle file; "
                              "docs/ru/training/strategist.md)")
+    parser.add_argument("--label-game", action="store_true",
+                        help="nn-arena --own-ai net --deploy strategist: the labelling over the live battle "
+                             "(tools/label/game.py): the player's orders off, the battle paused on every operative "
+                             "second until the companion's answer (the person's decision); docs/ru/training/label.md")
     parser.add_argument("--pause-probe", metavar="AT_S,REAL_MS,OFF_S", default=None,
                         help="nn-arena: at AT_S of battle disable the player's orders (bm:disable_orders) and pause the "
                              "battle (speed 0) for REAL_MS real ms, then resume; the orders back at AT_S + OFF_S "
@@ -645,6 +657,8 @@ def main(argv=None):
         parser.error("--enemy-ai is for nn-arena --own-ai net and the human target")
     if args.skirmish != "game" and not (net_arena or (args.target == "human" and args.enemy_ai != "game")):
         parser.error("--skirmish is for nn-arena --own-ai net and human --enemy-ai (the bridge's units)")
+    if args.label_game and not (net_arena and args.deploy == "strategist"):
+        parser.error("--label-game is for nn-arena --own-ai net --deploy strategist")
     if args.free_speed and args.target != "human":
         parser.error("--free-speed is for the human target")
     if args.soldiers_every is not None and args.soldiers_every < 0:
@@ -791,6 +805,8 @@ def main(argv=None):
             run_config.pop("speed")
             model_s = None
         run_config["deadline_s"] = args.deadline or (3600 if model_s is None else deadline_seconds(model_s, args.speed))
+        if getattr(args, "label_game", False) and not args.deadline:
+            run_config["deadline_s"] = 3 * LABEL_WAIT_S     # the person's pauses: real time the battle's clock does not count
         run_config["stall_ms"] = stall_ms
     if args.target in ARENA_TARGETS and scenario_file and not args.scenario:
         args.scenario = str(scenario_file)

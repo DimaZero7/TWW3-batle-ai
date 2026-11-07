@@ -16,6 +16,8 @@ GET  /api/state
 POST /api/preview       {edit}: the decision checked and played by the walk, nothing changed
 POST /api/decide        {edit}: the same, written and put in force
 POST /api/stop          the end now
+POST /api/game/start    {task: hold | destroy, speed: 1 | 3 | 10, name} -> the labelling over the live game
+                        (tools/label/game.py; the server run by tools/label/game.ps1 with --game: the game folder)
 GET  /maps/<name>/preview.png   the captured map's picture
 """
 import argparse
@@ -34,7 +36,7 @@ from tools.label import pool as PL
 
 WEB = Path(__file__).parent / "web"
 LOCK = threading.Lock()
-STATE = {"session": None, "nets": {}, "device": "cpu"}
+STATE = {"session": None, "nets": {}, "device": "cpu", "game": None}
 
 
 def nets(kind):
@@ -76,7 +78,8 @@ def config_info():
                        {"name": "strategist", "label": c["levels"]["strategist"]["label"], "period": None,
                         "ready": strategist_ready() is None, "why": strategist_ready()}],
             "enemy_modes": c["enemy_modes"], "verbs": list(MU.VERBS), "paces": list(MU.PACES),
-            "colors": c["group_colors"], "limit_s": c["limit_s"], "max_per_side": MU.MAX_PER_SIDE}
+            "colors": c["group_colors"], "limit_s": c["limit_s"], "max_per_side": MU.MAX_PER_SIDE,
+            "game": STATE["game"] is not None}
 
 
 def pool_info():
@@ -122,6 +125,27 @@ def start(body):
     return s.state()
 
 
+def start_game(body):
+    from tools.label import game as GM
+    if STATE["game"] is None:
+        raise HU_refused(["сервер запущен без игры: запусти powershell -File tools/label/game.ps1"])
+    old = STATE["session"]
+    if old is not None and not old.over:
+        old.stop()
+    speed = int(body.get("speed") or 3)
+    if speed not in GM.SPEEDS:
+        raise HU_refused([f"скорость {speed}: одна из {GM.SPEEDS}"])
+    s = GM.GameSession(STATE["game"], {"unit": nets("unit")}, task=body.get("task", "hold"), speed=speed,
+                       device=STATE["device"], name=body.get("name") or "игра")
+    STATE["session"] = s
+    return s.state()
+
+
+def HU_refused(errors):
+    from tools.label import human as HU
+    return HU.Refused(errors)
+
+
 def api(method, path, q, body):
     s = STATE["session"]
     if path == "/api/pool":
@@ -140,6 +164,8 @@ def api(method, path, q, body):
         return {"errors": MU.check(body)}
     if path == "/api/start":
         return start(body)
+    if path == "/api/game/start":
+        return start_game(body)
     if s is None:
         raise ValueError("боя нет: начни его (/api/start)")
     if path == "/api/state":
@@ -227,8 +253,11 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=int(cfg()["port"]))
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--game", default=None, help="the game folder (mounted at /game): the labelling over the live game "
+                                                 "(tools/label/game.ps1)")
     a = ap.parse_args(argv)
     STATE["device"] = a.device
+    STATE["game"] = a.game
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
     print(f"Разметка: http://localhost:{a.port}  (Ctrl+C - стоп)", flush=True)
     try:
