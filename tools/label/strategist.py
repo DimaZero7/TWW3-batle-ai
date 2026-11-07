@@ -54,6 +54,91 @@ def zone_of(r, toward, device):
     return {"x": t(x), "z": t(z), "b": t(b), "front": t(front), "depth": t(depth)}
 
 
+def act_of(edit, inp, axes, device):
+    """The walk's choices of the person's edit (Level.act; the live deployment: tools/label/live_deploy.py). Refused on a
+    malformed edit."""
+    G = int(scfg()["groups"])
+    dev = device
+    slots = inp["slot"][0].tolist()
+    own = inp["own"][0].tolist()
+    mine = [s for s, o in zip(slots, own) if o]
+    row_of = {s: j for j, s in enumerate(slots)}
+    K = len(slots)
+    act = {"comp": torch.full((1, K), -1, dtype=torch.long, device=dev),
+           **{k: torch.zeros((1, G), dtype=torch.long, device=dev) for k in ("form", "turn", "cell")}}
+    errs, where = [], {}
+    for e in edit.get("groups", []):
+        g = int(e.get("g", -1))
+        if not 0 <= g < G:
+            errs.append(f"группа {g}: номер 0-{G - 1}")
+            continue
+        for s in e.get("members", []):
+            if s not in mine:
+                errs.append(f"отряд {s}: не мой")
+            elif s in where:
+                errs.append(f"отряд {s} в двух группах")
+            where[s] = g
+        if not e.get("members"):
+            continue
+        act["form"][0, g] = FORMS.index(e.get("form", "square")) if e.get("form", "square") in FORMS else 0
+        act["turn"][0, g] = int(e.get("turn", 0)) % int(scfg()["sectors"])
+        gl = e.get("goal")
+        if gl is None:
+            errs.append(f"группа {g + 1}: не задано, куда зона")
+            continue
+        act["cell"][0, g] = SP.cell_of(axes, torch.tensor([float(gl[0])], device=dev),
+                                       torch.tensor([float(gl[1])], device=dev))[0]
+    lost = [s for s in mine if s not in where]
+    if lost:
+        errs.append(f"отряды без группы: {lost}")
+    for s, g in where.items():
+        act["comp"][0, row_of[s]] = g
+    v, p = edit.get("verb", "hold"), edit.get("pace", "any")
+    if v not in DC.VERBS or p not in DC.PACES:
+        errs.append("глагол / темп не из словаря")
+    if errs:
+        raise HU.Refused(errs)
+    act["verb"] = torch.tensor([DC.VERBS.index(v)], device=dev)
+    act["pace"] = torch.tensor([DC.PACES.index(p)], device=dev)
+    return act
+
+
+
+def walk_of(act, inp, ctx):
+    """(out, errors) of the walk with the choices act and heads of zeros (Level.walk without the deployment's own check)."""
+    B, K = inp["own"].shape
+    G = int(scfg()["groups"])
+    dev = inp['own'].device
+    S, C = int(scfg()["sectors"]), int(scfg()["cells"])
+    with HU.watch_picks(SNN) as calls:
+        out = SNN.choose(SNN.null_enc(B, K, G, dev), inp, ctx, SNN.NullHeads(B, dev), act=act)
+    names = {G: "comp", 2: "form", S: "turn", C * C: "cell", len(DC.VERBS): "verb", len(DC.PACES): "pace"}
+    errs = []
+    slots = inp["slot"][0].tolist()
+    comp_rows = [j for j in range(K) if bool(inp["own"][0, j])]
+    cells = [g for g in range(G) if bool(out["plan"]["on"][0, g])]
+    ci = ce = 0
+    for lg, given in calls:
+        h = names.get(lg.shape[-1], "?")
+        bad = given is not None and bool(HU.banned(lg, given).any())
+        if h == "comp":
+            j = comp_rows[ci] if ci < len(comp_rows) else -1
+            ci += 1
+            if bad:
+                errs.append(WHY["comp"].format(u=slots[j] if j >= 0 else "?", g=int(act["comp"][0, j]) + 1))
+        elif h == "cell":
+            g = cells[ce] if ce < len(cells) else -1
+            ce += 1
+            if bad:
+                errs.append(WHY["cell"].format(g=g + 1))
+        elif bad:
+            errs.append(WHY.get(h, "выбор закрыт правилами уровня"))
+    if int(out["plan"]["no_cell"][0]) > 0:
+        errs.append("одной из групп нет места в зоне расстановки")
+    return out, errs
+
+
+
 class Level:
     def __init__(self, sess):
         self.s = sess
@@ -115,50 +200,7 @@ class Level:
     # -------------------------------------------------------------- the decision
 
     def act(self, edit):
-        G = int(scfg()["groups"])
-        dev = self.s.device
-        slots = self.inp["slot"][0].tolist()
-        own = self.inp["own"][0].tolist()
-        mine = [s for s, o in zip(slots, own) if o]
-        row_of = {s: j for j, s in enumerate(slots)}
-        K = len(slots)
-        act = {"comp": torch.full((1, K), -1, dtype=torch.long, device=dev),
-               **{k: torch.zeros((1, G), dtype=torch.long, device=dev) for k in ("form", "turn", "cell")}}
-        errs, where = [], {}
-        for e in edit.get("groups", []):
-            g = int(e.get("g", -1))
-            if not 0 <= g < G:
-                errs.append(f"группа {g}: номер 0-{G - 1}")
-                continue
-            for s in e.get("members", []):
-                if s not in mine:
-                    errs.append(f"отряд {s}: не мой")
-                elif s in where:
-                    errs.append(f"отряд {s} в двух группах")
-                where[s] = g
-            if not e.get("members"):
-                continue
-            act["form"][0, g] = FORMS.index(e.get("form", "square")) if e.get("form", "square") in FORMS else 0
-            act["turn"][0, g] = int(e.get("turn", 0)) % int(scfg()["sectors"])
-            gl = e.get("goal")
-            if gl is None:
-                errs.append(f"группа {g + 1}: не задано, куда зона")
-                continue
-            act["cell"][0, g] = SP.cell_of(self.axes, torch.tensor([float(gl[0])], device=dev),
-                                           torch.tensor([float(gl[1])], device=dev))[0]
-        lost = [s for s in mine if s not in where]
-        if lost:
-            errs.append(f"отряды без группы: {lost}")
-        for s, g in where.items():
-            act["comp"][0, row_of[s]] = g
-        v, p = edit.get("verb", "hold"), edit.get("pace", "any")
-        if v not in DC.VERBS or p not in DC.PACES:
-            errs.append("глагол / темп не из словаря")
-        if errs:
-            raise HU.Refused(errs)
-        act["verb"] = torch.tensor([DC.VERBS.index(v)], device=dev)
-        act["pace"] = torch.tensor([DC.PACES.index(p)], device=dev)
-        return act
+        return act_of(edit, self.inp, self.axes, self.s.device)
 
     def places(self, out):
         from tools.nn.strategist import battle as SB
@@ -181,35 +223,7 @@ class Level:
         return m, pl
 
     def walk(self, act):
-        B, K = self.inp["own"].shape
-        G = int(scfg()["groups"])
-        dev = self.s.device
-        S, C = int(scfg()["sectors"]), int(scfg()["cells"])
-        with HU.watch_picks(SNN) as calls:
-            out = SNN.choose(SNN.null_enc(B, K, G, dev), self.inp, self.ctx, SNN.NullHeads(B, dev), act=act)
-        names = {G: "comp", 2: "form", S: "turn", C * C: "cell", len(DC.VERBS): "verb", len(DC.PACES): "pace"}
-        errs = []
-        slots = self.inp["slot"][0].tolist()
-        comp_rows = [j for j in range(K) if bool(self.inp["own"][0, j])]
-        cells = [g for g in range(G) if bool(out["plan"]["on"][0, g])]
-        ci = ce = 0
-        for lg, given in calls:
-            h = names.get(lg.shape[-1], "?")
-            bad = given is not None and bool(HU.banned(lg, given).any())
-            if h == "comp":
-                j = comp_rows[ci] if ci < len(comp_rows) else -1
-                ci += 1
-                if bad:
-                    errs.append(WHY["comp"].format(u=slots[j] if j >= 0 else "?", g=int(act["comp"][0, j]) + 1))
-            elif h == "cell":
-                g = cells[ce] if ce < len(cells) else -1
-                ce += 1
-                if bad:
-                    errs.append(WHY["cell"].format(g=g + 1))
-            elif bad:
-                errs.append(WHY.get(h, "выбор закрыт правилами уровня"))
-        if int(out["plan"]["no_cell"][0]) > 0:
-            errs.append("одной из групп нет места в зоне расстановки")
+        out, errs = walk_of(act, self.inp, self.ctx)
         if not errs:
             errs += self.deploy_errors(out)
         return out, errs

@@ -92,3 +92,53 @@ def test_the_marks_follow_the_groups(tmp_path):
     lines = text.splitlines()
     assert "mark a g 1" in lines and "mark b g 1" in lines and "mark x t 1" in lines and "mark y t 2" in lines
     assert sum(x.startswith("mark x ") for x in lines) == 1          # one icon a unit
+
+
+def test_the_deployment_makes_a_strategist_sample(tmp_path):
+    """The game's deployment (live_label.lua: deployment documents until 'Start battle'): the last one becomes the
+    strategist's sample - the input by the companion's code, the person's groups and places read backwards
+    (tools/label/live_deploy.py); its chat is the deployment's (window 0); the battle's windows follow."""
+    from tools.label import live_deploy as LD
+    from tools.label import strategist as LS
+    game, out = tmp_path / "game", tmp_path / "label"
+    game.mkdir()
+    out.mkdir()
+    torch.manual_seed(2)
+    st = scenario.build([TP.skirmish(gap=200.0)], P)
+    rec = LV.LiveRecorder(game, out, "d")
+    base = TP.doc_of_sim(st, 0, 0, own=1)
+    zones = {"own": {"x": 0.0, "z": -250.0, "b": 0.0, "front": 700.0, "depth": 400.0},
+             "enemy": {"x": 0.0, "z": 250.0, "b": 180.0, "front": 700.0, "depth": 400.0}}
+    xs = {"u0": -170.0, "u1": -140.0, "u2": 120.0, "u3": 150.0, "u4": 180.0}
+    units = []
+    for u in base["units"]:
+        if int(u["side"]) == 1:
+            units.append(dict(u, x=xs[u["n"]], z=-200.0, b=0.0))
+        else:
+            units.append({k: u.get(k) for k in ("n", "side", "key", "men", "hp")} | {"v": True})
+    groups = {"own": [[1, ["u0", "u1"]]], "enemy": [[1, ["u5", "u6"]]]}
+    for i, final in enumerate((False, False, True)):
+        doc = {k: v for k, v in base.items() if k != "units"}
+        doc.update(units=units, deploy=True, zones=zones, live=True, groups=groups, selection=[], batch="dep",
+                   move=0, t=0, deploy_final=final or None,
+                   chat=[{"n": 1, "t": 0, "text": "держим левый фланг"}] if i >= 1 else None)
+        rec.second({k: v for k, v in doc.items() if v is not None})
+    for sec in range(3):
+        doc = TP.doc_of_sim(st, 0, 1000 * sec, own=1)
+        doc.update(batch="dep", move=sec + 1, live=True, groups=groups, selection=[])
+        rec.second(doc)
+    f = rec.folder
+    dec = [json.loads(x) for x in (f / "decisions.jsonl").read_text(encoding="utf-8").splitlines()]
+    d = dec[0]
+    assert d["level"] == "strategist" and d["errors"] == [], d.get("errors")
+    g1, g2 = d["read"]["1"], d["read"]["2"]
+    assert g1["members"] == ["u0", "u1"] and g1["form"] == "line" and g1["turn"] == 0 and g1["cx"] == -155.0
+    assert g2["members"] == ["u2", "u3", "u4"] and g2["rest"] and d["groups"]["rest"] == [2]
+    assert d["groups"]["enemy"] == {"1": ["u5", "u6"]} and [c["text"] for c in d["chat"]] == ["держим левый фланг"]
+    smp = [s for s in RC.load(f) if s["level"] == "strategist"]
+    assert len(smp) == 1 and smp[0]["act"]
+    inp, ctx, act = LS.rebuild(smp[0])
+    assert int(act["comp"].ge(0).sum()) == 5 and LD.MISSING
+    chat = [json.loads(x) for x in (f / "chat.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert chat[0]["deploy"] and chat[0]["window"] == 0
+    assert rec.stats["strategist"] == 1 and rec.stats["strategist_refused"] == 0

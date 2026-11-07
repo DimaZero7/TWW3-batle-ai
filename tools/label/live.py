@@ -109,6 +109,7 @@ class LiveRecorder:
         self.game, self.device, self.window_s, self.poll_s = Path(game), device, int(window_s), poll_s
         kw = {} if map_root is None else {"map_root": map_root}
         self.seer = TI.TacticSeer(device=device, allow_flat=allow_flat, **kw)
+        self.seer_kw = dict(device=device, allow_flat=allow_flat, **kw)     # (the strategist's seer, made at the deployment)
         self.P = self.seer.P
         self.G = int(ocfg()["groups"])
         self.command = DC.order_vec(1, task, "any", device)
@@ -116,7 +117,8 @@ class LiveRecorder:
         self.folder = RC.new_folder(name, out_root)
         self.rec, self.batch, self.win, self.sec = None, None, None, 0
         self.stats = {"windows": 0, "human": 0, "keep": 0, "none": 0, "refused": 0, "seconds": 0, "orders_rows": 0,
-                      "chat": 0, "commands": 0}
+                      "chat": 0, "commands": 0, "strategist": 0, "strategist_refused": 0}
+        self.deploy_doc, self.deploy_done, self.deploy_chat = None, False, []
         self.chat_seen = 0
         self.cmd_seen = 0
         self.ov_version, self.ov_sig = 0, None
@@ -142,6 +144,17 @@ class LiveRecorder:
         self.last_doc = doc
         if doc["batch"] != self.batch:
             self.start(doc)
+        if doc.get("deploy"):
+            # the game's deployment phase (live_label.lua: the deployment document every second): the last one is the
+            # person's deployment; 'Start battle' (deploy_final, or the battle's first document) makes the strategist's
+            # sample of it
+            self.deploy_doc = doc
+            self.chat(doc)
+            if doc.get("deploy_final"):
+                self.deployed()
+            return
+        if self.deploy_doc is not None and not self.deploy_done:
+            self.deployed()
         r = self.seer.raw(doc)
         if self.axes is None:
             self.axes = FR.Axes.of(r, self.side, self.P.map_half)
@@ -164,6 +177,28 @@ class LiveRecorder:
             self.open(r, own, enemy, sig, doc)
         self.chat(doc)
         self.commands(doc)
+
+    def deployed(self):
+        """The strategist's sample of the person's deployment (tools/label/live_deploy.py) into the record, once."""
+        if self.deploy_done or self.deploy_doc is None:
+            return
+        self.deploy_done = True
+        from tools.label import live_deploy as LD
+        from tools.nn.companion import strategist_input as SI
+        try:
+            seer = SI.StrategistSeer(**self.seer_kw)
+            smp, text = LD.sample(self.deploy_doc, self.command, seer, chat=list(self.deploy_chat))
+        except Exception as e:                          # noqa: BLE001 - a broken deployment must not stop the battle's record
+            text = {"sec": 0, "until": 0, "level": "strategist", "mode": "live", "where": "game", "source": "none",
+                    "errors": [f"the sample: {type(e).__name__}: {e}"], "chat": list(self.deploy_chat)}
+            with open(self.folder / "decisions.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(text, ensure_ascii=False) + chr(10))
+            self.stats["strategist_refused"] += 1
+            return
+        self.rec.add(smp, text)
+        self.stats["strategist"] += 1
+        if text["errors"]:
+            self.stats["strategist_refused"] += 1
 
     def commands(self, doc):
         """The player's orders as the game handed them to the bridge (src/apps/battle/live_label.lua M.COMMANDS; doc.commands,
@@ -195,12 +230,17 @@ class LiveRecorder:
             if n <= self.chat_seen:
                 continue
             self.chat_seen = n
-            row = {"n": n, "sec": round(float(m.get("t") or 0) / 1000.0, 1), "window": self.stats["windows"] + 1,
-                   "window_sec": self.win["sec"] if self.win else None, "text": m.get("text"),
-                   "groups": m.get("groups"), "selection": m.get("selection"), "enemy_pick": m.get("enemy_pick")}
+            deploy = bool(doc.get("deploy"))
+            row = {"n": n, "sec": 0.0 if deploy else round(float(m.get("t") or 0) / 1000.0, 1),
+                   "window": 0 if deploy else self.stats["windows"] + 1,
+                   "window_sec": None if deploy else (self.win["sec"] if self.win else None), "deploy": deploy,
+                   "text": m.get("text"), "groups": m.get("groups"), "selection": m.get("selection"),
+                   "enemy_pick": m.get("enemy_pick")}
             with open(self.folder / "chat.jsonl", "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + chr(10))
-            if self.win is not None:
+            if deploy:
+                self.deploy_chat.append({"n": n, "text": row["text"]})
+            elif self.win is not None:
                 self.win.setdefault("chat", []).append({"n": n, "sec": row["sec"], "text": row["text"]})
             self.stats["chat"] += 1
 
@@ -282,6 +322,8 @@ class LiveRecorder:
     def finish(self, why):
         if self.rec is None or getattr(self, "finished", None):
             return getattr(self, "finished", None)
+        if self.deploy_doc is not None and not self.deploy_done:
+            self.deployed()
         result = {"why": why, "mode": "live", "where": "game", "seconds": self.sec, **self.stats}
         self.finished = result
         self.rec.finish(result, {"names": getattr(self, "names", []), "snaps": []})

@@ -13,6 +13,8 @@ reads it, record.rebuild rebuilds the operative's input) and <out>/export.json (
                  the width in metres (the network's 8 steps need the simulator's width limits); missing - the cell
                  ('where' is a cell of the unit's area, the tactician's frame: the person sets no area) and so the view
                  (the rows and the zone map are built round the area)
+    strategist   the deployment's sample (tools/label/live_deploy.py: the strategist's input of the game's deployment
+                 document, the person's groups and places as the walk's choices), rebuilt once (strategist.rebuild)
     tactic       none: the tactician's output is each unit's frame (a 48 / 64 / 80 m step of width and depth and a cell
                  of the group's near window) inside the group's zone; the person sets neither the zone (the record puts
                  it where the units stand) nor frames - his orders are points, targets and widths
@@ -54,6 +56,25 @@ def operative(rec):
     return out, n
 
 
+def strategist(rec):
+    """The deployment's strategist sample (tools/label/live_deploy.py), rebuilt once here (strategist.rebuild)."""
+    f = rec.folder / "samples.pt"
+    if not f.exists():
+        return [], {"samples": 0}
+    from tools.label import strategist as LS
+    out, n = [], {"samples": 0, "with_act": 0, "refused": 0}
+    for s in RC.load(rec.folder):
+        if s.get("level") != "strategist":
+            continue
+        LS.rebuild(s)                                       # (raises when the input does not build)
+        n["samples"] += 1
+        n["with_act" if s.get("act") else "refused"] += 1
+        out.append(s)
+    if out:
+        n["missing"] = out[0].get("missing")
+    return out, n
+
+
 def unit_orders(rec):
     """One sample a change of a unit's order (module doc)."""
     slot_of = {n: i for i, n in enumerate(rec.names)}
@@ -91,9 +112,10 @@ def unit_orders(rec):
 def export(rec, out):
     out = Path(out)
     ops, n_op = operative(rec)
+    strat, n_st = strategist(rec)
     units = unit_orders(rec)
-    torch.save(ops + units, out / "samples.pt")
-    info = {"operative": n_op, "unit_order": {"samples": len(units),
+    torch.save(strat + ops + units, out / "samples.pt")
+    info = {"strategist": n_st, "operative": n_op, "unit_order": {"samples": len(units),
                                               "with_target": sum(1 for u in units if u["act_partial"]["target_slot"] is not None),
                                               "with_face": sum(1 for u in units if u["act_partial"]["face"] is not None),
                                               "missing": MISSING_UNIT},

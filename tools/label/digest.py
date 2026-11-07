@@ -66,9 +66,13 @@ class Record:
         self.matchup = json.loads(mf.read_text(encoding="utf-8")) if mf.exists() else {}
         rf = self.folder / "result.json"
         self.result = json.loads(rf.read_text(encoding="utf-8")) if rf.exists() else {}
-        self.windows = _jsonl(self.folder / "decisions.jsonl")
+        rows = _jsonl(self.folder / "decisions.jsonl")
+        # the deployment (tools/label/live_deploy.py: the strategist's sample) apart from the operative's windows
+        self.deploy = [w for w in rows if w.get("level") == "strategist"]
+        self.windows = [w for w in rows if w.get("level") != "strategist"]
         self.orders = {int(r["sec"]): r["units"] for r in _jsonl(self.folder / "orders.jsonl")}
-        self.chat = _jsonl(self.folder / "chat.jsonl")
+        chat = _jsonl(self.folder / "chat.jsonl")
+        self.chat = [c for c in chat if not c.get("deploy")]          # (the deployment's: in its own section)
         self.names = list(self.session.get("names") or [u["n"] for u in self.matchup.get("units", [])])
         self.keys = list(self.session.get("keys") or [u.get("key") for u in self.matchup.get("units", [])])
         self.sides = list(self.session.get("sides") or [u.get("side") for u in self.matchup.get("units", [])])
@@ -240,7 +244,38 @@ def fight_text(rec, w):
     return out
 
 
-SOURCE_RU = {"human": "решение человека: группы поменялись", "keep": "оставить как есть", "none": "групп нет"}
+SOURCE_RU = {"human": "решение человека: группы поменялись", "keep": "оставить как есть", "none": "групп нет",
+             "deploy": "расстановка (образец стратега)"}
+
+
+FORM_RU = {"line": "линия", "square": "квадрат"}
+
+
+def deploy_md(rec):
+    """The deployment's section: the person's groups as read for the strategist (centre, facing, form, the spreads),
+    the enemy's groups, the chat of the deployment, what the strategist's walk refused, what is not one to one."""
+    if not rec.deploy:
+        return []
+    d = rec.deploy[0]
+    st = rec.state(0)
+    L = ["## Расстановка · " + ("образец стратега" if not d.get("errors") else "образец стратега не принят проверкой")]
+    for k, g in sorted((d.get("read") or {}).items(), key=lambda kv: int(kv[0])):
+        L.append(f"- группа {k}{' (остаток)' if g.get('rest') else ''}: {counted(rec, g['members'])} — центр "
+                 f"{xz(g['cx'], g['cz'])}, фронт на {compass(g['heading'])} ({g['heading']:.0f}°, сектор {g['turn']}), "
+                 f"форма {FORM_RU.get(g['form'], g['form'])} (разброс по фронту {g['front_spread']:.0f} м, "
+                 f"в глубину {g['depth_spread']:.0f} м)")
+    enemy = {int(k): v for k, v in ((d.get("groups") or {}).get("enemy") or {}).items()}
+    if enemy:
+        L += ["- " + t for t in groups_text(rec, enemy, st, False)] if st else             [f"- враг {k}: {counted(rec, v)}" for k, v in sorted(enemy.items())]
+    for c in d.get("chat") or []:
+        L.append(f"- 💬 расстановка: «{c.get('text')}»")
+    if d.get("errors"):
+        L.append(f"- не принято проверкой: {'; '.join(d['errors'])[:300]}")
+    if d.get("missing"):
+        L.append(f"- не один в один: {len(d['missing'])} пункта (места внутри группы, клетка зоны, форма по разбросу, "
+                 f"приказ начала боя) — `decisions.jsonl`, поле `missing`")
+    L.append("")
+    return L
 
 
 def digest_md(rec):
@@ -256,6 +291,7 @@ def digest_md(rec):
         L.append(f"**{word}** ({fac.get('own' if side == 1 else 'enemy', '')}{', ' + str(cost) + ' золота' if cost else ''},"
                  f" {len(names)} отр.): {counted(rec, names)}.")
     L.append("")
+    L += deploy_md(rec)
     prev = None
     for i, w in enumerate(rec.windows):
         a, b = int(w["sec"]), int(w.get("until") or w["sec"] + 15)

@@ -439,6 +439,9 @@ def nn_arena_config(args, run_config):
         # the live labelling (src/apps/battle/live_label.lua, tools/label/live.py): the person's groups and the enemy
         # cards' groups out with the state every second; live_test: the scripted check's commands
         run_config["live_label"] = True
+        # the deployment: the person deploys as in the game (until his 'Start battle'); the zones the strategist's input
+        # reads (tools/label/live_deploy.py) are the battle file's
+        run_config.setdefault("deploy_zones", {s: dict(z) for s, z in nn_scenario.zones(arena).items()})
         if args.live_test:
             run_config["live_test"] = True
     if getattr(args, "group_probe", False):

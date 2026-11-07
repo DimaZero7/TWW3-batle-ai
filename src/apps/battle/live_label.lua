@@ -349,6 +349,24 @@ function M.start(opts)
             -- click_banner <unit>: the unit's banner over the field (unit_id_holder's component of its id)
             local it = by_name[w[2]]
             row.result = click(it and f(env.core:get_ui_root(), 'unit_id_holder', tostring(it.unit:unique_ui_id())))
+        elseif verb == 'place' then
+            -- place <unit> <x> <z> <bearing> <width>: a scripted deployment of an own unit (a controller of its own,
+            -- released at once - the person's hand at the deployment)
+            local it = by_name[w[2]]
+            local ok, err = pcall(function()
+                local uc = opts.orders.take_control(opts.army, it.unit)
+                opts.orders.teleport(uc, opts.vec(tonumber(w[3]), tonumber(w[4])), tonumber(w[5]), tonumber(w[6]))
+                opts.orders.release(uc)
+            end)
+            row.result = ok and 'ok' or tostring(err)
+        elseif verb == 'end_deploy' then
+            row.result = tostring(select(2, pcall(function() opts.bm:end_current_battle_phase() end)))
+        elseif verb == 'start_button' then
+            -- the game's 'Start battle' (finish_deployment > deployment_end_sp > button_battle_start, else the holder)
+            local r = env.core:get_ui_root()
+            local b = f(r, 'finish_deployment', 'deployment_end_sp', 'button_battle_start')
+                or f(r, 'finish_deployment', 'button_battle_start') or f(r, 'button_battle_start')
+            row.result = b and click(b) or 'no button'
         elseif verb == 'click_ui' then
             -- click_ui <name> [<name>...]: a click on a game component found by its names (the orders panel's buttons)
             local path = {}
@@ -520,6 +538,47 @@ function M.start(opts)
         end})
     if okc then h.chat = chat else opts.emit('chat_made', {error = tostring(chat)}) end
 
+    -- The game's deployment phase (nn_arena: the live labelling waits for the person's 'Start battle'): every tick the
+    -- deployment document (services.deploy_document: my units whole, the enemy by its composition, both zones) with the
+    -- groups, the selection, the chat instead of the battle's state; deploy_end - the last one, deploy_final (the
+    -- recorder's strategist sample: tools/label/live_deploy.py). info: {zones, own_rows(), enemy_rows()}.
+    function h.deploy_begin(info)
+        h.deploying, h.deploy_info = true, info
+        local r = env.core:get_ui_root()
+        local fd = env.find_uicomponent(r, 'finish_deployment')
+        local vis = fd and select(2, pcall(function() return fd:Visible() end))
+        local b = env.find_uicomponent(r, 'button_battle_start')
+        opts.emit('live_deploy', {begin = true, finish_deployment = fd ~= nil, visible = vis,
+            start_button = b ~= nil})
+    end
+
+    local function deploy_doc(final)
+        local i = h.deploy_info
+        local doc = services.deploy_document(opts.meta, i.zones, i.own_rows(), i.enemy_rows())
+        doc.live = true
+        -- (each its own number below 0: the recorder takes a document whose batch / move / done is new)
+        h.deploy_n = (h.deploy_n or 0) + 1
+        doc.move = -h.deploy_n
+        doc.groups = groups_now()
+        doc.selection = selection()
+        doc.deploy_final = final or nil
+        if #h.chat_log > 0 then
+            doc.chat = {}
+            for k = math.max(1, #h.chat_log - M.CHAT_KEEP + 1), #h.chat_log do doc.chat[#doc.chat + 1] = h.chat_log[k] end
+        end
+        exchange.write(M.STATE, json.encode(doc))
+        return doc
+    end
+
+    function h.deploy_end()
+        if not h.deploying then return nil end
+        local ok, doc = pcall(deploy_doc, true)
+        h.deploying = false
+        opts.emit('live_deploy', {final = ok, error = (not ok) and tostring(doc) or nil,
+            groups = ok and doc.groups or nil})
+        return doc
+    end
+
     function h.tick()
         if opts.test then
             local text = exchange.read(M.CMD)
@@ -533,6 +592,7 @@ function M.start(opts)
         end
         h.cards.tick()
         if h.chat then pcall(h.chat.place) end
+        if h.deploying then return deploy_doc(false) end
         h.move = h.move + 1
         local okg, own = pcall(M.read_own, env, opts.own)
         local enemy = {}

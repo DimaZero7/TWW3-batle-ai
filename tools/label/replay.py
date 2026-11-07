@@ -181,9 +181,11 @@ def frame(rec, sec, window=None, view=None):
             dr.text((px + 8, py + 10), f"группа {k}", fill=_rgb(DG.COLORS[(k - 1) % len(DG.COLORS)]), font=f18)
     # the caption
     a, b = int(w.get("sec", sec)), int(w.get("until") or sec + 15)
-    lines = [f"t = {sec} с · окно {a}–{b} с · {DG.SOURCE_RU.get(w.get('source'), w.get('source') or '')}"]
+    deploy = w.get("source") == "deploy"
+    lines = [f"перед боем · {DG.SOURCE_RU['deploy']}" if deploy else
+             f"t = {sec} с · окно {a}–{b} с · {DG.SOURCE_RU.get(w.get('source'), w.get('source') or '')}"]
     for c in (w.get("chat") or []) + [c for c in rec.chat if a <= float(c.get("sec") or -1) < b and not w.get("chat")]:
-        lines.append(f"«{c.get('text')}» ({c.get('sec')} с)")
+        lines.append(f"«{c.get('text')}»" + ("" if deploy else f" ({c.get('sec')} с)"))
     dr.rectangle([0, 0, W, 10 + 22 * len(lines)], fill=(255, 255, 255))
     for i, t in enumerate(lines):
         dr.text((12, 6 + 22 * i), t, fill=INK, font=f18 if i == 0 else f14)
@@ -199,6 +201,13 @@ def frames(rec, out, gif=True, every_s=3, size=640):
     out = Path(out)
     view = View(rec)
     n = 0
+    for d in getattr(rec, "deploy", [])[:1]:
+        # the deployment: the places at the battle's start, the groups as the strategist's sample read them
+        g = d.get("groups") or {}
+        w = {"sec": 0, "until": 0, "source": "deploy", "chat": list(d.get("chat") or []),
+             "groups": {"own": {k: v["members"] for k, v in (d.get("read") or {}).items()}, "enemy": g.get("enemy") or {}}}
+        frame(rec, 0, w, view).save(out / "digest_00_deploy.png")
+        n += 1
     for k, w in enumerate(rec.windows, 1):
         frame(rec, int(w["sec"]), w, view).save(out / f"digest_{k:02d}.png")
         n += 1

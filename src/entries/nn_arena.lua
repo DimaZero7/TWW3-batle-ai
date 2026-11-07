@@ -373,7 +373,18 @@ function M.main(bm, config, globals)
     -- The live labelling (config.live_label, own_ai 'human'; apps.battle.live_label): the person plays, his groups and the
     -- enemy's groups on the enemy cards go out with the state every second; the marks the companion draws
     -- (apps.battle.label_overlay).
-    function live_start()
+    -- deploying: the game's deployment phase (the person deploys; the deployment documents on real-time ticks - the
+    -- battle's clock stands); else the battle (the deployment's last document first, then the battle's ticks)
+    function live_start(deploying)
+        if state.live then
+            if not deploying and not state.live_battle then
+                state.live_battle = true
+                pcall(state.live.deploy_end)
+                bm:repeat_callback(guarded(function() if state.active then state.live.tick() end end), 1000,
+                    'tww3_bai_live_label')
+            end
+            return
+        end
         local env = {core = globals.core, UIComponent = globals.UIComponent, cco = globals.cco,
             find_uicomponent = globals.find_uicomponent, common = common}
         local own, enemy, by_name = {}, {}, {}
@@ -397,9 +408,30 @@ function M.main(bm, config, globals)
                 now_ms = function() return bm:time_elapsed_ms() - started_ms end,
                 finished = function() return state.finished end})
         end
-        bm:repeat_callback(guarded(function() if state.active then state.live.tick() end end), 1000,
-            'tww3_bai_live_label')
-        emit('live_label', {cards = #state.live.cards.cards, test = config.live_test == true})
+        if deploying then
+            local function rows(side)
+                return function()
+                    local out = {}
+                    for _, r in ipairs(net_rows()) do
+                        if r.side == side then out[#out + 1] = r end
+                    end
+                    return out
+                end
+            end
+            state.live.deploy_begin({zones = config.deploy_zones, own_rows = rows(1), enemy_rows = rows(2)})
+            local function deploy_tick()
+                if state.live_battle or state.finished then return end
+                state.live.tick()
+                flush()
+                bm:real_callback(guarded(deploy_tick), 1000, 'tww3_bai_live_deploy')
+            end
+            deploy_tick()
+        else
+            state.live_battle = true
+            bm:repeat_callback(guarded(function() if state.active then state.live.tick() end end), 1000,
+                'tww3_bai_live_label')
+        end
+        emit('live_label', {cards = #state.live.cards.cards, test = config.live_test == true, deploying = deploying == true})
     end
 
     -- Both bridges at a decision, ours first (the same state for both).
@@ -663,6 +695,12 @@ function M.main(bm, config, globals)
                         flush()
                         bm:end_current_battle_phase()
                     end})
+                flush()
+                return
+            end
+            if config.live_label and config.deploy_zones then
+                -- the live labelling: the person deploys as in the game, the phase ends on his 'Start battle'
+                live_start(true)
                 flush()
                 return
             end
