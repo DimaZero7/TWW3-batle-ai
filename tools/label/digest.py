@@ -212,12 +212,39 @@ def orders_text(rec, w, own):
         if not r:
             continue
         kind, words = order_of(rec, r, None)
-        by[group_of.get(n, "—")][(kind, words)].append(n)
+        key = ("go", kind[-1]) if kind[0] == "go" else (kind, words)
+        by[group_of.get(n, "—")][key].append((n, r, words))
     out = []
     for g in sorted(by, key=lambda k: (k == "—", str(k))):
-        parts = [f"{counted(rec, names)} {words}" for (kind, words), names in by[g].items()]
+        parts = []
+        for key, items in by[g].items():
+            names = [n for n, _, _ in items]
+            if key[0] == "go":
+                ox = [float(r["ox"]) for _, r, _ in items]
+                oz = [float(r["oz"]) for _, r, _ in items]
+                if max(ox) - min(ox) <= 80 and max(oz) - min(oz) <= 80:
+                    parts.append(f"{counted(rec, names)} идут к {xz(sum(ox) / len(ox), sum(oz) / len(oz))}" +
+                                 (" бегом" if key[1] else ""))
+                else:
+                    parts += [f"{unit_name(rec, n)} {w}" for n, _, w in items]
+            else:
+                parts.append(f"{counted(rec, names)} {key[1]}")
         out.append(f"{'без группы' if g == '—' else 'группа ' + str(g)}: " + "; ".join(parts))
     return out
+
+
+def groups_line(rec, groups, st, own=True):
+    """The groups as one line: number, centre, facing (when nothing in them changed)."""
+    arrows = "↑↗→↘↓↙←↖"
+    parts = []
+    for k, names in sorted(groups.items(), key=lambda kv: int(kv[0])):
+        w = where(rec, names, st)
+        if w is None:
+            parts.append(f"{k} —")
+            continue
+        lost = len(names) - len(w[4])
+        parts.append(f"{k} {xz(w[0], w[1])}{arrows[int(((w[2] % 360) + 22.5) // 45) % 8]}" + (f" −{lost}" if lost else ""))
+    return ("свои: " if own else "враг: ") + " · ".join(parts)
 
 
 def fight_text(rec, w):
@@ -293,6 +320,7 @@ def digest_md(rec):
     L.append("")
     L += deploy_md(rec)
     prev = None
+    last_errs = ""
     for i, w in enumerate(rec.windows):
         a, b = int(w["sec"]), int(w.get("until") or w["sec"] + 15)
         st = rec.state(a)
@@ -300,14 +328,21 @@ def digest_md(rec):
         own = {int(k): v for k, v in (g.get("own") or {}).items()}
         enemy = {int(k): v for k, v in (g.get("enemy") or {}).items()}
         L.append(f"## {a}–{b} с · {SOURCE_RU.get(w.get('source'), w.get('source'))}")
-        if w.get("errors"):
-            L.append(f"- не принято проверкой: {'; '.join(w['errors'])[:300]}")
+        errs = "; ".join(dict.fromkeys(w.get("errors") or []))[:300]
+        if errs and errs != last_errs:
+            L.append(f"- не принято проверкой: {errs}")
+        elif errs:
+            L.append("- не принято проверкой (то же)")
+        last_errs = errs
+        # (the groups in full when they are new or changed; else one line of centres and facings)
+        same_own = prev is not None and prev[0] == own
+        same_enemy = prev is not None and prev[1] == enemy
         if own:
-            L += ["- " + t for t in groups_text(rec, own, st, True)]
-        if g.get("rest"):
+            L += ["- " + groups_line(rec, own, st, True)] if same_own else ["- " + t for t in groups_text(rec, own, st, True)]
+        if g.get("rest") and not same_own:
             L.append(f"- (отряды без группы собраны в группы {', '.join(map(str, g['rest']))})")
         if enemy:
-            L += ["- " + t for t in groups_text(rec, enemy, st, False)]
+            L += ["- " + groups_line(rec, enemy, st, False)] if same_enemy else ["- " + t for t in groups_text(rec, enemy, st, False)]
         if not own and not enemy:
             L.append("- групп нет")
         if prev is not None:

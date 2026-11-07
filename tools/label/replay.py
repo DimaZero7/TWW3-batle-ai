@@ -39,18 +39,20 @@ def _rgb(hexs):
 
 
 class View:
-    """World -> picture: the box of every unit's place over the battle, a margin, y up = z."""
+    """World -> picture: the box of every unit's place over the battle (or at the seconds secs only), a margin, y up =
+    z."""
 
-    def __init__(self, rec):
+    def __init__(self, rec, secs=None, margin=160):
         xs, zs = [], []
-        for st in list(rec.states.values()) or [rec.state(0)]:
+        sts = [rec.state(s) for s in secs] if secs else (list(rec.states.values()) or [rec.state(0)])
+        for st in sts:
             for r in st.values():
                 xs.append(float(r["x"]))
                 zs.append(float(r["z"]))
         if not xs:
             xs, zs = [-100, 100], [-100, 100]
         cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
-        span = max(max(xs) - min(xs), max(zs) - min(zs), 200) + 160
+        span = max(max(xs) - min(xs), max(zs) - min(zs), 200) + margin
         self.cx, self.cz, self.s = cx, cz, (W - 40) / span
 
     def __call__(self, x, z):
