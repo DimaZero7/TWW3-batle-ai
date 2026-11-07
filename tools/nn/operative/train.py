@@ -44,6 +44,7 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
     pa, pc = params_of(net, critic)
     share = float(cfg()["teacher"]["share"])
     first_w = float(cfg()["teacher"]["first_weight"])
+    keep_w = float(cfg()["teacher"]["keep_weight"])
     out = {"pi": [], "v": [], "clip": [], "kl": [], "ent": {h: [] for h in NN.HEADS}, "teach": [], "preds": [],
            "rets": [], "agree": {h: [] for h in NN.HEADS}}
     stop = False
@@ -73,8 +74,10 @@ def update(net, critic, opt, batch, tc, device, duty, teach_weight):
                     continue
                 inp2, ctx2, _ = EN.rebuild(batch, di[pick], bi[pick])
                 term, st = TC.loss(net, inp2, ctx2, batch["destroy"][bi[pick]])
-                if w > 0:
-                    loss = loss + w * term
+                kp = st.pop("keep_part")
+                # the 'keep / move / re-form' head is taught with keep_weight, which does not fall (07.11: run8 re-formed
+                # 2.2 times a battle on the armies' split, 66 % of them against the teacher's 'keep' or 'move')
+                loss = loss + w * (term - kp) + max(w, keep_w) * kp
                 out["teach"].append(float(term.detach()))
                 for h, v in st.items():
                     if v is not None:

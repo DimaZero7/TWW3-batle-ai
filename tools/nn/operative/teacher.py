@@ -259,12 +259,14 @@ def line_of(b, rows, pc, J, rng, pc_xy, axes, line_n, lat_m, have=None):
         return [(rows, pc, c, 0.0, right)]
     k = math.ceil(len(rows) / line_n)
     side = lambda j: float((J[b, j] - c) @ right)                                       # noqa: E731
-    # the line in force kept: the groups now cover exactly these units, each of up to line_n, as many as needed - the
+    # the line in force kept: the groups now cover exactly these units, each of up to line_n (any number of them) - the
     # same groups in their order from left to right (a cut again by places would re-form them as units shift: the
-    # formula re-formed 0.84 times a battle on the armies' exam, 07.11)
+    # formula re-formed 0.84 times a battle on the armies' exam, 07.11; and a valid line the network made is kept too:
+    # with 'as many as the cut' 44 % of run8's re-forms were the teacher's own 'reform' - reform_diag_run8.json)
     rs = set(rows)
     now = [m for m in (have or {}).values() if m and m <= rs]
-    if now and set().union(*now) == rs and all(len(m) <= line_n for m in now) and len(now) == k:
+    if now and set().union(*now) == rs and all(len(m) <= line_n for m in now):
+        k = len(now)
         now.sort(key=lambda m: float(np.mean([side(j) for j in m])))
         return [(sorted(m), pc, c, (i - (k - 1) / 2) * lat_m, right) for i, m in enumerate(now)]
     inf = sorted([j for j in rows if rng[b, j] <= 0], key=side)
@@ -294,7 +296,9 @@ def loss(net, inp, ctx, destroy):
     out, _ = net(inp, ctx, act=act, labels=labels)
     t = out["teach"]
     st = {h: (t[f"{h}_ok"] / t[f"{h}_n"]) if t[f"{h}_n"] > 0 else None for h in NN.HEADS}
-    return t["term"] / max(t["n"], 1.0), st
+    n = max(t["n"], 1.0)
+    st["keep_part"] = t["keep_term"] / n                 # (the 'keep / move / re-form' head's share of the term)
+    return t["term"] / n, st
 
 
 def weight_at(update, decay=None):

@@ -181,7 +181,8 @@ def play(setup, unit_net, net=None, critic=None, mode="formula", greedy=False, k
                       "tactic_fell_share": round(tac.fell / max(tac.ticks, 1), 4), "unit_decisions": units.n,
                       "ent": {k: round(v / n, 3) for k, v in stats["ent"].items()}, "trade": round(float(trade.mean()), 4)})
     readings = {"contact": rd.contact, "between": rd.between_share(),
-                "stayed": rd.stayed_share(float(c["cases"]["army"]["stayed_m"])), "hit": rd.hit_share(), "gathered": rd.gathered,
+                "stayed": rd.stayed_share(float(c["cases"]["army"]["stayed_m"])),
+                "clump_start": rd.c0, "clump_at_contact": rd.cc, "hit": rd.hit_share(), "gathered": rd.gathered,
                 "advanced": rd.advanced, "trade": trade, "why": ender.why, "t_contact": rd.watch[0].t_contact,
                 "groups": groups}
     batch = None

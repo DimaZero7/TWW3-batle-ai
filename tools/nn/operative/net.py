@@ -222,7 +222,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
     units, tok = enc["units"], enc["tokens"]
     lp = torch.zeros(B, device=dev)
     ent = {h: torch.zeros(B, device=dev) for h in HEADS}
-    teach = {"term": torch.zeros((), device=dev), "n": 0.0, **{f"{h}_ok": 0.0 for h in HEADS},
+    teach = {"term": torch.zeros((), device=dev), "keep_term": torch.zeros((), device=dev), "n": 0.0, **{f"{h}_ok": 0.0 for h in HEADS},
              **{f"{h}_n": 0.0 for h in HEADS}}
     A = {k: (act[k] if act is not None else None) for k in HEADS}
     out = {"keep": torch.zeros((B, G), dtype=torch.long, device=dev),
@@ -240,6 +240,8 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
                 q = F.one_hot(hard.clamp(min=0), lg.shape[-1]).float()
             ce = _soft_ce(lg, q)
             teach["term"] = teach["term"] + (ce * use).sum()
+            if name == "keep":
+                teach["keep_term"] = teach["keep_term"] + (ce * use).sum()
             teach["n"] += float(use.sum())
             # agreement: the network's best choice is the label's (a soft label: within its support's upper half -
             # any seed of the piece, a cell or a sector next to the wanted one)
