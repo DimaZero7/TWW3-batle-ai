@@ -56,11 +56,17 @@ try {
         $now = Get-Date
         if (($now - $started).TotalMinutes -ge $MaxMinutes) { break }
         # (the game process and its window looked up once a second, the keys and the cursor every PollMs)
-        $game = Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($game) { $seen = $true; $state.hwnd = $game.MainWindowHandle }
+        # ($proc, not $game: PowerShell's names ignore case - $game is the [string] parameter $Game, a process put
+        # into it became its name and the window handle $null: the helper died at the game's start - 07.11)
+        $proc = Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($proc) {
+            $seen = $true
+            $h = $proc.MainWindowHandle
+            if ($h -is [IntPtr]) { $state.hwnd = $h }
+        }
         elseif ($seen -or ($now - $started).TotalSeconds -ge $WaitSeconds) { break }
         for ($i = 0; $i -lt [Math]::Max(1, [int](1000 / $PollMs)); $i++) {
-            Write-Keys
+            try { Write-Keys } catch { }          # (a failed read never ends the helper)
             Start-Sleep -Milliseconds $PollMs
         }
     }

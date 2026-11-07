@@ -1,20 +1,23 @@
 """A generated / replayed battle put on a captured map (tools.build ... --map <name>; build/maps/<name>/meta.json): the
-map's battle file and catchment, the deployment zones of the map's capture (their size, the gap between their fronts,
-their centres) instead of the flat arena's squares. The network sees the ground (the companion reads build/maps by the
-map's path).
+map's battle file and catchment and its deployment zones - by default the game's own deployment of a land battle on that
+map (meta "game_deployment_zones": terrain/deployment/east.xml, see GAME_DIRECTIONS below; written by
+`py -3.14 -m tools.nn.arena_map --game-zones <names>`), else the capture battle's ("deployment_zones", kept beside) - their
+size, the gap between their fronts, their middle - instead of the flat arena's squares. The network sees the ground (the
+companion reads build/maps by the map's path).
 
 The arena's frame (tools/nn/scenario.py frame: the sides along x, facing each other across the map's centre) is kept;
-the map's zones sit elsewhere on the map (ksl_plains_01: both at z = -190, centres 240 m apart along x), so the battle
-file, the run config's places and the zones are moved by the zones' middle afterwards (shift_xml, shift_config) - the
-arena's own geometry and the simulator's version do not change. The units keep their places in their side's frame; their
-lateral spread is narrowed to fit the zone's front (the person redeploys anyway).
+when the zones sit off the map's centre (the capture's on ksl_plains_01: both at z = -190) the battle file, the run
+config's places and the zones are moved by the zones' middle afterwards (shift_xml, shift_config) - the arena's own
+geometry and the simulator's version do not change. The units keep their places in their side's frame; their lateral
+spread is narrowed only when it does not fit the zone's front (the person redeploys anyway).
 
-    arena = on_map(arena, "ksl_plains_01")        # map, catchment, deploy_zone, gap_m, origin, narrowed laterals
+    arena = on_map(arena, "ksl_plains_01")        # map, catchment, deploy_zone, gap_m, origin, the laterals if needed
     shift_xml(path, arena["origin"])              # the written battle file
     shift_config(run_config, arena["origin"])     # units' x / z, deploy_zones
-Plain python.
+Plain python (the game's packs: py -3.14 for --game-zones only).
 """
 import json
+import math
 import re
 from pathlib import Path
 
@@ -29,9 +32,55 @@ def meta(name, maps=MAPS):
     return json.loads((Path(maps) / name / "meta.json").read_text(encoding="utf-8"))
 
 
-def on_map(arena, name, maps=MAPS):
+# The game's own deployment areas of a land battle on a map without its own (the macro maps: ksl_plains_01,
+# ksl_river_01 - no deployment in their folder): terrain/deployment/{north,south,east,west}.xml in terrain.pack, the
+# files Warhammer3.exe names (its strings 0x1439dd450-0x1439dd4b0), in the map's 0..1024 frame (the world's -512..512):
+# east - alliance 0 x 240..416, alliance 1 x 608..784, both z 304..720 (corners rounded): 416 m across, 176 m deep, the
+# fronts 192 m apart, the centres 368 m apart, symmetric on the map's centre (build/diag_chain/deploy_zones/extract.py).
+GAME_DIRECTIONS = ("east", "west", "north", "south")
+
+
+def game_zones(xml_text):
+    """[{alliance, x, z, width, depth, bearing_deg, corners}] of a terrain/deployment/<direction>.xml (world metres:
+    the file's 0..1024 less 512; width across, depth along the line between the zones; bearing - towards the other)."""
+    out = []
+    for aid, body in re.findall(r"<ALLIANCE id='(\d+)'>(.*?)</ALLIANCE>", xml_text, re.S):
+        pts = [(float(x) - 512.0, float(y) - 512.0) for x, y in re.findall(r"x='(-?[\d.]+)' y='(-?[\d.]+)'", body)]
+        xs, zs = [p[0] for p in pts], [p[1] for p in pts]
+        out.append({"alliance": int(aid), "x": (min(xs) + max(xs)) / 2, "z": (min(zs) + max(zs)) / 2,
+                    "ex": max(xs) - min(xs), "ez": max(zs) - min(zs), "corners": [[round(a, 2), round(b, 2)] for a, b in pts]})
+    a, b = out
+    along_x = abs(a["x"] - b["x"]) > abs(a["z"] - b["z"])
+    for z, o in ((a, b), (b, a)):
+        z["width"], z["depth"] = (z["ez"], z["ex"]) if along_x else (z["ex"], z["ez"])
+        z["bearing_deg"] = round(math.degrees(math.atan2(o["x"] - z["x"], o["z"] - z["z"])) % 360.0, 2)
+        del z["ex"], z["ez"]
+    return out
+
+
+def write_game_zones(names, maps=MAPS, direction="east"):
+    """Adds "game_deployment_zones" (the game's own, game_zones of terrain/deployment/<direction>.xml; direction east: the
+    zones along x, as the arena's frame) to each map's meta.json next to its capture's "deployment_zones" (kept).
+    py -3.14 (the game's packs are zstd): python -m tools.nn.arena_map --game-zones ksl_plains_01 ksl_river_01"""
+    from tools.nn import gamedb
+    path = r"terrain\deployment" + "\\" + f"{direction}.xml"
+    data = gamedb.read_entries(Path(project.load()["game_dir"]) / "data" / "terrain.pack", {path})[path]
+    zones = game_zones(data.decode("utf-8"))
+    for name in names:
+        f = Path(maps) / name / "meta.json"
+        m = json.loads(f.read_text(encoding="utf-8"))
+        m["game_deployment_zones"] = zones
+        m["game_deployment_source"] = (f"terrain.pack {path}: the game's deployment of a land battle on a map without "
+                                       f"its own (tools/nn/arena_map.py)")
+        f.write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
+    return zones
+
+
+def on_map(arena, name, maps=MAPS, zones="game"):
+    """zones: 'game' - the game's own deployment of the map (meta game_deployment_zones; the default), 'capture' - the
+    capture battle's (meta deployment_zones)."""
     m = meta(name, maps)
-    zs = m.get("deployment_zones") or []
+    zs = (m.get("game_deployment_zones") if zones == "game" else None) or m.get("deployment_zones") or []
     if len(zs) != 2:
         raise ValueError(f"{name}: two deployment zones expected, {len(zs)} in meta.json")
     a, b = zs
@@ -90,3 +139,9 @@ def shift_config(run_config, origin):
         z["x"], z["z"] = round(float(z["x"]) + dx, 1), round(float(z["z"]) + dz, 1)
     run_config["origin"] = {"x": dx, "z": dz}
     return run_config
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:2] == ["--game-zones"]:
+        print(json.dumps(write_game_zones(sys.argv[2:]), indent=1))
