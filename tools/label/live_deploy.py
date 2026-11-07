@@ -31,12 +31,18 @@ from tools.nn.tactic import cfg as tcfg
 
 LINE_DEPTH_M = 15.0
 MISSING = [
-    "places inside a group: the strategist's code lays the group's units out in its tiles (strategist/deploy.places) - "
-    "the person's own places, widths and the order inside the group are kept raw (human_places), not as a choice",
-    "the cell is the centre of the group's units: the walk's cells are a 32 x 32 grid of my zone (the nearest cell)",
+    "places inside a group: the strategist's code lays the group's units out in its slots (strategist/deploy.places) - "
+    "the person's own places, widths and the order inside the group are kept raw (human_places, edit places, act "
+    "places), not as a choice; the strategist has no width head yet (its formula keeps the units' own frontage)",
+    "the cell is the one nearest the centre of the group's units (the walk's cells: 64 m); the exact centre and places "
+    "are the raw, the check goes by them (strategist.exact_check), not by the cell",
     "the form from the units' spread (line: one row); a loose or a mixed layout reads as square",
     "the operative's start command (verb, pace) is not set at the deployment: hold / any",
 ]
+
+
+def laid_slot(doc, name):
+    return next((i for i, u in enumerate(doc["units"]) if u["n"] == name), None)
 
 
 def groups_of(doc):
@@ -52,9 +58,10 @@ def circ_mean(bearings):
     return math.degrees(math.atan2(s, c)) % 360.0
 
 
-def edit_of(doc, own_groups, base, G=None, max_group=None, sectors=None):
+def edit_of(doc, own_groups, base, G=None, max_group=None, sectors=None, dims=None):
     """(edit for strategist.act_of, raw, rest numbers): the person's deployment read backwards (module doc); base the
-    bearing my zone -> the enemy's zone (strategist/net.Ctx.base)."""
+    bearing my zone -> the enemy's zone (strategist/net.Ctx.base); dims {name: (front, depth)} his formations (formations
+    of), else the check estimates them. The edit's 'places' - every unit's exact place (the raw the check goes by)."""
     G = int(G or scfg()["groups"])
     max_group = int(max_group or tcfg()["max_group"])
     S = int(sectors or scfg()["sectors"])
@@ -72,7 +79,10 @@ def edit_of(doc, own_groups, base, G=None, max_group=None, sectors=None):
             break
         full[k] = rest[i:i + max_group]
         rest_ks.append(k)
-    edit = {"groups": [], "verb": "hold", "pace": "any"}
+    dims = dims or {}
+    edit = {"groups": [], "verb": "hold", "pace": "any",
+            "places": {slot_of[n]: [u.get("x"), u.get("z"), u.get("b"), u.get("ow"), *(dims.get(n) or (None, None))]
+                       for n, u in mine.items()}}
     raw = {"units": {n: {"x": u.get("x"), "z": u.get("z"), "b": u.get("b"), "width": u.get("ow")} for n, u in mine.items()},
            "groups": {}}
     for k in sorted(full):
@@ -97,16 +107,33 @@ def edit_of(doc, own_groups, base, G=None, max_group=None, sectors=None):
     return edit, raw, rest_ks
 
 
+def formations_of(doc, laid, params):
+    """{name: (front, depth)} my formations as the person left them (the simulator's geometry.dims of the unit at his
+    place and width: the companion's state_with)."""
+    from tools.nn.companion import deploy as CD
+    from tools.nn.sim import geometry
+    places = {u["n"]: (float(u["x"]), float(u["z"]), float(u.get("b") or 0.0), float(u["ow"]))
+              for u in doc["units"] if int(u["side"]) == 1 and u.get("ow") and u.get("x") is not None}
+    st, _, index = CD.state_with(laid, places, params)
+    front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+    return {n: (float(front[0, index[i]]), float(depth[0, index[i]]))
+            for i, n in enumerate(u["n"] for u in laid["units"]) if n in places}
+
+
 def sample(doc, command, seer, chat=None):
     """(sample, text) of the deployment document (module doc): the sample in the strategist's labelling format
     (tools/label/strategist.rebuild reads it), act {} and the errors when the walk refuses the choices."""
-    inp, ctx, _ = seer.input(doc, command)
+    inp, ctx, laid = seer.input(doc, command)
     own, enemy = groups_of(doc)
-    edit, raw, rest = edit_of(doc, own, float(ctx.base[0]))
-    act, errs = {}, []
+    edit, raw, rest = edit_of(doc, own, float(ctx.base[0]), dims=formations_of(doc, laid, seer.P))
+    for n, u in raw["units"].items():
+        fd = (edit["places"].get(laid_slot(doc, n)) or [None] * 6)[4:6]
+        u["front"], u["depth"] = fd
+    act, errs, notes = {}, [], []
     try:
         act = LS.act_of(edit, inp, ctx.axes, inp["own"].device)
-        _, errs = LS.walk_of(act, inp, ctx)
+        out, errs = LS.walk_of(act, inp, ctx)
+        notes = out.get("notes") or []
     except HU.Refused as e:
         errs = list(e.errors)
     if errs:
@@ -118,8 +145,9 @@ def sample(doc, command, seer, chat=None):
            "side": torch.ones(1, dtype=torch.long, device=inp["own"].device), "command": inp["command"],
            "mine_zone": ctx.mine, "enemy_zone": ctx.enemy, "bounds": seer.P.map_half, "K": int(inp["own"].shape[1]),
            "act": act, "source": "human", "edit": edit, "human_groups": human, "human_places": raw, "errors": errs,
+           "notes": notes,
            "chat": chat or [], "names": names, "missing": MISSING}
     text = {"sec": 0, "until": 0, "level": "strategist", "mode": "live", "where": "game", "source": "human",
-            "groups": human, "read": raw["groups"], "edit": edit, "errors": errs, "chat": chat or [],
+            "groups": human, "read": raw["groups"], "edit": edit, "errors": errs, "notes": notes, "chat": chat or [],
             "missing": MISSING}
     return smp, text

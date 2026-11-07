@@ -217,3 +217,23 @@ def test_a_groups_slot_is_its_widest_formation():
     assert torch.allclose(w, torch.tensor([[56.0, 26.0]])) and torch.allclose(d, torch.tensor([[16.0, 18.0]]))
     fw, fd = DP.footprint(torch.tensor([[4, 3]]), torch.tensor([[False, True]]), w, d)
     assert torch.allclose(fw, torch.tensor([[112.0, 78.0]])) and torch.allclose(fd, torch.tensor([[32.0, 18.0]]))
+
+
+def test_the_walk_bans_by_formations_not_by_the_groups_zones():
+    """Two groups' zones may overlap while their units' formations stay unit_gap_m apart (the person's way); a
+    formation within unit_gap_m of a placed one closes the cell."""
+    K = 4
+    member = torch.tensor([[True, False, False, False]])
+    front, depth = torch.full((1, K), 20.0), torch.full((1, K), 10.0)
+    placed = {"x": torch.tensor([[0.0, 0.0, 0.0, 0.0]]), "z": torch.tensor([[0.0, 0.0, 0.0, 0.0]]),
+              "b": torch.tensor([[DP.round_bearing(torch.tensor(0.0)).item()] * K]),
+              "on": torch.tensor([[False, True, False, False]])}
+    s, f = torch.zeros((1, K)), torch.zeros((1, K))
+    heading = torch.tensor([0.0])
+    # the cells' centres: 23 m to the side (3 m clear), 21 m (1 m), the same place
+    px, pz = torch.tensor([[23.0, 21.0, 0.0]]), torch.zeros((1, 3))
+    ok = DP.apart_units(px, pz, heading, s, f, front, depth, member, placed, 2.0)
+    assert ok.tolist() == [[True, False, False]]
+    # nothing placed: every cell clear
+    none = dict(placed, on=torch.zeros((1, K), dtype=torch.bool))
+    assert bool(DP.apart_units(px, pz, heading, s, f, front, depth, member, none, 2.0).all())

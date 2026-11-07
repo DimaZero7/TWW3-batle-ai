@@ -12,6 +12,9 @@ middle of its sector of the engine's 64 (docs/ru/game/units/commands.md; round_b
 frontage (a slot is wider by GAP_M: the neighbours never overlap).
 
     slot(members, front, depth)          (across, deep) [B, G] m: a group's slot (above); members [B, G, K]
+    offsets(members, shooter, order, line, across, deep)   (s, f) each member's place in its group's axes
+    apart_units(px, pz, heading, s, f, front, depth, member, placed, gap)   [B, M] bool: the group's units at the cells
+                                      clear of the units placed already (the walk's ban: by formations, not zones)
     footprint(n, line, across, deep)     (front, depth) [B, G] m: the group's zone at the deployment (cols x rows slots)
     places(members, shooter, cx, cz, heading, line, width0, slot)   {x, z, b, width, on} [B, N]; slot (across, deep)
                                       [B, G] the walk's (net.choose plan slot_w, slot_d: slot_of(plan)); None - the
@@ -52,6 +55,52 @@ def footprint(n, line, across, deep):
     return cols.float() * across, rows.float() * deep
 
 
+def offsets(members, shooter, order, line, across, deep):
+    """(s, f) [..., N] each member's place in its group's axes (right, forward): members [..., N] bool, shooter [..., N],
+    order [..., N] the units' slot numbers; line, across, deep [...]. The melee units fill the rows of slots from the
+    front, the shooters after them (each kind by slot); a row's units are centred in it."""
+    n = members.sum(-1)
+    rows, cols = grid(n, line)
+    key = torch.where(members, shooter.float() * 1000.0 + order.float(), torch.full_like(order.float(), 1e9))
+    rank = key.argsort(-1).argsort(-1)                                   # the place in the group's order
+    r = torch.div(rank, cols[..., None], rounding_mode="floor")
+    i = rank % cols[..., None]
+    k = torch.minimum(cols[..., None], n[..., None] - r * cols[..., None])
+    s = (i.float() + 0.5 - k.float() / 2) * across[..., None]
+    f = (rows[..., None].float() / 2 - r.float() - 0.5) * deep[..., None]
+    return s, f
+
+
+def apart_units(px, pz, heading, s, f, front, depth, member, placed, gap):
+    """[B, M] bool: a group's units at the cells clear of the units placed already by gap m or more (their formations,
+    not the groups' zones: two groups' zones may overlap where their units do not - as the person stands his; the
+    simulator's geometry.rect_gap). px, pz [B, M] the group's centre at each cell; heading [B]; s, f [B, K] its
+    members' places in its axes (offsets), front, depth [B, K] every row's formation, member [B, K] bool the group's;
+    placed {x, z, b} [B, K] the units placed, on: placed["on"] [B, K]."""
+    from tools.nn.sim import geometry
+    B, M = px.shape
+    out = torch.ones((B, M), dtype=torch.bool, device=px.device)
+    on = placed["on"]
+    if not bool(on.any()):
+        return out
+    K = member.shape[1]
+    b = round_bearing(heading)
+    for c0 in range(0, M, 32):
+        c1 = min(M, c0 + 32)
+        m = c1 - c0
+        ux, uz = Z.world(s[:, None, :], f[:, None, :], px[:, c0:c1, None], pz[:, c0:c1, None], heading[:, None, None])
+        ex = lambda v: v[:, None, :].expand(B, m, K)                       # noqa: E731
+        x = torch.cat([ux, ex(placed["x"])], 2).reshape(B * m, 2 * K)
+        z = torch.cat([uz, ex(placed["z"])], 2).reshape(B * m, 2 * K)
+        bb = torch.cat([b[:, None, None].expand(B, m, K), ex(placed["b"])], 2).reshape(B * m, 2 * K)
+        fr = torch.cat([ex(front), ex(front)], 2).reshape(B * m, 2 * K)
+        dp = torch.cat([ex(depth), ex(depth)], 2).reshape(B * m, 2 * K)
+        g = geometry.rect_gap(x, z, bb, fr, dp)[:, :K, K:].reshape(B, m, K, K)
+        hit = (g < gap) & member[:, None, :, None] & on[:, None, None, :]
+        out[:, c0:c1] = ~hit.flatten(2).any(2)
+    return out
+
+
 def slot_of(plan):
     return plan["slot_w"], plan["slot_d"]
 
@@ -68,16 +117,8 @@ def places(members, shooter, cx, cz, heading, line, width0, slot=None):
     else:
         sw, sd = slot
         wmax = torch.full((B, N), 1e9, device=dev)
-    n = members.sum(2)
-    rows, cols = grid(n, line)
-    slot = torch.arange(N, device=dev, dtype=torch.float32)
-    key = torch.where(members, shooter[:, None, :].float() * 1000.0 + slot, torch.full((B, G, N), 1e9, device=dev))
-    rank = key.argsort(2).argsort(2)                                     # [B, G, N] the place in the group's order
-    r = torch.div(rank, cols[..., None], rounding_mode="floor")
-    i = rank % cols[..., None]
-    k = torch.minimum(cols[..., None], n[..., None] - r * cols[..., None])
-    s = (i.float() + 0.5 - k.float() / 2) * sw[..., None]
-    f = (rows[..., None].float() / 2 - r.float() - 0.5) * sd[..., None]
+    slot = torch.arange(N, device=dev, dtype=torch.float32).expand(B, G, N)
+    s, f = offsets(members, shooter[:, None, :].expand(B, G, N), slot, line, sw, sd)
     x, z = Z.world(s, f, cx[..., None], cz[..., None], heading[..., None])
     on = members.any(1)
     g = members.float().argmax(1)                                        # [B, N] each unit's group

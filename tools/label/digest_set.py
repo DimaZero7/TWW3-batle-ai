@@ -31,11 +31,41 @@ from tools.label import record as RC
 FACES = 64
 
 
+def place_dims(smp, rec):
+    """{name: (front, depth)} of the person's formations at the deployment: human_places' own when the record has them
+    (tools/label/live_deploy.py writes front / depth since 08.11), else the simulator's geometry.dims of each unit at
+    his width and its men (the record's matchup) - the same rule live_deploy.formations_of uses."""
+    places = (smp.get("human_places") or {}).get("units") or {}
+    out = {n: (float(p["front"]), float(p["depth"])) for n, p in places.items()
+           if p.get("front") is not None and p.get("depth") is not None}
+    todo = [n for n in places if n not in out and places[n].get("width")]
+    if not todo:
+        return out
+    from tools.nn.sim import geometry, scenario
+    from tools.nn.sim.params import load
+    P = load()
+    men = {u["n"]: u.get("men") for u in rec.matchup.get("units", [])}
+    fac = (rec.matchup.get("factions") or {})
+    units = [{"key": rec.key_of[n], "x": float(places[n]["x"]), "z": float(places[n]["z"]),
+              "b": float(places[n].get("b") or 0.0), "width": float(places[n]["width"]),
+              **({"men": float(men[n])} if men.get(n) else {})} for n in todo]
+    foe = next(n for n in rec.names if rec.side_of.get(n) == 2)
+    army = {"attacker": 2, "sides": {1: {"faction": fac.get("own"), "units": units},
+                                     2: {"faction": fac.get("enemy"), "units": [{"key": rec.key_of[foe], "x": 0.0,
+                                                                                 "z": 500.0}]}}}
+    st = scenario.build([army], P, per_side=len(units))
+    front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+    for i, n in enumerate(todo):
+        out[n] = (float(front[0, i]), float(depth[0, i]))
+    return out
+
+
 def strategist_bridge(smp, rec):
     """The deployment sample with the person's groups made fit (the bridge for the strategist): his Ctrl+G groups, his
     units in none join the nearest group (by centre) with room, then the two nearest groups merge while over the
     strategist's G; the rest as the live record reads a deployment (live_deploy.edit_of: centre, mean front as the turn,
-    line / square) and the strategist's walk (strategist.act_of, walk_of). Returns a new sample (source 'bridge')."""
+    line / square, every unit's exact place with its formation's front and depth - place_dims) and the strategist's walk
+    (strategist.act_of, walk_of). Returns a new sample (source 'bridge')."""
     import math
     from tools.label import human as HU
     from tools.label import live_deploy as LD
@@ -62,7 +92,7 @@ def strategist_bridge(smp, rec):
                       "x": (places.get(n) or {}).get("x"), "z": (places.get(n) or {}).get("z"),
                       "b": (places.get(n) or {}).get("b"), "ow": (places.get(n) or {}).get("width")} for n in names]}
     inp, ctx, _ = LS.rebuild(smp)
-    edit, raw, _ = LD.edit_of(doc, groups, float(ctx.base[0]))
+    edit, raw, _ = LD.edit_of(doc, groups, float(ctx.base[0]), dims=place_dims(smp, rec))
     act, errs = {}, []
     try:
         act = LS.act_of(edit, inp, ctx.axes, inp["own"].device)

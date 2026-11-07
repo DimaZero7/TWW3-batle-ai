@@ -142,6 +142,23 @@ def test_the_deployment_makes_a_strategist_sample(tmp_path):
     assert len(smp) == 1 and smp[0]["act"]
     inp, ctx, act = LS.rebuild(smp[0])
     assert int(act["comp"].ge(0).sum()) == 5 and LD.MISSING
+    # the raw: his exact places (x, z, bearing, width, the formation's front / depth), the check goes by them
+    pl = act["places"][0]
+    rows = {s: j for j, s in enumerate(inp["slot"][0].tolist())}
+    names = [u["n"] for u in units]
+    j0 = rows[names.index("u0")]
+    assert abs(float(pl[j0, 0]) + 170.0) < 1e-3 and abs(float(pl[j0, 1]) + 200.0) < 1e-3
+    assert float(pl[j0, 4]) > 0 and float(pl[j0, 5]) > 0
+    # a unit's formation out of my zone is an error; two formations closer than unit_gap_m - a note, not an error
+    out_zone = dict(act, places=act["places"].clone())
+    out_zone["places"][0, j0, 1] = -460.0
+    _, errs = LS.walk_of(out_zone, inp, ctx)
+    assert any("вне зоны" in e for e in errs)
+    close = dict(act, places=act["places"].clone())
+    j1 = rows[names.index("u1")]
+    close["places"][0, j1, 0] = close["places"][0, j0, 0] + float(close["places"][0, j0, 4]) / 2         + float(close["places"][0, j1, 4]) / 2 + 0.5
+    o, errs = LS.walk_of(close, inp, ctx)
+    assert errs == [] and any("строи" in n for n in o["notes"])
     chat = [json.loads(x) for x in (f / "chat.jsonl").read_text(encoding="utf-8").splitlines()]
     assert chat[0]["deploy"] and chat[0]["window"] == 0
     assert rec.stats["strategist"] == 1 and rec.stats["strategist_refused"] == 0

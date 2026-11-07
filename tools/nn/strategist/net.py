@@ -9,8 +9,9 @@
                  10, closed); per group with members, in its number's order: form (square / line) -> turn (16 sectors
                  from the bearing my zone -> the enemy's zone) -> cell (1024: the zone's centre, pushed inside my
                  deployment zone by at most half a cell - zones.pushed; the zone: its units' slots,
-                 deploy.footprint; closed: the zone does not fit there, or overlaps a zone placed already:
-                 separating axes); then the battle's verb (4, open: config verbs_open) and pace (3, open:
+                 deploy.footprint; closed: the zone does not fit there, or a unit's formation comes
+                 within unit_gap_m of one placed already - deploy.apart_units; two groups' zones may
+                 overlap); then the battle's verb (4, open: config verbs_open) and pace (3, open:
                  paces_open) - the operative's command
     choose()     the walk: sampling, the update (act: the same choices), the teacher's term (labels), the formula's walk
                  (bias: the formula's wishes as logits, greedy)
@@ -253,6 +254,11 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
                                                           "slot_d")}
     from tools.nn.strategist import deploy as DP
     slot_w, slot_d = DP.slot(mem, inp["front"], inp["depth"])
+    # my units placed so far (their formations: the walk's ban is by units, not by the groups' zones)
+    laid = {"x": torch.zeros((B, K), device=dev), "z": torch.zeros((B, K), device=dev),
+             "b": torch.zeros((B, K), device=dev), "on": torch.zeros((B, K), dtype=torch.bool, device=dev)}
+    gap = float(c["unit_gap_m"])
+    order = inp["slot"].float()
     plan["line"] = torch.zeros((B, G), dtype=torch.bool, device=dev)
     placed = torch.zeros((B, G), dtype=torch.bool, device=dev)
     cell_m = float(c["cell_m"])
@@ -290,7 +296,13 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
         front, depth = DP.footprint(n[:, g].clamp(min=1), line, slot_w[:, g], slot_d[:, g])
         r = ZS.radius(front, depth)
         px, pz, ok = ZS.pushed(ctx.cx, ctx.cz, ctx.mine, front, depth, heading)
-        ok = ok & ZS.apart(px, pz, front, depth, heading, plan, placed)
+        s_g, f_g = DP.offsets(mem[:, g], inp["shooter"], order, line, slot_w[:, g], slot_d[:, g])
+        cand = ok.any(0)                       # only the cells inside my zone somewhere in the batch (~30 of 1024)
+        clear = torch.zeros_like(ok)
+        if bool(cand.any()):
+            clear[:, cand] = DP.apart_units(px[:, cand], pz[:, cand], heading, s_g, f_g, inp["front"], inp["depth"],
+                                            mem[:, g], laid, gap)
+        ok = ok & clear
         none = ~ok.any(1) & a
         no_cell = no_cell + none.long()
         ok = ok | ~ok.any(1, keepdim=True)
@@ -321,6 +333,13 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
             plan[k][:, g] = torch.where(a, v, plan[k][:, g])
         plan["line"][:, g] = a & line
         placed[:, g] = a
+        from tools.nn.unit import zmap as Z
+        ux, uz = Z.world(s_g, f_g, zx[:, None], zz[:, None], heading[:, None])
+        put = mem[:, g] & a[:, None]
+        laid["x"] = torch.where(put, ux, laid["x"])
+        laid["z"] = torch.where(put, uz, laid["z"])
+        laid["b"] = torch.where(put, DP.round_bearing(heading)[:, None].expand(B, K), laid["b"])
+        laid["on"] = laid["on"] | put
     # 3. the operative's command
     hb = enc["summary"] + cmd
     vopen = open_mask(c["verbs_open"], DC.VERBS, B, dev)

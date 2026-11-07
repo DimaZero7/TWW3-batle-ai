@@ -100,12 +100,72 @@ def act_of(edit, inp, axes, device):
         raise HU.Refused(errs)
     act["verb"] = torch.tensor([DC.VERBS.index(v)], device=dev)
     act["pace"] = torch.tensor([DC.PACES.index(p)], device=dev)
+    if edit.get("places"):
+        # the raw (not a choice): every unit's place as the person left it - x, z, bearing, his width, the formation's
+        # front / depth when the record knows them (nan: walk_of estimates them) - the check goes by these
+        pl = torch.full((1, K, 6), float("nan"), device=dev)
+        for s, v in edit["places"].items():
+            s = int(s)
+            if s in row_of:
+                vals = (list(v) + [None] * 6)[:6]
+                pl[0, row_of[s]] = torch.tensor([float("nan") if a is None else float(a) for a in vals], device=dev)
+        act["places"] = pl
     return act
+
+
+def exact_dims(places, inp):
+    """(front, depth) [1, K] of the person's formations: the record's when it has them, else from the formation at the
+    simulator's default frontage (inp front / depth) turned to his width - the same men, so the depth by the area
+    (front x depth kept; a unit of one entity - a lord - keeps its own). An estimate: a rank (~2 m) off at most."""
+    f0, d0 = inp["front"], inp["depth"]
+    w = places[..., 3]
+    single = f0 < 3.0
+    front = torch.where(single | torch.isnan(w), f0, w)
+    depth = torch.where(single | torch.isnan(w), d0, d0 * f0 / front.clamp(min=1.0))
+    front = torch.where(torch.isnan(places[..., 4]), front, places[..., 4])
+    depth = torch.where(torch.isnan(places[..., 5]), depth, places[..., 5])
+    return front, depth
+
+
+def exact_check(act, inp, ctx):
+    """(errors, notes) of the person's own places (act places): every unit placed, its formation wholly inside my
+    deployment zone (any turn - the army turned 45 deg is fine); two formations closer than unit_gap_m - a note (the
+    game took his deployment as it is; our formations' model may differ from the game's)."""
+    from tools.nn.sim import geometry
+    pl = act["places"]
+    own = inp["own"]
+    slots = inp["slot"][0].tolist()
+    have = ~torch.isnan(pl[..., 0])
+    errs, notes = [], []
+    lost = [slots[j] for j in range(own.shape[1]) if bool(own[0, j]) and not bool(have[0, j])]
+    if lost:
+        errs.append(f"отряды без места: {lost}")
+    on = own & have
+    x, z, b = (torch.nan_to_num(pl[..., k]) for k in range(3))
+    front, depth = exact_dims(pl, inp)
+    cs = DP.corners(x, z, b, front, depth)                                     # [1, K, 4, 2]
+    s, f = ZS.local(ctx.mine, cs[..., 0].reshape(1, -1), cs[..., 1].reshape(1, -1))
+    s, f = s.view(cs.shape[:-1]), f.view(cs.shape[:-1])
+    out = ((s.abs() - ctx.mine["front"][:, None, None] / 2).amax(2).clamp(min=0) +
+           (f.abs() - ctx.mine["depth"][:, None, None] / 2).amax(2).clamp(min=0))
+    for j in range(own.shape[1]):
+        if bool(on[0, j]) and float(out[0, j]) > 1e-3:
+            errs.append(f"отряд {slots[j]}: строй вне зоны расстановки на {float(out[0, j]):.1f} м")
+    gap = float(scfg()["unit_gap_m"])
+    g = geometry.rect_gap(x, z, b, front, depth)[0]
+    for i in range(own.shape[1]):
+        for j in range(i + 1, own.shape[1]):
+            if bool(on[0, i]) and bool(on[0, j]) and float(g[i, j]) < gap:
+                notes.append(f"строи {slots[i]} и {slots[j]}: {float(g[i, j]):.1f} м (меньше {gap:g})")
+    return errs, notes
 
 
 
 def walk_of(act, inp, ctx):
-    """(out, errors) of the walk with the choices act and heads of zeros (Level.walk without the deployment's own check)."""
+    """(out, errors) of the walk with the choices act and heads of zeros (Level.walk without the deployment's own check).
+    act with the person's places (act_of of an edit with 'places': the live deployment): the cell is the nearest one to
+    his group's exact centre (a choice, not where he stood) - its bans and 'no cell' are not errors; the check goes by
+    his exact places instead (exact_check: out['notes'] - his formations closer than unit_gap_m)."""
     B, K = inp["own"].shape
     G = int(scfg()["groups"])
     dev = inp['own'].device
@@ -114,6 +174,7 @@ def walk_of(act, inp, ctx):
         out = SNN.choose(SNN.null_enc(B, K, G, dev), inp, ctx, SNN.NullHeads(B, dev), act=act)
     names = {G: "comp", 2: "form", S: "turn", C * C: "cell", len(DC.VERBS): "verb", len(DC.PACES): "pace"}
     errs = []
+    exact = act.get("places") is not None
     slots = inp["slot"][0].tolist()
     comp_rows = [j for j in range(K) if bool(inp["own"][0, j])]
     cells = [g for g in range(G) if bool(out["plan"]["on"][0, g])]
@@ -129,11 +190,16 @@ def walk_of(act, inp, ctx):
         elif h == "cell":
             g = cells[ce] if ce < len(cells) else -1
             ce += 1
-            if bad:
+            if bad and exact:
+                out.setdefault("snapped", []).append(g + 1)
+            elif bad:
                 errs.append(WHY["cell"].format(g=g + 1))
         elif bad:
             errs.append(WHY.get(h, "выбор закрыт правилами уровня"))
-    if int(out["plan"]["no_cell"][0]) > 0:
+    if exact:
+        e, out["notes"] = exact_check(act, inp, ctx)
+        errs += e
+    elif int(out["plan"]["no_cell"][0]) > 0:
         errs.append("одной из групп нет места в зоне расстановки")
     return out, errs
 
