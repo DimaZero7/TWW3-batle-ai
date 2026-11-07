@@ -89,7 +89,7 @@ function M.start(opts)
                 min_pair = math.min(min_pair or pair, pair)
             end
             opts.emit('nn_deploy_check', {u = x.it.name,
-                plan = {x = round(p.x), z = round(p.z), b = round(p.b, 2), w = round(p.w)},
+                plan = {x = round(p.x), z = round(p.z), b = round(p.b, 2), w = round(p.w), cx = round(p.cx), cz = round(p.cz)},
                 at = {x = round(m.x), z = round(m.z), b = round(m.b, 2), w = round(m.w)},
                 d_m = round(c.d_m, 2), db = round(c.db, 2), edge_m = round(c.edge_m), inside = c.inside,
                 far = c.far, turned = c.turned, pair_m = round(pair), missing = c.missing})

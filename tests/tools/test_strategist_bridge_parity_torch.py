@@ -79,3 +79,32 @@ def test_the_enemys_place_and_state_never_reach_the_input():
     g1, _, _ = SI.StrategistSeer(allow_flat=True, params=P).input(moved, pre.command[:1])
     for k in ("rows", "map", "numbers"):
         assert torch.allclose(g0[k], g1[k], atol=1e-5), k
+
+
+def test_the_point_sent_is_half_a_depth_ahead_of_the_centre():
+    # the game stands the formation's centre ~half its depth behind the teleport point (07.11.2026): the plan sends
+    # centre + depth / 2 along the facing; a unit of one (a lord) its centre
+    x, z = CD.teleport_point(-248.0, -376.0, 90.0, 9.6, 120)
+    assert abs(float(x) + 243.2) < 1e-4 and abs(float(z) + 376.0) < 1e-4
+    x, z = CD.teleport_point(10.0, 20.0, 0.0, 9.6, 120)
+    assert abs(float(x) - 10.0) < 1e-4 and abs(float(z) - 24.8) < 1e-4
+    x, z = CD.teleport_point(-248.0, 456.0, 92.8125, 1.4, 1)
+    assert float(x) == -248.0 and float(z) == 456.0
+    # the plan's lines: the point sent and the centre; the record's places stay the simulator's centres
+    from tools.nn.sim import geometry
+    pre = CS.Pre(CS.exam_specs(n=3, seed=5), P, "cpu")
+    out, a, _ = BT.decide(pre)
+    st, _, places, _ = BT.placed(pre, out, a)
+    _, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+    import math
+    for b in range(3):
+        text, rec = CD.Strategist("formula", pre.sp[b]["task"], params=P).decide(doc_of_pre(pre, b))
+        lines = {ln.split()[1]: [float(v) for v in ln.split()[2:]] for ln in text.splitlines() if ln.startswith("place ")}
+        for name, (px, pz, bear, w, cx, cz) in lines.items():
+            i = int(name[1:])
+            half = float(depth[b, i]) / 2 if float(st.u["men0"][b, i]) > 1 else 0.0
+            assert half > 1.0 or float(st.u["men0"][b, i]) <= 1
+            a_ = math.radians(bear)
+            assert abs(cx - float(places["x"][b, i])) < 0.01 and abs(cz - float(places["z"][b, i])) < 0.01
+            assert abs(px - (cx + half * math.sin(a_))) < 0.02 and abs(pz - (cz + half * math.cos(a_))) < 0.02
+            assert rec["sent"][name] == [round(px, 2), round(pz, 2)]

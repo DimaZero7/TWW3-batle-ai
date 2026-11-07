@@ -395,7 +395,8 @@ end
 --   tww3_bai_nn_plan 1
 --   batch <batch>
 --   think_ms <ms>
---   place <unit> <x> <z> <bearing deg> <width m>     (one per own unit: teleport_to_location's arguments)
+--   place <unit> <x> <z> <bearing deg> <width m> [<cx> <cz>]   (one per own unit: teleport_to_location's arguments;
+--                                     cx, cz the formation's centre wanted - the game stands it half a depth behind x, z)
 --   end
 M.PLAN_FORMAT = 'tww3_bai_nn_plan 1'
 M.COMPOSITION = {'n', 'side', 'key', 'men', 'hp'}
@@ -430,11 +431,14 @@ function M.parse_plan(text)
         elseif w[1] == 'think_ms' then
             doc.think_ms = tonumber(w[2])
         elseif w[1] == 'place' then
-            local p = {unit = w[2], x = tonumber(w[3]), z = tonumber(w[4]), b = tonumber(w[5]), w = tonumber(w[6])}
+            local p = {unit = w[2], x = tonumber(w[3]), z = tonumber(w[4]), b = tonumber(w[5]), w = tonumber(w[6]),
+                cx = tonumber(w[7]), cz = tonumber(w[8])}
             if not (p.unit and value.finite(p.x) and value.finite(p.z) and value.finite(p.b) and value.finite(p.w)
-                and p.w > 0) then
+                and p.w > 0) or (w[7] and not (value.finite(p.cx) and value.finite(p.cz))) then
                 return nil, 'bad place: ' .. line
             end
+            -- the formation's centre the plan wants (the point sent lies half a depth ahead of it); none: the point
+            p.cx, p.cz = p.cx or p.x, p.cz or p.z
             doc.places[#doc.places + 1] = p
         elseif w[1] == 'end' then
             complete = true
@@ -454,14 +458,15 @@ end
 
 -- One unit's placement read after the teleport (pure): plan p {x, z, b, w}, read m {x, z, b, w} (position, bearing(),
 -- ordered_width()), its own zone, engine_b - the facing the engine stands at for p.b (apps.orders.facing). ->
--- {d_m: the read centre from the planned one, db: the read bearing from engine_b (deg), edge_m: how far inside the zone
+-- {d_m: the read centre from the planned centre (cx, cz; else the point sent), db: the read bearing from engine_b (deg),
+-- edge_m: how far inside the zone
 -- the ends of its front are (< 0: out), inside, far (d_m > FAR_M), turned (db > TURN_DEG)}. Logged, never fatal.
 M.DEPLOY_FAR_M = 10          -- 26.09.2026: up to 9.4 m between the point sent and the unit's native place
 M.DEPLOY_TURN_DEG = 360 / 128  -- half a sector of the engine's 64: the bearing read is not in the sector sent
 function M.deploy_check(p, m, zone, engine_b)
     local out = {}
     if not (value.finite(m.x) and value.finite(m.z)) then return {missing = true} end
-    out.d_m = math.sqrt((m.x - p.x) ^ 2 + (m.z - p.z) ^ 2)
+    out.d_m = math.sqrt((m.x - (p.cx or p.x)) ^ 2 + (m.z - (p.cz or p.z)) ^ 2)
     if value.finite(m.b) then out.db = math.abs((m.b - engine_b + 180) % 360 - 180) end
     local half = (value.finite(m.w) and m.w or p.w) / 2
     local a = math.rad(value.finite(m.b) and m.b or p.b)

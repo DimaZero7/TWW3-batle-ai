@@ -403,7 +403,7 @@ class TestNnArena:
         assert [sorted(u) for u in enemy] == [["hp", "key", "men", "n", "side", "v"]] * 2
         (tmp_path / "tww3_bai_nn_plan.txt").write_text(
             f"tww3_bai_nn_plan 1\nbatch {doc['batch']}\nthink_ms 4.5\n"
-            "place own_lord -295 -400 90 5\nplace own_spear_1 -295 3 90 40\nplace nobody 0 0 0 1\nend\n",
+            "place own_lord -295 -400 90 5\nplace own_spear_1 -295 3 90 40 -300 3\nplace nobody 0 0 0 1\nend\n",
             encoding="utf-8")
         lua.execute("""
             bm:pump()
@@ -424,6 +424,8 @@ class TestNnArena:
         assert checks["own_lord"]["d_m"] == 0 and checks["own_lord"]["inside"] is True
         assert checks["own_lord"]["db"] == 0 and not checks["own_lord"]["turned"]
         assert checks["own_spear_1"]["pair_m"] == 50 and checks["own_spear_1"]["edge_m"] == 89  # 180 - 90, the front 2.8 deg turned
+        # the centre wanted 5 m behind the point sent (the fake stands the centre on the point): 5 m off the centre
+        assert checks["own_spear_1"]["d_m"] == 5 and checks["own_spear_1"]["plan"]["cx"] == -300
         placed = next(r for r in rows if r["event"] == "nn_deploy" and r["stage"] == "placed")
         assert (placed["units"], placed["far"], placed["outside"], placed["overlaps"]) == (2, 0, 0, 0)
         assert kinds.index("start") > kinds.index("nn_deploy_check")
