@@ -99,7 +99,9 @@ def run_walk(edit, inp, ctx, axes, raw):
         return None, e.errors
 
 
-def check(rec, wins):
+def check(rec, wins, samples=None):
+    """samples: a list to append the windows' operative samples to (the record's format: the raw input, the bridge's
+    previous groups, the walk's act or {} with the errors) - tools/label/digest_set.py."""
     S = _samples(rec)
     slot_of = {n: i for i, n in enumerate(rec.names)}
     G = int(ocfg()["groups"])
@@ -130,6 +132,14 @@ def check(rec, wins):
         bans.update(kinds)
         ok += not errs
         rows.append({"sec": w.sec, "decision": w.decision, "ok": not errs, "bans": kinds, "errors": errs[:3]})
+        if samples is not None:
+            samples.append({"format": RC.FORMAT, "level": "operative", "mode": "bridge", "where": "game", "sec": w.sec,
+                            "raw": raw, "groups": RC.groups_dict(prev_g), "card": s["card"], "side": s["side"],
+                            "command": s["command"], "axes": s["axes"], "bounds": s["bounds"], "K": s["K"],
+                            "act": act if (act is not None and not errs) else {},
+                            "source": "keep" if edit.get("keep") else "human", "errors": errs,
+                            "bridge": {"groups": now, "targets": w.targets, "seed": w.seed, "area": w.area,
+                                       "why": w.why}})
         prev = w
     return {"windows": len(rows), "ok": ok, "bans": dict(bans), "rows": rows}
 

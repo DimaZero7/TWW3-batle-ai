@@ -50,6 +50,9 @@ def battle_commands(rec):
     """[command] of the battle (the deployment's commands come first in the file with the deployment's own clock: they
     are dropped - everything before the first drop of the seconds)."""
     rows = DG._jsonl(rec.folder / "commands.jsonl")
+    if any("phase" in c for c in rows):
+        # (the newer records mark them: phase 'deployment'; 'Group Destroyed' is no longer written)
+        return [c for c in rows if c.get("phase") != "deployment"]
     out, cut = [], 0
     for i in range(1, len(rows)):
         if float(rows[i]["sec"]) + 1e-6 < float(rows[i - 1]["sec"]):

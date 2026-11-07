@@ -42,11 +42,13 @@ class View:
     """World -> picture: the box of every unit's place over the battle (or at the seconds secs only), a margin, y up =
     z."""
 
-    def __init__(self, rec, secs=None, margin=160):
+    def __init__(self, rec, secs=None, margin=160, names=None):
         xs, zs = [], []
         sts = [rec.state(s) for s in secs] if secs else (list(rec.states.values()) or [rec.state(0)])
         for st in sts:
-            for r in st.values():
+            for n, r in st.items():
+                if names is not None and n not in names:
+                    continue
                 xs.append(float(r["x"]))
                 zs.append(float(r["z"]))
         if not xs:
@@ -56,7 +58,9 @@ class View:
         self.cx, self.cz, self.s = cx, cz, (W - 40) / span
 
     def __call__(self, x, z):
-        return (W / 2 + (x - self.cx) * self.s, H / 2 - (z - self.cz) * self.s)
+        # (z down the picture: the game's view from above - its world is left-handed, facing +x the +z is on the right;
+        # with z up the picture would be the battle in a mirror)
+        return (W / 2 + (x - self.cx) * self.s, H / 2 + (z - self.cz) * self.s)
 
 
 def dims(key, men, width):
