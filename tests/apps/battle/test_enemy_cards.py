@@ -26,3 +26,19 @@ def test_the_enemy_cards_leave_room_for_the_group_frames():
             assert(q[1] >= 255 and q[1] + 54 <= 1345 + 1)
         end
     """)
+
+
+def test_a_groups_cards_stand_in_a_row_groups_first_by_number_then_the_rest():
+    lua = new_runtime()
+    lua.globals().ec = load(lua, "apps.battle.enemy_cards")
+    lua.execute("""
+        local names = {'a', 'b', 'c', 'd', 'e', 'f'}
+        -- group 1 of the 2nd and the 6th card, group 2 of the 4th: 1, 1, 2, then the rest in their first order
+        local o = ec.order(names, {[1] = {'f', 'b'}, [2] = {'d'}}, 6)
+        assert(table.concat(o, '') == 'bfdace', table.concat(o, ''))
+        -- a group dissolved: the first order back
+        assert(table.concat(ec.order(names, {[2] = {'d'}}, 6), '') == 'dabcef')
+        assert(table.concat(ec.order(names, {}, 6), '') == 'abcdef')
+        -- an empty group left by a move: nothing
+        assert(table.concat(ec.order(names, {[1] = {}, [3] = {'a'}}, 6), '') == 'abcdef')
+    """)

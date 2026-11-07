@@ -25,6 +25,8 @@ M.HOVER_IMAGE = 'ui/bai/label/hover.png'   -- bound to its unit: it does not sho
 M.GROUP_FRAME_IMAGE = 'ui/bai/label/gf%d.png'   -- a group's frame in its colour (tools/label/icons.py)
 M.GROUP_TAB_IMAGE = 'ui/bai/label/g%d.png'      -- its number
 M.TAB = 26
+M.EDGE = 3           -- px: a group frame's edge
+M.GROUP_EDGE_IMAGE = 'ui/bai/label/gb%d.png'   -- its colour, solid (tools/label/icons.py)
 M.CLEAR_IMAGE = 'ui/bai/label/clear.png'   -- a clear pixel
 M.OVER = 50         -- an overlay's priority over the card's (drawn over it)
 M.UNIT_IMAGE = 'ui/bai/units/%s.png'
@@ -66,6 +68,23 @@ function M.places(own, n, left, right)
     for k = 1, n do places[k][2] = places[k][2] - M.FRAME_H end
     local width = math.min(n, per) * step
     return places, {(left + right) / 2 - width / 2, top - M.FRAME_H - 6, width, 4, 'above'}, w, h
+end
+
+-- The cards' order (pure: tests): names in the cards' first order, groups = {[k] = {names}} -> the names in order:
+-- group 1's cards, group 2's, ... (each in the first order), then the units in no group in the first order. As the game
+-- orders its own cards: a unit grouped moves up to its group, before the units in none (the check battle 07.11 17:29:
+-- own greatsword 2 grouped as 2 moved from the 3rd card to the 2nd, before the lord in none).
+function M.order(names, groups, G)
+    local out, used = {}, {}
+    for k = 1, G or M.GROUPS do
+        local set = {}
+        for _, n in ipairs(groups[k] or {}) do set[n] = true end
+        for _, n in ipairs(names) do
+            if set[n] and not used[n] then out[#out + 1] = n; used[n] = true end
+        end
+    end
+    for _, n in ipairs(names) do if not used[n] then out[#out + 1] = n end end
+    return out
 end
 
 -- opts: bm, env {core, UIComponent, find_uicomponent}, own = {{name, unit}}, enemy = {{name, unit, key}}, emit, now_ms,
@@ -136,65 +155,92 @@ function M.start(opts)
         pcall(function() h.button:SetDisabled(not any) end)
     end
 
-    -- the group frames over the enemy cards: a frame over the group's cards and its number on a tab above them (our
-    -- images: the game's own group_frame layout repositions itself by its callback - a white block over the own tabs,
-    -- run 20261107-1425xx)
-    -- every card of group k gets the group's colour frame (a child of the card, as the pick's), the group's first card
-    -- its number on a tab above it (on the root: a child would be cut by its card); a click on the tab picks the group
+    -- A group's frame, as the game's own: one frame around the group's cards (they stand in a row: M.order) in its colour
+    -- and its number on a tab over the first. Drawn as pieces on each card (its children: a card's child over another
+    -- card would go under it) - the top and the bottom edge on every card of the group, the left on the first of a row
+    -- of them, the right on the last; the tab a child of the first card. A click on the tab picks the group.
+    local EDGES = {'top', 'bottom', 'left', 'right'}
+    local function edge_box(g, side, first, last)
+        local t = M.EDGE
+        if side == 'top' then return {x = g.x, y = g.y, w = g.w, h = t} end
+        if side == 'bottom' then return {x = g.x, y = g.y + g.h - t, w = g.w, h = t} end
+        if side == 'left' and first then return {x = g.x, y = g.y, w = t, h = g.h} end
+        if side == 'right' and last then return {x = g.x + g.w - t, y = g.y, w = t, h = g.h} end
+        return nil
+    end
+
     local function draw_frames()
-        for _, fr in pairs(h.frames) do pcall(function() fr.tab:SetVisible(false) end) end
+        -- each card: its group's edges
         for _, e in ipairs(h.cards) do
-            if e.gf_uic and e.gf_k ~= h.group_of[e.name] then pcall(function() e.gf_uic:SetVisible(false) end) end
-        end
-        for k = 1, M.GROUPS do
-            local names = h.groups[k]
-            if names and #names > 0 and h.overlay then
-                local x0, y0, first = nil, nil, nil
-                for _, n in ipairs(names) do
-                    local g, e = geom[n], h.by_name[n]
-                    if g and e then
-                        if not (x0 and (g.y > y0 or (g.y == y0 and g.x >= x0))) then x0, y0, first = g.x, g.y, e end
-                        if e.gf_uic and e.gf_k ~= k then
-                            pcall(function() e.gf_uic:DestroyChildren() end)
-                            pcall(function() e.gf_uic:Destroy() end)
-                            e.gf_uic = nil
-                        end
-                        if not e.gf_uic then
-                            local ok, c = pcall(h.overlay, 'bai_enemy_gf' .. k .. '_' .. e.id:match('(%d+)$'),
-                                string.format(M.GROUP_FRAME_IMAGE, k), e.uic)
-                            if ok then e.gf_uic, e.gf_k = c, k end
-                            if not ok then opts.emit('enemy_group_frame', {group = k, unit = n, error = tostring(c)}) end
-                        end
-                        if e.gf_uic then
-                            h.put(e.gf_uic, g)
-                            pcall(function() e.gf_uic:SetVisible(true) end)
-                        end
+            local k, g = h.group_of[e.name], geom[e.name]
+            e.edges = e.edges or {}
+            local first, last = false, false
+            if k and g then
+                local l, r = nil, nil
+                for _, n in ipairs(h.groups[k] or {}) do
+                    local o = geom[n]
+                    if o and o.y == g.y then
+                        if math.abs(o.x + o.w - g.x) < 2 then l = n end
+                        if math.abs(g.x + g.w - o.x) < 2 then r = n end
                     end
                 end
-                if x0 then
-                    local fr = h.frames[k]
-                    if fr and fr.parent ~= first then
-                        pcall(function() fr.tab:DestroyChildren() end)
-                        pcall(function() fr.tab:Destroy() end)
-                        fr, h.frames[k] = nil, nil
-                    end
-                    if not fr then
-                        local ok, tab = pcall(h.overlay, 'bai_enemy_group_tab_' .. k, string.format(M.GROUP_TAB_IMAGE, k),
-                            first.uic)
-                        if ok then
-                            fr = {tab = tab, parent = first}
-                            h.frames[k] = fr
-                            pcall(function() tab:SetInteractive(true) end)
-                            pcall(function() h.find(tab, 'icon'):SetInteractive(true) end)
-                        else
-                            opts.emit('enemy_group_frame', {group = k, error = tostring(tab)})
+                first, last = l == nil, r == nil
+            end
+            for _, side in ipairs(EDGES) do
+                local b = k and g and edge_box(g, side, first, last) or nil
+                local c = e.edges[side]
+                if b and not c then
+                    local ok, made = pcall(h.overlay, 'bai_enemy_edge_' .. side .. '_' .. e.id:match('(%d+)$'),
+                        string.format(M.GROUP_EDGE_IMAGE, k), e.uic)
+                    if ok then c = made; e.edges[side] = c; e.edge_k = k end
+                    if not ok then opts.emit('enemy_group_frame', {group = k, unit = e.name, error = tostring(made)}) end
+                end
+                if c then
+                    if b then
+                        if e.edge_k ~= k then
+                            pcall(function() h.find(c, 'icon'):SetImagePath(string.format(M.GROUP_EDGE_IMAGE, k), 0) end)
                         end
+                        h.put(c, b)
                     end
-                    if fr then
-                        h.put(fr.tab, {x = x0, y = y0 - M.TAB - 2, w = M.TAB, h = M.TAB})
-                        pcall(function() fr.tab:SetVisible(true) end)
-                        if h.where then opts.emit('enemy_group_tab', {group = k, at = h.where(fr.tab)}) end
+                    pcall(function() c:SetVisible(b ~= nil) end)
+                end
+            end
+            if k then e.edge_k = k end
+        end
+        -- each group: the tab over its first card (a child of that card: remade when the first card changes)
+        for k = 1, M.GROUPS do
+            local names = h.groups[k]
+            local fr = h.frames[k]
+            local first = nil
+            for _, n in ipairs(names or {}) do
+                local g = geom[n]
+                if g and (not first or g.y < geom[first].y or (g.y == geom[first].y and g.x < geom[first].x)) then
+                    first = n
+                end
+            end
+            local e = first and h.by_name[first]
+            if fr and fr.parent ~= e then
+                pcall(function() fr.tab:SetVisible(false) end)
+                pcall(function() fr.tab:DestroyChildren() end)
+                pcall(function() fr.tab:Destroy() end)
+                fr, h.frames[k] = nil, nil
+            end
+            if e and h.overlay then
+                if not fr then
+                    local ok, tab = pcall(h.overlay, 'bai_enemy_group_tab_' .. k, string.format(M.GROUP_TAB_IMAGE, k), e.uic)
+                    if ok then
+                        fr = {tab = tab, parent = e}
+                        h.frames[k] = fr
+                        pcall(function() tab:SetInteractive(true) end)
+                        pcall(function() h.find(tab, 'icon'):SetInteractive(true) end)
+                    else
+                        opts.emit('enemy_group_frame', {group = k, error = tostring(tab)})
                     end
+                end
+                if fr then
+                    local g = geom[first]
+                    h.put(fr.tab, {x = g.x, y = g.y - M.TAB - 2, w = M.TAB, h = M.TAB})
+                    pcall(function() fr.tab:SetVisible(true) end)
                 end
             end
         end
@@ -211,10 +257,15 @@ function M.start(opts)
             if wb.x > resw / 2 then right = math.min(right, wb.x - 6) end
         end
         local places, sep, w, hh = M.places(own, #h.cards, left, right)
-        local key = table.concat({w, hh, sep[1], sep[2], places[1][1], places[1][2], #h.cards}, ',')
+        local names = {}
+        for _, e in ipairs(h.cards) do names[#names + 1] = e.name end
+        local order = M.order(names, h.groups, M.GROUPS)
+        local key = table.concat({w, hh, sep[1], sep[2], places[1][1], places[1][2], #h.cards,
+            table.concat(order, ' ')}, ',')
         if key == placed and not force then return nil end
         placed = key
-        for k, e in ipairs(h.cards) do
+        for k, name in ipairs(order) do
+            local e = h.by_name[name]
             local b = box(e.uic)
             if b.w > 0 and math.abs(b.w - w) > 1 then
                 pcall(function() e.uic:SetCanResizeWidth(true); e.uic:SetCanResizeHeight(true) end)
@@ -223,6 +274,7 @@ function M.start(opts)
             pcall(function() e.uic:MoveTo(places[k][1], places[k][2]) end)
             geom[e.name] = {x = places[k][1], y = places[k][2], w = w, h = hh}
             if e.pick_uic and h.put then h.put(e.pick_uic, geom[e.name]) end
+            if e.hover_uic and h.put then h.put(e.hover_uic, geom[e.name]) end
         end
         if h.sep then
             local icon = f(h.sep, 'icon')
@@ -390,6 +442,21 @@ function M.start(opts)
         show_button()
     end
 
+    -- a box over the field (apps.battle.box_pick): the pick is the box's enemies (none: the pick stays)
+    function h.box_pick(names, why)
+        if #names == 0 then return end
+        h.clear_pick()
+        for _, name in ipairs(names) do
+            if h.by_name[name] then
+                h.pick[name] = true
+                show_pick(h.by_name[name])
+            end
+        end
+        highlight(names, true)
+        show_button()
+        opts.emit('enemy_pick_box', {t = opts.now_ms(), units = names, why = why})
+    end
+
     -- a group's frame clicked: the pick is that group
     function h.pick_group(k, why)
         h.clear_pick()
@@ -402,10 +469,25 @@ function M.start(opts)
         opts.emit('enemy_pick_group', {t = opts.now_ms(), group = k, why = why})
     end
 
-    -- the pick -> enemy group N (the next number not in use; 6 at most: then the last)
+    -- the pick -> enemy group N (the next number not in use; 6 at most: then the last); the pick being exactly one group
+    -- -> that group dissolved (the game's group button on a group: 'ungroup'). The cards move to their order (M.order).
     function h.group_pick(why)
         local names = picked_names()
         if #names == 0 then return nil end
+        local same = h.group_of[names[1]]
+        if same and #(h.groups[same] or {}) == #names then
+            for _, n in ipairs(names) do if h.group_of[n] ~= same then same = nil break end end
+        else
+            same = nil
+        end
+        if same then
+            for _, n in ipairs(names) do h.group_of[n] = nil end
+            h.groups[same] = nil
+            h.clear_pick()
+            pcall(h.layout, true)
+            opts.emit('enemy_ungroup', {t = opts.now_ms(), why = why, group = same, units = names})
+            return 0
+        end
         local k = 1
         while h.groups[k] and #h.groups[k] > 0 and k < M.GROUPS do k = k + 1 end
         for _, name in ipairs(names) do
@@ -419,7 +501,7 @@ function M.start(opts)
         h.groups[k] = names
         for _, name in ipairs(names) do h.group_of[name] = k end
         h.clear_pick()
-        draw_frames()
+        pcall(h.layout, true)
         opts.emit('enemy_group', {t = opts.now_ms(), why = why, group = k, units = names})
         return k
     end

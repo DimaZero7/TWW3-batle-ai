@@ -17,6 +17,7 @@ local exchange = require('apps.bridge.exchange_adapter')
 local json = require('apps.core.json')
 local services = require('apps.bridge.services')
 local enemy_cards = require('apps.battle.enemy_cards')
+local box_pick = require('apps.battle.box_pick')
 
 local M = {}
 
@@ -102,6 +103,10 @@ function M.start(opts)
     end
     h.cards = enemy_cards.start({bm = opts.bm, env = env, own = opts.own, enemy = opts.enemy, emit = opts.emit,
         now_ms = opts.now_ms, highlight = highlight})
+    -- the box over the field picks enemies too (apps.battle.box_pick)
+    local okb, box = pcall(box_pick.start, {bm = opts.bm, env = env, units = opts.enemy, emit = opts.emit,
+        now_ms = opts.now_ms, on_box = function(names) h.cards.box_pick(names, 'box') end})
+    if okb then h.box = box else opts.emit('box_probe', {error = tostring(box)}) end
     local by_name = {}
     for _, it in ipairs(opts.own) do by_name[it.name] = it end
     for _, it in ipairs(opts.enemy) do by_name[it.name] = it end
@@ -150,6 +155,28 @@ function M.start(opts)
                     line:match('^eval%s+%S+%s+(.+)$'))
             end)
             row.result = ok and tostring(v) or ('error: ' .. tostring(v))
+        elseif verb == 'reval' then
+            -- a CcoBattleRoot expression: reval <expr> (the cursor's probe)
+            local ok, v = pcall(function()
+                return env.common.get_context_value('CcoBattleRoot', '', line:match('^reval%s+(.+)$'))
+            end)
+            row.result = ok and tostring(v) or ('error: ' .. tostring(v))
+        elseif verb == 'box_units' and h.box then
+            -- a box around these units' banners (the drag itself is the person's: a script cannot drag) -> the pick
+            local want, x0, y0, x1, y1 = {}, nil, nil, nil, nil
+            for i = 2, #w do want[w[i]] = true end
+            for _, p in ipairs(h.box.points()) do
+                if want[p[1]] then
+                    x0, y0 = math.min(x0 or p[2], p[2]), math.min(y0 or p[3], p[3])
+                    x1, y1 = math.max(x1 or p[2], p[2]), math.max(y1 or p[3], p[3])
+                end
+            end
+            if x0 then
+                local got = h.box.finish({x = x0 - 6, y = y0 - 6, w = x1 - x0 + 12, h = y1 - y0 + 12}, 'test')
+                row.result = table.concat(got, ' ')
+            else
+                row.result = 'no banners'
+            end
         elseif verb == 'click_tab' then
             local fr = h.cards.frames[tonumber(w[2])]
             row.result = click(fr and fr.tab)
@@ -201,6 +228,7 @@ function M.start(opts)
     end
 
     function h.finish()
+        if h.box then h.box.stop() end
         local doc = services.state_document(opts.meta, h.move, opts.now_ms(), opts.rows(), true, {}, {}, nil)
         doc.live = true
         exchange.write(M.STATE, json.encode(doc))

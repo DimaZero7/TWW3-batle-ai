@@ -99,5 +99,6 @@ def pack_files():
     for k, colour in enumerate(cfg()["group_colors"][:6], start=1):
         out[f"{FOLDER}\\g{k}.png"] = icon(k, colour)
         out[f"{FOLDER}\\gf{k}.png"] = frame(colour=_rgb(colour) + (255,))
+        out[f"{FOLDER}\\gb{k}.png"] = png([[_rgb(colour) + (255,)] * 4 for _ in range(4)], 4, 4)   # a frame's edge
         out[f"{FOLDER}\\t{k}.png"] = icon(k, colour, ring=True)
     return out
