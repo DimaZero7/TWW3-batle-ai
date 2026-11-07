@@ -53,6 +53,8 @@ try {
     docker stop -t 10 $Container 2>$null | Out-Null
     Clear-Exchange
     if (Test-Path -LiteralPath $lock) { Remove-Item -LiteralPath $lock }
-    $last = Get-ChildItem -LiteralPath (Join-Path $repo 'build\label') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
+    # the recorder's folder: build/label/<date>_<time>_live (not matchups/ or the other folders there)
+    $last = Get-ChildItem -LiteralPath (Join-Path $repo 'build\label') -Directory -Filter '*_live*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}_\d{6}_live' } | Sort-Object Name | Select-Object -Last 1
     if ($last) { Write-Output ("Запись: {0}" -f $last.FullName) }
 }

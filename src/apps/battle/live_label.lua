@@ -23,6 +23,11 @@ local M = {}
 M.STATE = 'tww3_bai_nn_state.json'
 M.CMD = 'tww3_bai_live_cmd.txt'
 M.FRAMES = 10
+-- the unit's highlight on the field (the game's own: a strip under the unit in its side's colour, as on a hover): the
+-- CCO command ToggleHighlight shows it, SetHighlight(true) / Highlight(true) do nothing (the check battle 07.11 17:29,
+-- build/diag_chain/ingame_live_6_outline_1.png); IsHighlighted says whether it is on
+M.HIGHLIGHT = 'ToggleHighlight'
+M.HIGHLIGHTED = 'IsHighlighted'
 
 local function box(uic)
     local okp, x, y = pcall(function() return uic:Position() end)
@@ -70,8 +75,33 @@ end
 function M.start(opts)
     local env = opts.env
     local h = {move = 0}
+    local by_name_all = {}
+    for _, it in ipairs(opts.own) do by_name_all[it.name] = it end
+    for _, it in ipairs(opts.enemy) do by_name_all[it.name] = it end
+    -- the highlight of the picked enemy units on the field: toggled where it is not as wanted (IsHighlighted; unread -
+    -- our own memory of it), the results logged (event live_highlight)
+    local lit = {}
+    local function highlight(names, on)
+        local res = {}
+        for _, name in ipairs(names) do
+            local it = by_name_all[name]
+            if it then
+                local id = tostring(it.unit:unique_ui_id())
+                local okr, now = pcall(function() return env.common.get_context_value('CcoBattleUnit', id, M.HIGHLIGHTED) end)
+                if not okr or type(now) ~= 'boolean' then now = lit[name] == true end
+                if now ~= on then
+                    local ok, err = pcall(function() return env.common.call_context_command('CcoBattleUnit', id, M.HIGHLIGHT) end)
+                    if ok then lit[name] = on end
+                    res[#res + 1] = name .. ' ' .. M.HIGHLIGHT .. ': ' .. (ok and 'ok' or tostring(err))
+                else
+                    res[#res + 1] = name .. ' already ' .. tostring(on)
+                end
+            end
+        end
+        opts.emit('live_highlight', {t = opts.now_ms(), on = on, results = res})
+    end
     h.cards = enemy_cards.start({bm = opts.bm, env = env, own = opts.own, enemy = opts.enemy, emit = opts.emit,
-        now_ms = opts.now_ms})
+        now_ms = opts.now_ms, highlight = highlight})
     local by_name = {}
     for _, it in ipairs(opts.own) do by_name[it.name] = it end
     for _, it in ipairs(opts.enemy) do by_name[it.name] = it end
@@ -104,8 +134,25 @@ function M.start(opts)
             local card = it and f(env.core:get_ui_root(), 'cards_panel', 'review_DY', tostring(it.unit:unique_ui_id()))
             row.result = click(card, verb == 'dbl_own')
         elseif verb == 'click_enemy' then
-            local e = h.cards.by_name[w[2]]
-            row.result = click(e and e.uic)
+            row.result = h.cards.click(w[2], w[3])          -- (w[3]: a child of the card - a person's click lands there)
+        elseif verb == 'cco' then
+            -- a CCO command on a unit: cco <unit> <command> (the outlines' probe)
+            local it = by_name[w[2]]
+            local ok, err = pcall(function()
+                return env.common.call_context_command('CcoBattleUnit', tostring(it.unit:unique_ui_id()),
+                    line:match('^cco%s+%S+%s+(.+)$'))
+            end)
+            row.result = ok and ('ok ' .. tostring(err)) or tostring(err)
+        elseif verb == 'eval' then
+            local it = by_name[w[2]]
+            local ok, v = pcall(function()
+                return env.common.get_context_value('CcoBattleUnit', tostring(it.unit:unique_ui_id()),
+                    line:match('^eval%s+%S+%s+(.+)$'))
+            end)
+            row.result = ok and tostring(v) or ('error: ' .. tostring(v))
+        elseif verb == 'click_tab' then
+            local fr = h.cards.frames[tonumber(w[2])]
+            row.result = click(fr and fr.tab)
         elseif verb == 'button_group' then
             row.result = click(f(env.core:get_ui_root(), 'battle_orders', 'button_group'))
         elseif verb == 'move' then

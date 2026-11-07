@@ -86,9 +86,18 @@ def unit_files(keys):
     return out
 
 
+def frame(w=60, h=130, t=3, colour=(255, 214, 90, 255)):
+    """A card's pick frame (src/apps/battle/enemy_cards.lua PICK_IMAGE): a border of t px, the inside clear."""
+    px = [[colour if (x < t or x >= w - t or y < t or y >= h - t) else (0, 0, 0, 0) for x in range(w)] for y in range(h)]
+    return png(px, w, h)
+
+
 def pack_files():
-    out = {f"{FOLDER}\\sep.png": separator()}
+    out = {f"{FOLDER}\\sep.png": separator(), f"{FOLDER}\\pick.png": frame(),
+           f"{FOLDER}\\hover.png": frame(colour=(255, 255, 255, 150)),
+           f"{FOLDER}\\clear.png": png([[(0, 0, 0, 0)] * 4 for _ in range(4)], 4, 4)}
     for k, colour in enumerate(cfg()["group_colors"][:6], start=1):
         out[f"{FOLDER}\\g{k}.png"] = icon(k, colour)
+        out[f"{FOLDER}\\gf{k}.png"] = frame(colour=_rgb(colour) + (255,))
         out[f"{FOLDER}\\t{k}.png"] = icon(k, colour, ring=True)
     return out

@@ -12,8 +12,7 @@ cards}. This recorder cuts the battle into windows of WINDOW_S (15 s, the operat
                        stand), checked by the walk (human.op_walk); the same groups -> a skip ('keep'); no groups at all
                        -> 'none' (written as text only)
     every second       the player's orders (orders.jsonl: each own unit's place, ordered point, target, running, moving,
-                       melee, width - the bridge's row), the marks in the game (label_overlay: the group's number over
-                       its units, a ring with the number over its enemy group)
+                       melee, width - the bridge's row)
 
 The record: record.Recorder's folder (samples.pt, decisions.jsonl, result.json) with "mode": "live", "where": "game";
 a sample keeps the window's raw input (record.rebuild gives the operative's input) and the person's groups as they were
@@ -153,9 +152,8 @@ class LiveRecorder:
             f.write(json.dumps({"sec": self.sec, "t": doc.get("t"), "selection": doc.get("selection"),
                                 "units": rows}, ensure_ascii=False) + "\n")
         self.stats["orders_rows"] += 1
-        if sig != self.ov_sig:
-            self.ov_sig = sig
-            self.overlay(own, enemy)
+        # (no marks over the units on the field: the person's word 07.11 - "not that"; the groups show as the game shows
+        # its own: the frames over the cards, the outlines - src/apps/battle/enemy_cards.lua)
         if self.win is None:
             self.open(r, own, enemy, sig, doc)
         elif self.sec >= self.win["sec"] + self.window_s:
@@ -238,9 +236,10 @@ class LiveRecorder:
         exchange.write_atomic(self.game / GM.OVERLAY, GM.overlay_text(self.ov_version, self.names, groups))
 
     def finish(self, why):
-        if self.rec is None:
-            return
+        if self.rec is None or getattr(self, "finished", None):
+            return getattr(self, "finished", None)
         result = {"why": why, "mode": "live", "where": "game", "seconds": self.sec, **self.stats}
+        self.finished = result
         self.rec.finish(result, {"names": getattr(self, "names", []), "snaps": []})
         try:
             exchange.write_atomic(self.game / GM.OVERLAY, GM.overlay_text(self.ov_version + 1, [], []))
@@ -289,6 +288,13 @@ def main(argv=None):
     torch.set_num_threads(2)
     rec = LiveRecorder(a.game, Path(a.out) if a.out else None, a.name)
     print(f"live: watching {Path(a.game) / exchange.STATE}; the record {rec.folder}")
+
+    def stop(*_):
+        # docker stop (live.ps1 after the game closed): the record's result before going
+        print(f"live: stopped {rec.finish('stopped')}")
+        sys.exit(0)
+    import signal
+    signal.signal(signal.SIGTERM, stop)
     rec.run(a.idle_exit)
 
 
