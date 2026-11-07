@@ -21,6 +21,11 @@ from tools import config as project
 from tools.label import pool as PL
 
 OUT = project.ROOT / "build" / "label_icons"
+# A lord's card the db's unit variant does not name among the unit cards: the character's own card in ui.pack
+# ui/portraits/units (60 x 130, the card the game shows for our own general - the person's 07.11: the enemy's lord had no
+# picture)
+CHARACTER_CARDS = {"wh_main_emp_cha_general_0": "ui/portraits/units/no_culture/emp_generals_campaign_01_0.png",
+                   "wh2_main_skv_cha_warlord_0": "ui/portraits/units/no_culture/skv_warlord_campaign_01_0.png"}
 BS = "\\"
 
 
@@ -96,7 +101,8 @@ def strings_after(blob, key, span=600):
 def main(argv=None):
     data = Path(project.load()["game_dir"]) / "data"
     OUT.mkdir(parents=True, exist_ok=True)
-    keys = sorted({u["key"] for f in PL.factions().values() for u in f["units"]})
+    keys = sorted({u["key"] for f in PL.factions().values() for u in f["units"]}
+                  | set(json.loads((project.CONFIG_DIR / "nn" / "units.json").read_text(encoding="utf-8"))["units"]))
     ui = _index(data / "ui.pack")
     icons = {n.split(BS)[-1][:-4]: (n, o, s, c) for n, o, s, c in ui
              if n.lower().startswith("ui" + BS + "units" + BS + "icons" + BS) and n.lower().endswith(".png")}
@@ -116,6 +122,14 @@ def main(argv=None):
                 card[key] = hit
                 icons.setdefault(hit, anyp[hit])
                 break
+    for key, path in CHARACTER_CARDS.items():
+        if key in keys and key not in card:
+            want = path.replace("/", BS).lower()
+            hit = next((e for e in ui if e[0].lower() == want), None)
+            if hit:
+                name = hit[0].split(BS)[-1][:-4]
+                icons[name] = hit
+                card[key] = name
     got = _read(data / "ui.pack", [icons[c] for c in set(card.values())])
     for key, c in card.items():
         (OUT / f"{key}.png").write_bytes(got[icons[c][0]])

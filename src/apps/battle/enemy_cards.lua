@@ -31,6 +31,18 @@ M.GROUP_EDGE_IMAGE = 'ui/bai/label/gb%d.png'   -- its colour, solid (tools/label
 M.CLEAR_IMAGE = 'ui/bai/label/clear.png'   -- a clear pixel
 M.OVER = 50         -- an overlay's priority over the card's (drawn over it)
 M.UNIT_IMAGE = 'ui/bai/units/%s.png'
+-- the card layout's parts no enemy card of ours shows (ui/common ui/land_unit_card.twui.xml; the game fills them for its
+-- own cards by the unit - Cathay's harmony, the Waaagh, Slaanesh, the campaign's, the frontend's ...): hidden once (the
+-- person's 07.11: a harmony sign on Skaven cards). Kept: the picture, the health and the men, the category frame, the
+-- ammunition (shown only for a unit with ammunition: M.AMMO)
+M.HIDE = {'upgrade_effect_icon', 'waaagh_unit_marker', 'dlc27_sla_daemonic_attraction_marker', 'kinfolk_tag',
+    'augment_instability_effect', 'hellforge_display_holder', 'augment_display_holder', 'ostankya_blessing_curse_frame',
+    'ostankya_blessing_curse_cat_frame', 'train_cat_frame', 'frontend', 'icon_idle', 'status_holder',
+    'spell_state_parent', 'no_engine', 'icon_behaviour_activated', 'icon_raise', 'unstable_overlay', 'crumbling_overlay',
+    'vehicle', 'icon_ladder', 'icon_rallying', 'smoke_particle_emitter', 'icon_rampage', 'unit_upgrades',
+    'replenishment_list_parent', 'teleport_withdraw_counter', 'icon_gifted', 'button_recall_gifted', 'icon_harmony',
+    'icon_executable', 'experience', 'common_list', 'campaign', 'selected_frame', 'exchange_arrow',
+    'scrap_upgrades_frame', 'cp1_cth_banners_frame', 'twitch_components', 'unlimited_ammo'}
 M.GAP = 26           -- px between the last own card and the first enemy card (the separator in the middle)
 M.MARGIN = 510       -- the game's cards strip: screen width less this (hud_battle review_DY fullwidth_margin)
 M.FRAME_H = 48       -- px over a row of cards kept free for the group frames' tabs (the game's tab: 45 px over a card)
@@ -365,6 +377,35 @@ function M.start(opts)
             local ww = w0[e.name]
             if ww[1] > 0 then size(bar, math.max(1, ww[1] * hp), ww[2]) end
         end
+        -- the ammunition: only a unit with it (its starting ammunition), the bar by what is left
+        if e.ammo0 == nil then
+            local a0 = select(2, pcall(function() return u:starting_ammo() end))
+            e.ammo0 = type(a0) == 'number' and a0 or 0
+            local holder = f(e.uic, 'ammunition')
+            if holder then pcall(function() holder:SetVisible(e.ammo0 > 0) end) end
+        end
+        if e.ammo0 > 0 then
+            local am = f(e.uic, 'ammo')
+            local left = select(2, pcall(function() return u:ammo_left() end))
+            if am and type(left) == 'number' then
+                if not e.ammo_box then
+                    -- (its place against the card's: the card moves with the layout)
+                    local b, cb = box(am), box(e.uic)
+                    e.ammo_box = {dx = b.x - cb.x, dy = b.y - cb.y, w = b.w, h = b.h}
+                end
+                local b = e.ammo_box
+                local k = math.max(0, math.min(1, left / e.ammo0))
+                if b.h > b.w and b.h > 0 then
+                    -- a standing bar: it shrinks from the top
+                    local hh = math.max(1, b.h * k)
+                    local cb = box(e.uic)
+                    size(am, b.w, hh)
+                    pcall(function() am:MoveTo(cb.x + b.dx, cb.y + b.dy + b.h - hh) end)
+                elseif b.w > 0 then
+                    size(am, math.max(1, b.w * k), b.h)
+                end
+            end
+        end
         local gone = type(men) == 'number' and men <= 0
         pcall(function() e.uic:SetOpacity(gone and 90 or 255, true) end)
     end
@@ -663,6 +704,14 @@ function M.start(opts)
             c:SetVisible(true)
             pcall(function() c:SetInteractive(true) end)
             pcall(function() c:RegisterTopMost() end)
+            for _, part in ipairs(M.HIDE) do
+                local x = f(c, part)
+                if x then pcall(function() x:SetVisible(false) end) end
+            end
+            -- (the ammunition sits in the layout's 'battle' part, hidden off a battle's own card: shown, its other
+            -- parts hidden above)
+            local bt = f(c, 'battle')
+            if bt then pcall(function() bt:SetVisible(true) end) end
             local e = {name = it.name, unit = it.unit, key = it.key, uic = c, id = id}
             h.cards[#h.cards + 1] = e
             h.by_name[it.name] = e
