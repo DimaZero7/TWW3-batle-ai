@@ -24,7 +24,7 @@ local M = {}
 
 M.STATE = 'tww3_bai_nn_state.json'
 M.CMD = 'tww3_bai_live_cmd.txt'
-M.FRAMES = 10
+M.FRAMES = 40        -- the game's own group frames looked for: group_frame0..39 (no limit of 6 or 10 of ours)
 -- the unit's highlight on the field (the game's own: a strip under the unit in its side's colour, as on a hover): the
 -- CCO command ToggleHighlight shows it, SetHighlight(true) / Highlight(true) do nothing (the check battle 07.11 17:29,
 -- build/diag_chain/ingame_live_6_outline_1.png); IsHighlighted says whether it is on
@@ -461,9 +461,10 @@ function M.start(opts)
     -- the command's own values (bool1, string1, unit: an attack's target) and the own units selected then; M.ORDER_READ_MS
     -- later what the order set on each of them (ordered position, bearing, width: the script's unit). In the state
     -- document as doc.commands (the last M.CMD_KEEP; tools/label/live.py -> commands.jsonl).
+    -- (Group Destroyed left out: the game sends it on its own, 1324 of them in the person's battle 07.11 17:45 - no order)
     M.COMMANDS = {'Move Orientation Width', 'Move Rotation Angle', 'Attack Unit', 'Attack Building', 'Change Speed',
         'Change Skirmish', 'Change Melee', 'Change Formation', 'Fire At Will', 'Special Ability', 'Shot Type',
-        'Group Created', 'Group Destroyed', 'Double Click', 'Double Click Unit Card'}
+        'Group Created', 'Double Click', 'Double Click Unit Card'}
     h.cmd_log = {}
     local function ordered(it)
         local u = it.unit
@@ -479,6 +480,9 @@ function M.start(opts)
         local ok, err = pcall(function()
             opts.bm:register_command_handler_callback(name, function(ctx)
                 local row = {n = #h.cmd_log + 1, t = opts.now_ms(), name = name}
+                -- the deployment's orders: their phase and ms from the deployment's start (the battle's clock is not
+                -- running then: t would read as the battle's)
+                if h.deploying then row.phase, row.deploy_ms = 'deployment', opts.now_ms() - (h.deploy_t0 or 0) end
                 pcall(function() row.bool1 = ctx:get_bool1() end)
                 pcall(function() row.string1 = ctx:get_string1() end)
                 pcall(function() row.unit = unit_name(ctx:get_unit()) end)
@@ -517,10 +521,7 @@ function M.start(opts)
     local function groups_now()
         local okg, own = pcall(M.read_own, env, opts.own)
         local enemy = {}
-        for k = 1, enemy_cards.GROUPS do
-            local g = h.cards.groups[k]
-            if g and #g > 0 then enemy[#enemy + 1] = {k, g} end
-        end
+        for _, k in ipairs(enemy_cards.numbers(h.cards.groups)) do enemy[#enemy + 1] = {k, h.cards.groups[k]} end
         return {own = okg and own or {}, enemy = enemy}
     end
     local okc, chat = pcall(label_chat.start, {bm = opts.bm, env = env, emit = opts.emit, now_ms = opts.now_ms,
@@ -544,6 +545,7 @@ function M.start(opts)
     -- recorder's strategist sample: tools/label/live_deploy.py). info: {zones, own_rows(), enemy_rows()}.
     function h.deploy_begin(info)
         h.deploying, h.deploy_info = true, info
+        h.deploy_t0 = opts.now_ms()
         local r = env.core:get_ui_root()
         local fd = env.find_uicomponent(r, 'finish_deployment')
         local vis = fd and select(2, pcall(function() return fd:Visible() end))
@@ -562,6 +564,10 @@ function M.start(opts)
         doc.groups = groups_now()
         doc.selection = selection()
         doc.deploy_final = final or nil
+        if #h.cmd_log > 0 then
+            doc.commands = {}
+            for k = math.max(1, #h.cmd_log - M.CMD_KEEP + 1), #h.cmd_log do doc.commands[#doc.commands + 1] = h.cmd_log[k] end
+        end
         if #h.chat_log > 0 then
             doc.chat = {}
             for k = math.max(1, #h.chat_log - M.CHAT_KEEP + 1), #h.chat_log do doc.chat[#doc.chat + 1] = h.chat_log[k] end
@@ -596,10 +602,7 @@ function M.start(opts)
         h.move = h.move + 1
         local okg, own = pcall(M.read_own, env, opts.own)
         local enemy = {}
-        for k = 1, enemy_cards.GROUPS do
-            local g = h.cards.groups[k]
-            if g and #g > 0 then enemy[#enemy + 1] = {k, g} end
-        end
+        for _, k in ipairs(enemy_cards.numbers(h.cards.groups)) do enemy[#enemy + 1] = {k, h.cards.groups[k]} end
         local doc = services.state_document(opts.meta, h.move, opts.now_ms(), opts.rows(), false, {}, {}, nil)
         doc.live = true
         doc.groups = {own = okg and own or {}, enemy = enemy}

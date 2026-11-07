@@ -75,3 +75,22 @@ def test_the_pick_follows_windows_explorer():
         assert(names(ec.merge({a = true}, {'c', 'd'}, true)) == 'acd')
         assert(names(ec.merge({a = true}, {}, false)) == '')
     """)
+
+
+def test_more_than_six_enemy_groups_keep_their_numbers_and_neighbours_differ():
+    lua = new_runtime()
+    lua.globals().ec = load(lua, "apps.battle.enemy_cards")
+    lua.execute("""
+        local names = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'}
+        local groups = {}
+        for k = 1, 8 do groups[k] = {names[k]} end
+        groups[8] = {'h', 'i'}
+        local ks = ec.numbers(groups)
+        assert(#ks == 8 and ks[8] == 8)
+        assert(table.concat(ec.order(names, groups), '') == 'abcdefghij')
+        -- a 9th group ahead of the units in none, the 7th and 8th apart from the 6th
+        groups[9] = {'j'}
+        assert(table.concat(ec.order({'j', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'}, groups), '') == 'abcdefghij')
+        for k = 1, 39 do assert(ec.colour(k) ~= ec.colour(k + 1)) end
+        assert(ec.colour(7) == 1 and ec.colour(6) == 6)
+    """)

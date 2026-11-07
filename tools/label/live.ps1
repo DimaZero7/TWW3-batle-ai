@@ -8,7 +8,9 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools/label/live.ps1
 #   ... -Run build/human/runs/20261025-192124 -Map ksl_plains_01 -Graphics ultrafull -ExtraMods 3812267837
 #   ... -Run '' -Seed 1000702579   (the generator's armies instead of a run's)
+#   ... -Match 1   (a prepared matchup of tools/label/live_matches.json: the generator's seed, the sides, the map)
 param(
+    [int]$Match = 0,
     [string]$Run = 'build/human/runs/20261025-192124',
     [int]$Seed = 1000702579,
     [string]$Map = 'ksl_plains_01',
@@ -44,7 +46,16 @@ if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is 
 if (Test-Path -LiteralPath $lock) { throw ("The game is held: build/steps/probe_game.lock says '{0}'" -f (Get-Content -LiteralPath $lock -Raw).Trim()) }
 if (docker ps -a --filter "name=^$Container$" --format '{{.Names}}') { throw "Container $Container exists: docker stop $Container" }
 $buildArgs = @('-m', 'tools.build', 'human', '--live-label', '--free-speed', '--timeout', $TimeoutModelSeconds)
-if ($Run) {
+if ($Match -gt 0) {
+    # a prepared matchup (tools/label/live_matches.json): the v3 generator's seed, its sides as they are or swapped, the map
+    $table = Get-Content -LiteralPath (Join-Path $repo 'tools\label\live_matches.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $m = $table.("$Match")
+    if (-not $m) { throw "No matchup $Match in tools/label/live_matches.json" }
+    Write-Output ("Матчап {0}: {1}, карта {2}" -f $Match, $m.name, $m.map)
+    $Map = $m.map
+    $buildArgs += @('--army-seed', $m.seed, '--armies', 'v3')
+    if ($m.swap) { $buildArgs += '--army-swap' }
+} elseif ($Run) {
     $buildArgs += @('--army-from-run', (Join-Path $repo $Run))
     foreach ($x in $Swap) { if ($x) { $buildArgs += @('--army-replace', $x) } }
 } else { $buildArgs += @('--army-seed', $Seed, '--army-swap', '--armies', 'v3') }
@@ -68,7 +79,10 @@ try {
     if ($Graphics) { $graphicsArgs['Graphics'] = $Graphics }
     & (Join-Path $repo 'tools\launcher\launch.ps1') -Target human -LingerSeconds 5 @graphicsArgs
     Start-Sleep -Seconds 3
-    docker logs $Container 2>&1 | Select-Object -Last 3
+    # (the recorder ends with the battle and docker removes its container: no logs to show then - 07.11)
+    if (docker ps -a --filter "name=^$Container$" --format '{{.Names}}') {
+        try { docker logs $Container 2>&1 | Select-Object -Last 3 } catch { }
+    }
 } finally {
     $ErrorActionPreference = 'Continue'
     docker stop -t 10 $Container 2>$null | Out-Null

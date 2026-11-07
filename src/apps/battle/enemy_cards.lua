@@ -24,7 +24,7 @@ M.SEP_IMAGE = 'ui/bai/label/sep.png'
 M.PICK_IMAGE = 'ui/bai/label/pick.png'     -- the pick's frame over a card (the card's own 'selected' look is the game's,
 M.HOVER_IMAGE = 'ui/bai/label/hover.png'   -- bound to its unit: it does not show on ours - the person's battle 07.11)
 M.GROUP_FRAME_IMAGE = 'ui/bai/label/gf%d.png'   -- a group's frame in its colour (tools/label/icons.py)
-M.GROUP_TAB_IMAGE = 'ui/bai/label/g%d.png'      -- its number
+M.GROUP_TAB_IMAGE = 'ui/bai/label/gn%d.png'     -- its number (gn1..gn40, tools/label/icons.py TABS)
 M.TAB = 26
 M.EDGE = 3           -- px: a group frame's edge
 M.GROUP_EDGE_IMAGE = 'ui/bai/label/gb%d.png'   -- its colour, solid (tools/label/icons.py)
@@ -34,7 +34,9 @@ M.UNIT_IMAGE = 'ui/bai/units/%s.png'
 M.GAP = 26           -- px between the last own card and the first enemy card (the separator in the middle)
 M.MARGIN = 510       -- the game's cards strip: screen width less this (hud_battle review_DY fullwidth_margin)
 M.FRAME_H = 48       -- px over a row of cards kept free for the group frames' tabs (the game's tab: 45 px over a card)
-M.GROUPS = 6
+M.COLORS = 6         -- the group colours (config/label.json group_colors): group k's the ((k - 1) % 6 + 1)-th - neighbours
+                     -- never alike; as many groups as the enemy has units (the person's 07.11: a 7th merged into the 6th)
+M.TABS = 40          -- number tabs drawn (a group above: no tab, its frame still)
 M.PARENTS = 8        -- how far up from a clicked component our card is looked for
 
 -- The places of n enemy cards (pure: tests): own = {{x, y, w, h}} the own cards, right / left the strip's edges.
@@ -75,9 +77,22 @@ end
 -- group 1's cards, group 2's, ... (each in the first order), then the units in no group in the first order. As the game
 -- orders its own cards: a unit grouped moves up to its group, before the units in none (the check battle 07.11 17:29:
 -- own greatsword 2 grouped as 2 moved from the 3rd card to the 2nd, before the lord in none).
-function M.order(names, groups, G)
+-- the group numbers in use, in order (pure)
+function M.numbers(groups)
+    local ks = {}
+    for k, v in pairs(groups) do if type(k) == 'number' and v and #v > 0 then ks[#ks + 1] = k end end
+    table.sort(ks)
+    return ks
+end
+
+-- a group's colour number 1..M.COLORS (pure)
+function M.colour(k)
+    return (k - 1) % M.COLORS + 1
+end
+
+function M.order(names, groups)
     local out, used = {}, {}
-    for k = 1, G or M.GROUPS do
+    for _, k in ipairs(M.numbers(groups)) do
         local set = {}
         for _, n in ipairs(groups[k] or {}) do set[n] = true end
         for _, n in ipairs(names) do
@@ -225,14 +240,14 @@ function M.start(opts)
                 local c = e.edges[side]
                 if b and not c then
                     local ok, made = pcall(h.overlay, 'bai_enemy_edge_' .. side .. '_' .. e.id:match('(%d+)$'),
-                        string.format(M.GROUP_EDGE_IMAGE, k), e.uic)
+                        string.format(M.GROUP_EDGE_IMAGE, M.colour(k)), e.uic)
                     if ok then c = made; e.edges[side] = c; e.edge_k = k end
                     if not ok then opts.emit('enemy_group_frame', {group = k, unit = e.name, error = tostring(made)}) end
                 end
                 if c then
                     if b then
                         if e.edge_k ~= k then
-                            pcall(function() h.find(c, 'icon'):SetImagePath(string.format(M.GROUP_EDGE_IMAGE, k), 0) end)
+                            pcall(function() h.find(c, 'icon'):SetImagePath(string.format(M.GROUP_EDGE_IMAGE, M.colour(k)), 0) end)
                         end
                         h.put(c, b)
                     end
@@ -242,7 +257,10 @@ function M.start(opts)
             if k then e.edge_k = k end
         end
         -- each group: the tab over its first card (a child of that card: remade when the first card changes)
-        for k = 1, M.GROUPS do
+        local ks, seen = {}, {}
+        for _, k in ipairs(M.numbers(h.groups)) do ks[#ks + 1] = k; seen[k] = true end
+        for k in pairs(h.frames) do if not seen[k] then ks[#ks + 1] = k end end
+        for _, k in ipairs(ks) do
             local names = h.groups[k]
             local fr = h.frames[k]
             local first = nil
@@ -259,7 +277,7 @@ function M.start(opts)
                 pcall(function() fr.tab:Destroy() end)
                 fr, h.frames[k] = nil, nil
             end
-            if e and h.overlay then
+            if e and h.overlay and k <= M.TABS then
                 if not fr then
                     local ok, tab = pcall(h.overlay, 'bai_enemy_group_tab_' .. k, string.format(M.GROUP_TAB_IMAGE, k), e.uic)
                     if ok then
@@ -293,7 +311,7 @@ function M.start(opts)
         local places, sep, w, hh = M.places(own, #h.cards, left, right)
         local names = {}
         for _, e in ipairs(h.cards) do names[#names + 1] = e.name end
-        local order = M.order(names, h.groups, M.GROUPS)
+        local order = M.order(names, h.groups)
         h.order = order
         local key = table.concat({w, hh, sep[1], sep[2], places[1][1], places[1][2], #h.cards,
             table.concat(order, ' ')}, ',')
@@ -582,7 +600,7 @@ function M.start(opts)
             return 0
         end
         local k = 1
-        while h.groups[k] and #h.groups[k] > 0 and k < M.GROUPS do k = k + 1 end
+        while h.groups[k] and #h.groups[k] > 0 and k < #h.cards do k = k + 1 end
         for _, name in ipairs(names) do
             local was = h.group_of[name]
             if was and h.groups[was] then

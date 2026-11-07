@@ -121,7 +121,10 @@ def test_the_deployment_makes_a_strategist_sample(tmp_path):
         doc = {k: v for k, v in base.items() if k != "units"}
         doc.update(units=units, deploy=True, zones=zones, live=True, groups=groups, selection=[], batch="dep",
                    move=0, t=0, deploy_final=final or None,
-                   chat=[{"n": 1, "t": 0, "text": "держим левый фланг"}] if i >= 1 else None)
+                   chat=[{"n": 1, "t": 0, "text": "держим левый фланг"}] if i >= 1 else None,
+                   commands=[{"n": 1, "t": 240000, "name": "Move Orientation Width", "phase": "deployment",
+                              "deploy_ms": 12500, "selection": ["u0"], "after": {"u0": {"ox": -150.0, "oz": -200.0}}}]
+                   if i >= 2 else None)
         rec.second({k: v for k, v in doc.items() if v is not None})
     for sec in range(3):
         doc = TP.doc_of_sim(st, 0, 1000 * sec, own=1)
@@ -142,3 +145,5 @@ def test_the_deployment_makes_a_strategist_sample(tmp_path):
     chat = [json.loads(x) for x in (f / "chat.jsonl").read_text(encoding="utf-8").splitlines()]
     assert chat[0]["deploy"] and chat[0]["window"] == 0
     assert rec.stats["strategist"] == 1 and rec.stats["strategist_refused"] == 0
+    cmds = [json.loads(x) for x in (f / "commands.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(c["phase"], c["sec"], c["window"]) for c in cmds] == [("deployment", 12.5, 0)]

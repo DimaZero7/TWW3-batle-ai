@@ -150,6 +150,7 @@ class LiveRecorder:
             # sample of it
             self.deploy_doc = doc
             self.chat(doc)
+            self.commands(doc)
             if doc.get("deploy_final"):
                 self.deployed()
             return
@@ -204,17 +205,24 @@ class LiveRecorder:
         """The player's orders as the game handed them to the bridge (src/apps/battle/live_label.lua M.COMMANDS; doc.commands,
         numbered n): each to commands.jsonl once it carries what the order set (after: each ordered unit's ordered
         position ox, oz, bearing ob, width ow, fast) or once it is 2 s old - with the battle's second and the window:
-        name, target (an attack's unit), bool1 / string1 (the command's own values), units (the own selection then)."""
+        name, target (an attack's unit), bool1 / string1 (the command's own values), units (the own selection then);
+        phase 'deployment' (the deployment's orders: sec from the deployment's start, window 0) or 'battle'."""
         for m in doc.get("commands") or []:
             n = int(m.get("n") or 0)
             if n <= self.cmd_seen:
                 continue
             t = float(m.get("t") or 0)
-            if "after" not in m and float(doc.get("t") or 0) - t < 2000:
+            if "after" not in m and float(doc.get("t") or 0) - t < 2000 and not doc.get("deploy"):
                 break                          # (in order: wait for it)
+            if "after" not in m and doc.get("deploy"):
+                break                          # (the deployment's clock stands: the next document brings it)
             self.cmd_seen = n
-            row = {"n": n, "sec": round(t / 1000.0, 1), "window": self.stats["windows"] + 1,
-                   "window_sec": self.win["sec"] if self.win else None, "name": m.get("name"), "target": m.get("unit"),
+            deploy = m.get("phase") == "deployment"
+            row = {"n": n, "phase": "deployment" if deploy else "battle",
+                   "sec": round(float(m.get("deploy_ms") or 0) / 1000.0, 1) if deploy else round(t / 1000.0, 1),
+                   "window": 0 if deploy else self.stats["windows"] + 1,
+                   "window_sec": None if deploy else (self.win["sec"] if self.win else None),
+                   "name": m.get("name"), "target": m.get("unit"),
                    "bool1": m.get("bool1"), "string1": m.get("string1"), "units": m.get("selection") or [],
                    "ordered": m.get("after") or {}}
             with open(self.folder / "commands.jsonl", "a", encoding="utf-8") as f:

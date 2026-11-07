@@ -17,7 +17,12 @@ DIGITS = {
     "1": (0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E), "2": (0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F),
     "3": (0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E), "4": (0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02),
     "5": (0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E), "6": (0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E),
+    "7": (0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08), "8": (0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E),
+    "9": (0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C), "0": (0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E),
 }
+# the enemy groups' number tabs gn1..gn40 (src/apps/battle/enemy_cards.lua: a group of any number, its colour the k-th of
+# group_colors round the circle - neighbours never alike)
+TABS = 40
 
 
 def _rgb(hex_colour):
@@ -92,6 +97,31 @@ def frame(w=60, h=130, t=3, colour=(255, 214, 90, 255)):
     return png(px, w, h)
 
 
+def number_tab(k, colour, size=SIZE):
+    """A group's tab: a filled disc of colour with a white rim and the number k (one or two digits)."""
+    c = _rgb(colour)
+    r0 = size / 2 - 1.5
+    m = size / 2 - 0.5
+    px = [[(0, 0, 0, 0)] * size for _ in range(size)]
+    for y in range(size):
+        for x in range(size):
+            d = ((x - m) ** 2 + (y - m) ** 2) ** 0.5
+            if d <= r0:
+                px[y][x] = (255, 255, 255, 255) if d > r0 - 4 else c + (255,)
+    text = str(k)
+    s = 5 if len(text) == 1 else 4
+    w = len(text) * 5 * s + (len(text) - 1) * s
+    x0, y0 = int(m - w / 2 + 1), int(m - 7 * s / 2 + 1)
+    for n, ch in enumerate(text):
+        for j, bits in enumerate(DIGITS[ch]):
+            for i in range(5):
+                if bits >> (4 - i) & 1:
+                    for yy in range(y0 + j * s, y0 + (j + 1) * s):
+                        for xx in range(x0 + n * 6 * s + i * s, x0 + n * 6 * s + (i + 1) * s):
+                            px[yy][xx] = (255, 255, 255, 255)
+    return png(px, size, size)
+
+
 def pick_ring(size=SIZE, colour=(255, 214, 90)):
     """The enemy's pick over its unit on the field (src/apps/battle/live_label.lua RING_IMAGE): a yellow ring, as the
     ring the game puts round a selected own unit's banner."""
@@ -110,6 +140,9 @@ def pack_files():
            f"{FOLDER}\\hover.png": frame(colour=(255, 255, 255, 150)),
            f"{FOLDER}\\clear.png": png([[(0, 0, 0, 0)] * 4 for _ in range(4)], 4, 4),
            f"{FOLDER}\\pick_ring.png": pick_ring()}
+    colours = cfg()["group_colors"][:6]
+    for k in range(1, TABS + 1):
+        out[f"{FOLDER}\\gn{k}.png"] = number_tab(k, colours[(k - 1) % len(colours)])
     for k, colour in enumerate(cfg()["group_colors"][:6], start=1):
         out[f"{FOLDER}\\g{k}.png"] = icon(k, colour)
         out[f"{FOLDER}\\gf{k}.png"] = frame(colour=_rgb(colour) + (255,))
