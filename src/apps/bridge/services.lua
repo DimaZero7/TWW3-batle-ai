@@ -388,6 +388,98 @@ function M.active_effects(read)
     return out
 end
 
+-- The deployment by the companion's strategist (apps.bridge.deploy_adapter; docs/ru/apps/bridge.md "Расстановка
+-- стратегом"). The game writes the deployment document once (deploy_document): our units' full rows, the enemy's by its
+-- composition only (name, key, men, health - the pre-battle screen; no place, it is not seen), both deployment zones
+-- {x, z, b, front, depth} as the battle file declares them. The companion answers with the plan:
+--   tww3_bai_nn_plan 1
+--   batch <batch>
+--   think_ms <ms>
+--   place <unit> <x> <z> <bearing deg> <width m>     (one per own unit: teleport_to_location's arguments)
+--   end
+M.PLAN_FORMAT = 'tww3_bai_nn_plan 1'
+M.COMPOSITION = {'n', 'side', 'key', 'men', 'hp'}
+
+function M.deploy_document(meta, zones, own_rows, enemy_rows)
+    local units = {}
+    for _, r in ipairs(own_rows) do units[#units + 1] = r end
+    for _, r in ipairs(enemy_rows) do
+        local row = {v = true}      -- the composition is known: the pre-battle screen shows it
+        for _, k in ipairs(M.COMPOSITION) do row[k] = r[k] end
+        units[#units + 1] = row
+    end
+    local doc = {move = 0, t = 0, deploy = true, zones = zones, units = units, abilities_used = {},
+        abilities_count = {}}
+    for k, v in pairs(meta) do doc[k] = v end
+    return doc
+end
+
+-- The plan's text -> {batch, think_ms, places = {{unit, x, z, b, w}...}}, or nil and the reason (no 'end': not
+-- complete; a bad line: refused whole).
+function M.parse_plan(text)
+    if type(text) ~= 'string' or text == '' then return nil, 'empty' end
+    local doc = {places = {}}
+    local header, complete = false, false
+    for line in text:gmatch('[^\r\n]+') do
+        local w = words(line)
+        if not header then
+            if line ~= M.PLAN_FORMAT then return nil, 'unknown format' end
+            header = true
+        elseif w[1] == 'batch' then
+            doc.batch = w[2]
+        elseif w[1] == 'think_ms' then
+            doc.think_ms = tonumber(w[2])
+        elseif w[1] == 'place' then
+            local p = {unit = w[2], x = tonumber(w[3]), z = tonumber(w[4]), b = tonumber(w[5]), w = tonumber(w[6])}
+            if not (p.unit and value.finite(p.x) and value.finite(p.z) and value.finite(p.b) and value.finite(p.w)
+                and p.w > 0) then
+                return nil, 'bad place: ' .. line
+            end
+            doc.places[#doc.places + 1] = p
+        elseif w[1] == 'end' then
+            complete = true
+        end
+    end
+    if not complete then return nil, 'incomplete' end
+    if not doc.batch then return nil, 'no batch' end
+    return doc
+end
+
+-- A point (x, z) in a zone's axes: (across, along its forward) from its centre.
+function M.zone_local(zone, x, z)
+    local a = math.rad(zone.b)
+    local dx, dz = x - zone.x, z - zone.z
+    return dx * math.cos(a) - dz * math.sin(a), dx * math.sin(a) + dz * math.cos(a)
+end
+
+-- One unit's placement read after the teleport (pure): plan p {x, z, b, w}, read m {x, z, b, w} (position, bearing(),
+-- ordered_width()), its own zone, engine_b - the facing the engine stands at for p.b (apps.orders.facing). ->
+-- {d_m: the read centre from the planned one, db: the read bearing from engine_b (deg), edge_m: how far inside the zone
+-- the ends of its front are (< 0: out), inside, far (d_m > FAR_M), turned (db > TURN_DEG)}. Logged, never fatal.
+M.DEPLOY_FAR_M = 10          -- 26.09.2026: up to 9.4 m between the point sent and the unit's native place
+M.DEPLOY_TURN_DEG = 360 / 128  -- half a sector of the engine's 64: the bearing read is not in the sector sent
+function M.deploy_check(p, m, zone, engine_b)
+    local out = {}
+    if not (value.finite(m.x) and value.finite(m.z)) then return {missing = true} end
+    out.d_m = math.sqrt((m.x - p.x) ^ 2 + (m.z - p.z) ^ 2)
+    if value.finite(m.b) then out.db = math.abs((m.b - engine_b + 180) % 360 - 180) end
+    local half = (value.finite(m.w) and m.w or p.w) / 2
+    local a = math.rad(value.finite(m.b) and m.b or p.b)
+    local edge
+    for _, sgn in ipairs({-1, 1}) do
+        -- an end of the unit's front: half its ordered width to the right (bearing + 90) or the left
+        local ex, ez = m.x + sgn * half * math.cos(a), m.z - sgn * half * math.sin(a)
+        local s, f = M.zone_local(zone, ex, ez)
+        local e = math.min(zone.front / 2 - math.abs(s), zone.depth / 2 - math.abs(f))
+        edge = edge and math.min(edge, e) or e
+    end
+    out.edge_m = edge
+    out.inside = edge >= 0
+    out.far = out.d_m > M.DEPLOY_FAR_M
+    out.turned = out.db ~= nil and out.db > M.DEPLOY_TURN_DEG
+    return out
+end
+
 -- Real milliseconds between two os.clock() readings (nil when unknown).
 function M.real_ms(from, to)
     if not (value.finite(from) and value.finite(to)) then return nil end

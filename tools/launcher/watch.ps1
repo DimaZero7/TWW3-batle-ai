@@ -18,6 +18,10 @@
 #                                         B's weights, the companion's --enemy-checkpoint; with -NoBuild and no
 #                                         -EnemyCheckpoint the build's --enemy-net-name is used, else -Checkpoint's)
 #   ... -Graphics human2k                (a graphics preset for the run, launch.ps1 -Graphics; default: BAI_GRAPHICS)
+#   ... -NoBuild -Strategist formula -StrategistTask hold   (a build with --deploy strategist: the companion's strategist
+#                                         places our side - its formula or a checkpoint; any own_ai: not net -> the
+#                                         companion answers only the deployment, --no-own; docs/ru/training/strategist.md)
+#   ... -Container agent-deploy          (the companion container's name; default tww3-bai-companion)
 param(
     [ValidateSet('nn-arena', 'lord-duel', 'human')][string]$Target = 'nn-arena',
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
@@ -31,14 +35,18 @@ param(
     [switch]$Greedy,
     [int]$LingerSeconds = 30,
     [ValidateSet('', 'ultra', 'low', 'lowigpu', 'human2k')][string]$Graphics = '',
+    [string]$Strategist = '',
+    [ValidateSet('hold', 'destroy')][string]$StrategistTask = 'hold',
+    [string]$Container = 'tww3-bai-companion',
     [switch]$NoBuild
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $python = Join-Path $repo '.venv\Scripts\python.exe'
-$container = 'tww3-bai-companion'
+$container = $Container
 $exchangeFiles = @('tww3_bai_nn_state.json', 'tww3_bai_nn_state.json.tmp', 'tww3_bai_nn_orders.txt', 'tww3_bai_nn_orders.txt.tmp',
-    'tww3_bai_nn_state_enemy.json', 'tww3_bai_nn_state_enemy.json.tmp', 'tww3_bai_nn_orders_enemy.txt', 'tww3_bai_nn_orders_enemy.txt.tmp')
+    'tww3_bai_nn_state_enemy.json', 'tww3_bai_nn_state_enemy.json.tmp', 'tww3_bai_nn_orders_enemy.txt', 'tww3_bai_nn_orders_enemy.txt.tmp',
+    'tww3_bai_nn_deploy.json', 'tww3_bai_nn_deploy.json.tmp', 'tww3_bai_nn_plan.txt', 'tww3_bai_nn_plan.txt.tmp')
 
 $settings = Get-Content -LiteralPath (Join-Path $repo 'config\default.json') -Raw | ConvertFrom-Json
 $localConfig = Join-Path $repo 'config\local.json'
@@ -70,7 +78,9 @@ $manifest = Get-Content -LiteralPath (Join-Path $repo ('build\' + $Target + '\ma
 $human = $Target -eq 'human'
 if ($human) {
     if ($manifest.config.own_ai -ne 'human' -or $manifest.config.enemy_ai -ne 'companion') { throw "build/human has no enemy under the companion: python -m tools.build human --enemy-ai net ..." }
-} elseif ($manifest.config.own_ai -ne 'net') { throw "build/$Target is not a net build; run without -NoBuild" }
+} elseif ($manifest.config.own_ai -ne 'net' -and -not $Strategist) { throw "build/$Target is not a net build; run without -NoBuild" }
+if ($Strategist -and $manifest.config.deploy -ne 'strategist') { throw "build/$Target has no strategist deployment: python -m tools.build nn-arena --deploy strategist ..." }
+if ($Strategist -and $Strategist -ne 'formula' -and -not (Test-Path -LiteralPath (Join-Path $repo $Strategist))) { throw "No strategist checkpoint $Strategist (a path inside the repository)" }
 $enemyScript = ''
 if ($manifest.config.enemy_ai -eq 'companion') { $enemyScript = [string]$manifest.config.enemy_script }
 if ($EnemyAi -and ($EnemyAi -ne 'game') -ne [bool]$enemyScript) { throw "build/$Target enemy ($($manifest.config.enemy_ai) $enemyScript) is not -EnemyAi $EnemyAi; build it again" }
@@ -94,6 +104,12 @@ if ($manifest.config.soldiers_state) { $dockerArgs += ' --shape' }   # the soldi
 if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
 if ($EnemyCheckpoint) { $dockerArgs += ' --enemy-checkpoint /repo/' + ($EnemyCheckpoint -replace '\\', '/') }
 if ($human) { $dockerArgs += ' --no-own' }   # a human plays side 1: nobody answers its bridge
+if ($Strategist) {
+    $who = if ($Strategist -eq 'formula') { 'formula' } else { '/repo/' + ($Strategist -replace '\\', '/') }
+    $dockerArgs += ' --strategist ' + $who + ' --strategist-task ' + $StrategistTask
+    if ($manifest.config.own_ai -ne 'net' -and -not $human) { $dockerArgs += ' --no-own' }   # only the deployment is answered
+    Write-Output ("The deployment: the strategist ({0}, task {1}) in the companion" -f $Strategist, $StrategistTask)
+}
 $runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
 $companion = Start-Process -FilePath docker -ArgumentList $dockerArgs -NoNewWindow -PassThru

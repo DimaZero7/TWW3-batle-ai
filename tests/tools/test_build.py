@@ -143,6 +143,38 @@ class TestRecorders:
         assert f"<timeout_winning_alliance_index>{winner}</timeout_winning_alliance_index>" in \
             (tmp_path / "nn_arena.xml").read_text(encoding="utf-8")
 
+    def test_nn_arena_deploy_strategist_writes_its_zones_outside_scenarios(self, tmp_path, monkeypatch):
+        # The strategist's zones (its cases': 1200 x 360 m, the fronts 50 m apart) in a battle file of its own;
+        # the entry gets them in the strategist's format; scenarios/nn_arena.xml is not written.
+        import re
+        from tools.nn import scenario as nn_scenario
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append((config, scenario))
+                            or {})
+        assert build.main(["nn-arena", "--own-ai", "defend", "--deploy", "strategist"]) == 0
+        config, scenario = written[0]
+        assert not (tmp_path / "nn_arena.xml").exists() and scenario.endswith("arena_strategist.xml")
+        assert config["deploy"] == "strategist" and config["deploy_wait_s"] == build.DEPLOY_WAIT_S
+        own, enemy = config["deploy_zones"]["own"], config["deploy_zones"]["enemy"]
+        assert own == {"x": -205.0, "z": 0.0, "b": 90, "front": 1200.0, "depth": 360.0}
+        assert enemy == {"x": 205.0, "z": 0.0, "b": 270, "front": 1200.0, "depth": 360.0}
+        xml = (tmp_path / "nn-arena" / "arena_strategist.xml").read_text(encoding="utf-8")
+        areas = re.findall(r'<centre x="([-\d.]+)" y="[-\d.]+"/><width metres="(\d+)"/><height metres="(\d+)"/>', xml)
+        assert areas == [("-205.0", "1200", "360"), ("205.0", "1200", "360")]
+        # every unit of the battle file inside its side's zone
+        for side, zone in (("own", own), ("enemy", enemy)):
+            for u in config["units"][side]:
+                assert abs(u["x"] - zone["x"]) < zone["depth"] / 2 and abs(u["z"] - zone["z"]) < zone["front"] / 2
+        # without it: no zones, the old square areas
+        written.clear()
+        assert build.main(["nn-arena", "--own-ai", "defend"]) == 0
+        assert "deploy" not in written[0][0] and "deploy_zones" not in written[0][0]
+        assert '<width metres="300"/><height metres="300"/>' in (tmp_path / "nn_arena.xml").read_text(encoding="utf-8")
+        with pytest.raises(SystemExit):
+            build.main(["human", "--deploy", "strategist"])
+
     def test_nn_arena_net_gives_our_side_to_the_network(self, tmp_path, monkeypatch):
         from tools.nn import scenario as nn_scenario
         monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")

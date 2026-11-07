@@ -3,8 +3,8 @@
 A group's zone is the tactician's tiles (tactic/zone.grid of n and the form, tile_m = 80 m) centred on the chosen cell,
 turned by the chosen sector. The melee units fill the rows of tiles from the front, the shooters after them (each
 kind by slot); a row's units are centred in it; a unit stands on its place's centre facing the zone's turn. The result
-is per unit exactly the game's teleport_to_location(position, bearing, width_m): x, z, the bearing rounded to the
-engine's 64 sectors (docs/ru/game/units/commands.md), the width - the unit's own frontage, at most a tile less
+is per unit exactly the game's teleport_to_location(position, bearing, width_m): x, z, the bearing - the middle of its
+sector of the engine's 64 (docs/ru/game/units/commands.md; round_bearing), the width - the unit's own frontage, at most a tile less
 gap_m (the neighbours never overlap).
 
     places(members, shooter, cx, cz, heading, line, width0)   {x, z, b, width, on} [B, N]
@@ -23,8 +23,11 @@ GAP_M = 6.0               # tools/nn/armies/place.py LATERAL_GAP_M: between neig
 
 
 def round_bearing(b):
+    """The facing the engine stands at for bearing b: the MIDDLE of its sector of 64 (measured 28.09.2026, the game's
+    rule in src/apps/orders/facing.lua engine(): 90 -> 92.81). The place sent to the game is that facing, so the
+    simulator's unit faces where the game's does (was the sector's edge: 2.8 deg off the game's)."""
     step = 360.0 / SECTORS
-    return torch.remainder(torch.round(b / step) * step, 360.0)
+    return torch.remainder((torch.floor(torch.remainder(b, 360.0) / step) + 0.5) * step, 360.0)
 
 
 def places(members, shooter, cx, cz, heading, line, width0):

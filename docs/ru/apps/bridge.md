@@ -314,6 +314,42 @@ wh_main_spell_metal_searing_doom enemy_spear_3`; строк сколько уг�
 формат остаётся `tww3_bai_nn_orders 1`).
 Без последней строки `end` игра ничего не берёт. Отряд без строки сохраняет свой приказ.
 
+## Расстановка стратегом
+
+Сборка `python -m tools.build nn-arena --deploy strategist` (точка входа [nn_arena](entries.md#nn_arena),
+`config.deploy = 'strategist'`): в фазе `Deployment` нашу сторону ставит стратег помощника
+([стратег, «В игре»](../training/strategist.md#в-игре)), а не места файла боя. Код — `src/apps/bridge/deploy_adapter.lua`
+(движок), правила без движка — `services.lua` (`deploy_document`, `parse_plan`, `deploy_check`). Один раз за бой:
+
+1. Игра пишет **документ расстановки** `tww3_bai_nn_deploy.json`: `batch`, `deploy = true`, `move = 0`, `factions`,
+   `attacker`, `map`, `zones = {own, enemy}` (каждая `{x, z, b, front, depth}` — как в файле боя, `tools/nn/scenario.py`
+   `zones`), `units`: наши — строки целиком, как у моста; враг — **только состав** `{n, side, key, men, hp, v = true}`
+   (экран перед боем: ни места, ни состояния).
+2. Ждёт **план** `tww3_bai_nn_plan.txt` раз в 100 мс реального времени, до `deploy_wait_s` (120 с):
+
+   ```
+   tww3_bai_nn_plan 1
+   batch 20261107T014441-nn-2232
+   think_ms 134.9
+   place own_spear_1 -248.00 -376.00 92.8125 29.60
+   ...
+   end
+   ```
+
+   Строка `place`: отряд, точка x, z, поворот (середина сектора движка), ширина строя — ровно аргументы
+   `teleport_to_location`. Без `end` план не берётся; чужой `batch` — тоже. Нет плана к сроку — `nn_deploy` `no_plan`, фаза
+   кончается как раньше (места файла боя).
+3. Берёт каждый отряд плана под управление и ждёт флага управления (`is_script_controlled`; в проверке 26.09 он
+   приходил через ~200 мс) — опрос раз в 100 мс, не дольше 3 с, потом ставит всё равно.
+4. `teleport_to_location` каждому (`apps.orders.adapter` `teleport`).
+5. Через `deploy_settle_ms` (1000 мс реального времени) читает каждый отряд: место, `bearing()`, `ordered_width()`,
+   `unit_distance` до поставленных раньше (расстояние коробок движка) — и пишет отклонения от плана (`nn_deploy_check`).
+   Отклонения бой не останавливают.
+6. Отпускает отряды и кончает фазу; дальше нашей стороной командует, кто задан (`own_ai`: планировщик, мост сети, человек).
+
+Всё на таймерах реального времени: расстановка не ждёт часов боя. Врага ставит файл боя, как всегда. Без
+`config.deploy` всё как раньше: фаза кончается через 1 с.
+
 ## Вход сети отряда: один в один с симулятором
 
 Сеть отряда (личный уровень, `tools/nn/unit`) в игре: помощник строит её сырую строку (`view.RAW`) из полей моста —
@@ -406,6 +442,9 @@ Stand Your Ground 11 раз, отказов нет; 714 ходов, пропус
 | `parse_orders(text)` | Файл приказов → `{move, batch, think_ms, orders, abilities}` (способность — `{unit, key, target}`, без цели — сам отряд) или `nil` и причина (`incomplete`, `bad kind`, `ability without a unit or a key`…) |
 | `changed(old, new)` | Другой ли приказ (вид, цель, бег, точка дальше `REPEAT_M` = 5 м) |
 | `state_document(meta, move, t, units, done, used)` | Состояние как таблица для JSON (`used` → `abilities_used`) |
+| `deploy_document(meta, zones, own_rows, enemy_rows)` | Документ расстановки: наши строки целиком, у врага только `COMPOSITION` (`n`, `side`, `key`, `men`, `hp`) и `v = true`, зоны |
+| `parse_plan(text)` | План стратега → `{batch, think_ms, places = {{unit, x, z, b, w}}}` или `nil` и причина (`incomplete`, `bad place`, `no batch`) |
+| `deploy_check(p, m, zone, engine_b)` | Отряд после переноса: `d_m`, `db`, `edge_m`, `inside`, `far`, `turned` ([расстановка](#расстановка-стратегом)) |
 | `active_effects(read)` | Ключи фаз, действующих на отряде, с его карточки (`read(field)` → значение CcoBattleUnit) или `nil`, если список не прочесть |
 | `real_ms(a, b)` | Миллисекунды между двумя замерами `os.clock()` |
 | `fire_freely(me, target, range)` | Отдать атаку как стрельбу по выбору: цель стоит в рукопашной в досягаемости |
@@ -445,6 +484,8 @@ Stand Your Ground 11 раз, отказов нет; 714 ходов, пропус
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), при изменении |
 | `nn_effects` | `u`, `fx` (фазы на отряде или `unknown`), при изменении |
 | `nn_skirmish` | только при `skirmish = 'off'`: `action` `off` (при старте; `units` — у кого выключен, `was` — был ли включён до того) или `again` (`u`: на решении режим оказался включён и выключен снова) |
+| `nn_deploy` | Только при `deploy = 'strategist'`: `stage` — `asked` (`own`, `enemy`, `wait_s`, `write_mode`), `plan` (`places`, `unknown` — отряды плана, которых нет, `unplanned` — наши без места, `think_ms`, `polls`), `control` (`confirmed`, `polls`), `teleported` (`units`, `settle_ms`), `placed` (`units`, `far` — дальше `DEPLOY_FAR_M` = 10 м, `turned` — поворот вне сектора посланного (больше половины сектора, 2,8°), `outside` — край фронта вне зоны, `overlaps` — коробки ближе 1 м, `missing`, `max_d_m`, `max_db`, `min_pair_m`), `no_plan` (`polls`, `why`), `empty_plan` |
+| `nn_deploy_check` | На каждый отряд плана: `u`, `plan {x, z, b, w}`, `at {x, z, b, w}` (место, `bearing()`, `ordered_width()`), `d_m`, `db` (от поворота движка для посланного), `edge_m` (запас концов фронта до края зоны, < 0 — вне), `inside`, `far`, `turned`, `pair_m` (ближайшая коробка из поставленных раньше) |
 | `result` (дополнено) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (приказы, отданные снова при сборе), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_reaims`, `nn_empty_melees`, `nn_aims_kept` (не отданные приказы: стрелок уже был на этой цели), `nn_skirmish` (`off` или `game`), `nn_skirmish_again` (только при `off`) |
 
 В `result` также входят `nn_reaims` и `nn_empty_melees` — число этих вмешательств. Проверка

@@ -46,6 +46,10 @@
 -- unit idle under fire is kicked ('idle_kick': stage 1 back to the planner,
 -- stage 2 a planner of its own that attacks).
 -- The battle ends on the game's outcome, a stall, the timeout or the deadline: 'result'.
+-- config.deploy = 'strategist' (tools.build nn-arena --deploy strategist): in the Deployment phase the companion's
+-- strategist places our side (apps.bridge.deploy_adapter: the deployment document, its plan, the teleports, the places
+-- read back - events nn_deploy, nn_deploy_check), then the phase ends; no plan within config.deploy_wait_s real seconds
+-- - as without it. Absent: the phase ends after 1 s (the battle file's places). The enemy stays where the file puts it.
 local battle = require('apps.battle.adapter')
 local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
@@ -56,6 +60,7 @@ local map = require('apps.map.adapter')
 local bridge = require('apps.bridge.adapter')
 local observer = require('apps.telemetry.observer_adapter')
 local orders = require('apps.orders.adapter')
+local deploy = require('apps.bridge.deploy_adapter')
 
 local M = {}
 
@@ -107,6 +112,7 @@ function M.main(bm, config, globals)
         pcall(function() bm:remove_process(DECIDE) end)
         pcall(function() bm:remove_process(POLL) end)
         pcall(function() bm:remove_process('tww3_bai_nn_arena_start') end)
+        deploy.cancel(bm)
     end
     local function fail(err)
         cleanup()
@@ -540,6 +546,30 @@ function M.main(bm, config, globals)
             end
         end))
         local function deployment()
+            if config.deploy == 'strategist' then
+                if state.deploy then return end
+                local function rows(side)
+                    return function()
+                        local out = {}
+                        for _, r in ipairs(net_rows()) do
+                            if r.side == side then out[#out + 1] = r end
+                        end
+                        return out
+                    end
+                end
+                state.deploy = deploy.start({bm = bm, army = state.own_army, own = state.sides[1],
+                    enemies = state.sides[2], own_rows = rows(1), enemy_rows = rows(2), vec = vec, emit = emit,
+                    zones = config.deploy_zones, wait_s = config.deploy_wait_s, settle_ms = config.deploy_settle_ms,
+                    guard = guarded,
+                    meta = {batch = state.batch, factions = config.factions, map = config.map,
+                        attacker = config.enemy_role == 'defend' and 1 or 2},
+                    done = function()
+                        flush()
+                        bm:end_current_battle_phase()
+                    end})
+                flush()
+                return
+            end
             bm:callback(guarded(function() bm:end_current_battle_phase() end), 1000, 'tww3_bai_nn_arena_start')
         end
         bm:register_phase_change_callback('Deployment', guarded(deployment))

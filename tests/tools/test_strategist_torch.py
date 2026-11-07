@@ -71,7 +71,7 @@ def test_the_formula_groups_places_and_commands():
     assert int(errs.sum()) == 0
     step = 360.0 / DP.SECTORS
     b = places["b"][pre.own]
-    assert bool(((b / step - torch.round(b / step)).abs() < 1e-3).all())
+    assert bool(((b / step - torch.floor(b / step) - 0.5).abs() < 1e-3).all())     # the sector's middle, as the game
     assert bool((places["width"][pre.own] <= 74.0 + 1e-4).all())
     # 'hold' at the back, 'attack' at the front of my zone
     from tools.nn.strategist import zones as ZS

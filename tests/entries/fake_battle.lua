@@ -62,9 +62,9 @@ function F.unit(name, kind, x, z)
     function u:owned_passive_special_abilities() return {} end
     function u:unit_distance() return 50 end
     function u:unit_in_range() return false end
-    function u:bearing() return 0 end
+    function u:bearing() return self.tb or 0 end
     function u:ordered_bearing() return 0 end
-    function u:ordered_width() return 30 end
+    function u:ordered_width() return self.tw or 30 end
     function u:ordered_position() return self.pos end
     function u:is_moving_fast() return false end
     function u:slow_speed() return 4 end
@@ -95,7 +95,13 @@ local function controller(log)
         self.unit.moving = not ((self.unit.range or 0) > 0 and (self.unit.ammo or 0) > 0)
         log[#log + 1] = 'attack' .. (enemy and (' ' .. enemy:name()) or '')
     end
-    function uc:teleport_to_location() end
+    -- the last teleport's arguments; a unit with follow_teleport stands where it was sent (facing it, that width)
+    function uc:teleport_to_location(p, b, w)
+        self.unit.tp = {x = p.x, z = p.z, b = b, w = w}
+        if self.unit.follow_teleport then
+            self.unit.pos, self.unit.tb, self.unit.tw = p, b, w
+        end
+    end
     function uc:goto_location(p, run)
         self.unit.moving = true
         log[#log + 1] = string.format('goto %s %g %g %s', self.unit:name(), p:get_x(), p:get_z(), tostring(run))

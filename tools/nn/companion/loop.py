@@ -9,6 +9,9 @@
         [--enemy-script net --enemy-checkpoint B.pt]   (the network against another network: side 2 by B's
                                          weights, its own general if B has one; default: the --checkpoint's)
         [--no-general] [--general-set replan_s=30]   (a checkpoint with a general, S28: tools/nn/companion/general.py)
+        [--strategist formula|<strategist checkpoint> --strategist-task hold|destroy]   (tools.build nn-arena --deploy
+                                         strategist: the strategist answers the deployment document once a battle,
+                                         tools/nn/companion/deploy.py; with --no-own it is the only one answered)
 
 One line per decision: move number, battle time, how long the network took, the orders.
 A new battle (a new batch in the state) starts the network's memory afresh (and a v2 network's commitment: its
@@ -172,8 +175,33 @@ class Seat:
         self.done = False
 
 
+class DeploySeat:
+    """The deployment's document and plan (tools/nn/companion/deploy.py): answered once a battle (a new batch)."""
+
+    def __init__(self, game, strategist, log=None):
+        from tools.nn.companion import deploy
+        self.deploy = deploy
+        self.doc, self.plan = Path(game) / deploy.DOC, Path(game) / deploy.PLAN
+        self.strategist, self.log = strategist, log
+        first = exchange.read_state(self.doc)
+        self.last = first["batch"] if first else None     # a file of an earlier run: not answered
+
+    def poll(self, out):
+        doc = exchange.read_state(self.doc)
+        if doc is None or not doc.get("deploy") or doc["batch"] == self.last:
+            return False
+        self.last = doc["batch"]
+        text, record = self.strategist.decide(doc)
+        attempts = exchange.write_atomic(self.plan, text)
+        out(self.deploy.describe(record))
+        if self.log:
+            with open(self.log, "a", encoding="utf-8", newline="\n") as f:
+                f.write(json.dumps(dict(record, event="deploy", write_attempts=attempts)) + "\n")
+        return True
+
+
 def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False, idle_exit_s=0, out=print,
-        enemy=None, enemy_log=None):
+        enemy=None, enemy_log=None, strategist=None):
     """The loop. Returns when the battle is done (exit_on_done) or nothing new came for idle_exit_s.
     brain: the network for our side (side 1), or None when nobody answers it (a human plays it).
     enemy: who answers the enemy's bridge too (exchange.ENEMY_STATE / ENEMY_ORDERS), after our side's answer to
@@ -191,10 +219,14 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                           lambda doc: enemy.decide(doc, brain.orders_before(doc["batch"], doc["move"])
                                                    if brain is not None else {}),
                           enemy_log, "enemy "))
-    assert seats, "nobody to answer"
+    deploy = DeploySeat(game, strategist, log) if strategist is not None else None
+    assert seats or deploy, "nobody to answer"
     last_new, busy_until = time.monotonic(), 0.0
     while True:
         new = False
+        if deploy is not None and deploy.poll(out):
+            new, last_new = True, time.monotonic()
+            busy_until = last_new + BUSY_S
         for seat in seats:
             doc = exchange.read_state(seat.state)
             if doc is None or (doc["batch"], doc["move"]) == seat.last:
@@ -230,7 +262,7 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                     if plans:
                         row["general"] = plans                   # the general's plans made at this decision
                     f.write(json.dumps(row) + "\n")
-        if exit_on_done and all(seat.done for seat in seats[:1]):
+        if exit_on_done and seats and all(seat.done for seat in seats[:1]):
             return
         if not new:
             if idle_exit_s and time.monotonic() - last_new > idle_exit_s:
@@ -272,6 +304,12 @@ def main(argv=None):
     parser.add_argument("--general-set", action="append", default=[], metavar="KEY=VALUE",
                         help="a GeneralConfig field over the checkpoint's for the game (e.g. replan_s=30); deploy is "
                              "'script' (the bridge does not move units)")
+    parser.add_argument("--strategist",
+                        help="the deployment by the strategist (tools.build nn-arena --deploy strategist): 'formula' or "
+                             "a strategist checkpoint (build/diag_strategist/run4/latest.pt), greedy; answers the "
+                             "deployment document once a battle (tools/nn/companion/deploy.py)")
+    parser.add_argument("--strategist-task", choices=("hold", "destroy"), default="hold",
+                        help="the battle's task the strategist is given (no level above it yet)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -289,8 +327,8 @@ def main(argv=None):
         print("companion: the checkpoint has a general; --no-general: played without it")
     if args.log:
         Path(args.log).parent.mkdir(parents=True, exist_ok=True)
-    if args.no_own and not args.enemy_script:
-        parser.error("--no-own needs --enemy-script: somebody must be answered")
+    if args.no_own and not (args.enemy_script or args.strategist):
+        parser.error("--no-own needs --enemy-script or --strategist: somebody must be answered")
     if args.enemy_checkpoint and args.enemy_script != "net":
         parser.error("--enemy-checkpoint needs --enemy-script net")
     enemy, enemy_log = None, None
@@ -312,12 +350,18 @@ def main(argv=None):
         who = "the network" if args.enemy_script == "net" else f"the script {args.enemy_script}"
         print(f"companion: the enemy side by {who}; watching "
               f"{Path(args.game) / exchange.ENEMY_STATE}")
+    strategist = None
+    if args.strategist:
+        from tools.nn.companion.deploy import Strategist
+        strategist = Strategist(args.strategist, args.strategist_task)
+        print(f"companion: the strategist ({args.strategist}, task {args.strategist_task}) answers "
+              f"{Path(args.game) / 'tww3_bai_nn_deploy.json'}")
     try:
         run(args.game, None if args.no_own else Brain(actor, args.greedy, args.temperature, shape=args.shape,
                                                       general=gcfg),
             args.log,
             exit_on_done=args.exit_on_done,
-            idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log)
+            idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log, strategist=strategist)
     except KeyboardInterrupt:
         pass
     return 0

@@ -19,6 +19,7 @@ Usage:
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like   # the enemy under the simulator's script
     python -m tools.build nn-arena --army-seed 1000920026 --enemy-ai net --net-name A.pt --enemy-net-name B.pt   # net v net
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like --skirmish off   # no skirmish mode
+    python -m tools.build nn-arena --own-ai defend --deploy strategist   # the strategist places our side (companion)
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
@@ -206,6 +207,10 @@ ENEMY_SCRIPTS = ("ai_like", "nearest", "hold_shoot", "hold")
 LORD_SWARM_TICK_MS = 200
 # nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
 TIMEOUT_MARGIN_S = 60
+# nn-arena --deploy strategist: real seconds the deployment waits for the companion's plan (then as before: no plan),
+# and real ms after the teleports before the places are read (the 26.09.2026 check read them 1000 ms after).
+DEPLOY_WAIT_S = 120
+DEPLOY_SETTLE_MS = 1000
 # human: every soldier's position every this many ticks (a reading of all men takes ~50 ms).
 HUMAN_SOLDIERS_EVERY = 5
 ARENA_TARGETS = ("nn-arena", "human")
@@ -340,6 +345,14 @@ def side_labels(args):
     return {"own": args.label_own or own, "enemy": args.label_enemy or enemy}
 
 
+def strategist_zone(arena):
+    """The arena with the strategist's deployment areas (tools/nn/scenario.py deploy_zone): the zones of its cases
+    (config/nn/strategist.json cases.zone_m, gap_m), so the zones it sees in the game are those it learnt with."""
+    cases = json.loads((project.CONFIG_DIR / "nn" / "strategist.json").read_text(encoding="utf-8"))["cases"]
+    front, depth = cases["zone_m"]
+    return dict(arena, deploy_zone={"front": float(front), "depth": float(depth), "gap": float(cases["gap_m"])})
+
+
 def nn_arena_config(args, run_config):
     """nn-arena: writes the battle file and fills run_config (units, roles, the generated armies).
     Returns the path of a battle file written outside scenarios/ (a generated battle), else None."""
@@ -369,6 +382,9 @@ def nn_arena_config(args, run_config):
                 "budget": arena["budget"],
                 "side_budget": {s: arena["sides"][s]["budget"] for s in nn_scenario.SIDES},
                 "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES}}
+    if args.deploy == "strategist":
+        arena = strategist_zone(arena if (args.army_seed is not None or args.army_from_run is not None)
+                                else nn_scenario.load_arena(args.arena))
     if args.army_seed is not None or args.army_from_run is not None:
         if args.army_add or args.army_remove:
             # our side's army changed by hand (tools/nn/army_edit.py): a battle for the game only
@@ -384,6 +400,11 @@ def nn_arena_config(args, run_config):
                                        for s in nn_scenario.SIDES})
         if "edit" in arena["sides"]["own"]:
             run_config["army"]["edit"] = arena["sides"]["own"]["edit"]
+    elif args.deploy == "strategist":
+        # the strategist's zones are not those of scenarios/nn_arena.xml: its battle file goes next to the build
+        path = project.BUILD / args.target / f"{arena['name']}_strategist.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        nn_scenario.write_scenario(defender, arena, path, duration_s, labels)
     elif args.target == "nn-arena":
         arena = nn_scenario.write_scenario(defender, nn_scenario.load_arena(args.arena), duration_s=duration_s,
                                             labels=labels)
@@ -394,6 +415,11 @@ def nn_arena_config(args, run_config):
         path.parent.mkdir(parents=True, exist_ok=True)
         nn_scenario.write_scenario(defender, arena, path, duration_s, labels)
     run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
+    if args.deploy == "strategist":
+        # Deployment: the companion's strategist places our side (src/apps/bridge/deploy_adapter.lua); the zones its
+        # input reads are the battle file's (scenario.zones), the enemy's side stays where the battle file puts it
+        run_config.update(deploy="strategist", deploy_zones={s: dict(z) for s, z in nn_scenario.zones(arena).items()},
+                          deploy_wait_s=DEPLOY_WAIT_S, deploy_settle_ms=DEPLOY_SETTLE_MS)
     if args.defend_radius is not None:
         run_config["defend_radius_m"] = args.defend_radius
     if args.own_ai != "human" and args.soldiers_every:
@@ -530,6 +556,11 @@ def main(argv=None):
                         help="nn-arena --army-seed: remove N (1) units of KEY from our side; repeatable")
     parser.add_argument("--decide-ms", type=int, default=1000,
                         help="nn-arena --own-ai net: model ms between two decisions (250..5000)")
+    parser.add_argument("--deploy", choices=("script", "strategist"), default="script",
+                        help="nn-arena: who places our side in the deployment - 'script' (default: the battle file's "
+                             "places, the phase ends after 1 s) or 'strategist' (the companion's strategist, "
+                             "companion --strategist: its zones - the strategist's cases' - in the battle file; "
+                             "docs/ru/training/strategist.md)")
     parser.add_argument("--arena", default="arena",
                         help="nn-arena: 'arena' (config/nn/arena.json, the same army on both sides) "
                              "or a named arena in config/nn/arenas.json")
@@ -629,6 +660,8 @@ def main(argv=None):
             army_edit.parse(spec)
         except ValueError:
             parser.error(f"--army-add/--army-remove {spec!r}: KEY or KEY=N with N >= 1")
+    if args.deploy != "script" and args.target != "nn-arena":
+        parser.error("--deploy is for nn-arena")
     if args.army_seed is not None and args.arena != "arena":
         parser.error("--army-seed and --arena are two sources of armies: give one")
     if not 30 <= args.timeout <= 3600:

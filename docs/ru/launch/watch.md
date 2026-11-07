@@ -44,6 +44,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 | `-EnemyCheckpoint` | путь из сборки (`--enemy-net-name`), иначе `-Checkpoint` | Веса сети врага при `-EnemyAi net` (помощник `--enemy-checkpoint`); путь внутри репозитория |
 | `-Skirmish game\|off` | `game` | Режим застрельщиков под мостами (сборка `--skirmish`; с `-NoBuild` берётся из сборки) ([bridge](../apps/bridge.md#режим-застрельщиков)) |
 | `-Target nn-arena\|lord-duel\|human` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/`; `human` — [человек против сети](run.md#человек-против-сети): только с `-NoBuild`, помощник отвечает только стороне 2 (`--no-own`) |
+| `-Strategist formula\|<чекпойнт>` | нет | Сборка с `--deploy strategist`: помощник расставляет нашу сторону стратегом (`--strategist`); при `own_ai` не `net` помощник отвечает только на расстановку (`--no-own`) ([стратег, «В игре»](../training/strategist.md#в-игре)) |
+| `-StrategistTask hold\|destroy` | `hold` | Задача боя для стратега (уровня выше пока нет) |
+| `-Container` | `tww3-bai-companion` | Имя контейнера помощника (`agent-<задача>` для агента) |
 | `-Graphics` | `BAI_GRAPHICS` | Набор графики на этот запуск (`launch.ps1 -Graphics`: `ultra`, `low`, `lowigpu`, `human2k`) |
 
 Быстрая проверка: `-Speed 20 -LingerSeconds 0`.

@@ -381,6 +381,66 @@ class TestNnArena:
         assert "defend 150" in log and not any(e.startswith("attack") for e in log)
         assert rows[-1]["event"] == "result" and rows[-1]["status"] == "timeout" and rows[-1]["winner"] == 0
 
+    DEPLOY = """
+        CONFIG.own_ai, CONFIG.timeout_ms, CONFIG.enemy_role = 'defend', 5000, 'attack'
+        CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh_main_emp_empire'}
+        CONFIG.deploy, CONFIG.deploy_wait_s, CONFIG.deploy_settle_ms = 'strategist', 2, 1000
+        CONFIG.deploy_zones = {own = {x = -205, z = 0, b = 90, front = 1200, depth = 360},
+                               enemy = {x = 205, z = 0, b = 270, front = 1200, depth = 360}}
+        for _, u in ipairs(own) do u.follow_teleport = true end
+    """
+
+    def test_the_strategist_places_our_side_from_the_companions_plan(self, lua, tmp_path):
+        # The test plays the companion's strategist: it reads the deployment document and answers with the plan.
+        lua.execute(self.SETUP + self.DEPLOY + """
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        """)
+        doc = json.loads((tmp_path / "tww3_bai_nn_deploy.json").read_text(encoding="utf-8"))
+        assert doc["deploy"] is True and doc["move"] == 0 and doc["zones"]["own"]["front"] == 1200
+        own, enemy = [u for u in doc["units"] if u["side"] == 1], [u for u in doc["units"] if u["side"] == 2]
+        assert [u["n"] for u in own] == ["own_lord", "own_spear_1"] and "x" in own[0]
+        # the enemy by its composition only: no place, no state
+        assert [sorted(u) for u in enemy] == [["hp", "key", "men", "n", "side", "v"]] * 2
+        (tmp_path / "tww3_bai_nn_plan.txt").write_text(
+            f"tww3_bai_nn_plan 1\nbatch {doc['batch']}\nthink_ms 4.5\n"
+            "place own_lord -295 -400 90 5\nplace own_spear_1 -295 3 90 40\nplace nobody 0 0 0 1\nend\n",
+            encoding="utf-8")
+        lua.execute("""
+            bm:pump()
+            assert(bm.phase == 'Deployed', 'the deployment did not end')
+            assert(not own[1].controlled and not own[2].controlled, 'the deployment keeps no control')
+            for _ = 1, 8 do bm:tick() end
+            assert(STATE.finished)
+        """)
+        assert lua.eval("own[2].tp.x") == -295 and lua.eval("own[2].tp.b") == 92.8125   # the sector's middle
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        stages = [r["stage"] for r in rows if r["event"] == "nn_deploy"]
+        assert stages == ["asked", "plan", "control", "teleported", "placed"]
+        plan = next(r for r in rows if r["event"] == "nn_deploy" and r["stage"] == "plan")
+        assert plan["unknown"] == ["nobody"] and plan["places"] == 2 and plan["think_ms"] == 4.5
+        checks = {r["u"]: r for r in rows if r["event"] == "nn_deploy_check"}
+        assert checks["own_lord"]["d_m"] == 0 and checks["own_lord"]["inside"] is True
+        assert checks["own_lord"]["db"] == 0 and not checks["own_lord"]["turned"]
+        assert checks["own_spear_1"]["pair_m"] == 50 and checks["own_spear_1"]["edge_m"] == 89  # 180 - 90, the front 2.8 deg turned
+        placed = next(r for r in rows if r["event"] == "nn_deploy" and r["stage"] == "placed")
+        assert (placed["units"], placed["far"], placed["outside"], placed["overlaps"]) == (2, 0, 0, 0)
+        assert kinds.index("start") > kinds.index("nn_deploy_check")
+        assert not (tmp_path / "tww3_bai_nn_deploy.json").exists() and not (tmp_path / "tww3_bai_nn_plan.txt").exists()
+
+    def test_without_the_strategists_plan_the_deployment_ends_as_before(self, lua, tmp_path):
+        lua.execute(self.SETUP + self.DEPLOY + """
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            assert(bm.phase == 'Deployed')
+            assert(own[1].tp == nil and own[2].tp == nil, 'no plan: nobody teleported')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        last = [r for r in rows if r["event"] == "nn_deploy"][-1]
+        assert last["stage"] == "no_plan" and last["polls"] == 20 and last["why"] == "empty"
+
     def test_hold_gives_no_orders_and_each_side_has_its_own_army(self, lua, tmp_path):
         # A named arena: one Skaven unit of ours holds, two Empire units of the game's AI.
         lua.execute("""
