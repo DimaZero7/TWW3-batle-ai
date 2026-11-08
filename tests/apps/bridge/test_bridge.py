@@ -89,6 +89,26 @@ def test_the_chains_answer_says_its_mode_and_its_idle_shooter_is_never_released(
     assert [duty(d, idle, tg, None) for _ in range(10)][-1] == "release"
 
 
+def test_under_the_chain_a_recovery_takes_only_the_ordered_target_or_one_within_the_arc(lua):
+    """The chain's recovery (nn_reaim) adds no target of the bridge's: an attack's only the ordered one, a hold's only an
+    enemy within REAIM_ARC_DEG of the shooter's facing (the simulator's shooter firing at will never turns)."""
+    t = lua.table_from
+    recover = lua.eval("bridge.reaim_target")
+    after = lua.eval("bridge.REAIM_AFTER_CHAIN")
+    me = {"n": "own", "side": 1, "men": 100, "a": 20, "x": 0, "z": 0, "t": "", "b": 0}     # facing +z
+    ahead = {"n": "ahead", "side": 2, "men": 100, "x": 10, "z": 100}                       # ~6 deg off
+    aside = {"n": "aside", "side": 2, "men": 100, "x": 60, "z": 20}                        # ~72 deg off, nearer
+
+    def last(enemies, preferred, limit):
+        watch, rows = t({}), t([t(e) for e in enemies])
+        return [recover(watch, t(me), rows, 120, preferred, False, after, t(limit)) for _ in range(after)][-1]
+    assert last([ahead, aside], None, {"arc": 45}) == "ahead"           # the nearer one is out of the arc
+    assert last([aside], None, {"arc": 45}) is None
+    assert last([ahead, aside], "aside", {"only": True}) == "aside"     # the ordered one, wherever it stands
+    assert last([ahead], "aside", {"only": True}) is None               # not in reach: nothing of the bridge's
+    assert last([ahead, aside], None, {}) == "aside"                     # without a limit: the nearest, as before
+
+
 def test_real_time_from_os_clock(lua):
     real_ms = lua.eval("function(a, b) return bridge.real_ms(a, b) end")
     assert real_ms(1.5, 1.5234) == 23 and real_ms(None, 2) is None

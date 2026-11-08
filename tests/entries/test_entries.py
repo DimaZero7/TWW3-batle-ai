@@ -631,6 +631,42 @@ class TestNnArena:
         assert [r["mode"] for r in rows if r["event"] == "nn_mode"] == ["chain"]
         assert not [r for r in rows if r["event"] == "nn_duty" and r.get("action") == "release"]
 
+    @pytest.mark.parametrize("mode", ["chain", None])
+    def test_under_the_chain_a_held_shooter_is_not_aimed_by_the_bridge(self, lua, tmp_path, mode):
+        # companion --chain: a hold of a shooter is the simulator's - stand and fire at will; the bridge's own pick of
+        # the nearest enemy (nn_hold aim -> an attack order) is off (08.11: the pick of a side-stepping fast unit
+        # turned and walked the held jezzails 35 s of 40 without a shot)
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            archer = fake.unit('own_archer_1', 'archers', -200, 40)
+            archer.ammo, archer.range = 1800, 400
+            table.insert(own, archer)
+            table.insert(CONFIG.units.own, {script_name = 'own_archer_1', slot = 'archer_1', key = 'archers'})
+            fake.cco['uid_own_archer_1'] = {IsFiringMissiles = false}
+            CONFIG.own_ai, CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'net', 'attack', 1000, 100
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        answered = [0]
+        orders = [{"unit": "own_spear_1", "kind": "keep"}, {"unit": "own_archer_1", "kind": "hold"}]
+        for _ in range(60):
+            doc = exchange.read_state(tmp_path / exchange.STATE)
+            if doc["move"] > answered[0]:
+                answered[0] = doc["move"]
+                exchange.write_atomic(tmp_path / exchange.ORDERS,
+                                      exchange.orders_text(doc["batch"], doc["move"], orders, 1.0, mode=mode))
+            lua.execute("bm:tick(100)")
+        attacks = [o for o in lua.eval("bm.orders").values() if str(o).startswith("attack")]
+        assert (not attacks) if mode else attacks          # (the old mode: the bridge aims the held shooter)
+        lua.execute("""
+            bm.outcome, bm.winner = true, 2
+            for _ = 1, 10 do bm:tick(100) end
+        """)
+        rows = [json.loads(x) for x in (tmp_path / "tww3_bai_events.jsonl").read_text(encoding="utf-8").splitlines()]
+        held = [r for r in rows if r["event"] == "nn_hold" and r.get("u") == "own_archer_1"]
+        assert (not held) if mode else held
+
     def test_net_runs_shooters_frees_idle_ones_and_gives_orders_again_after_a_rally(self, lua, tmp_path):
         # The gate's in-game findings (01.10.2026): a ranged attack must pass the run flag; a unit that
         # routed and rallied gets its order again; a shooter that cannot hit its target (the target in

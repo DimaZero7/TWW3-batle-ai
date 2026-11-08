@@ -268,10 +268,21 @@ function M.start(opts)
         guard[it.name] = nil
         stall[it.name] = nil
         if (order.face or order.width) and order.kind ~= 'attack' and formation(it, order) then
-            if order.kind == 'hold' then guard[it.name] = {} end    -- a held shooter is aimed as under any hold
+            -- a held shooter is aimed as under any hold (not under the chain: the companion aims it)
+            if order.kind == 'hold' and not handle.chain then guard[it.name] = {} end
             return 'given'
         end
-        if order.kind == 'hold' then
+        if order.kind == 'hold' and handle.chain then
+            -- Under the chain a hold is the simulator's: stand and fire at will, no target of the bridge's (08.11:
+            -- the bridge's pick of the nearest - a fast, side-stepping unit - walked and turned the held jezzails 35 s
+            -- of 40 without a shot). A shooter shooting standing is not halted (a halt restarts its aim).
+            if shooter(it.unit) and services.firing(seen[it.name], recent(it.name)) then
+                orders.set_fire_at_will(uc, true)
+                return 'kept'
+            end
+            orders.halt(uc)
+            orders.set_fire_at_will(uc, true)
+        elseif order.kind == 'hold' then
             -- A shooter firing at the unit it would be aimed at under hold goes on (no halt).
             local me = seen[it.name]
             local tg = me and me.t
@@ -420,16 +431,21 @@ function M.start(opts)
             return false
         end
         reaim[it.name] = reaim[it.name] or {}
+        local limit = nil
+        if handle.chain then
+            -- (the chain: an attack's recovery is its own target, a hold's only within the shooter's arc)
+            limit = order.kind == 'attack' and {only = true} or {arc = services.REAIM_ARC_DEG}
+        end
         local target = services.reaim_target(reaim[it.name], seen[it.name], rows,
             read(function() return it.unit:missile_range() end), order.target, recent(it.name),
-            handle.chain and services.REAIM_AFTER_CHAIN or services.REAIM_AFTER)
+            handle.chain and services.REAIM_AFTER_CHAIN or services.REAIM_AFTER, limit)
         local enemy = target and enemy_by_name[target]
         if not enemy then return false end
         -- Deliberately bypass aim/fire_freely: halt + free fire can leave no engine target
         -- indefinitely. attack_unit supplies a target for the engine to turn toward and shoot.
         orders.attack_ranged(it.uc, enemy.unit, order.kind == 'attack' and order.run, true)
         duty[it.name] = {}
-        if order.kind == 'hold' then guard[it.name] = {pick = target} end
+        if order.kind == 'hold' and not handle.chain then guard[it.name] = {pick = target} end
         handle.reaims = handle.reaims + 1
         opts.emit('nn_reaim', {t = opts.now_ms(), u = it.name, k = order.kind, tg = target})
         return true

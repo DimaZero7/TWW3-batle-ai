@@ -272,6 +272,10 @@ M.REAIM_AFTER = 3
 -- (under the chain - the answer's 'mode chain' - 10: a re-given order restarts a shooter's aim and a fresh one needs up
 -- to 8.5 s to its first shot, the losrange probe 08.11; as RELEASE_AFTER)
 M.REAIM_AFTER_CHAIN = 10
+-- Under the chain a held shooter's recovery takes only an enemy within REAIM_ARC_DEG of its facing (the simulator's
+-- shooter firing at will never turns - sim.json missile.stand_fire_why; its attack turns only beyond 45 deg), and an
+-- attack's recovery only the ordered target (the companion's): the bridge adds no target of its own (08.11).
+M.REAIM_ARC_DEG = 45
 
 local function approaching(me, rows, range, preferred)
     if preferred == nil or me.mv ~= true then return false end
@@ -284,8 +288,17 @@ local function approaching(me, rows, range, preferred)
     return false
 end
 
-function M.reaim_target(watch, me, rows, range, preferred, recent, after)
+-- limit (optional, the chain): {arc = deg} the candidates within arc of the shooter's facing; {only = true} the
+-- preferred (the ordered) target only.
+local function within_arc(me, row, arc)
+    if not (value.finite(me.b) and value.finite(row.x) and value.finite(row.z)) then return false end
+    local brg = math.deg((math.atan2 or math.atan)(row.x - me.x, row.z - me.z)) % 360
+    return math.abs((brg - me.b + 180) % 360 - 180) <= arc
+end
+
+function M.reaim_target(watch, me, rows, range, preferred, recent, after, limit)
     after = after or M.REAIM_AFTER
+    limit = limit or {}
     if not (up(me) and me.m ~= true and me.fire ~= true and (me.a or 0) > 0 and (range or 0) > 0
         and value.finite(me.x) and value.finite(me.z)) or approaching(me, rows, range, preferred) then
         watch.n = 0
@@ -296,6 +309,8 @@ function M.reaim_target(watch, me, rows, range, preferred, recent, after)
         local d = in_reach(me, row, range, 0)
         -- Keep a real target between volleys, including the engine's edge-to-edge range.
         if row.n == me.t and (d or M.on_target(me, row, recent)) then keep = row end
+        if d and limit.only and row.n ~= preferred then d = nil end
+        if d and limit.arc and not within_arc(me, row, limit.arc) then d = nil end
         if d then
             if row.n == preferred then wanted = row.n end
             if row.r ~= true then
