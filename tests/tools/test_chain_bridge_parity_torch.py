@@ -239,7 +239,7 @@ def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(m
         chain.end_second()
     monkeypatch.setattr(LW.Units, "second", second)
     game = CH.Chain(unit_net, unit_greedy=True, params=P, task="hold")
-    game.start("sim", [f"u{i}" for i in range(st.N)], st.keys[0], card[:1], rec["raw"][0])
+    game.start("sim", [f"u{i}" for i in range(st.N)], st.keys[0], card[:1], rec["raw"][0], lords=st.u["lord"][:1])
     own = side[0] == 1
     shooter = own & (st.u["range"][0] > 0)
     attacks = 0
@@ -253,3 +253,4 @@ def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(m
         attacks += int((want.kind[0, shooter] == O.ATTACK).sum())
     assert game.stats["op_decisions"] == 4 and game.stats["parcel_errors"] == 0
     assert attacks > 0                     # the shooters' rule fired: the comparison covers it
+    assert getattr(game.units, "n_stay", 0) > 0     # and the rule "stay in the area" (stay_rule)

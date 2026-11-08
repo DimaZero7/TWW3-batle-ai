@@ -59,14 +59,17 @@ STATIC_U = ("men0", "wmin_k", "sp_h", "sp_v", "arc")
 
 def static_u(keys, params, device="cpu"):
     """{men0, wmin_k, sp_h, sp_v, arc} [1, N] of the units by key (params.static; unknown: zeros) - what lower.Units
-    reads of the simulator's state for the width limits (decode.width_limits) and the rule 'a shooter shoots its
-    target' (its own fire arc)."""
-    out = {k: torch.zeros((1, len(keys)), device=device) for k in STATIC_U}
+    reads of the simulator's state for the width limits (decode.width_limits), the rule 'a shooter shoots its
+    target' (its own fire arc) and the rule 'stay in the area' (eng0: a gun's engines, 0 not artillery)."""
+    out = {k: torch.zeros((1, len(keys)), device=device) for k in STATIC_U + ("eng0",)}
     for i, key in enumerate(keys):
         if key in params.units:
             s = params.static(key)
             for k in STATIC_U:
                 out[k][0, i] = float(s.get(k, 0.0))
+            # an artillery unit's guns (sim/scenario.build: only a unit with engines has them)
+            if params.units[key].get("engines"):
+                out["eng0"][0, i] = float(s.get("eng0", 0.0))
     return out
 
 
@@ -85,11 +88,13 @@ class GameUnits(LW.Units):
     the state the game gives each second (refresh): places, men, alive, seen, routing, range, in melee, the target a
     shooter aims at (the document's 't'), its fire arc (the key's)."""
 
-    def __init__(self, raw_u, keys, card, params, unit_net, unit_greedy=False, targets=False, still=False, aim=False):
+    def __init__(self, raw_u, keys, card, params, unit_net, unit_greedy=False, targets=False, still=False, aim=False,
+                 lords=None):
         I = V.I
         own = raw_u[..., I["side"]] == 1
         u = {"x": raw_u[..., I["x"]].clone(), "z": raw_u[..., I["z"]].clone(), "b": raw_u[..., I["b"]].clone(),
-             **static_u(keys, params, raw_u.device)}
+             **static_u(keys, params, raw_u.device),
+             "lord": torch.zeros_like(own) if lords is None else torch.as_tensor(lords, device=raw_u.device).bool()}
         st = SimpleNamespace(B=1, N=raw_u.shape[1], u=u, device=raw_u.device)
         setup = SimpleNamespace(st=st, P=params, device=raw_u.device, own=own,
                                 shooter=(raw_u[..., I["range"]] > 0) & own, card=card)
@@ -139,6 +144,7 @@ class GameUnits(LW.Units):
             if self.still:
                 intended = self.stand_still(intended, st, inside)
             if self.aim:
+                intended = self.stay_rule(intended, st, inside)
                 intended = self.aim_rule(intended, st, inside)
             self.n += int(bl.numel())
         self.intended = intended
@@ -196,7 +202,8 @@ class Chain:
         self.op_mode = op_mode
         # the translator's rules of the simulator's matchup chain (matchup/duel.Chain; lower.Units; 07-08.11,
         # build/diag_m1/night.md 6, 11, 18): the group's target to its units, a unit in its area stands, a shooter in
-        # its area attacks its target within range (False: the plain chain of strategist/battle.play)
+        # its area attacks its target within range, shooters / guns stay in their area (stay_rule, 08.11; False: the plain
+        # chain of strategist/battle.play)
         self.targets, self.still, self.aim = targets, still, aim
         self.op_decide = None          # callable (inp, ctx, raw) -> the walk's output: the operative's decision by
         #                                someone else (the labelling over the game: the person, tools/label/game.py)
@@ -210,8 +217,9 @@ class Chain:
         self.stats = {}
 
     # -- a new battle
-    def start(self, batch, names, keys, card, r):
-        """A new battle: names, keys [N] in the raw state's order, card [1, N, F] (passport.table), r its first raw."""
+    def start(self, batch, names, keys, card, r, lords=None):
+        """A new battle: names, keys [N] in the raw state's order, card [1, N, F] (passport.table), r its first raw;
+        lords [1, N] bool the sides' generals (None: by name, '<side>_lord' - the arena's script names)."""
         dev = self.device
         self.batch, self.names, self.keys, self.card = batch, list(names), list(keys), card
         N = r.shape[1]
@@ -230,8 +238,10 @@ class Chain:
         self.K = OEN.rows_of(N)
         self.tac = LW.Tacticians(1, N, self.G, dev, net=self.tactic_net, greedy=self.tactic_greedy)
         base = r[..., :TR.BASE]
+        if lords is None:
+            lords = [[n.endswith("_lord") for n in self.names]]
         self.units = GameUnits(base, self.keys, card, self.P, self.unit_net, self.unit_greedy, targets=self.targets,
-                               still=self.still, aim=self.aim)
+                               still=self.still, aim=self.aim, lords=lords)
         self.next_op = self.next_tac = None
         self.stats = {"parcels": 0, "parcel_errors": 0, "errors": [], "op_decisions": 0, "op_reforms": 0.0,
                       "tactic_ticks": 0, "unit_seconds": 0, "from_strategist": plan is not None}
