@@ -61,7 +61,7 @@ def static_u(keys, params, device="cpu"):
     """{men0, wmin_k, sp_h, sp_v, arc} [1, N] of the units by key (params.static; unknown: zeros) - what lower.Units
     reads of the simulator's state for the width limits (decode.width_limits), the rule 'a shooter shoots its
     target' (its own fire arc) and the rule 'stay in the area' (eng0: a gun's engines, 0 not artillery)."""
-    out = {k: torch.zeros((1, len(keys)), device=device) for k in STATIC_U + ("eng0",)}
+    out = {k: torch.zeros((1, len(keys)), device=device) for k in STATIC_U + ("eng0", "direct")}
     for i, key in enumerate(keys):
         if key in params.units:
             s = params.static(key)
@@ -70,6 +70,7 @@ def static_u(keys, params, device="cpu"):
             # an artillery unit's guns (sim/scenario.build: only a unit with engines has them)
             if params.units[key].get("engines"):
                 out["eng0"][0, i] = float(s.get("eng0", 0.0))
+            out["direct"][0, i] = float(bool(s.get("direct", False)))
     return out
 
 
@@ -99,15 +100,25 @@ class GameUnits(LW.Units):
         setup = SimpleNamespace(st=st, P=params, device=raw_u.device, own=own,
                                 shooter=(raw_u[..., I["range"]] > 0) & own, card=card)
         super().__init__(setup, unit_net, unit_greedy, targets=targets, still=still, aim=aim)
+        # the order in force of each unit (what the bridge was given last: the leashed orders, a KEEP keeps it) - the
+        # simulator's u order_kind / order_target, read by the rule 'a shooter keeps its target' (sticky_rule)
+        self.order_kind = torch.full(own.shape, O.HOLD, dtype=torch.long, device=raw_u.device)
+        self.order_target = torch.full(own.shape, -1, dtype=torch.long, device=raw_u.device)
         self.refresh(raw_u)
 
-    def refresh(self, raw_u, aim_tgt=None, contact=None):
+    def refresh(self, raw_u, aim_tgt=None, contact=None, order=None):
         """The state the rules read (class doc) from the unit level's raw [1, N, RAW]; aim_tgt [1, N] long each unit's
-        target slot (-1 none), contact [1, N] bool in melee contact (None: the raw's melee flag)."""
+        target slot (-1 none), contact [1, N] bool in melee contact (None: the raw's melee flag); order (kind,
+        target) [1, N] the orders in force (None: the ones this chain gave - the bridge does not give an equal one
+        again)."""
         I = V.I
         u = self.setup.st.u
-        for k in ("x", "z", "b", "range"):
+        for k in ("x", "z", "b", "range", "front"):
             u[k] = raw_u[..., I[k]]
+        u["side"] = raw_u[..., I["side"]].long()
+        if order is not None:
+            self.order_kind, self.order_target = order[0].clone(), order[1].clone()
+        u["order_kind"], u["order_target"] = self.order_kind, self.order_target
         u["men"] = raw_u[..., I["men"]]
         u["gone"] = ~(raw_u[..., I["alive"]] > 0)
         u["vis"] = raw_u[..., I["vis"]] > 0
@@ -146,6 +157,7 @@ class GameUnits(LW.Units):
             if self.aim:
                 intended = self.stay_rule(intended, st, inside)
                 intended = self.aim_rule(intended, st, inside)
+                intended = self.sticky_rule(intended, st, inside)
             self.n += int(bl.numel())
         self.intended = intended
         return intended, inside
@@ -154,7 +166,28 @@ class GameUnits(LW.Units):
         """The intended orders with the leash's replacements (decode.Leash.apply on the raw state; updates leash.on)."""
         out = self.leash.apply(leash_state(raw_u), self.intended, self.area, self.setup.own)
         self.in_force = self.intended
+        given = self.setup.own & (out.kind != O.KEEP)
+        self.order_kind = torch.where(given, out.kind, self.order_kind)
+        self.order_target = torch.where(given, out.target, self.order_target)
         return out
+
+    def line_closed(self, st, t):
+        """lower.Units.line_closed with each unit's formation front from the raw state (its width and men there: the
+        simulator's geometry.dims)."""
+        u = st.u
+        tc = t.clamp(min=0)
+        vx, vz = u["x"].gather(1, tc) - u["x"], u["z"].gather(1, tc) - u["z"]
+        L = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
+        ex, ez = vx / L, vz / L
+        dx = u["x"][:, None, :] - u["x"][:, :, None]
+        dz = u["z"][:, None, :] - u["z"][:, :, None]
+        along = dx * ex[:, :, None] + dz * ez[:, :, None]
+        across = (dx * ez[:, :, None] - dz * ex[:, :, None]).abs()
+        side = u["side"]
+        mine = (side[:, :, None] == side[:, None, :]) & (u["men"] > 0)[:, None, :] & ~u["r"][:, None, :]
+        eye = torch.eye(st.N, dtype=torch.bool, device=u["x"].device)[None]
+        band = (along > 10.0) & (along < L[:, :, None] - 10.0) & (across < u["front"][:, None, :] / 2)
+        return (band & mine & ~eye).any(2) & (t >= 0)
 
 
 def groups_of_plan(plan, names, N, G, device="cpu"):
@@ -296,7 +329,7 @@ class Chain:
         return out
 
     @torch.no_grad()
-    def step(self, r, sec, raw_u=None, aim_tgt=None, contact=None):
+    def step(self, r, sec, raw_u=None, aim_tgt=None, contact=None, order=None):
         """One second of the chain on the raw state r [1, N, RAW] at battle second sec: the levels due (module doc) ->
         (the orders with the leash, the units' intended orders before it, inside [1, N] each unit in its area). raw_u:
         the unit level's raw (tests: the simulator's own, its leash column included); None - r's base columns with
@@ -306,7 +339,7 @@ class Chain:
         if raw_u is None:
             raw_u = r[..., :TR.BASE].clone()
             raw_u[..., V.I["leash"]] = self.units.leash.on.float()
-        self.units.refresh(raw_u, aim_tgt, contact)
+        self.units.refresh(raw_u, aim_tgt, contact, order)
         if self.next_op is None:
             self.next_op, self.next_tac = sec, sec
         self.plans_log = []

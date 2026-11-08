@@ -208,12 +208,13 @@ def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(m
     st, card = DU.build("m3", [AR.base("m3")], "cpu", P)
     chain = DU.Chain(1, "formula", command="hold")
     chain.start(st, P, "cpu", card, unit_net)
-    rec = {"raw": [], "raw_u": [], "intended": [], "aim": [], "contact": []}
+    rec = {"raw": [], "raw_u": [], "intended": [], "aim": [], "contact": [], "order": []}
     second = LW.Units.second
 
     def units_second(self, s):
         rec["aim"].append(s.u["aim_tgt"].clone())
         rec["contact"].append(s.u["contact_s"] > 0)
+        rec["order"].append((s.u["order_kind"].clone(), s.u["order_target"].clone()))
         lands = second(self, s)
         rec["raw_u"].append(self.ubuf[-1].clone())
         rec["intended"].append(self.intended.clone())
@@ -245,7 +246,7 @@ def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(m
     attacks = 0
     for s in range(MATCHUP_SECONDS):
         _, intended, _ = game.step(rec["raw"][s], s, raw_u=rec["raw_u"][s], aim_tgt=rec["aim"][s],
-                                   contact=rec["contact"][s])
+                                   contact=rec["contact"][s], order=rec["order"][s])
         want = rec["intended"][s]
         for f in O.FIELDS:
             a, b = getattr(intended, f)[0, own], getattr(want, f)[0, own]
@@ -254,3 +255,4 @@ def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(m
     assert game.stats["op_decisions"] == 4 and game.stats["parcel_errors"] == 0
     assert attacks > 0                     # the shooters' rule fired: the comparison covers it
     assert getattr(game.units, "n_stay", 0) > 0     # and the rule "stay in the area" (stay_rule)
+    assert getattr(game.units, "n_keep", 0) > 0     # and the rule "a shooter keeps its target" (sticky_rule)
