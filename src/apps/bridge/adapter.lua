@@ -421,7 +421,8 @@ function M.start(opts)
         end
         reaim[it.name] = reaim[it.name] or {}
         local target = services.reaim_target(reaim[it.name], seen[it.name], rows,
-            read(function() return it.unit:missile_range() end), order.target, recent(it.name))
+            read(function() return it.unit:missile_range() end), order.target, recent(it.name),
+            handle.chain and services.REAIM_AFTER_CHAIN or services.REAIM_AFTER)
         local enemy = target and enemy_by_name[target]
         if not enemy then return false end
         -- Deliberately bypass aim/fire_freely: halt + free fire can leave no engine target

@@ -298,6 +298,12 @@ def test_targetless_recovery_prefers_the_order_then_nearest_valid_enemy(lua):
     watch, rows = t({}), t([t(near)])
     assert [recover(watch, t(me), rows, 120, None, False) for _ in range(6)] == [
         None, None, "near", None, None, "near"]  # rejected engine orders retry only every 3 decisions
+    # under the chain (mode chain) every 10 decisions: a fresh order needs up to 8.5 s to its first shot
+    chain_after = lua.eval("bridge.REAIM_AFTER_CHAIN")
+    assert chain_after == 10
+    watch = t({})
+    got = [recover(watch, t(me), rows, 120, None, False, chain_after) for _ in range(20)]
+    assert got == ([None] * 9 + ["near"]) * 2
 
 
 def test_a_formation_rides_with_a_hold_move_or_withdraw_and_reads_back(lua):

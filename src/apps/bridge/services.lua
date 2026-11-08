@@ -269,6 +269,9 @@ end
 -- range (battle.py close_in). Before, after 3 decisions the bridge stopped it and aimed it at the nearest
 -- enemy in range: the network's attack orders were overridden 6.9 times a battle (build/audit_orders).
 M.REAIM_AFTER = 3
+-- (under the chain - the answer's 'mode chain' - 10: a re-given order restarts a shooter's aim and a fresh one needs up
+-- to 8.5 s to its first shot, the losrange probe 08.11; as RELEASE_AFTER)
+M.REAIM_AFTER_CHAIN = 10
 
 local function approaching(me, rows, range, preferred)
     if preferred == nil or me.mv ~= true then return false end
@@ -281,7 +284,8 @@ local function approaching(me, rows, range, preferred)
     return false
 end
 
-function M.reaim_target(watch, me, rows, range, preferred, recent)
+function M.reaim_target(watch, me, rows, range, preferred, recent, after)
+    after = after or M.REAIM_AFTER
     if not (up(me) and me.m ~= true and me.fire ~= true and (me.a or 0) > 0 and (range or 0) > 0
         and value.finite(me.x) and value.finite(me.z)) or approaching(me, rows, range, preferred) then
         watch.n = 0
@@ -307,7 +311,7 @@ function M.reaim_target(watch, me, rows, range, preferred, recent)
     end
     local pick = wanted or best or routing
     watch.n = pick and (watch.n or 0) + 1 or 0
-    if watch.n >= M.REAIM_AFTER then
+    if watch.n >= after then
         watch.n = 0
         return pick
     end
