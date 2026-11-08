@@ -194,20 +194,60 @@ def game_zone_doc(task_zones=GAME_ZONES):
 
 
 @pytest.mark.parametrize("task", ["hold", "destroy"])
-def test_the_formula_fits_20_units_into_the_games_zone(task):
-    """The game's zone 416 x 176 m holds 20 units: the groups' zones are their units' slots (deploy.footprint), the
-    formula lays 6 groups in two rows, every unit inside the zone, none overlapping, facing the enemy (07.11: with the
-    tactician's 80 m tile a unit the formula had 16 of 20 out of the zone)."""
+def test_the_formula_fits_20_units_into_the_games_zone_by_the_army_teachers_roles(task):
+    """The game's zone 416 x 176 m holds 20 units (the groups' zones are their units' slots, deploy.footprint); an army
+    (9 units and more) is deployed in the operative's army-formula groups (strategist/army.py): the line and the
+    halberds in pairs, the shooters, the snipers, the guns, the lord - each group of one role within the teacher's
+    size, the line in front, the guns and the lord behind it, every unit inside the zone, none overlapping, facing the
+    enemy; the operative's teacher keeps them all at its first decision (no re-form)."""
+    import math
+    from tools.nn.companion import chain as CH
     from tools.nn.companion import deploy as CD
-    _, rec = CD.Strategist("formula", task, params=P).decide(game_zone_doc())
+    from tools.nn.operative import army as AM
+    from tools.nn.strategist import army as SA
+    from tools.nn.tactic import raw as TR
+    from tools.nn.unit import net as Nt
+    doc = game_zone_doc()
+    S = CD.Strategist("formula", task, params=P)
+    _, rec = S.decide(doc)
     assert rec["errors"] == 0 and len(rec["places"]) == 20
-    assert len(rec["groups"]) == 6
     for n, (x, z, b, w) in rec["places"].items():
         assert -272.0 <= x <= -96.0 and -208.0 <= z <= 208.0, (n, x, z)
         assert abs(b - 92.8125) < 1e-3                                            # facing the enemy (east), 64 sectors
-    # 'hold' - the first row at the back edge, 'attack' - at the front
-    xs = [g["cx"] for g in rec["groups"][:3]]
-    assert all(x < -184.0 for x in xs) if task == "hold" else all(x > -184.0 for x in xs)
+    key = {u["n"]: u["key"] for u in doc["units"]}
+    from tools.nn.model import passport as PP
+    role = dict(zip(key, AM.roles(PP.table([key[n] for n in key]))))
+    by = {}
+    for g in rec["groups"]:
+        rs = {role[n] for n in g["units"]}
+        assert len(rs) == 1 and len(g["units"]) <= SA.SIZE[rs.pop()], g
+        by.setdefault(role[g["units"][0]], []).append(g)
+    assert [len(by[r]) for r in ("line", "anti", "shooter", "sniper", "art", "lord")] == [4, 3, 1, 1, 1, 1]
+    line_x = max(g["cx"] for g in by["line"])
+    assert by["art"][0]["cx"] < line_x and by["lord"][0]["cx"] < line_x                # behind the line (east = +x)
+    # the operative's army teacher at second 0 keeps the strategist's groups
+    torch.manual_seed(0)
+    chain = CH.Chain(Nt.UnitNet().eval(), plans={doc["batch"]: S.plans[doc["batch"]]}, params=P, task=task)
+    from tools.nn.sim import scenario
+    rows = [dict(u) for u in doc["units"]]
+    st = scenario.build([{"attacker": 2, "sides": {
+        s: {"faction": doc["factions"]["own" if s == 1 else "enemy"],
+            "units": [{"key": key[u["n"]], "x": (rec["places"][u["n"]][0] if s == 1 else 184.0),
+                       "z": (rec["places"][u["n"]][1] if s == 1 else -190.0 + 20.0 * k),
+                       "b": (rec["places"][u["n"]][2] if s == 1 else 270.0),
+                       "width": (rec["places"][u["n"]][3] if s == 1 else 30.0)}
+                      for k, u in enumerate(r for r in rows if r["side"] == s)]} for s in (1, 2)}}],
+        P, device="cpu", per_side=20)
+    names = [f"u{i}" for i in range(st.N)]
+    plan = S.plans[doc["batch"]]
+    plan = dict(plan, group={f"u{i}": plan["group"][n] for i, n in enumerate(u["n"] for u in rows if u["side"] == 1)})
+    chain.plans = {"t": plan}
+    from tools.nn.unit import train as UT
+    r0 = TR.Seer(P).raw(st)
+    chain.start("t", names, st.keys[0], UT.cards(st, "cpu").float()[:1], r0)
+    chain.step(r0, 0)
+    assert chain.stats["op_decisions"] == 1 and chain.stats["op_reforms"] == 0
+    assert math.isfinite(rec["think_ms"])
 
 
 def test_a_groups_slot_is_its_widest_formation():

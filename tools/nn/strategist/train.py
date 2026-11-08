@@ -53,8 +53,13 @@ def restore(path, device="cpu"):
     if ck.get("kind") != KIND:
         raise ValueError(f"not a {KIND} checkpoint: {path}")
     net, critic = NN.StrategistNet().to(device), NN.StrategistCritic().to(device)
-    net.load_state_dict(ck["net"])
-    critic.load_state_dict(ck["critic"])
+    try:
+        net.load_state_dict(ck["net"])
+        critic.load_state_dict(ck["critic"])
+    except RuntimeError as e:
+        # (08.11: the strategist's groups 6 -> 40, config/nn/strategist.json groups; the nets run1-run5 had 6)
+        raise ValueError(f"{path}: a strategist of another number of groups than config/nn/strategist.json groups "
+                         f"({cfg()['groups']}): {str(e).splitlines()[0]}") from e
     return net, critic, ck
 
 

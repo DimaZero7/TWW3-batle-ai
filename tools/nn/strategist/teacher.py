@@ -83,10 +83,63 @@ def wishes(inp, ctx, mode="formula"):
     front = (destroy[:, None] | torch.full_like(destroy[:, None], mode == "front")) & (mode != "back")
     back = -Dz / 2 + fd[:, None] / 2 + edge + row * fd[:, None]
     f = torch.where(front, -back, back)
+    if mode in ("formula", "hold", "attack"):
+        # an army (the operative's army formula from army.min own units): its groups by role, laid out as the person
+        # lays his out (strategist/army.py) - the operative's teacher keeps them from its first decision
+        g, s, f = army_wishes(inp, ctx, destroy, g, s, f, G)
+        comp = F_one(g, G) * BIG
     gx, gz = ZS.world(ctx.mine, s, f)
     verb = torch.zeros((B, len(DC.VERBS)), device=dev)
     verb[torch.arange(B, device=dev), torch.where(destroy, DC.VERBS.index("destroy"), DC.VERBS.index("hold"))] = BIG
     return {"comp": comp, "form": form, "turn": turn, "goal_x": gx, "goal_z": gz, "verb": verb}
+
+
+def army_wishes(inp, ctx, destroy, g, s, f, G):
+    """(g [B, K], s, f [B, G]) with the battles of an army (army.min own units or more) by strategist/army.py; the
+    others as given."""
+    import math
+    from tools.nn.strategist import army as SA
+    own = inp["own"]
+    B, K = own.shape
+    amin = int(ocfg()["teacher"]["army"]["min"])
+    if not bool((own.sum(1) >= amin).any()):
+        return g, s, f
+    edge = float(cfg()["teacher"]["edge_m"])
+    g, s, f = g.clone(), s.clone(), f.clone()
+    cards = inp["rows"][..., :69].cpu().numpy()
+    slot = inp["slot"].cpu().tolist()
+    fr, dp = inp["front"].cpu().tolist(), inp["depth"].cpu().tolist()
+    cs, cf = ZS.local(ctx.mine, ctx.cx, ctx.cz)                    # the cells' centres in my zone's axes
+    for b in range(B):
+        mine = sorted((j for j in range(K) if bool(own[b, j])), key=lambda j: slot[b][j])
+        if len(mine) < amin:
+            continue
+        rl = SA.roles(cards[b][mine])
+        gs = SA.groups(rl, mine)
+        if len(gs) > G:
+            continue
+        fw, fd = [], []
+        for _, rows in gs:
+            n = len(rows)
+            sw = max(fr[b][j] for j in rows) + DP.GAP_M
+            sd = max(dp[b][j] for j in rows) + DP.ROW_GAP_M
+            cols = math.ceil(math.sqrt(n) - 1e-6)
+            fw.append(cols * sw)
+            fd.append(math.ceil(n / cols) * sd)
+        F_, D_ = float(ctx.mine["front"][b]), float(ctx.mine["depth"][b])
+        inside = (cs[b].abs() <= F_ / 2) & (cf[b].abs() <= D_ / 2)
+        s_grid = sorted({round(float(v), 1) for v in cs[b][inside]})
+        f_grid = sorted({round(float(v), 1) for v in cf[b][inside]})
+        pl = SA.layout(gs, fw, fd, s_grid, f_grid, F_, edge, bool(destroy[b]))
+        num = {i: k for k, i in enumerate(SA.order(gs, pl))}
+        s[b], f[b] = 0.0, 0.0
+        g[b] = 0
+        for i, (_, rows) in enumerate(gs):
+            k = num[i]
+            for j in rows:
+                g[b, j] = k
+            s[b, k], f[b, k] = pl[i]
+    return g, s, f
 
 
 def runs(sel, k):
