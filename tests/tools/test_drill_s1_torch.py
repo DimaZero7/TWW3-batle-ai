@@ -16,7 +16,7 @@ P = load()
 
 def test_the_generator_gives_small_armies_with_snipers_and_fast_enemies():
     from tools.nn.strategist import drill_s1 as D
-    sp = D.specs(40, random.Random(3), turn=True)
+    sp = D.specs(40, random.Random(3), turn=True, vary=True)
     for s in sp:
         mine, foes = s["battle"][1], s["battle"][2]
         assert 9 <= len(mine) <= 12 and mine[0]["general"] and not any(u["general"] for u in mine[1:])
@@ -125,3 +125,23 @@ def test_the_behind_deployment_puts_the_snipers_behind_the_infantry_inside_its_e
             assert 25.0 <= float(f[k, inf].max()) - float(f[k, i]) <= 65.0
             mid = (float(s[k, inf].min()) + float(s[k, inf].max())) / 2
             assert abs(float(s[k, i]) - mid) <= 41.0                 # round the middle of the infantry
+
+
+def test_the_deepest_lawful_deployment_stays_in_the_zone_behind_the_infantry():
+    from tools.nn.strategist import drill_s1 as D
+    from tools.nn.strategist import zones as ZS
+    from tools.nn.unit import net as Nt
+    sp = D.specs(6, random.Random(11))
+    b = D.Batch(sp, P, "cpu")
+    out = D.decide(b.inp, b.ctx, "deep_zone")
+    _, _, pl = D.placed(b, out)
+    s, f = ZS.local(b.mine_zone, pl["x"], pl["z"])
+    rl = D.roles_of_state(b.st0)
+    for k in range(len(sp)):
+        n = len(sp[k]["battle"][1])
+        inf = [i for i in range(n) if rl[k][i] in ("line", "anti")]
+        for i in (i for i in range(n) if rl[k][i] == "sniper"):
+            assert float(f[k, i]) <= float(f[k, inf].max()) - 40.0
+    torch.manual_seed(0)
+    m, _ = D.play(b, out, Nt.UnitNet().eval(), P, "cpu", limit=2)
+    assert float(m["deploy_errors"].sum()) == 0

@@ -62,6 +62,7 @@ ENEMIES = tuple(DC1["enemies"].items())
 LIMIT_S = int(DC1["limit_s"])
 KEPT_S = int(DC1["kept_s"])
 BEHIND_M = 44.0                            # the hand-made 'behind': this far behind the infantry's front row
+DEEP_ZONE_M = 0.0                          # (a nudge past the cell: the walk checks the zone without it - errors)
 DEEP_M = 150.0                             # the bad 'deep': the snipers this far behind the front row
 PER_SIDE = 12                              # (the drill's armies are at most 12 a side: a smaller state, a faster step)
 _ROLE = {}
@@ -322,6 +323,19 @@ def decide(inp, ctx, who, temp=None, greedy=True):
             plan["cx"], plan["cz"] = torch.where(put, px, plan["cx"]), torch.where(put, pz, plan["cz"])
             plan["nudge"] = torch.where(put, torch.zeros_like(plan["nudge"]), plan["nudge"])
             return out
+        if who == "deep_zone":
+            # the deepest lawful one: the snipers' groups at the back row's cells round the middle, 40 m apart (a nudge
+            # past the cell would leave the zone: the walk's zone check sees no nudge - 1 error in 6 at 10 m)
+            comp = bias["comp"].argmax(2)
+            sg = sniper_groups(inp, comp)
+            f_back = (-ctx.mine["depth"][:, None] / 2 + 32.0).expand(B, G)
+            k = torch.cumsum(sg.long(), 1)
+            s = (k.float() - (sg.sum(1, keepdim=True).float() + 1) / 2) * 40.0
+            gx, gz = ZS.world(ctx.mine, s, f_back)
+            bias["goal_x"] = torch.where(sg, gx, bias["goal_x"])
+            bias["goal_z"] = torch.where(sg, gz, bias["goal_z"])
+            bias["nudge"] = torch.where(sg, torch.full_like(bias["nudge"], -DEEP_ZONE_M), bias["nudge"])
+            return NN.choose(NN.null_enc(B, K, G, dev), inp, ctx, NN.NullHeads(B, dev), greedy=True, bias=bias)
         if who == "deep":
             # the bad one the other way: the snipers' groups behind the middle, DEEP_M behind the front row's cells
             # (out of the zone's depth 176 m: a deployment error by design - hidden, out of everyone's range)

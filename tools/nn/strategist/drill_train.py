@@ -34,7 +34,7 @@ CAND_TEMPS = (1.5, 2.0, 2.0, 3.0, 3.0)
 
 
 def deployer(who, dev):
-    if who in ("teacher", "exposed", "teacher0", "deep", "behind"):
+    if who in ("teacher", "exposed", "teacher0", "deep", "behind", "deep_zone"):
         return who
     net, _, _ = ST.restore(who, dev)
     net.eval()
@@ -169,27 +169,42 @@ def agreement(net, chunks):
     return {h: round(sum(v) / len(v), 3) for h, v in acc.items()}
 
 
-def search(sp, cands, dev, unit_net, P, mark, rnd, R=None):
-    """(batch of sp, best act [S], marks [K, S], the chosen candidate [S], readings [R, K, S]): every candidate of every
-    seed played R times (config drill_s1 repeats: the seed's own enemy, then others of the mix - another script and
-    another draw of the dice), its mark the mean."""
+def play_chunks(sp, out, enemies, dev, unit_net, P, chunk=512):
+    """drill_s1.play of the battles sp (out their decisions, enemies their scripts) in pieces of chunk battles: the
+    readings joined."""
+    ms = []
+    for a in range(0, len(sp), chunk):
+        b = min(len(sp), a + chunk)
+        batch = D.Batch(sp[a:b], P, dev)
+        m, st = D.play(batch, D.take_out(out, torch.arange(a, b, device=dev)), unit_net, P, dev, enemies=enemies[a:b])
+        ms.append(m)
+    return {k: torch.cat([m[k] for m in ms]) for k in ms[0]}, st
+
+
+def search(sp, cands, dev, unit_net, P, mark, rnd, R=None, F=2):
+    """(batch of sp, best act [S], marks [K, S], the chosen candidate [S], readings [K, S], the finalists' marks [S]):
+    every candidate of every seed played once (the seed's own enemy); the F best of each seed played R - 1 times more
+    (others of the mix: another script and another draw of the dice), the label the finalist of the best mean of its R
+    battles (step 5: 3 battles for all 8 cost 24 a seed, this 8 + F (R - 1) = 12)."""
     S, K = len(sp), len(cands)
     R = int(R or D.DC1["repeats"])
     batch = D.Batch(sp * K, P, dev)
     out = decide_all(batch, cands, dev)
-    idx = torch.arange(K * S, device=dev).repeat(R)                      # copy r of candidate k, seed s: r*K*S + k*S + s
-    big = D.Batch(sp * K * R, P, dev)
-    enemies = [s_["enemy"] for s_ in sp] * K
-    for _ in range(R - 1):
-        other = [D._enemy_script(rnd) for _ in sp]
-        enemies += other * K
-    m, st = D.play(big, D.take_out(out, idx), unit_net, P, dev, enemies=enemies)
-    m = {k: v.view(R, K * S).mean(0) for k, v in m.items()}
+    m, st = play_chunks(sp * K, out, [s_["enemy"] for s_ in sp] * K, dev, unit_net, P)
     score = m[mark].view(K, S)
-    best = score.argmax(0)                                  # ties: the first (the formula)
+    top = score.topk(min(F, K), 0).indices                               # [F, S]
+    fin = (top * S + torch.arange(S, device=dev)[None]).reshape(-1)      # finalist f of seed s: f*S + s
+    reps = []
+    for _ in range(R - 1):
+        en = [D._enemy_script(rnd) for _ in sp] * top.shape[0]
+        m2, _ = play_chunks(sp * top.shape[0], D.take_out(out, fin), en, dev, unit_net, P)
+        reps.append(m2[mark])
+    mean = (score.gather(0, top) + sum(r.view(top.shape) for r in reps)) / R          # [F, S]
+    best = top.gather(0, mean.argmax(0)[None])[0]                        # ties: the better of the first battle
     idx = best * S + torch.arange(S, device=dev)
     lab = D.take_out(out, idx)["act"]
     one = D.Batch(sp, P, dev)
+    m["final_mark"] = mean.amax(0)
     return one, lab, score, best, m, st
 
 
@@ -289,8 +304,9 @@ def _train(a, P, dev, out, say, unit_net, net, critic, opt):
             K = len(cands)
             S = len(sp)
             V = lambda k: m[k].view(K, S)                                                    # noqa: E731
+            final = round(float(m.pop("final_mark").mean()), 3)
             pick = lambda k: round(float(V(k).gather(0, best[None])[0].mean()), 3)           # noqa: E731
-            row[kind] = {"seeds": S, "cands": K, "teacher": round(float(score[0].mean()), 3),
+            row[kind] = {"seeds": S, "cands": K, "teacher": round(float(score[0].mean()), 3), "final_mean": final,
                          "best": round(float(score.max(0).values.mean()), 3),
                          "net_greedy": round(float(score[K - 2].mean()), 3) if (rd > 0 or a.init) else None,
                          "chosen": torch.bincount(best, minlength=K).tolist(),
