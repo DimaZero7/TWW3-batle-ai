@@ -230,7 +230,9 @@ def test_the_formula_fits_20_units_into_the_games_zone_by_the_army_teachers_role
     for g in by["sniper"]:
         (n,) = g["units"]
         x, z, _, w = pl[n]
-        assert x >= line_x - 1.0                                                   # in the front row
+        assert line_x - 12.5 <= x <= line_x - 7.5          # 8-12 m behind the front row (SNIPER_BACK_M: the flank)
+        guard = min(math.hypot(pl[m][0] - x, pl[m][1] - z) for m in pl if role[m] == "anti")
+        assert guard <= 70.0, guard                         # a halberd pair near it, a row behind
         assert not [m for m in pl if m != n and pl[m][0] > x + 2 and abs(pl[m][1] - z) < (w + pl[m][3]) / 2]
         near = min(math.hypot(pl[m][0] - x, pl[m][1] - z) for m in pl if role[m] in ("line", "anti"))
         assert 30.0 <= near <= 70.0, near

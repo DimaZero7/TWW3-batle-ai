@@ -251,7 +251,10 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
     on = n > 0
     # 2. the groups' zones, in the numbers' order
     plan = {k: torch.zeros((B, G), device=dev) for k in ("cx", "cz", "heading", "r", "front", "depth", "slot_w",
-                                                          "slot_d")}
+                                                          "slot_d", "nudge")}
+    # (the formula's wish: a group's units nudge m along its facing from its zone's centre - its snipers behind the
+    # front row; deploy.places; the network has none)
+    nudge = bias["nudge"] if bias is not None and "nudge" in bias else torch.zeros((B, G), device=dev)
     from tools.nn.strategist import deploy as DP
     slot_w, slot_d = DP.slot(mem, inp["front"], inp["depth"])
     # my units placed so far (their formations: the walk's ban is by units, not by the groups' zones)
@@ -297,6 +300,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
         r = ZS.radius(front, depth)
         px, pz, ok = ZS.pushed(ctx.cx, ctx.cz, ctx.mine, front, depth, heading)
         s_g, f_g = DP.offsets(mem[:, g], inp["shooter"], order, line, slot_w[:, g], slot_d[:, g])
+        f_g = f_g + nudge[:, g:g + 1]
         cand = ok.any(0)                       # only the cells inside my zone somewhere in the batch (~30 of 1024)
         clear = torch.zeros_like(ok)
         if bool(cand.any()):
@@ -329,7 +333,7 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
             out[name][:, g] = torch.where(a, v, out[name][:, g])
         zx, zz = px.gather(1, cl[:, None])[:, 0], pz.gather(1, cl[:, None])[:, 0]
         for k, v in (("cx", zx), ("cz", zz), ("heading", heading), ("r", r), ("front", front), ("depth", depth),
-                     ("slot_w", slot_w[:, g]), ("slot_d", slot_d[:, g])):
+                     ("slot_w", slot_w[:, g]), ("slot_d", slot_d[:, g]), ("nudge", nudge[:, g])):
             plan[k][:, g] = torch.where(a, v, plan[k][:, g])
         plan["line"][:, g] = a & line
         placed[:, g] = a

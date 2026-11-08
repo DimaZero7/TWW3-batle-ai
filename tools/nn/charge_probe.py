@@ -568,7 +568,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange")
+UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2404,7 +2404,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     # attacker and a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
     for b, ln in enumerate(meta):
         if ln.get("plan") in UNIT_PLANS + ("memshot", "warpfire", "globes", "globes2", "dglobes"):
-            if ln["spec"].get("mode") != "shoot" and int(slot["a"][b]) >= 0:
+            if ln["spec"].get("mode") != "shoot" and not ln["spec"].get("a_free") and int(slot["a"][b]) >= 0:
                 st.u["range"][b, int(slot["a"][b])] = 0.0
             if ln["spec"].get("target_mode") != "skirmish" and int(slot["tg"][b]) >= 0:
                 st.u["range"][b, int(slot["tg"][b])] = 0.0
@@ -2696,7 +2696,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             elif tmode[b] in ("both", "both_walk") or (sp.get("answer") and c is not None):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
-                kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
+                kind[b, T], x[b, T], z[b, T], run_[b, T] = (O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60),
+                                                            bool(sp.get("push_run")))
             for j, e in enumerate((sp.get("extras") or [])[:3], 1):
                 # an extra with attack (the busycharge plan's anvil, the crowd plan's flankers) attacks the target at a
                 # walk from the go

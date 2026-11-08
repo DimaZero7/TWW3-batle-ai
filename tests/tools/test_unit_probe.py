@@ -39,6 +39,10 @@ def test_the_new_units_plans_build_on_the_grid_with_effects_and_card_rows(tmp_pa
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATFORM_LANES]
         elif plan == "ratshape":           # one battle, each kind once (narrow and wide targets, a lone man)
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATSHAPE_LANES]
+        elif plan == "losmove":            # one battle, each kind once (the target walks / runs at the shooter)
+            assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.LOSMOVE_LANES]
+            assert all(l["target_mode"] == "push" and l["push_m"] > up.LOSMOVE_GAP for l in b[0])
+            assert sum(bool(l.get("a_free")) for l in b[0]) == 4 and sum(bool(l.get("push_run")) for l in b[0]) == 4
         elif plan == "losrange":           # the flat battle, then the two map lanes (one a battle)
             assert [l["kind"] for l in b[0]] == [x[0] for x in up.LOSRANGE_LANES]
             assert [bt[0]["kind"] for bt in b[1:]] == [x[0] for x in up.LOSRANGE_MAP]

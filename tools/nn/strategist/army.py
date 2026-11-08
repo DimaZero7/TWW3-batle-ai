@@ -10,10 +10,10 @@ each, the other snipers one group, all the guns one group, the lord alone, the f
 The layout, in my zone's axes (s right, f forward), rows from the front (human_rules 1):
     row 1..   the line: its pairs side by side across the middle (the line 180-330 m wide, 2 rows); the snipers that
               fire flat (passport 'direct': jezzails, long rifles) at the outer ends of the first row, the right one
-              first, SNIPER_GAP_M clear of the line (33-44 m from the nearest infantry, nothing of mine ahead: the
-              game's flat fire needs a clear line past friends - 08.11, the game's battles: behind the line they
-              walked through it into melee or did not fire); the other snipers and the shooters at the flanks of
-              the first line row; the first two halberd pairs at the flanks of the last line row ("one pair left, one right")
+              first, SNIPER_GAP_M clear of the line (33-44 m from the nearest infantry, nothing of mine ahead),
+              SNIPER_BACK_M behind the row (plan nudge), a halberd / spear pair at the outer end of the second row
+              beside each (the open flank's guard: the enemy's fast units struck the snipers at the ends first);
+              the other snipers and the shooters at the flanks of the first line row; the first two halberd pairs at the flanks of the last line row ("one pair left, one right")
     the back  behind the centre: the guns (the artillery in the centre behind the line, -50..0 m), the lord (behind the
               centre, -15..-19 m), the other halberd pairs (the reserve "behind in the centre"); the fast behind the
               flanks (80 m behind the line)
@@ -33,6 +33,9 @@ GAP_M = 2.0               # between two groups side by side (their outer formati
 SNIPER_GAP_M = 8.0        # a direct-fire snipers' group's footprint from its neighbour's: the person's snipers stand
 #                           33-44 m (centre to centre) from the nearest infantry (human_rules 1) - a pair of greatswords
 #                           and two long rifles' slots 8 m apart put their nearest men's centres ~42 m apart
+SNIPER_BACK_M = 10.0      # the direct-fire snipers stand this far behind their front row's centre line (the
+#                           orchestrator 08.11: 8-12 m behind the first row's edge - the enemy's fast units strike the
+#                           open flank first: in the chain's battles the snipers at the ends met them at 52-71 s)
 DIRECT_COL = 66           # passport.features: FLIGHT 'direct' (flat fire: needs a clear line past friends)
 
 
@@ -127,6 +130,15 @@ def _rows(gs, fw, grid, half, flat=()):
     fast = [i for i, (r, _) in enumerate(gs) if r == "fast"]
     for k, i in enumerate(sorted(flat)):             # the flat-firing snipers first: the front row's ends
         put(0, i, "right" if k % 2 == 0 else "left")
+    # a halberd / spear pair beside each such sniper, nearer the flank, a row behind (the front row has no room for
+    # them: 6 cells of 64 m - two line pairs and two snipers fill it), the guard of the open flank; no halberds: a line
+    # pair (the last ones)
+    n_g = len(flat)
+    guards = anti[:n_g] + line[len(line) - max(0, n_g - len(anti)):] if n_g > len(anti) else anti[:n_g]
+    for k, i in enumerate(guards):
+        put(1, i, "right" if k % 2 == 0 else "left")
+    anti = [i for i in anti if i not in guards]
+    line = [i for i in line if i not in guards]
     last_line = 0
     for i in line:
         last_line = put(last_line, i, "mid")

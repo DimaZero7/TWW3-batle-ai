@@ -465,7 +465,7 @@ function M.main(bm, config, globals)
     -- 'skirmish' target), the morale fields with lane.morale_rows (both) or lane.t_morale (the target), the card's
     -- values (cs) with lane.card_rows.
     local function lane_row(lane, who, u)
-        local shooter = who == 'a' and (lane.mode == 'retarget' or lane.mode == 'shoot')
+        local shooter = who == 'a' and (lane.mode == 'retarget' or lane.mode == 'shoot' or lane.a_free == true)
             or who == 'tg' and lane.target_mode == 'skirmish'
         local row = shooter and shooter_row(u) or unit_row(u)
         if lane.morale_rows or (who == 'tg' and lane.t_morale) then add_morale(row, u) end
@@ -1197,7 +1197,8 @@ function M.main(bm, config, globals)
                 attack(lane, lane.t, state.units[lane.extras[1].name], true)
             end
             if lane.target_mode == 'push' then
-                orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
+                -- (lane.push_run: at a run - the losmove plan's running target)
+                orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), lane.push_run == true)
             elseif lane.target_mode == 'skirmish' and lane.t_move then
                 -- (the shootcontact plan) a move t_move.back_m straight away from the attacker (-z), never changed
                 local L = lane.layout
@@ -1219,6 +1220,9 @@ function M.main(bm, config, globals)
                 attack(lane, lane.a, lane.t, false)
             elseif m == 'attack_walk' then
                 attack(lane, lane.a, lane.t, true)
+            elseif m == 'hold' and lane.a_free then
+                -- (the losmove plan) no order, fire at will on: the shooter picks its own target
+                orders.set_fire_at_will(lane.a.uc, true)
             elseif m == 'shoot' then
                 orders.set_fire_at_will(lane.a.uc, true)
                 orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)

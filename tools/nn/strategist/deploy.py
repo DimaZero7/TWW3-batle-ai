@@ -102,7 +102,9 @@ def apart_units(px, pz, heading, s, f, front, depth, member, placed, gap):
 
 
 def slot_of(plan):
-    return plan["slot_w"], plan["slot_d"]
+    """(across, deep, nudge) [B, G]: the walk's slots and each group's units' shift along its facing (m, - back;
+    the formula's direct-fire snipers stand SNIPER_BACK_M behind the front row: strategist/army.py)."""
+    return plan["slot_w"], plan["slot_d"], plan.get("nudge", torch.zeros_like(plan["slot_w"]))
 
 
 def places(members, shooter, cx, cz, heading, line, width0, slot=None):
@@ -115,10 +117,12 @@ def places(members, shooter, cx, cz, heading, line, width0, slot=None):
         sw = sd = torch.full((B, G), tile, device=dev)
         wmax = torch.full((B, N), tile - GAP_M, device=dev)
     else:
-        sw, sd = slot
+        sw, sd = slot[0], slot[1]
         wmax = torch.full((B, N), 1e9, device=dev)
+    nudge = slot[2] if slot is not None and len(slot) > 2 else torch.zeros((B, G), device=dev)
     slot = torch.arange(N, device=dev, dtype=torch.float32).expand(B, G, N)
     s, f = offsets(members, shooter[:, None, :].expand(B, G, N), slot, line, sw, sd)
+    f = f + nudge[..., None]
     x, z = Z.world(s, f, cx[..., None], cz[..., None], heading[..., None])
     on = members.any(1)
     g = members.float().argmax(1)                                        # [B, N] each unit's group

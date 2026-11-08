@@ -47,6 +47,12 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             the centres, the ground between) - battle 2, and the same place facing the target - battle 3 (LOSRANGE_*).
             Measures: losfriend's, and the distance to the target (centres) at the go, at the first shot and at the end,
             the way walked;
+  losmove   a target coming at the shooter (08.11, the chain's battles: long rifles under an attack on advancing
+            swordsmen walked 45 m ahead without a shot; jezzails held 40 s without one): the target walks / runs at the
+            shooter from LOSMOVE_GAP m (front to front) through it; the shooter (long rifles, jezzails) ordered to attack
+            it ('shoot') or with no order and fire at will on (a_free: our 'hold' of a shooter) - 1 battle of 8 lanes,
+            LOSMOVE_S. Measures: the first shot and the distance then, shots before the contact, how far the shooter
+            walked forward;
   wolfpoison the poison (W3): poisoned wolf rats -> swordsmen, plain ones (the control), the poisoned leaving 15 s after
             contact with the swordsmen halting or chasing them, the plain leaving chased (the control) - 2 battles of 5 lanes.
 
@@ -127,6 +133,10 @@ LOSRANGE_LANES = (("lr200", LR, "clanrat", 200, "front"), ("lr230", LR, "clanrat
 LOSRANGE_MAP = (("m3_as_game", JZ, (-104.4, 160.6, 265.0), "flag", (137.5, 132.0, 277.0)),
                 ("m3_facing", JZ, (-104.4, 160.6, 97.0), "flag", (137.5, 132.0, 277.0)))
 LOSRANGE_S = 90
+# the losmove plan: (kind, shooter, target, order 'shoot' / 'free', the target's pace 'walk' / 'run')
+LOSMOVE_LANES = tuple((f"{s}_{o}_{p}", key, tg, o, p) for s, key, tg in (("lr", LR, "clanrat"), ("jz", JZ, "swords"))
+                      for p in ("walk", "run") for o in ("shoot", "free"))
+LOSMOVE_GAP, LOSMOVE_S = 320, 300
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -191,6 +201,16 @@ def battles(plan):
             return cp.lane(shooter, target, "shoot", "hold", gap_m=LOSFRIEND_GAP, fight_s=LOSFRIEND_S,
                            max_s=LOSFRIEND_S, answer=False, kind=kind, **FX, **extra)
         return [_placed([lf(*x) for x in LOSFRIEND_LANES], 0)]
+    if plan == "losmove":
+        lanes = []
+        for kind, shooter, target, order, pace in LOSMOVE_LANES:
+            ak, am, _ = cp.UNITS[shooter]
+            extra = {"a_free": True} if order == "free" else {}
+            lanes.append(cp.lane(shooter, target, "shoot" if order == "shoot" else "hold", "push", gap_m=LOSMOVE_GAP,
+                                 fight_s=10, max_s=LOSMOVE_S, answer=False, kind=kind,
+                                 push_m=round(LOSMOVE_GAP + cp.depth(ak, am) + 20, 1), push_run=pace == "run",
+                                 **FX, **extra))
+        return [_placed(lanes, 0)]
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -658,6 +678,26 @@ def losfriend_measure(lane):
     return out
 
 
+def losmove_measure(lane):
+    """losrange's, and the shots before the contact (the shooter's first melee sample), the distance at the first shot,
+    the contact's time."""
+    out = losrange_measure(lane)
+    s = lane["samples"]
+    t = _t(lane)
+    m = cp.series(s, "a", "m")
+    ammo = cp.series(s, "a", "ammo")
+    hit = np.nan_to_num(m) > 0
+    out["contact_s"] = float(t[hit][0]) if hit.any() else None
+    ok = np.isfinite(ammo)
+    if ok.any():
+        end = out["contact_s"] if out["contact_s"] is not None else float(t[-1])
+        before = ok & (t <= end)
+        out["shots_before_contact"] = float(ammo[ok][0] - ammo[before][-1]) if before.any() else 0.0
+    if out.get("first_shot_s") is None:
+        out["first_shot_s"] = None
+    return out
+
+
 def losrange_measure(lane):
     """losfriend's, and the distance between the centres (go / first shot / end / least), the way walked."""
     out = losfriend_measure(lane)
@@ -697,7 +737,7 @@ def ratcover_measure(lane):
     return out
 
 
-MEASURE = {"losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+MEASURE = {"losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -733,7 +773,8 @@ def _fmt(v):
 
 
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
-KEY = {"losrange": ("first_shot_s", "bullets", "dist0_m", "dist_at_shot_m", "dist_end_m", "walked_m", "moved_until_s",
+KEY = {"losmove": ("first_shot_s", "dist_at_shot_m", "shots_before_contact", "contact_s", "fwd_max_m", "walked_m"),
+       "losrange": ("first_shot_s", "bullets", "dist0_m", "dist_at_shot_m", "dist_end_m", "walked_m", "moved_until_s",
                     "b0", "b_end"),
        "losfriend": ("first_shot_s", "bullets", "hp_per_bullet", "cover_hp_lost", "moved_until_s", "fwd_max_m",
                      "fwd_end_m", "side_end_m"),

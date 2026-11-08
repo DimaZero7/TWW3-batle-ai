@@ -86,12 +86,14 @@ def wishes(inp, ctx, mode="formula"):
     if mode in ("formula", "hold", "attack"):
         # an army (the operative's army formula from army.min own units): its groups by role, laid out as the person
         # lays his out (strategist/army.py) - the operative's teacher keeps them from its first decision
-        g, s, f = army_wishes(inp, ctx, destroy, g, s, f, G)
+        g, s, f, nudge = army_wishes(inp, ctx, destroy, g, s, f, G)
         comp = F_one(g, G) * BIG
+    else:
+        nudge = torch.zeros((B, G), device=dev)
     gx, gz = ZS.world(ctx.mine, s, f)
     verb = torch.zeros((B, len(DC.VERBS)), device=dev)
     verb[torch.arange(B, device=dev), torch.where(destroy, DC.VERBS.index("destroy"), DC.VERBS.index("hold"))] = BIG
-    return {"comp": comp, "form": form, "turn": turn, "goal_x": gx, "goal_z": gz, "verb": verb}
+    return {"comp": comp, "form": form, "turn": turn, "goal_x": gx, "goal_z": gz, "verb": verb, "nudge": nudge}
 
 
 def army_wishes(inp, ctx, destroy, g, s, f, G):
@@ -102,8 +104,9 @@ def army_wishes(inp, ctx, destroy, g, s, f, G):
     own = inp["own"]
     B, K = own.shape
     amin = int(ocfg()["teacher"]["army"]["min"])
+    nudge = torch.zeros_like(s)
     if not bool((own.sum(1) >= amin).any()):
-        return g, s, f
+        return g, s, f, nudge
     edge = float(cfg()["teacher"]["edge_m"])
     g, s, f = g.clone(), s.clone(), f.clone()
     cards = inp["rows"][..., :69].cpu().numpy()
@@ -140,7 +143,9 @@ def army_wishes(inp, ctx, destroy, g, s, f, G):
             for j in rows:
                 g[b, j] = k
             s[b, k], f[b, k] = pl[i]
-    return g, s, f
+            if i in flat:
+                nudge[b, k] = -SA.SNIPER_BACK_M
+    return g, s, f, nudge
 
 
 def runs(sel, k):
