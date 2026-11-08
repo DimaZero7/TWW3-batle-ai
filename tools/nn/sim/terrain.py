@@ -259,14 +259,28 @@ def missile_factor(dh, params):
 
 def hill(u, pw, alive, params):
     """[B, N] the morale's 'on the hill' (mechanic.md 4, the program; the database's ume_encouraged_on_the_hill +10): an
-    enemy within radius_m (centre to centre) and the ground under the unit's front rank (its centre + depth / 2 ahead)
-    at least dh_m above the ground under every such enemy's centre."""
+    enemy near and the unit's ground at least dh_m above the ground under every such enemy's centre. Near: reach
+    'centre_box' - the unit's centre within the enemy's rectangle widened by radius_m + the unit's own radius (the
+    game's list), else radius_m centre to centre; the unit's ground: own 'centre' - under its centre, else under its
+    front rank (its centre + depth / 2 ahead). Measured (the probe hill, build/diag_stage0_probe): centre_box, centre."""
     tc = params.sim["terrain"]["hill"]
-    b = u["b"] * math.pi / 180
-    d = pw["depth"] / 2
-    hf = height(u, u["x"] + torch.sin(b) * d, u["z"] + torch.cos(b) * d)
     hc = ground(u)
-    near = pw["enemy"] & alive[:, None, :] & (pw["dist"] <= float(tc["radius_m"]))
+    if tc.get("own") == "centre":
+        # (terrain.hill.own 'centre', measured: the probe hill, build/diag_stage0_probe) the ground under the unit's centre
+        hf = hc
+    else:
+        b = u["b"] * math.pi / 180
+        d = pw["depth"] / 2
+        hf = height(u, u["x"] + torch.sin(b) * d, u["z"] + torch.cos(b) * d)
+    if tc.get("reach") == "centre_box":
+        # (terrain.hill.reach 'centre_box') the game's list of units near: the unit's centre within the enemy's
+        # rectangle widened by radius_m + the unit's own radius (half its box's diagonal; as morale.fear.reach)
+        from tools.nn.sim import geometry
+        own_r = 0.5 * torch.sqrt(pw["front"] ** 2 + pw["depth"] ** 2)
+        reach = geometry.centre_box_dist(u, pw["front"], pw["depth"]) <= (float(tc["radius_m"]) + own_r)[:, :, None]
+    else:
+        reach = pw["dist"] <= float(tc["radius_m"])
+    near = pw["enemy"] & alive[:, None, :] & reach
     top = torch.where(near, hc[:, None, :], torch.full_like(pw["dist"], -1e9)).amax(2)
     return alive & near.any(2) & (hf >= top + float(tc["dh_m"]))
 

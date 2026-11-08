@@ -131,6 +131,27 @@ def test_the_hill_morale():
         assert not bool(terrain.hill(st.u, pw, alive, P)[0, st.N // 2])
 
 
+def test_the_hill_reaches_by_the_enemy_box_and_takes_the_unit_centre():
+    """terrain.hill reach 'centre_box', own 'centre' (the probe hill, build/diag_stage0_probe): the enemy counts while the
+    unit's centre is within its box widened by 120 m + the unit's own radius (the spearmen 30 x 9.6 m: 15.75 m), so a
+    clanrat block (15.3 m deep) 140 m off centre to centre counts and 150 m off does not (120 m centre to centre: neither);
+    the height is the unit's centre's - a slope where the centre stands 9.9 m above the enemy but the front rank 10.3 m
+    gives no +10."""
+    assert P.sim["terrain"]["hill"]["reach"] == "centre_box" and P.sim["terrain"]["hill"]["own"] == "centre"
+    for dz, hill in ((140.0, True), (150.0, False)):
+        st = scenario.build([army([(SPEAR, 0, 0, 0)], [(CLANRAT, 0, dz, 180)])], P)
+        terrain.set_map(st, plane(0.0, -0.15))
+        pw = geometry.pairwise(st.u, SP)
+        assert bool(terrain.hill(st.u, pw, st.u["men"] > 0, P)[0, 0]) == hill
+    # the centre 9.9 m above: a slope 0.11 over 90 m; the front rank (4.8 m ahead, downhill) lower still - and uphill
+    # facing away (the front rank higher by 0.5 m) it is still off
+    for b in (0, 180):
+        st = scenario.build([army([(SPEAR, 0, 0, b)], [(CLANRAT, 0, 90, 180)])], P)
+        terrain.set_map(st, plane(0.0, -0.11))
+        pw = geometry.pairwise(st.u, SP)
+        assert not bool(terrain.hill(st.u, pw, st.u["men"] > 0, P)[0, 0])
+
+
 def test_the_ground_closes_the_line_of_fire():
     # a ridge 15 m high halfway between handgunners and clanrats 100 m off
     Z, X = np.meshgrid(GX, GX, indexing="ij")

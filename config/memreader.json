@@ -6,7 +6,7 @@
   "author": "Druwski (PKozdra)",
   "url": "https://github.com/PKozdra/memreader_plus",
   "pack_name": "memreader_plus.pack",
-  "sha256": "d034ea466c29f6a75da92d43e6c8261d319d3d2710310c6b88ee88bed15b9a0b",
-  "release": "0_15_1",
+  "sha256": "0c751ae032bb51718c267cd06b67c648035367c13338763edf9a689be4ce9ae1",
+  "release": "0_15_2",
   "sites_file": "build/mem/sites.json"
 }

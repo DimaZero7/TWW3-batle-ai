@@ -164,6 +164,147 @@ CHASE = dict(t_morale=True, at_rout="none", after_rout_s=45, max_s=200, rout_at_
              damage={"t": {"method": "kill", "share": 0.5}})
 
 
+# ---------------------------------------------------------------- stage 0-1 mechanics (build/diag_stage0_probe)
+# the hill plan (build/diag_stage0_probe/find_hill.py; ksl_plains_01): kind -> (the target's centre x, z, its bearing
+# towards the enemy's approach, the drop target - ground HILL_GAP m out); the target (tested spearmen, its morale kept)
+# holds, the enemy (fearless clanrats) walks up from HILL_GAP m (front to front) to HILL_STOP m off its front
+HILL_SITES = {"gentle": (272.0, 96.0, 150.0), "steep": (-200.0, -136.0, 60.0), "level": (64.0, -200.0, 0.0)}
+HILL_T, HILL_A = "spear", "clanrat"
+HILL_GAP, HILL_STOP, HILL_S = 200, 15, 200
+# the flankslot plan (flat): the morale's three neighbour slots (memory: nb1 left, nb2 right, nb3 rear; 0 / 1 / 2) and
+# flanks exposed / secure against the script's lf / rf / bf. The target (tested spearmen, its morale kept) holds at its
+# place facing +z (b 0; its right +x); the enemy (fearless clanrats, 'script' moves from its start) and the target's
+# friends (fearless spearmen, side 't') by kind - kind -> (the enemy's start dx, dz from the target's centre, its
+# bearing, [steps], [friends' dx]): side_stand from 160 m on the right in at a run to 120 / 90 / 65 / 45 / 30 m
+# (centre to centre), standing between; rear_walk from 200 m behind at a walk to 35 m; past_left at a run 50 m off its
+# left from 150 m ahead to 150 m behind (facing its way, not the target); friends - spearmen 40 m left (10 m gap) and
+# 80 m right (50 m gap), the enemy from 200 m ahead at a walk to 60 m; friend_screen - a friend 45 m right (15 m gap),
+# the enemy from 200 m right to 100 m, then to 75 m (7 m off the friend's edge); side_away - the enemy standing 45 m
+# right with its back to the target, at 40 s it turns to face it, at 80 s away again
+FLANK_T, FLANK_A, FLANK_F = "spear", "clanrat", "spear"
+FLANK_PLACES = ((-400.0, -260.0), (0.0, -260.0), (400.0, -260.0), (-400.0, 240.0), (0.0, 240.0), (400.0, 240.0))
+FLANK_LANES = {
+    "side_stand": ((160.0, 0.0, 270.0), [(15, -40, 0, True), (35, -70, 0, True), (55, -95, 0, True),
+                                          (75, -115, 0, True), (95, -130, 0, True)], []),
+    "rear_walk": ((0.0, -200.0, 0.0), [(2, 0, 165, False)], []),
+    "past_left": ((-50.0, 150.0, 180.0), [(2, 0, -300, True)], []),
+    "friends": ((0.0, 200.0, 180.0), [(20, 0, -140, False)], [-40.0, 80.0]),
+    "friend_screen": ((200.0, 0.0, 270.0), [(2, -100, 0, False), (70, -125, 0, False)], [45.0]),
+    "side_away": ((45.0, 0.0, 90.0), [(40, "face", 270.0), (80, "face", 90.0)], []),
+}
+FLANK_S = 130
+# the flankslot2 plan (battle 2, the bounds the first left open): front_walk - from 150 m ahead at a walk to 30 m;
+# diag_front / diag_rear - from 150 m at 45 deg front-right / 135 deg rear-right at a walk to 25 m; lateral_out - 40 m
+# right and 25 m ahead, out to 55 / 65 / 75 m, then 40 m right at 45 / 60 m ahead (at a run, standing between);
+# friends2 - friends 55 m left and 70 m right, the enemy from 200 m behind to 100 m; friends3 - friends 50 m left and
+# 60 m right, the enemy from 200 m left to 110 m (beyond the left friend)
+FLANK2_LANES = {
+    "front_walk": ((0.0, 150.0, 180.0), [(2, 0, -120, False)], []),
+    "diag_front": ((106.0, 106.0, 225.0), [(2, -88, -88, False)], []),
+    "lateral_out": ((40.0, 25.0, 270.0), [(15, 15, 0, True), (30, 25, 0, True), (45, 35, 0, True), (60, 0, 20, True),
+                                         (80, 0, 35, True)], []),
+    "diag_rear": ((106.0, -106.0, 315.0), [(2, -81, 81, False)], []),
+    "friends2": ((0.0, -200.0, 0.0), [(20, 0, 100, False)], [-55.0, 70.0]),
+    "friends3": ((-200.0, 0.0, 90.0), [(20, 90, 0, False)], [-50.0, 60.0]),
+}
+# the lobfriend plan (flat): arcing fire over own infantry (stage 1's 'fire over the head'): (kind, shooter, its width,
+# the target, gap front to front m, the cover's short name or None, the cover's back edge this far ahead of the
+# shooter's front m); a held target, LOB_S of fire
+LOB_LANES = (("arch_c20", "archer", 30, "wh2_main_skv_inf_clanrats_0", 100, "spear", 20),
+             ("arch_c5", "archer", 30, "wh2_main_skv_inf_clanrats_0", 100, "spear", 5),
+             ("arch_alone", "archer", 30, "wh2_main_skv_inf_clanrats_0", 100, None, 0),
+             ("xbow_c20", "xbow", 30, "wh2_main_skv_inf_clanrats_0", 110, "spear", 20),
+             ("sling_c20", "slinger", 45, "spear", 80, "wh2_main_skv_inf_clanrats_0", 20),
+             ("sling_alone", "slinger", 45, "spear", 80, None, 0))
+LOB_S = 70
+# the forestwalk plan (ksl_plains_01; build/diag_g49/ground/sites.json: 60 m level legs fully in forest / on grass):
+# spearmen to and fro between their place and LEG_M ahead, kind -> (x, z, bearing, run); the game's legs at a run 0.87-
+# 0.93 of grass (the ground probe): a walk too, and the men from memory (each man's step speed: a ground rule or the
+# way round the trunks?)
+FOREST_SITES = {"forest1_walk": (-48.0, -360.0, 0.0, False), "forest2_walk": (-80.0, -200.0, 150.0, False),
+                "forest3_run": (120.0, -360.0, 150.0, True), "forest4_run": (408.0, 456.0, 180.0, True),
+                "grass1_walk": (416.0, 232.0, 90.0, False), "grass2_walk": (-176.0, 64.0, 300.0, False),
+                "grass3_run": (272.0, -24.0, 210.0, True), "grass4_run": (112.0, -40.0, 0.0, True)}
+FOREST_S = 150
+
+
+def _fwd(b):
+    r = math.radians(b)
+    return math.sin(r), math.cos(r)
+
+
+def hill_battles():
+    """The hill plan's battle (module doc): the HILL_SITES lanes on Kislev."""
+    g = cp.TERRAIN
+    tk, tm, _ = cp.UNITS[HILL_T]
+    ak, am, _ = cp.UNITS[HILL_A]
+    td, ad = cp.depth(tk, tm), cp.depth(ak, am)
+    lanes = []
+    for kind, (px, pz, b) in HILL_SITES.items():
+        fx, fz = _fwd(b)
+        far, near = HILL_GAP + (td + ad) / 2, HILL_STOP + (td + ad) / 2
+        a_at = {"x": round(px + fx * far, 1), "z": round(pz + fz * far, 1), "b": (b + 180) % 360}
+        t_at = {"x": px, "z": pz, "b": b}
+        steps = [{"at_s": 2, "kind": "move", "dx": round(-fx * (far - near), 1), "dz": round(-fz * (far - near), 1),
+                  "run": False}]
+        lanes.append(cp.lane(HILL_A, HILL_T, "script", "hold", gap_m=HILL_GAP, fight_s=0, max_s=HILL_S, answer=False,
+                             kind=kind, map=g["map"], catchment=g["catchment"], a_at=a_at, t_at=t_at, place=(px, pz),
+                             steps=steps, t_morale=True, flank_rows=True, **FX))
+    return [lanes]
+
+
+def flankslot_battles(table=None):
+    """The flankslot plan's battle (module doc): FLANK_LANES (flankslot2: FLANK2_LANES) on FLANK_PLACES, flat."""
+    lanes = []
+    for (kind, ((dx, dz, ab), steps, friends)), (px, pz) in zip((table or FLANK_LANES).items(), FLANK_PLACES):
+        a_at = {"x": px + dx, "z": pz + dz, "b": ab}
+        t_at = {"x": px, "z": pz, "b": 0.0}
+        st = []
+        for s in steps:
+            if s[1] == "face":
+                st.append({"at_s": s[0], "kind": "face", "bearing": s[2]})
+            else:
+                st.append({"at_s": s[0], "kind": "move", "dx": float(s[1]), "dz": float(s[2]), "run": bool(s[3])})
+        extra = {}
+        if friends:
+            extra["extras"] = [{"short": FLANK_F, "dx": fx, "dz": 0.0, "b": 0.0, "width": cp.WIDTH_M, "side": "t"}
+                               for fx in friends]
+        lanes.append(cp.lane(FLANK_A, FLANK_T, "script", "hold", gap_m=round(math.hypot(dx, dz)), fight_s=0,
+                             max_s=FLANK_S, answer=False, kind=kind, a_at=a_at, t_at=t_at, place=(px, pz), steps=st,
+                             t_morale=True, flank_rows=True, **FX, **extra))
+    return [lanes]
+
+
+def lobfriend_battles():
+    """The lobfriend plan's battle (module doc): LOB_LANES on the grid, flat."""
+    lanes = []
+    for kind, shooter, aw, target, gap, cover, ahead in LOB_LANES:
+        extra = {}
+        if cover:
+            tk, tm, _ = cp.UNITS[target]
+            ck, cm, _ = cp.UNITS[cover]
+            td, cd = cp.depth(tk, tm), cp.depth(ck, cm)
+            dz = td / 2 + gap - ahead - cd / 2           # from the target's centre, towards the shooter
+            extra["extras"] = [{"short": cover, "dx": 0.0, "dz": round(dz, 1), "width": cp.WIDTH_M}]
+        lanes.append(cp.lane(shooter, target, "shoot", "hold", gap_m=gap, fight_s=LOB_S, max_s=LOB_S, answer=False,
+                             kind=kind, a_w=aw, **FX, **extra))
+    return [_placed(lanes, 0)]
+
+
+def forestwalk_battles():
+    """The forestwalk plan's battle (module doc): FOREST_SITES shuttles of spearmen on Kislev, the targets parked."""
+    g, gr = cp.TERRAIN, cp.GROUND
+    lanes = []
+    for k, (kind, (x0, z0, b, run)) in enumerate(FOREST_SITES.items()):
+        fx, fz = _fwd(b)
+        lanes.append(cp.lane("spear", "clanrat", "shuttle", "hold", gap_m=250, fight_s=FOREST_S, max_s=FOREST_S,
+                             answer=False, kind=kind, map=g["map"], catchment=g["catchment"], shuttle_walk=not run,
+                             a_at={"x": x0, "z": z0, "b": b},
+                             p2={"x": round(x0 + gr["leg_m"] * fx, 1), "z": round(z0 + gr["leg_m"] * fz, 1)},
+                             t_at={"x": -470.0 + 40 * k, "z": g["park_z"], "b": 180.0}, place=(x0, z0), **FX))
+    return [lanes]
+
+
 def _placed(base, k):
     """The lanes rotated by k on the grid's places; a pace lane runs towards the middle of the field."""
     out = []
@@ -231,6 +372,16 @@ def battles(plan):
         return [_placed(lanes, 0)]
     if plan == "snipe":
         return snipe_battles()
+    if plan == "hill":
+        return hill_battles()
+    if plan == "flankslot":
+        return flankslot_battles()
+    if plan == "flankslot2":
+        return flankslot_battles(FLANK2_LANES)
+    if plan == "lobfriend":
+        return lobfriend_battles()
+    if plan == "forestwalk":
+        return forestwalk_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -842,7 +993,27 @@ def ratcover_measure(lane):
     return out
 
 
-MEASURE = {"snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+def forestwalk_measure(lane):
+    """The shuttle's cruise: the median of the 2 s speeds over each leg from 4 s after its start to 1 s before the next
+    (the turn and the start left out; legs from the entry's 'leg' phases, the first from the go at 0), their mean over
+    the legs, the legs done and the mean time of a whole leg (start to the next start)."""
+    t = _t(lane)
+    v = _speed(lane, "a")
+    starts = [0.0] + [p["t"] / 1000 for p in lane.get("phases", []) if p["phase"] == "leg"]
+    ends = starts[1:] + [float(t[-1])]
+    cruise, legs = [], []
+    for a, b in zip(starts, ends):
+        m = (t >= a + 4) & (t <= b - 1) & np.isfinite(v)
+        if m.sum() >= 3:
+            cruise.append(float(np.median(v[m])))
+        if b > a and b < float(t[-1]):
+            legs.append(b - a)
+    return {"kind": lane["spec"]["kind"], "run": lane.get("run"), "cruise": float(np.mean(cruise)) if cruise else None,
+            "cruise_first": cruise[0] if cruise else None, "legs": float(len(starts) - 1),
+            "leg_s": float(np.mean(legs)) if legs else None}
+
+
+MEASURE = {"lobfriend": losfriend_measure, "forestwalk": forestwalk_measure, "snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -878,7 +1049,9 @@ def _fmt(v):
 
 
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
-KEY = {"snipe": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "hid_go", "hid_order", "hid_firing_share",
+KEY = {"lobfriend": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "cover_hp_lost", "fwd_max_m"),
+       "forestwalk": ("cruise", "cruise_first", "legs", "leg_s"),
+       "snipe": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "hid_go", "hid_order", "hid_firing_share",
                  "seen_firing_share", "revealed_s", "hid_share", "gap_seen_m", "gap_unhid_m", "hid_100", "hid_60",
                  "hid_40", "v_100", "v_60", "v_40", "shots_unseen", "gap_min_m"),
        "losmove": ("first_shot_s", "dist_at_shot_m", "shots_before_contact", "contact_s", "fwd_max_m", "walked_m"),
@@ -920,7 +1093,8 @@ def measure_lanes(lanes):
 
 
 # the plans whose lanes stand on a map (their twin: the map's heights, ground and trunks)
-MAP_TWIN = {"snipe": cp.project.ROOT / "build" / "maps" / "ksl_plains_01" / "heights.npz"}
+MAP_TWIN = {"snipe": cp.project.ROOT / "build" / "maps" / "ksl_plains_01" / "heights.npz",
+            "forestwalk": cp.project.ROOT / "build" / "maps" / "ksl_plains_01" / "heights.npz"}
 
 
 def twin(lanes, device="cpu", copies=4, params=None):

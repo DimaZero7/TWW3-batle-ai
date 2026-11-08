@@ -486,6 +486,12 @@ function M.main(bm, config, globals)
             row.v = visible_to_target(lane)
         end
         if lane.card_rows then row.cs = card_stats(u) end
+        if lane.flank_rows and who == 'tg' then
+            -- (the flankslot plan) the script's flank threats (the bridge's lf / rf / bf)
+            row.lf = read(function() return u:is_left_flank_threatened() end)
+            row.rf = read(function() return u:is_right_flank_threatened() end)
+            row.bf = read(function() return u:is_rear_flank_threatened() end)
+        end
         if lane.dd_rows and (who == 'a' or lane.dd_rows == 'both') then
             row.dd = round(read(cco, u, 'DamageDealt'), 0)
         end

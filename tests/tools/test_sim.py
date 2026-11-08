@@ -3485,8 +3485,8 @@ class TestMoraleBatch:
         return seen
 
     def test_flanks_secure_by_enemy_distance_or_friends_at_both_sides(self, monkeypatch):
-        """M1, M2: +5 with no standing enemy within morale.secure.enemy_m, or friends (not lords) within side_m at both
-        sides; one side, a friend in front or only the lord: no; a threatened flank: no."""
+        """M1, M2: +5 with no standing enemy near, or friends (not lords) holding its side; one friend on the other side,
+        a friend in front or only the lord: no; a threatened flank: no (the enemy dead ahead counts on the left)."""
         sc = P.sim["morale"]["secure"]
         far = sc["enemy_m"] + 20
         near = sc["enemy_m"] - 40
@@ -3503,6 +3503,25 @@ class TestMoraleBatch:
         assert not secure([(SPEAR, 0, 30)], near)
         assert not secure([(GENERAL, 30, 0), (GENERAL, -30, 0)], near)
         assert not secure([(SPEAR, 34, 0), (SPEAR, -34, 0)], near, lf=True)
+
+    def test_flanks_secure_by_sides_held_by_friends(self, monkeypatch):
+        """morale.secure.rule 'sides' (the probes flankslot / flankslot2, build/diag_stage0_probe): an enemy in the list
+        (its box within list_m + the unit's radius) counts on its half - left (rel <= 0) or right - and behind the
+        flank line on the rear as well; a friend within friend_m at side_deg holds its side; the rear is never held."""
+        sc = P.sim["morale"]["secure"]
+        assert sc["rule"] == "sides" and sc["list_m"] == 120 and sc["friend_m"] == 57.5
+
+        def secure(friends, ex, ez):
+            own = [(SPEAR, 0, 0, 0)] + [(k, x, z, 0) for k, x, z in friends]
+            st = scenario.build([army(own, [(SLAVE, ex, ez, 270 if ex > 0 else 90 if ex < 0 else 180)])], P)
+            return bool(self.ctx_of(st, monkeypatch=monkeypatch)[-1]["secure"][0, 0])
+        # an enemy 100 m right: held by a friend 50 m right (not 60 m), the left friend does not help
+        assert secure([(SPEAR, 50, 0)], 100, 5) and not secure([(SPEAR, 60, 0)], 100, 5)
+        assert not secure([(SPEAR, -50, 0)], 100, 5)
+        # just behind the flank line: the rear too - not held even with both sides held
+        assert not secure([(SPEAR, 50, 0), (SPEAR, -50, 0)], 100, -5)
+        # ahead a little to the left: the left friend holds it; out of the list (160 m): secure alone
+        assert secure([(SPEAR, -45, 0)], -3, 100) and secure([], 0, 165)
 
     def test_the_charge_gives_15_in_blocks_from_the_sprint(self):
         """M4: an attack order at a run from far: +15 from the charge sprint's start (target within the charge

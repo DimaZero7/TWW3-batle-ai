@@ -56,6 +56,8 @@ def test_the_new_units_plans_build_on_the_grid_with_effects_and_card_rows(tmp_pa
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.LOSFRIEND_LANES]
             cover = [l for l in b[0] if l.get("extras")]
             assert len(cover) == 2 and all(l["extras"][0]["dz"] > 0 for l in cover)
+        elif plan in ("hill", "flankslot", "flankslot2", "lobfriend", "forestwalk"):   # one battle (build/diag_stage0_probe)
+            assert len(b) == 1 and len({l["kind"] for l in b[0]}) == len(b[0])
         else:
             assert len(b) == 2 and sorted(l["kind"] for l in b[0]) == sorted(l["kind"] for l in b[1])
             # every kind in two lane places
@@ -64,7 +66,8 @@ def test_the_new_units_plans_build_on_the_grid_with_effects_and_card_rows(tmp_pa
         for i in range(1, len(b) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             for l in config["lanes"]:
-                assert l["morale_rows"] and l["card_rows"] and max(abs(l["x"]), abs(l["z"])) <= 440
+                # (a map lane: inside the Kislev field, |x|, |z| <= 470)
+                assert l["morale_rows"] and l["card_rows"] and max(abs(l["x"]), abs(l["z"])) <= (470 if l.get("map") else 440)
                 seen |= {l["a_key"], l["t_key"]}
             xml = cp.write_scenario(plan, i, path=tmp_path / "b.xml").read_text(encoding="utf-8")
             assert all(f'type="{k}"' in xml for k in {l["a_key"] for l in config["lanes"]})
@@ -284,3 +287,117 @@ def test_snipe_measure_reads_the_hiding_and_the_gap_at_which_the_enemy_saw_the_s
     assert m["hid_go"] == 1.0 and m["gap_seen_m"] == pytest.approx(60.0) and m["gap_unhid_m"] == pytest.approx(60.0)
     assert m["hid_100"] == 1.0 and m["v_100"] == 0.0 and m["hid_40"] == 0.0 and m["v_60"] == 1.0
     assert m["shots_unseen"] == 32.0 and m["first_shot_s"] == pytest.approx(2.0)
+
+
+def _lane_points(l):
+    """[(x, z)] a flankslot / hill lane's units: the target, the friends, the enemy's start and its step points."""
+    pts = [(l["t_at"]["x"], l["t_at"]["z"])] + [(l["t_at"]["x"] + e["dx"], l["t_at"]["z"] + e["dz"])
+                                                 for e in l.get("extras") or []]
+    ax, az = l["a_at"]["x"], l["a_at"]["z"]
+    pts.append((ax, az))
+    for s in l.get("steps") or []:
+        if s["kind"] == "move":
+            pts.append((ax + s["dx"], az + s["dz"]))
+    return pts
+
+
+def test_the_hill_plan_walks_the_enemy_up_to_a_target_on_the_hill_and_on_level_ground():
+    """The hill plan (build/diag_stage0_probe): the tested target (its morale kept, the script's flank flags) holds at
+    each HILL_SITES place facing the enemy, who walks up from HILL_GAP to HILL_STOP m off its front; the sites' drop
+    (target - ground HILL_GAP m out) on the Kislev heights: gentle and steep >= 15 m, level < 3 m; the lanes' units
+    stay 150+ m from every other lane's target (the morale's 120 m lists)."""
+    b = cp.battles("hill")[0]
+    assert [l["kind"] for l in b] == list(up.HILL_SITES)
+    td = cp.depth(cp.UNITS[up.HILL_T][0], cp.UNITS[up.HILL_T][1])
+    ad = cp.depth(cp.UNITS[up.HILL_A][0], cp.UNITS[up.HILL_A][1])
+    for l in b:
+        assert l["mode"] == "script" and l["target_mode"] == "hold" and l["t_morale"] and l["flank_rows"]
+        assert l["map"] == cp.TERRAIN["map"]
+        px, pz, bear = up.HILL_SITES[l["kind"]]
+        ax, az = l["a_at"]["x"], l["a_at"]["z"]
+        assert abs((math.degrees(math.atan2(ax - px, az - pz)) - bear + 180) % 360 - 180) < 0.5
+        (sx, sz), = [(s["dx"], s["dz"]) for s in l["steps"]]
+        assert math.hypot(ax + sx - px, az + sz - pz) == pytest.approx(up.HILL_STOP + (td + ad) / 2, abs=0.2)
+        assert math.hypot(ax - px, az - pz) == pytest.approx(up.HILL_GAP + (td + ad) / 2, abs=0.2)
+    for l in b:
+        for o in b:
+            if o is not l:
+                assert all(math.hypot(x - o["t_at"]["x"], z - o["t_at"]["z"]) > 150 for x, z in _lane_points(l))
+    p = Path("build/maps/ksl_plains_01/heights.npz")
+    if p.exists():
+        H = np.load(p)
+        h = lambda x, z: float(H["height"][int(round(z - float(H["z0"]))), int(round(x - float(H["x0"])))])
+        for l in b:
+            px, pz, bear = up.HILL_SITES[l["kind"]]
+            fx, fz = math.sin(math.radians(bear)), math.cos(math.radians(bear))
+            drop = h(px, pz) - h(px + fx * up.HILL_GAP, pz + fz * up.HILL_GAP)
+            assert (drop < 3) if l["kind"] == "level" else (drop >= 15)
+
+
+def test_the_flankslot_plan_moves_the_enemy_about_a_held_target_lanes_apart():
+    """The flankslot plan: the held target faces +z at its place, its friends (side 't') beside it on its line, the
+    enemy's 'script' steps from its start; every lane's units 190+ m from any other lane's target (the 120 m lists); the target's row
+    carries the script's lf / rf / bf (flank_rows) and its morale (t_morale); the run reads the morale from memory."""
+    b = cp.battles("flankslot")[0]
+    assert [l["kind"] for l in b] == list(up.FLANK_LANES)
+    assert [l["kind"] for l in cp.battles("flankslot2")[0]] == list(up.FLANK2_LANES)
+    for bt in (b, cp.battles("flankslot2")[0]):
+        for l in bt:
+            assert l["t_at"]["b"] == 0.0 and l["t_morale"] and l["flank_rows"] and l["target_mode"] == "hold"
+            for e in l.get("extras") or []:
+                assert e["side"] == "t" and e["dz"] == 0.0 and abs(e["dx"]) >= 40
+            for o in bt:
+                if o is not l:
+                    assert all(math.hypot(x - o["t_at"]["x"], z - o["t_at"]["z"]) > 190 for x, z in _lane_points(l))
+            assert all(abs(x) <= 560 and abs(z) <= 560 for x, z in _lane_points(l))
+    side = next(l for l in b if l["kind"] == "side_stand")
+    gaps = [side["a_at"]["x"] + s["dx"] - side["t_at"]["x"] for s in side["steps"]]
+    assert gaps == [120, 90, 65, 45, 30]
+    away = next(l for l in b if l["kind"] == "side_away")
+    assert [s["kind"] for s in away["steps"]] == ["face", "face"] and away["a_at"]["b"] == 90.0
+    config, _, arena = cp.run_config("flankslot", 1)
+    assert config["mem_morale"] and config["men_near_m"] >= 600 and "ksl" not in arena.get("map", "")
+
+
+def test_the_lobfriend_plan_puts_the_cover_ahead_of_the_arcing_shooters():
+    """The lobfriend plan: archers / crossbows / slingers ('shoot', arcing) at a held target, a unit of their side
+    (fearless, never ordered) with its back edge LOB_LANES' metres ahead of the shooter's front - or none (the
+    controls); the run reads the projectiles and the cover's men from memory."""
+    b = cp.battles("lobfriend")[0]
+    assert [l["kind"] for l in b] == [x[0] for x in up.LOB_LANES]
+    for l, (kind, shooter, aw, target, gap, cover, ahead) in zip(b, up.LOB_LANES):
+        assert l["mode"] == "shoot" and l["target_mode"] == "hold" and l["gap_m"] == gap and l["a_w"] == aw
+        assert cp.passport(cp.UNITS[shooter][0])["missile"]["trajectory"] == "dual_low_fixed"
+        if cover is None:
+            assert not l.get("extras")
+            continue
+        e, = l["extras"]
+        tk, tm, _ = cp.UNITS[target]
+        ck, cm, _ = cp.UNITS[cover]
+        # the cover's back edge `ahead` m from the shooter's front, the target's front gap m off it
+        assert e["dz"] + cp.depth(ck, cm) / 2 == pytest.approx(cp.depth(tk, tm) / 2 + gap - ahead, abs=0.1)
+    config, _, _ = cp.run_config("lobfriend", 1)
+    assert config["mem_proj"] and config["mem_extras"]
+
+
+def test_the_forestwalk_plan_shuttles_spearmen_in_forest_and_on_grass_walking_and_running():
+    """The forestwalk plan: spearmen shuttle GROUND leg_m legs (a walk: shuttle_walk) at FOREST_SITES on Kislev; the
+    forest sites' legs on forest ground, the grass ones' off it, both level (rise < 0.07 over the leg)."""
+    b = cp.battles("forestwalk")[0]
+    assert [l["kind"] for l in b] == list(up.FOREST_SITES)
+    for l in b:
+        x0, z0, bear, run = up.FOREST_SITES[l["kind"]]
+        assert l["mode"] == "shuttle" and l["shuttle_walk"] == (not run) and l["map"] == cp.TERRAIN["map"]
+        assert math.hypot(l["p2"]["x"] - x0, l["p2"]["z"] - z0) == pytest.approx(cp.GROUND["leg_m"], abs=0.2)
+    p = Path("build/maps/ksl_plains_01/heights.npz")
+    if p.exists():
+        H = np.load(p)
+        names = json.loads(Path("build/maps/ksl_plains_01/meta.json").read_text(encoding="utf-8"))["ground_names"]
+        at = lambda a, x, z: a[int(round(z - float(H["z0"]))), int(round(x - float(H["x0"])))]
+        for l in b:
+            x0, z0, _, _ = up.FOREST_SITES[l["kind"]]
+            pts = [(x0 + k / 10 * (l["p2"]["x"] - x0), z0 + k / 10 * (l["p2"]["z"] - z0)) for k in range(11)]
+            share = np.mean([at(H["ground"], x, z) == names.index("forest") for x, z in pts])
+            assert share == (1.0 if l["kind"].startswith("forest") else 0.0)
+            hs = [float(at(H["height"], x, z)) for x, z in pts]
+            assert abs(hs[-1] - hs[0]) / cp.GROUND["leg_m"] < 0.07

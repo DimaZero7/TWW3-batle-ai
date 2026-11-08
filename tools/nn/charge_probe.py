@@ -568,7 +568,8 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe")
+UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
+              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2075,6 +2076,16 @@ def run_config(plan, index):
             config["heights"] = {"half": 256, "step": 2.0, "lines": [
                 {"x": 100.0, "z": 100.3, "dx": 0.25, "n": 81}, {"x": 100.3, "z": 100.0, "dz": 0.25, "n": 81},
                 {"x": -200.0, "z": -199.7, "dx": 0.25, "n": 81}, {"x": -199.7, "z": -200.0, "dz": 0.25, "n": 81}]}
+    if plan in ("hill", "flankslot", "flankslot2"):
+        # (build/diag_stage0_probe) the targets' morale effects from memory every 0.5 s all the lane (mem_morale; every
+        # lane 'near': the morale poll rides on the men's dense polls)
+        config.update(men_ms=1000, men_after_s=0, men_near_m=600, mem_morale=True)
+    if plan == "lobfriend":
+        # (build/diag_stage0_probe) the men of the shooter, the target and the cover and the projectiles from memory
+        config.update(men_ms=1000, men_after_s=0, men_near_m=400, mem_proj=True, mem_extras=True)
+    if plan == "forestwalk":
+        # (build/diag_stage0_probe) the walkers' men from memory every 0.5 s (no enemy near: the sparse polls)
+        config.update(men_ms=1000, men_after_s=0, men_near_m=0)
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         config.update(magic_probe.config_extra(index))
@@ -2762,7 +2773,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     leg += 1
                     goal = (float(sp["p2"]["x"]), float(sp["p2"]["z"])) if leg % 2 else home
                 st_["shuttle"][b] = leg
-                kind[b, A], target[b, A], run_[b, A] = O.MOVE, -1, True
+                # (lane.shuttle_walk, the forestwalk plan: at a walk, as the entry)
+                kind[b, A], target[b, A], run_[b, A] = O.MOVE, -1, not sp.get("shuttle_walk")
                 x[b, A], z[b, A] = goal
             elif mode[b] == "tire":
                 ti = st_["tire"][b]

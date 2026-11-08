@@ -1235,6 +1235,23 @@ def step(st, orders, params=None, dt=None):
     covered = ((beside & (rel <= -side_lo) & (rel >= -side_hi)).any(2)
                & (beside & (rel >= side_lo) & (rel <= side_hi)).any(2))
     secure = ~(u["lf"] | u["rf"] | u["bf"]) & ((enemy_d >= float(sc["enemy_m"])) | covered)
+    if sc.get("rule") == "sides":
+        # morale.secure.rule 'sides' (the probes flankslot / flankslot2, build/diag_stage0_probe; the program: the
+        # +5 when no flank slot is threatened and no enemy near on a side whose slot a friend does not hold): an enemy
+        # in the unit's list (its centre within the enemy's box widened by list_m + its own radius) counts on its half
+        # - left or right of the unit's facing line - and, behind the unit's flank line, on the rear too; a side is
+        # held by a friend (not a lord) within friend_m centre to centre at side_deg; the rear is never held
+        own_r = 0.5 * torch.sqrt(pw["front"] ** 2 + pw["depth"] ** 2)
+        listed = foes & standing[:, None, :] & (
+            geometry.centre_box_dist(u, pw["front"], pw["depth"]) <= (float(sc["list_m"]) + own_r)[:, :, None])
+        mate = friends & standing[:, None, :] & (u["men0"][:, None, :] > 1) & (d <= float(sc["friend_m"]))
+        held_l = (mate & (rel <= -side_lo) & (rel >= -side_hi)).any(2)
+        held_r = (mate & (rel >= side_lo) & (rel <= side_hi)).any(2)
+        # (straight ahead, rel 0: the left - the morale probe's 'side' lane, a friend 32 m right and the enemy dead ahead:
+        # no +5)
+        open_ = (((listed & (rel <= 0)).any(2) & ~held_l) | ((listed & (rel > 0)).any(2) & ~held_r)
+                 | (listed & (rel.abs() > 90)).any(2))
+        secure = ~(u["lf"] | u["rf"] | u["bf"]) & ~open_
     # In a fight (the morale's winning / losing): in melee, shooting, or shot at by an enemy shooting at it now.
     slot = torch.arange(N, device=st.device)
     aimed = (firing & (m_target >= 0))[:, :, None] & (m_target.clamp(min=0)[:, :, None] == slot[None, None, :])
