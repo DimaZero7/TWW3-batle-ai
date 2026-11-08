@@ -122,6 +122,13 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
     wavers = sum(bool(routing[e]) for e in enemy_rows) / n_enemy >= tc["shake"]
     shake = wavers or bool(
         lords and my_lord and math.hypot(*(pos[lords[0]] - pos[my_lord[0]])) <= tc["lord_m"])
+    # (08.11, the bridge's game battles: the snipers' zone stepped 60-110 m ahead onto the enemy lord at 0 s, in melee
+    # from 53-56 s; the user's rules: snipers 33-44 m from their infantry, on the enemy's shooters and snipers)
+    no_lord = [e for e in foes if rl[e] != "lord"] or foes                      # (the lord only when the front wavers)
+    mel = [j for j in own_rows if rl[j] in ("line", "anti") and not routing[j]]
+    front = max(float(pos[j] @ f) for j in mel) if mel else None              # my infantry's front edge, along f
+    back = min(float(pos[j] @ f) for j in mel) if mel else None
+    enemy_melee = [e for e in foes if rl[e] not in ("shooter", "sniper", "art")]
     out = []
     for g in groups:
         r = rl[g[0]]
@@ -136,12 +143,15 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
                     or _nearest(c, er.get("art", []), pos) or _nearest(c, er.get("sniper", []), pos)
                     or _nearest(c, er.get("shooter", []), pos) or _nearest(c, foes, pos))
         elif r == "sniper":
-            seed = (_nearest(c, within("sniper"), pos) or _nearest(c, within("art"), pos)
-                    or _nearest(c, er.get("sniper", []), pos) or _nearest(c, er.get("shooter", []), pos)
-                    or (threat[0] if threat else None) or _nearest(c, foes, pos))
+            # the user's order: a threat to my shooters, the enemy's snipers and shooters, artillery, the rest (no lord)
+            seed = ((_nearest(c, threat, pos) if threat else None)
+                    or _nearest(c, within("sniper") + within("shooter"), pos) or _nearest(c, within("art"), pos)
+                    or _nearest(c, er.get("sniper", []) + er.get("shooter", []), pos)
+                    or _nearest(c, er.get("art", []), pos) or _nearest(c, foes if wavers else no_lord, pos))
         elif r == "shooter":
             inr = [e for e in er.get("shooter", []) + er.get("sniper", []) if math.hypot(*(pos[e] - c)) <= rng + 50]
-            seed = (threat[0] if threat else None) or _nearest(c, inr, pos) or _nearest(c, foes, pos)
+            seed = ((threat[0] if threat else None) or _nearest(c, inr, pos)
+                    or _nearest(c, foes if wavers else no_lord, pos))
         elif r == "anti":
             if threat:
                 seed, holds = _nearest(c, threat, pos), False
@@ -184,12 +194,26 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
         # snipers and guns step up to their range (the user's M2: snipers on the Jezzails from 75 s; build/diag_m1/night.md
         # 18): a target beyond the range of all the group, by at most range_step_m -> a point range_margin_m inside it
         reach = min(float(ranges[j]) for j in g)
+        # shooters and snipers step back behind the infantry from an enemy melee unit within back_m (the user's rule:
+        # 25-40 m behind his infantry when an enemy comes within ~70 m)
+        if r in ("shooter", "sniper") and back is not None and tc.get("back_m"):
+            near_e = [e for e in enemy_melee if math.hypot(*(pos[e] - c)) <= float(tc["back_m"])]
+            behind_m = float(tc.get("behind_m", 30.0))
+            if near_e and float(c @ f) > back - behind_m + 5.0:
+                out.append((g, seed, c + f * ((back - behind_m) - float(c @ f)), False))
+                continue
         if r in ("art", "sniper") and seed is not None and holds and not threat and reach > 0:
             d = pos[seed] - c
             n = max(float(np.hypot(*d)), 1e-6)
             if reach < n <= reach + float(tc.get("range_step_m", 0.0)):
-                out.append((g, seed, pos[seed] - d / n * (reach - float(tc.get("range_margin_m", 10.0))), False))
-                continue
+                gl = pos[seed] - d / n * (reach - float(tc.get("range_margin_m", 10.0)))
+                # (not past my infantry's front edge by more than ahead_m: the step stops there)
+                lim = None if front is None else front + float(tc.get("ahead_m", 10.0))
+                if lim is not None and float(gl @ f) > lim:
+                    gl = gl - f * (float(gl @ f) - lim)
+                if lim is None or float(gl @ f) > float(c @ f) + 1.0:
+                    out.append((g, seed, gl, False))
+                    continue
         if seed is not None and not holds:
             d = pos[seed] - c
             n = max(float(np.hypot(*d)), 1e-6)

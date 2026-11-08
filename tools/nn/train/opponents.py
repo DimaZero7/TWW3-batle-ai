@@ -163,6 +163,14 @@ class Line:
     #                               of the AI's M1 centre: its march points there were refused, the line waited for those
     #                               units and stopped after 47 m (the game: 190 m in 3 min; build/diag_m1/night.md 28).
     #                               Off: as before (the old arenas have no such ground)
+    fast_free: bool = False       # the game AI's fast units run ahead alone (the user's M1-M3, build/diag_m1/night.md 31:
+    #                               the wolf rats / knights ran from 15-60 s at 4-5 m/s, first melee 82-121 s, killed
+    #                               first): a melee unit of run speed >= fast_run_ms, out of the march, attacks the
+    #                               nearest enemy at a run from fast_go_s. Off: as before (they march with the line)
+    fast_run_ms: float = 6.0
+    fast_go_s: float = 30.0
+    start_wait_s: float = 0.0     # the line stands this long before the march (the user's battles: the AI's line moved
+    #                               12-25 m in its first 60 / 120 / 30 s of M1 / M2 / M3, then 1.7-2.6 m/s); 0: off
     switch_m: float = 15.0        # target hysteresis: a new target must score this much better
     # Melee targets: score = distance - bonuses + penalties - pick_noise_m * Gumbel (lowest wins). The numbers are
     # a conditional logit fitted on the game AI's 3,397 new targets of melee units out of melee in the pool
@@ -666,6 +674,17 @@ def ai_like(st, p=Line()):
     ok = standing & has
     kind = torch.where(ok | (kind == O.HOLD), kind, torch.full_like(kind, O.HOLD))
     target = torch.where(kind == O.ATTACK, target, torch.full_like(target, -1))
+    if p.start_wait_s > 0:
+        wait = (st.t[:, None] < p.start_wait_s) & line & (kind == O.MOVE) & ~fighting
+        kind = torch.where(wait, torch.full_like(kind, O.HOLD), kind)
+        tx, tz = torch.where(wait, x, tx), torch.where(wait, z, tz)
+    if p.fast_free:
+        fast = line & (u["run"] >= p.fast_run_ms) & standing & has & (st.t[:, None] >= p.fast_go_s)
+        fast = fast & ~((kind == O.ATTACK) & (target >= 0)) & ~(kind == O.WITHDRAW)
+        ni = d_foe.argmin(2)
+        kind = torch.where(fast, torch.full_like(kind, O.ATTACK), kind)
+        target = torch.where(fast, ni, target)
+        run = run | fast
     if p.step_around:
         tx, tz = _around(u, kind, x, z, tx, tz)
     return O.Orders(kind=kind, x=tx, z=tz, target=target, run=run & ((kind == O.ATTACK) | (kind == O.MOVE)
@@ -699,9 +718,13 @@ def _around(u, kind, x, z, tx, tz):
     return nx, nz
 
 
+GAME = Line(step_around=True, fast_free=True, start_wait_s=60.0)
+
+
 def ai_game(st):
-    """ai_like for the user's matchups (tools/nn/matchup): the same line, stepping round 'cannot stand' ground."""
-    return ai_like(st, Line(step_around=True))
+    """ai_like for the user's matchups (tools/nn/matchup; build/diag_m1/night.md 28, 31): the same line, stepping round
+    'cannot stand' ground, standing its first start_wait_s, its fast units running ahead alone."""
+    return ai_like(st, GAME)
 
 
 @dataclass(frozen=True)

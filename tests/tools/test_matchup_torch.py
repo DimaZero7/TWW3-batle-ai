@@ -128,11 +128,26 @@ def test_snipers_step_up_to_their_range():
     pos[jz] = (100.0, 0.0)                                       # the Jezzails 300 m off the snipers (range 260)
     ranges = cards[:, 29] * 500.0
     tc = dict(ocfg()["teacher"]["army"])
+    pos[[j for j in own if rl[j] in ("line", "anti")], 0] = -100.0          # (my infantry ahead of the snipers)
     out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
     g = [x for x in out if set(x[0]) == set(snip)][0]
     rows, seed, goal, holds = g
     assert seed == jz and not holds and goal is not None
     assert abs(float(np.hypot(*(pos[jz] - goal))) - (260.0 - float(tc["range_margin_m"]))) < 1.0
+    # ... but not past my infantry's front edge by more than ahead_m (the infantry 100 m behind the step's point)
+    melee = [j for j in own if rl[j] in ("line", "anti")]
+    pos[melee, 0] = -260.0
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
+    g = [x for x in out if set(x[0]) == set(snip)][0]
+    assert g[2] is None or float(g[2][0]) <= -260.0 + float(tc["ahead_m"]) + 1e-6
+    # the enemy lord is no target of the snipers while the front stands
+    lord = [e for e in foes if rl[e] == "lord"][0]
+    pos[melee, 0] = -200.0
+    pos[20:, 0] = 900.0
+    pos[lord] = (0.0, 0.0)
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
+    g = [x for x in out if set(x[0]) == set(snip)][0]
+    assert g[1] != lord
 
 
 def test_shooters_guns_and_the_lord_stay_in_their_area():
