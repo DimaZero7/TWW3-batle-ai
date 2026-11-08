@@ -132,8 +132,27 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
     front = max(float(pos[j] @ f) for j in mel) if mel else None              # my infantry's front edge, along f
     back = min(float(pos[j] @ f) for j in mel) if mel else None
     enemy_melee = [e for e in foes if rl[e] not in ("shooter", "sniper", "art")]
+    # the halberd pairs on the threats and skirmishers: at most per_target pairs a target, the nearest pairs first, and
+    # only targets within chase_ahead_m of my infantry's front (08.11, the whole-battle exam: every pair went for every
+    # fast enemy and slinger, the pairs routed first in 27 of 32 M1 battles and kept 0.17 of their men; the user:
+    # "по одной паре на цель")
+    anti_t = {}
+    if tc.get("per_target"):
+        sk = [e for e in er.get("shooter", []) if mine_shooting and
+              min(math.hypot(*(pos[e] - pos[j])) for j in mine_shooting) <= tc["chase_m"]]
+        lim = None if front is None else front + float(tc.get("chase_ahead_m", 1e9))
+        tg = [e for e in (threat or sk) if lim is None or float(pos[e] @ f) <= lim]
+        pairs = [k for k, g in enumerate(groups) if rl[g[0]] == "anti"]
+        cen = {k: np.mean([pos[j] for j in groups[k]], 0) for k in pairs}
+        cand = sorted((float(np.hypot(*(pos[e] - cen[k]))), k, e) for k in pairs for e in tg)
+        used = {}
+        for dd, k, e in cand:
+            if k in anti_t or used.get(e, 0) >= int(tc["per_target"]):
+                continue
+            anti_t[k] = e
+            used[e] = used.get(e, 0) + 1
     out = []
-    for g in groups:
+    for gk, g in enumerate(groups):
         r = rl[g[0]]
         c = np.mean([pos[j] for j in g], 0)
         rng = max(float(ranges[j]) for j in g)
@@ -146,8 +165,11 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
                     or _nearest(c, er.get("art", []), pos) or _nearest(c, er.get("sniper", []), pos)
                     or _nearest(c, er.get("shooter", []), pos) or _nearest(c, foes, pos))
         elif r == "sniper":
-            # the user's order: a threat to my shooters, the enemy's snipers and shooters, artillery, the rest (no lord)
-            seed = ((_nearest(c, threat, pos) if threat else None)
+            # the user's order: a threat to my shooters, the enemy's snipers and shooters, artillery, the rest (no lord);
+            # a threat only within sniper_threat_m of the snipers (08.11, the whole-battle exam M1: ~500 shots a unit
+            # for 44-72 HP, spent on the running wolf rats; the enemy's Jezzails kept all their men)
+            near_t = [e for e in threat if math.hypot(*(pos[e] - c)) <= float(tc.get("sniper_threat_m", 1e9))]
+            seed = ((_nearest(c, near_t, pos) if near_t else None)
                     or _nearest(c, within("sniper") + within("shooter"), pos) or _nearest(c, within("art"), pos)
                     or _nearest(c, er.get("sniper", []) + er.get("shooter", []), pos)
                     or _nearest(c, er.get("art", []), pos) or _nearest(c, foes if wavers else no_lord, pos))
@@ -155,6 +177,9 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
             inr = [e for e in er.get("shooter", []) + er.get("sniper", []) if math.hypot(*(pos[e] - c)) <= rng + 50]
             seed = ((threat[0] if threat else None) or _nearest(c, inr, pos)
                     or _nearest(c, foes if wavers else no_lord, pos))
+        elif r == "anti" and tc.get("per_target"):
+            if gk in anti_t:
+                seed, holds = anti_t[gk], False
         elif r == "anti":
             if threat:
                 seed, holds = _nearest(c, threat, pos), False
@@ -227,7 +252,7 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
         # the flank under the wolf rats' charge took them 100-150 m in 240 s)
         if (r == "sniper" and direct and mel and seed is not None and not threat
                 and math.hypot(*(pos[seed] - c)) <= reach and closed(seed)):
-            tiers = [threat, within("sniper") + within("shooter"), within("art"),
+            tiers = [near_t, within("sniper") + within("shooter"), within("art"),
                      [e_ for e_ in (foes if wavers else no_lord) if math.hypot(*(pos[e_] - c)) <= reach]]
             alt = None
             for tier in tiers:

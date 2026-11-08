@@ -94,9 +94,9 @@ def test_the_shooter_shoots_its_target():
     own = setup.own[0]
     ranged = [i for i in range(st.N) if bool(own[i]) and float(u["range"][0, i]) > 300]       # the mortars
     melee = [i for i in range(st.N) if bool(own[i]) and float(u["range"][0, i]) <= 0 and not bool(u["lord"][0, i])]
-    foe = [i for i in range(st.N) if not bool(own[i])][1]
+    foe = [i for i in range(st.N) if not bool(own[i]) and float(u["run"][0, i]) < 6.0 and not bool(u["lord"][0, i])][0]
     m, w = ranged[0], melee[0]
-    u["x"][0, foe], u["z"][0, foe] = u["x"][0, m] + 200.0, u["z"][0, m]     # within the mortar's range
+    u["x"][0, foe], u["z"][0, foe] = u["x"][0, m] + 200.0, u["z"][0, m]     # within the mortar's range (not fast)
     units.prio[0, m] = units.prio[0, w] = foe
     o = O.hold(st.B, st.N)
     inside = torch.ones_like(setup.own)
@@ -232,3 +232,50 @@ def test_direct_fire_snipers_stand_on_the_flank_and_need_an_open_line():
     assert bool(units.line_closed(st, t)[0, i])
     u["z"][0, j] = 80.0
     assert not bool(units.line_closed(st, t)[0, i])
+
+
+def test_one_halberd_pair_a_threat():
+    """army.plan: a fast enemy near my shooters draws the nearest halberd pair only (per_target 1); one farther than
+    chase_ahead_m past my infantry's front draws none."""
+    from tools.nn.operative import cfg as ocfg
+    keys = [u["key"] for u in AR.base("m1")[1]] + [u["key"] for u in AR.base("m1")[2]]
+    cards = np.asarray(PP.table(keys))
+    rl = AM.roles(cards)
+    K = len(keys)
+    own, foes = list(range(20)), list(range(20, K))
+    pos = np.zeros((K, 2))
+    pos[:20, 0] = -200.0
+    pos[:20, 1] = np.linspace(-150, 150, 20)
+    pos[20:, 0] = 400.0
+    fast = [e for e in foes if rl[e] == "fast"][0]
+    sh = [j for j in own if rl[j] in ("shooter", "sniper")][0]
+    pos[fast] = pos[sh] + np.array([50.0, 0.0])                               # 50 m before a shooter: a threat
+    tc = dict(ocfg()["teacher"]["army"])
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, cards[:, 29] * 500.0)
+    on_fast = [x for x in out if rl[x[0][0]] == "anti" and x[1] == fast]
+    assert len(on_fast) == 1
+    pos[fast] = pos[sh] + np.array([50.0, 0.0])                               # past the front + chase_ahead_m (20)
+    tc2 = dict(tc, chase_ahead_m=20.0)
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc2, cards[:, 29] * 500.0)
+    assert not [x for x in out if rl[x[0][0]] == "anti" and x[1] == fast]
+
+
+def test_no_attack_on_a_fast_target_going_aside():
+    """lower.Units.fast_rule / bad_fast: a fast enemy (giant rats) running across a shooter's line is no attack target
+    (the order is a hold); the same coming at the shooter is."""
+    from tools.nn.operative import lower as LW
+    from tools.nn.sim import orders as O
+    st, card = DU.build("m1", [AR.base("m1")], "cpu", P)
+    setup = DU._SideSetup(st, P, "cpu", 1, card)
+    units = LW.Units(setup, None, targets=True, aim=True)
+    u = st.u
+    i = [k for k in range(st.N) if bool(setup.own[0, k]) and float(u["range"][0, k]) > 200][0]
+    f = [k for k in range(st.N) if not bool(setup.own[0, k]) and float(u["run"][0, k]) >= 6.0][0]
+    u["x"][0, i], u["z"][0, i], u["b"][0, i] = -200.0, 0.0, 90.0          # facing +x
+    u["x"][0, f], u["z"][0, f] = 0.0, 0.0
+    u["vx"][0, f], u["vz"][0, f] = 0.0, 7.0                                # across the line
+    o = O.hold(st.B, st.N)
+    o.kind[0, i], o.target[0, i] = O.ATTACK, f
+    assert int(units.fast_rule(o, st).kind[0, i]) == O.HOLD
+    u["vx"][0, f], u["vz"][0, f] = -7.0, 0.0                               # at the shooter
+    assert int(units.fast_rule(o, st).kind[0, i]) == O.ATTACK

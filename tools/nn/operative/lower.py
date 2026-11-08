@@ -10,6 +10,8 @@
     Units        the unit network's second (as tactic/env.play): the frames -> the units' areas (a shooter's fire
                  sector forward along the zone), the order with the stage by code, the latency, the leash
 """
+import math
+
 import torch
 
 from tools.nn.operative import cfg
@@ -340,6 +342,8 @@ class Units:
         brg = torch.rad2deg(torch.atan2(u["x"].gather(1, tc) - u["x"], u["z"].gather(1, tc) - u["z"]))
         off = (torch.remainder(brg - u["b"] + 180.0, 360.0) - 180.0).abs()
         a_ok = (a >= 0) & alive.gather(1, tc) & (off > u["arc"]) & (dist_to(a) <= u["range"])
+        p_ok = p_ok & ~self.bad_fast(st, p)
+        a_ok = a_ok & ~self.bad_fast(st, a)
         t = torch.where(p_ok, p, torch.where(a_ok, a, torch.full_like(a, -1)))
         go = ok_u & (t >= 0)
         # a direct-fire shooter: only with its line of fire open (no own unit in the band to the target as wide as its
@@ -378,7 +382,7 @@ class Units:
         tc = t0.clamp(min=0)
         seen = (u["men"] > 0) & ~u["gone"] & u["vis"].bool() & ~u["r"]
         d0 = torch.sqrt((u["x"].gather(1, tc) - u["x"]) ** 2 + (u["z"].gather(1, tc) - u["z"]) ** 2)
-        valid = (t0 >= 0) & seen.gather(1, tc) & (d0 <= u["range"])
+        valid = (t0 >= 0) & seen.gather(1, tc) & (d0 <= u["range"]) & ~self.bad_fast(st, t0)
         back = float(cfg()["teacher"]["army"].get("back_m") or 70.0)
         dx = u["x"][:, None, :] - u["x"][:, :, None]
         dz = u["z"][:, None, :] - u["z"][:, :, None]
@@ -393,6 +397,40 @@ class Units:
         run = torch.where(ranged & (kind == O.ATTACK), torch.zeros_like(o.run), o.run)
         self.n_keep = getattr(self, "n_keep", 0) + int(keep.sum())
         return O.Orders(kind, o.x, o.z, o.target, run, o.ability, o.cast_target, o.face, o.width)
+
+    def bad_fast(self, st, t):
+        """[B, N] bool: t (-1: none -> False) is a fast unit (run >= fast_run_ms) that crosses or leaves the shooter -
+        moving over fast_move_ms at more than fast_side_deg off the way to the shooter - or stands out of the shooter's
+        fire arc (08.11, the probe losmove, plan.md 'Н-прямой-огонь' 3: a shooter ordered to attack cavalry or giant
+        rats going sideways turns and walks after it, not shooting)."""
+        u = st.u
+        c = cfg()
+        tc = t.clamp(min=0)
+        fast = u["run"].gather(1, tc) >= float(c.get("fast_run_ms", 6.0))
+        vx, vz = u["vx"].gather(1, tc), u["vz"].gather(1, tc)
+        sp = torch.sqrt(vx * vx + vz * vz)
+        wx, wz = u["x"] - u["x"].gather(1, tc), u["z"] - u["z"].gather(1, tc)            # from the target to me
+        wn = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
+        cosv = (vx * wx + vz * wz) / (sp.clamp(min=1e-6) * wn)
+        side = (sp > float(c.get("fast_move_ms", 1.0))) & (cosv < math.cos(math.radians(float(c.get("fast_side_deg", 45.0)))))
+        brg = torch.rad2deg(torch.atan2(-wx, -wz))
+        off = (torch.remainder(brg - u["b"] + 180.0, 360.0) - 180.0).abs() > u["arc"]
+        return (t >= 0) & fast & (side | off)
+
+    def fast_rule(self, o, st):
+        """No attack of my shooter on a bad fast target (bad_fast): such an order (and one in force that the next is
+        KEEP) is a HOLD - the shooter fires at will at what is in its arc."""
+        u = st.u
+        own = self.setup.own & (u["range"] > 0) & (u["men"] > 0) & ~u["r"]
+        new_bad = own & (o.kind == O.ATTACK) & self.bad_fast(st, o.target)
+        old_bad = own & (o.kind == O.KEEP) & (u["order_kind"] == O.ATTACK) & self.bad_fast(st, u["order_target"])
+        bad = new_bad | old_bad
+        if not bool(bad.any()):
+            return o
+        self.n_fast = getattr(self, "n_fast", 0) + int(bad.sum())
+        return O.Orders(torch.where(bad, torch.full_like(o.kind, O.HOLD), o.kind), torch.where(bad, u["x"], o.x),
+                        torch.where(bad, u["z"], o.z), torch.where(bad, torch.full_like(o.target, -1), o.target),
+                        o.run & ~bad, o.ability, o.cast_target, o.face, o.width)
 
     def line_closed(self, st, t):
         """[B, N] bool: an own unit stands across the line from each unit to its target t (-1: none -> False): its centre
@@ -447,7 +485,9 @@ class Units:
             if self.aim:
                 intended = self.stay_rule(intended, st, inside)
                 intended = self.aim_rule(intended, st, inside)
+                intended = self.fast_rule(intended, st)
                 intended = self.sticky_rule(intended, st, inside)
+                intended = self.fast_rule(intended, st)
             self.n += int(bl.numel())
         self.intended = intended
         return self.cad.delays(P.dt, B, st.device)
