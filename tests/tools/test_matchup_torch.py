@@ -110,9 +110,9 @@ def test_the_shooter_shoots_its_target():
     assert int(units.aim_rule(o, st, inside).kind[0, m]) == O.HOLD
 
 
-def test_snipers_step_up_to_their_range():
-    """army.plan: a sniper group whose target stands beyond its range by less than range_step_m gets a goal at its
-    range less range_margin_m, and does not hold."""
+def test_snipers_do_not_take_the_enemy_lord():
+    """army.plan: the snipers' target is no enemy lord while the enemy's front stands (08.11: their zone stepped onto
+    him); direct-fire snipers do not step up past the line (their place is its flank)."""
     from tools.nn.operative import cfg as ocfg
     keys = [u["key"] for u in AR.base("m2")[1]] + [u["key"] for u in AR.base("m2")[2]]
     cards = np.asarray(PP.table(keys))
@@ -122,32 +122,15 @@ def test_snipers_step_up_to_their_range():
     foes = list(range(20, K))
     pos = np.zeros((K, 2))
     pos[:20, 0] = -200.0
-    pos[20:, 0] = 400.0                                          # all the enemy far
-    snip = [j for j in own if rl[j] == "sniper"]
-    jz = [e for e in foes if rl[e] == "sniper"][0]
-    pos[jz] = (100.0, 0.0)                                       # the Jezzails 300 m off the snipers (range 260)
-    ranges = cards[:, 29] * 500.0
-    tc = dict(ocfg()["teacher"]["army"])
-    pos[[j for j in own if rl[j] in ("line", "anti")], 0] = -100.0          # (my infantry ahead of the snipers)
-    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
-    g = [x for x in out if set(x[0]) == set(snip)][0]
-    rows, seed, goal, holds = g
-    assert seed == jz and not holds and goal is not None
-    assert abs(float(np.hypot(*(pos[jz] - goal))) - (260.0 - float(tc["range_margin_m"]))) < 1.0
-    # ... but not past my infantry's front edge by more than ahead_m (the infantry 100 m behind the step's point)
-    melee = [j for j in own if rl[j] in ("line", "anti")]
-    pos[melee, 0] = -260.0
-    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
-    g = [x for x in out if set(x[0]) == set(snip)][0]
-    assert g[2] is None or float(g[2][0]) <= -260.0 + float(tc["ahead_m"]) + 1e-6
-    # the enemy lord is no target of the snipers while the front stands
-    lord = [e for e in foes if rl[e] == "lord"][0]
-    pos[melee, 0] = -200.0
     pos[20:, 0] = 900.0
+    snip = [j for j in own if rl[j] == "sniper"]
+    lord = [e for e in foes if rl[e] == "lord"][0]
     pos[lord] = (0.0, 0.0)
-    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
+    tc = dict(ocfg()["teacher"]["army"])
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, cards[:, 29] * 500.0)
     g = [x for x in out if set(x[0]) == set(snip)][0]
     assert g[1] != lord
+    assert g[2] is None or float(g[2][0]) <= -200.0 + float(tc["ahead_m"]) + 1e-6
 
 
 def test_shooters_guns_and_the_lord_stay_in_their_area():
@@ -207,3 +190,45 @@ def test_ai_game_steps_round_cannot_stand_ground():
     fx, fz = torch.full_like(x, 120.0), torch.full_like(z, -31.0)
     ox, oz = OP._around(u, kind, x, z, fx, fz)
     assert torch.equal(ox, fx) and torch.equal(oz, fz)
+
+
+def test_direct_fire_snipers_stand_on_the_flank_and_need_an_open_line():
+    """army.plan: direct-fire snipers behind the line's centre get a goal flank_m beside its outermost infantry unit;
+    lower.Units.line_closed: an own unit in the band to the target closes the line, one aside does not."""
+    from tools.nn.operative import cfg as ocfg
+    from tools.nn.operative import lower as LW
+    keys = [u["key"] for u in AR.base("m1")[1]] + [u["key"] for u in AR.base("m1")[2]]
+    cards = np.asarray(PP.table(keys))
+    rl = AM.roles(cards)
+    K = len(keys)
+    own, foes = list(range(20)), list(range(20, K))
+    pos = np.zeros((K, 2))
+    pos[:20, 0] = -140.0
+    pos[20:, 0] = 100.0                                                       # (in the snipers' range)
+    mel = [j for j in own if rl[j] in ("line", "anti")]
+    for k, j in enumerate(mel):
+        pos[j] = (-100.0, -100.0 + 200.0 * k / max(len(mel) - 1, 1))       # a line 200 m wide across z at x -100
+    snip = [j for j in own if rl[j] == "sniper"]
+    pos[snip] = (-140.0, 0.0)                                                 # behind its centre
+    tc = dict(ocfg()["teacher"]["army"], flank_m=38.0)                        # (config: off since the probe losfriend)
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, cards[:, 29] * 500.0)
+    g = [x for x in out if set(x[0]) == set(snip)][0]
+    assert g[2] is not None and not g[3]
+    assert abs(abs(float(g[2][1])) - (100.0 + float(tc["flank_m"]))) < 1.0 and abs(float(g[2][0]) + 100.0) < 1.0
+    st, card = DU.build("m1", [AR.base("m1")], "cpu", P)
+    setup = DU._SideSetup(st, P, "cpu", 1, card)
+    units = LW.Units(setup, None, targets=True, aim=True)
+    u = st.u
+    i = [k for k in range(st.N) if bool(setup.own[0, k]) and bool(u["direct"][0, k])][0]
+    j = [k for k in range(st.N) if bool(setup.own[0, k]) and k != i][0]
+    tgt = [k for k in range(st.N) if not bool(setup.own[0, k])][0]
+    others = [k for k in range(st.N) if bool(setup.own[0, k]) and k not in (i, j)]
+    u["x"][0, others] = -400.0                                               # (out of the way)
+    u["x"][0, i], u["z"][0, i] = -200.0, 0.0
+    u["x"][0, tgt], u["z"][0, tgt] = 50.0, 0.0
+    u["x"][0, j], u["z"][0, j] = -100.0, 0.0
+    t = torch.full((1, st.N), -1, dtype=torch.long)
+    t[0, i] = tgt
+    assert bool(units.line_closed(st, t)[0, i])
+    u["z"][0, j] = 80.0
+    assert not bool(units.line_closed(st, t)[0, i])

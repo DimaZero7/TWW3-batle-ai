@@ -74,6 +74,9 @@ def _nearest(xy, cands, pos):
     return min(cands, key=lambda e: math.hypot(*(pos[e] - xy)))
 
 
+DIRECT = 66                     # the passport's column 'direct' (flat, trajectory low: friends block its line)
+
+
 def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges):
     """[(rows, seed, goal, holds)] of battle b (module doc). own_rows / enemy_rows: row indices; pos [K, 2]; cards
     [K, 69]; routing [K] bool; have {g: set(rows)} the groups in force; destroy: the command; tc: config teacher.army;
@@ -202,6 +205,54 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
             if near_e and float(c @ f) > back - behind_m + 5.0:
                 out.append((g, seed, c + f * ((back - behind_m) - float(c @ f)), False))
                 continue
+        # direct-fire snipers on the flank of the line (the user: 33-44 m beside the outermost infantry unit, an open
+        # line of fire; 08.11, the bridge's games: behind the line their fire was blocked by our own and the attack
+        # order walked them through it): a goal there when the group stands farther than move_m from it
+        direct = all(float(cards[j][DIRECT]) > 0.5 for j in g)
+        # (only while my infantry closes its line to every target worth it: first the user's order among the targets
+        # with an open line from where the group stands - the walk to the flank cost the simulator's snipers 60-80 %
+        # of their fire on the user's own places)
+        def closed(e_):
+            v = pos[e_] - c
+            L = max(float(np.hypot(*v)), 1e-6)
+            ev = v / L
+            for j in mel:
+                w = pos[j] - c
+                a_, x_ = float(w @ ev), abs(float(w[0] * ev[1] - w[1] * ev[0]))
+                if 10.0 < a_ < L - 10.0 and x_ < float(tc.get("fire_band_m", 30.0)):
+                    return True
+            return False
+        blocked = False
+        # (not with a threat at my shooters: then they stay and shoot what they can, or step back - the walk along
+        # the flank under the wolf rats' charge took them 100-150 m in 240 s)
+        if (r == "sniper" and direct and mel and seed is not None and not threat
+                and math.hypot(*(pos[seed] - c)) <= reach and closed(seed)):
+            tiers = [threat, within("sniper") + within("shooter"), within("art"),
+                     [e_ for e_ in (foes if wavers else no_lord) if math.hypot(*(pos[e_] - c)) <= reach]]
+            alt = None
+            for tier in tiers:
+                alt = _nearest(c, [e_ for e_ in tier if not closed(e_)], pos)
+                if alt is not None:
+                    break
+            if alt is not None:
+                seed = alt
+            else:
+                blocked = True
+        if r == "sniper" and direct and mel and tc.get("flank_m") and blocked:
+            lats = [float(pos[j] @ right) for j in mel]
+            mid = 0.5 * (max(lats) + min(lats))
+            sgn = 1.0 if float(c @ right) >= mid else -1.0
+            edge = max(lats) if sgn > 0 else min(lats)
+            ej = mel[int(np.argmax(lats))] if sgn > 0 else mel[int(np.argmin(lats))]
+            gl = right * (edge + sgn * float(tc["flank_m"])) + f * float(pos[ej] @ f)
+            if float(np.hypot(*(gl - c))) > float(tc.get("flank_move_m", 40.0)):
+                out.append((g, seed, gl, False))
+                continue
+        # guns: no step up (08.11, the bridge's games: the step to the infantry's front drove M2's mortars 270-360 m,
+        # 8 and 1 shots, into melee; behind, 30 and 20) - their zone moves only by art_step (off by default)
+        if r == "art" and not tc.get("art_step"):
+            out.append((g, seed, None, True))
+            continue
         if r in ("art", "sniper") and seed is not None and holds and not threat and reach > 0:
             d = pos[seed] - c
             n = max(float(np.hypot(*d)), 1e-6)

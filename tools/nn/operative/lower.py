@@ -301,7 +301,11 @@ class Units:
         far = att & (d > u["range"])
         guard = float(cfg().get("lord_guard_m") or 0.0)
         lord = u["lord"] & ~ranged & (self.prio < 0) & (guard > 0)        # (lord_guard_m 0: the lord's part off)
-        to_area = free & ~inside & ((ranged & far) | (gun & (att | (o.kind == O.MOVE))) | (lord & att & (d > guard)))
+        direct = ranged & u["direct"].bool() & ~gun if "direct" in u and cfg().get("direct_line", True)             else torch.zeros_like(ranged)
+        # (08.11, the bridge's games: a direct-fire sniper ordered to attack a target in range walked through our line
+        # to an open line of fire, into melee - out of its area it only goes to the area)
+        to_area = free & ~inside & ((ranged & far) | (direct & att) | (gun & (att | (o.kind == O.MOVE)))
+                                    | (lord & att & (d > guard)))
         stand = free & inside & ~to_area & ((ranged & far) | (gun & out_pt) | (lord & att & (d > guard)))
         if not bool((to_area | stand).any()):
             return o
@@ -338,11 +342,80 @@ class Units:
         a_ok = (a >= 0) & alive.gather(1, tc) & (off > u["arc"]) & (dist_to(a) <= u["range"])
         t = torch.where(p_ok, p, torch.where(a_ok, a, torch.full_like(a, -1)))
         go = ok_u & (t >= 0)
-        if not bool(go.any()):
+        # a direct-fire shooter: only with its line of fire open (no own unit in the band to the target as wide as its
+        # front), else it stands - an attack order makes the game walk it to an open line, through our line (08.11)
+        direct = (u["direct"].bool() & (u["eng0"] <= 0)) if "direct" in u and cfg().get("direct_line", True)             else torch.zeros_like(go)
+        own_att = own & inside & (u["range"] > 0) & direct & (u["contact_s"] <= 0) & (o.kind == O.ATTACK) & (o.target >= 0)
+        tt = torch.where(go, t, torch.where(own_att, o.target, torch.full_like(t, -1)))
+        chk = (go | own_att) & direct
+        closed = self.line_closed(st, tt) & chk
+        go = go & ~closed
+        stand = own_att & closed & ~go
+        if not bool((go | stand).any()):
             return o
-        kind = torch.where(go, torch.full_like(o.kind, O.ATTACK), o.kind)
-        return O.Orders(kind, o.x, o.z, torch.where(go, t, o.target), o.run & ~go, o.ability, o.cast_target, o.face,
-                        o.width)
+        kind = torch.where(go, torch.full_like(o.kind, O.ATTACK), torch.where(stand, torch.full_like(o.kind, O.HOLD),
+                                                                               o.kind))
+        x = torch.where(stand, u["x"], o.x)
+        z = torch.where(stand, u["z"], o.z)
+        tg = torch.where(go, t, torch.where(stand, torch.full_like(o.target, -1), o.target))
+        return O.Orders(kind, x, z, tg, o.run & ~go & ~stand, o.ability, o.cast_target, o.face, o.width)
+
+    def sticky_rule(self, o, st, inside):
+        """The rule 'a shooter keeps its target' (08.11, the game's probe: every new order resets a shooter's aim - 3-8.5 s
+        to the first shot; the chain changed the long rifles' order 17 times in 43 s and they never fired; plan.md
+        'Н-прямой-огонь'): for my ranged units out of melee, not routing -
+        * a target in force (its attack order's, else the one it fires at) alive, seen and in range, and no enemy melee
+          unit within back_m: an attack on another target, a hold or the same attack again is no new order (KEEP);
+        * an attack of a shooter is at a walk (the run flag does not change a standing shooter's order).
+        A move out of its area and a withdraw stay."""
+        u = st.u
+        own = self.setup.own
+        ranged = own & (u["range"] > 0) & (u["men"] > 0) & ~u["r"] & (u["contact_s"] <= 0)
+        if not bool(ranged.any()):
+            return o
+        att_in = (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0)
+        t0 = torch.where(att_in, u["order_target"], u["aim_tgt"])
+        tc = t0.clamp(min=0)
+        seen = (u["men"] > 0) & ~u["gone"] & u["vis"].bool() & ~u["r"]
+        d0 = torch.sqrt((u["x"].gather(1, tc) - u["x"]) ** 2 + (u["z"].gather(1, tc) - u["z"]) ** 2)
+        valid = (t0 >= 0) & seen.gather(1, tc) & (d0 <= u["range"])
+        back = float(cfg()["teacher"]["army"].get("back_m") or 70.0)
+        dx = u["x"][:, None, :] - u["x"][:, :, None]
+        dz = u["z"][:, None, :] - u["z"][:, :, None]
+        foe = (u["side"][:, :, None] != u["side"][:, None, :]) & (u["side"][:, None, :] > 0) & seen[:, None, :]             & (u["range"] <= 0)[:, None, :]
+        near = (foe & (dx * dx + dz * dz <= back * back)).any(2)
+        quiet = (o.kind == O.HOLD) | (o.kind == O.KEEP) | (o.kind == O.ATTACK)
+        keep = ranged & valid & ~near & quiet & (att_in | (o.kind != O.ATTACK) | (o.target != t0))
+        keep = keep & ~(((o.kind == O.HOLD) | (o.kind == O.KEEP)) & ~att_in)   # (holding and firing at will: as it is)
+        same = ranged & att_in & (o.kind == O.ATTACK) & (o.target == u["order_target"])
+        keep = keep | same
+        kind = torch.where(keep, torch.full_like(o.kind, O.KEEP), o.kind)
+        run = torch.where(ranged & (kind == O.ATTACK), torch.zeros_like(o.run), o.run)
+        self.n_keep = getattr(self, "n_keep", 0) + int(keep.sum())
+        return O.Orders(kind, o.x, o.z, o.target, run, o.ability, o.cast_target, o.face, o.width)
+
+    def line_closed(self, st, t):
+        """[B, N] bool: an own unit stands across the line from each unit to its target t (-1: none -> False): its centre
+        between 10 m past the shooter and 10 m short of the target, its front covering the line's middle."""
+        from tools.nn.sim import geometry
+        u = st.u
+        front, _ = geometry.dims(u, self.spacing)
+        tc = t.clamp(min=0)
+        vx, vz = u["x"].gather(1, tc) - u["x"], u["z"].gather(1, tc) - u["z"]
+        L = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
+        ex, ez = vx / L, vz / L
+        dx = u["x"][:, None, :] - u["x"][:, :, None]                       # [b, i, j] from shooter i to unit j
+        dz = u["z"][:, None, :] - u["z"][:, :, None]
+        along = dx * ex[:, :, None] + dz * ez[:, :, None]
+        across = (dx * ez[:, :, None] - dz * ex[:, :, None]).abs()
+        side = u["side"]
+        mine = (side[:, :, None] == side[:, None, :]) & (u["men"] > 0)[:, None, :] & ~u["r"][:, None, :]
+        eye = torch.eye(st.N, dtype=torch.bool, device=u["x"].device)[None]
+        # (a friend whose front covers the line's middle: the simulator's line of fire - missile.friend_lines, 3 rays
+        # from the shooter's front, clear when 2 are - is closed then; the band of both fronts closed it too often:
+        # the snipers' fire fell to 0.5x on M1 / M3)
+        band = (along > 10.0) & (along < L[:, :, None] - 10.0) & (across < front[:, None, :] / 2)
+        return (band & mine & ~eye).any(2) & (t >= 0)
 
     def second(self, st):
         """The units' decision of this second -> intended orders; returns them (the latency: cadence)."""
@@ -374,6 +447,7 @@ class Units:
             if self.aim:
                 intended = self.stay_rule(intended, st, inside)
                 intended = self.aim_rule(intended, st, inside)
+                intended = self.sticky_rule(intended, st, inside)
             self.n += int(bl.numel())
         self.intended = intended
         return self.cad.delays(P.dt, B, st.device)
