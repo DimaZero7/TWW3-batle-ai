@@ -75,11 +75,13 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
              ("stat_resistance_physical", "add"): "resist_physical"}
 # The rules a unit's attribute can set -> the unit field that carries the flag for the step (the innate effects' as well:
-# effects.py); unspottable (02.11.2026): an enemy sees it hidden only within stealth.unspottable_m (stealth.py)
+# effects.py); unspottable (02.11.2026): an enemy sees it hidden only within stealth.unspottable_m (stealth.py); snipe
+# (08.11.2026): its fire does not reveal it while hidden (stealth.py)
 RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
          "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
          "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd", "causes_fear": "fear",
-         "immune_to_psychology": "itp", "causes_terror": "terror", "unspottable": "unsp"}
+         "immune_to_psychology": "itp", "causes_terror": "terror", "unspottable": "unsp",
+         "snipe": "snipe"}
 # the database's attribute key where it is not the rule's name (tools/nn/effects.py ATTRIBUTES)
 ATTRIBUTE_RULE = {"charge_defense": "charge_defence", "charge_defense_vs_large": "charge_defence_vs_large",
                   "mounted_fire_move": "fire_while_moving"}

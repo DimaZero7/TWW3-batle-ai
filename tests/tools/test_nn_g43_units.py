@@ -76,7 +76,8 @@ def test_the_effects_catalogue():
     doc = mfx.load()
     e = doc["effects"]
     assert e["stalk"]["modelled"] and e["stalk"]["rules"] == ["stalk"]
-    assert not e["snipe"]["modelled"] and not e["ignore_trees"]["modelled"] and not e["hide_forest"]["modelled"]
+    assert e["snipe"]["modelled"] and e["snipe"]["rules"] == ["snipe"]          # (08.11.2026: stealth.reveal.snipe)
+    assert not e["ignore_trees"]["modelled"] and not e["hide_forest"]["modelled"]
     net = e[SNARE]
     assert net["modelled"] and net["range_m"] == 35.0 and net["kind"] == "passive"
     assert {(s["stat"], s["value"], tuple(s["on"])) for s in net["stats"]} == {

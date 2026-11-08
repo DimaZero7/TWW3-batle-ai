@@ -670,10 +670,10 @@
    "when": "always",
    "source": "db: unit_attributes_to_groups_junctions (snipe)",
    "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
-   "does": "firing does not reveal the hidden unit (fandom 'Snipe')",
-   "modelled": false,
-   "sim": null,
-   "why": "the unit that has it (Hochland Long Rifles) hides only in woods (hide_forest): no woods on our maps, it is never hidden"
+   "does": "firing does not reveal the hidden unit (the game: 'This unit remains hidden while firing'; the program: build/diag_g49/terrain/stealth.md 1)",
+   "modelled": true,
+   "sim": "its own fire (at will, on the move) does not reveal it while hidden (tools/nn/sim/stealth.py; config/nn/sim.json stealth.reveal.snipe)",
+   "why": null
   },
   "stalk": {
    "kind": "attribute",

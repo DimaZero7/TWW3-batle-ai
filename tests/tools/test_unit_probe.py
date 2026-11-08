@@ -1,6 +1,9 @@
 """The new units' probe plans and measures (tools/nn/unit_probe.py, on the melee probe tools/nn/charge_probe.py)."""
 import json
+import math
+from pathlib import Path
 
+import numpy as np
 import pytest
 
 from tools.nn import charge_probe as cp
@@ -39,6 +42,8 @@ def test_the_new_units_plans_build_on_the_grid_with_effects_and_card_rows(tmp_pa
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATFORM_LANES]
         elif plan == "ratshape":           # one battle, each kind once (narrow and wide targets, a lone man)
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATSHAPE_LANES]
+        elif plan == "snipe":              # two battles (long rifles, jezzails), the same four map lanes each
+            assert [[l["kind"] for l in bt] for bt in b] == [list(up.SNIPE_SITES)] * 2
         elif plan == "losmove":            # one battle, each kind once (the target walks / runs at the shooter)
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.LOSMOVE_LANES]
             assert all(l["target_mode"] == "push" and l["push_m"] > up.LOSMOVE_GAP for l in b[0])
@@ -222,3 +227,60 @@ def test_report_tables_per_plan_and_kind(tmp_path, capsys):
     # the hits land a flight (100 m at 100 m/s: 1 s) after the bullets: the bullets of the lane's last 1.5 s are left out
     assert s["d60"]["hp_per_bullet"][0] == pytest.approx(1.5, rel=0.02) and s["d60"]["n"] == 1
     assert "== ratling" in capsys.readouterr().out
+
+
+def test_the_snipe_plan_puts_the_shooter_in_the_woods_and_the_target_on_open_ground():
+    """The snipe plan (build/diag_snipe): the shooter block on forest ground (edge / deep / approach) or off it (open),
+    facing its target SNIPE_GAP m off on open ground; the ranged attack waits SNIPE_GO_S; the approach lane's enemy walks
+    to SNIPE_STOP_M m off the shooter's front; both rows carry the hiding (stealth_rows 'both')."""
+    import json
+    H = np.load("build/maps/ksl_plains_01/heights.npz") if Path("build/maps/ksl_plains_01/heights.npz").exists() else None
+    names = (json.loads(Path("build/maps/ksl_plains_01/meta.json").read_text(encoding="utf-8"))["ground_names"]
+             if H is not None else None)
+    b = cp.battles("snipe")
+    assert [{l["attacker"] for l in bt} for bt in b] == [{up.LR}, {up.JZ}]
+    for bt in b:
+        assert len({l["kind"] for l in bt}) == 4
+        for l in bt:
+            assert l["stealth_rows"] == "both" and l["map"] == cp.TERRAIN["map"] and l["answer"] is False
+            ax, az, ab = l["a_at"]["x"], l["a_at"]["z"], l["a_at"]["b"]
+            tx, tz = l["t_at"]["x"], l["t_at"]["z"]
+            assert abs((math.degrees(math.atan2(tx - ax, tz - az)) - ab + 180) % 360 - 180) < 0.5   # facing it
+            assert l["t_at"]["b"] == (ab + 180) % 360
+            if l["kind"] == "approach":
+                assert l["mode"] == "hold" and l["a_free"] and l["target_mode"] == "push" and not l["push_run"]
+                px, pz, _, _ = up.SNIPE_SITES["approach"]
+                assert math.hypot(l["push_to"]["x"] - px, l["push_to"]["z"] - pz) == pytest.approx(up.SNIPE_STOP_M, abs=0.2)
+            else:
+                assert l["mode"] == "shoot" and l["a_go_s"] == up.SNIPE_GO_S and l["max_s"] == up.SNIPE_S
+            if H is None:
+                continue
+            g = H["ground"]
+            forest = names.index("forest")
+            on = lambda x, z: g[int(round(z - float(H["z0"]))), int(round(x - float(H["x0"])))] == forest
+            assert on(ax, az) == (l["kind"] != "open")
+            assert not on(tx, tz)
+    # the lanes are apart: no enemy within 300 m of the approach shooter but its own (its fire at will)
+    for bt in b:
+        ap = next(l for l in bt if l["kind"] == "approach")
+        for l in bt:
+            if l is not ap:
+                assert math.hypot(l["t_at"]["x"] - ap["a_at"]["x"], l["t_at"]["z"] - ap["a_at"]["z"]) > 300
+
+
+def test_snipe_measure_reads_the_hiding_and_the_gap_at_which_the_enemy_saw_the_shooter():
+    spec = {"kind": "approach", "target_mode": "push", "a_depth": 8.0, "t_depth": 16.0, "attacker": up.LR,
+            "a_go_s": None}
+    samples = []
+    for k in range(40):
+        t = k * 0.5
+        gap = 100 - 4 * k                               # edge to edge: 100 m at the go, 4 m a sample closer
+        d = gap + 12.0
+        a = {"x": 0.0, "z": 0.0, "men": 32, "ammo": 768 - (32 if k >= 4 else 0) - (32 if k >= 20 else 0),
+             "hid": gap > 60, "v": gap <= 60}
+        tg = {"x": 0.0, "z": d, "men": 160, "hp": 1000.0 - (10 if k >= 6 else 0)}
+        samples.append((t, a, tg, None))
+    m = up.snipe_measure({"spec": spec, "samples": samples, "run": "r", "plan": "snipe"})
+    assert m["hid_go"] == 1.0 and m["gap_seen_m"] == pytest.approx(60.0) and m["gap_unhid_m"] == pytest.approx(60.0)
+    assert m["hid_100"] == 1.0 and m["v_100"] == 0.0 and m["hid_40"] == 0.0 and m["v_60"] == 1.0
+    assert m["shots_unseen"] == 32.0 and m["first_shot_s"] == pytest.approx(2.0)

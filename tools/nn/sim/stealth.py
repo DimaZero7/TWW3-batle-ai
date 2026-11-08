@@ -19,8 +19,11 @@ The game's rules (the game's database and the community's breakdown of the engin
   distance, hiding_scalar, forest, fresh bonus or night (the game's program, build/diag_roster/
   wh2_main_skv_inf_death_runners_0/mechanic.md 1.1); it hides as any other unit (the attribute alone does not hide: it needs
   stalk; a clock of 5 s if it was seen for longer than quick_s, and those 5 s it too is seen only within 20 m);
-* its own acts reveal it: firing (at will and on the move; the attribute snipe would keep it hidden - none of our hiding
-  units has it) and melee; an attack order does not (reveal.attack_order 0: the probe of 25.10.2026), running does not.
+* its own acts reveal it: firing (at will and on the move) and melee; an attack order does not (reveal.attack_order 0: the
+  probe of 25.10.2026), running does not. The attribute snipe (the Hochland Long Rifles: hide_forest + snipe) keeps it
+  hidden while it fires (reveal.snipe 1; the game's program, build/diag_g49/terrain/stealth.md 1: fire at will, firing
+  on the move and an ability do not reveal a snipe unit; its spotting by distance and melee still do; the probe 'snipe'
+  08.11.2026, build/diag_snipe).
 The probe 'скрытность' (25.10.2026, 3 battles) checks the rules: seen at 66.6 / 64.8 / 62.9 m standing / walking /
 running (64), the Huntsmen by the Jezzails at 163.5 m (160), firing reveals 0.6 s after it begins, hidden again 5.0 s
 after it stops (config/nn/sim.json stealth.why).
@@ -31,7 +34,7 @@ it is no order (HOLD, as a dead target), the enemy's blows do not fall on it, an
 with the token's `hidden` column. A dead unit is seen (the game shows a destroyed unit).
 
 
-State: STATIC stalk (the attribute's rule flag, effects.py), unsp (unspottable's), hidef (hide_forest), spot_m / spot_tree (its spotting
+State: STATIC stalk (the attribute's rule flag, effects.py), unsp (unspottable's), snipe (snipe's), hidef (hide_forest), spot_m / spot_tree (its spotting
 distances), hide_k (hiding_scalar); INTERNAL hid (hidden now), hid_s (seconds it has met the conditions unseen: the hide
 clock), hid_t (seconds since it hid), hid_g (seconds of the grace used), hid_r (the quick re-hide's window left), hid_d
 (deployed, not stepped: a hide_forest unit in the woods at the first step starts hidden). Only json without torch here at
@@ -130,7 +133,8 @@ def update(u, pw, params, dt, fired, engaged, attack):
     spotted = (pw["enemy"] & eyes[:, None, :] & (pw["gap"] <= reach)).any(2)
     acts = torch.zeros_like(can)
     if rv.get("fire", 1):
-        acts = acts | fired
+        # (reveal.snipe: a snipe unit's own fire does not reveal it)
+        acts = acts | (fired & ~u["snipe"] if rv.get("snipe") and "snipe" in u else fired)
     if rv.get("melee", 1):
         acts = acts | engaged
     if rv.get("attack_order", 1):

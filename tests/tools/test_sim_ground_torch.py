@@ -242,3 +242,42 @@ def test_a_hide_forest_unit_hides_in_the_woods_and_is_seen_within_60_m():
     assert not bool(st.u["hid"][0, 0])
     ground._LAYERS.clear()
     ground._DEV.clear()
+
+
+def test_a_snipe_unit_firing_from_the_woods_stays_hidden_and_others_are_revealed():
+    """The attribute snipe (stealth.reveal.snipe; the probe 'snipe' 08.11.2026, build/diag_snipe): the Hochland Long
+    Rifles (hide_forest + snipe) in the woods fire at clanrats 150 m off and stay hidden; the handgunners (hide_forest)
+    firing the same way are revealed; with reveal.snipe 0 the long rifles are revealed too."""
+    import json as _json
+    code = np.full((N, N), 1, np.uint8)
+    code[:, : node(0)] = 0                                     # x < 0: forest
+    mid = flat_map(code)
+    LR, HG = "wh3_dlc25_emp_inf_hochland_long_rifles", "wh_main_emp_inf_handgunners"
+    sim_off = _json.loads(_json.dumps(P.sim))
+    sim_off["stealth"]["reveal"]["snipe"] = 0
+    off = type(P)(P.units, P.rules, sim_off, P.abilities, P.effects, P.spells)
+
+    def fire(key, params, gap=150.0):
+        st = scenario.build([army([(key, -60, 0, 90)], [(CLANRAT, -60 + gap + 20, 0, 270)])], params)
+        terrain.set_map(st, mid)
+        pw = geometry.pairwise(st.u, SP)
+        g = float(pw["gap"][0, st.N // 2, 0])
+        st.u["x"][0, st.N // 2] = st.u["x"][0, st.N // 2] - (g - gap)
+        o = O.hold(st.B, st.N)
+        o.kind[0, 0], o.target[0, 0] = O.ATTACK, st.N // 2
+        hid, a0 = [], float(st.u["a"][0, 0])
+        for _ in range(40):                                    # 20 s: a volley at least
+            battle.step(st, o, params)
+            o = O.Orders(kind=torch.full_like(o.kind, O.KEEP), x=o.x, z=o.z, target=o.target, run=o.run,
+                         ability=o.ability)
+            hid.append(bool(st.u["hid"][0, 0]))
+        return hid, a0 - float(st.u["a"][0, 0])
+    assert bool(P.sim["stealth"]["reveal"]["snipe"])
+    hid, shots = fire(LR, P)
+    assert shots > 0 and all(hid)                              # deployed in the woods, hidden all the time it fired
+    hid, shots = fire(HG, P, gap=120.0)
+    assert shots > 0 and not hid[-1]                           # its fire reveals it
+    hid, shots = fire(LR, off)
+    assert shots > 0 and not hid[-1]                           # without the rule: as the handgunners
+    ground._LAYERS.clear()
+    ground._DEV.clear()

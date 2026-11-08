@@ -198,6 +198,8 @@ STATIC = {
     "stalk": ("b", "attribute stalk: any ground hides it (tools/nn/sim/stealth.py)"),
     "unsp": ("b", "attribute unspottable (02.11.2026: Concealment Bombs while on, abilities.py): an enemy sees it hidden "
                   "only within stealth.unspottable_m, edge to edge, with no other term (stealth.py)"),
+    "snipe": ("b", "attribute snipe (08.11.2026): its fire does not reveal it while hidden (stealth.py; the Hochland Long "
+                   "Rifles)"),
     "spot_m": ("f", "how far it sees a hidden enemy, m (the database's land_units spot_dist_scrub: 80, the Jezzails 160; "
                     "stealth.py)"),
     "hide_k": ("f", "its hiding_scalar: an enemy sees it hidden within its spotting distance x this (0.8 the Gutter "

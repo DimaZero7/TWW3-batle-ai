@@ -1534,6 +1534,41 @@ class TestChargeProbe:
         rear = lay(lua.table_from(dict(base, a_side=180)))
         assert (rear["ax"], rear["az"], rear["ab"], rear["tb"]) == (0, -61, 0, 0)
 
+    def test_snipe_lanes_hold_the_ranged_order_walk_to_a_point_and_sample_the_shooters_hiding(self, lua, tmp_path):
+        """The snipe plan: a 'shoot' lane with a_go_s gives its ranged attack only then; a 'push' target with push_to
+        walks to that world point; stealth_rows 'both' puts hid and v on the attacker's row too."""
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {
+                {name = 'L1', attacker = 'own_swords_1', target = 'enemy_clanrat_1', x = -120, z = 0, gap_m = 150,
+                 a_depth = 9, t_depth = 12, a_width = 30, t_width = 30, mode = 'shoot', target_mode = 'hold',
+                 answer = false, fight_s = 30, max_s = 30, a_go_s = 6, stealth_rows = 'both',
+                 a_at = {x = -120, z = 160, b = 180}, t_at = {x = -120, z = 0, b = 0}},
+                {name = 'L2', attacker = 'own_swords_2', target = 'enemy_clanrat_2', x = 120, z = 0, gap_m = 240,
+                 a_depth = 9, t_depth = 12, a_width = 30, t_width = 30, mode = 'hold', target_mode = 'push',
+                 answer = false, fight_s = 10, max_s = 30, a_free = true, stealth_rows = 'both',
+                 push_to = {x = 133.5, z = 222.5}, a_at = {x = 120, z = 250, b = 180}, t_at = {x = 120, z = 0, b = 0}}}
+            CONFIG.park = {{name = 'own_lord', x = -700, z = -400, bearing = 0},
+                           {name = 'enemy_lord', x = 700, z = -400, bearing = 0}}
+            own[2].is_hidden = function() return true end
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 8 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args == nil, 'the ranged attack waits a_go_s')
+            assert(own[3].free_fire == true and own[3].attack_args == nil, 'fire at will, no order')
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].free_fire == true, 'the ranged attack')
+            for _ = 1, 100 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        assert any(r["phase"] == "a_go" and r["lane"] == "L1" for r in rows if r["event"] == "probe_phase")
+        gotos = [str(v) for v in lua.eval("bm.orders").values() if str(v).startswith("goto enemy_clanrat_2")]
+        assert gotos and gotos[0].split()[2:4] == ["133.5", "222.5"]
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        a = {x["lane"]: x["a"] for x in sample["lanes"]}
+        assert a["L1"]["hid"] is True and a["L1"]["v"] is True and a["L2"]["v"] is True
+
     def test_damage_shoot_and_two_on_one(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}

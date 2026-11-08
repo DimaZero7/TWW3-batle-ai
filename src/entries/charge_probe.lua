@@ -56,7 +56,8 @@
 -- the hidden target all the same (probe_phase 'a_try'); a_try_s later, still moving: the order stands (probe_phase 'a_try_end'
 -- kept true); standing: a move at a run to move_beyond_m behind the target's front (kept false, probe_phase 'a_move'), and the
 -- attack order once the target is visible to the attacker's alliance (probe_phase 'a_seen' with d, the centres' distance, in
--- either case). lane.stealth_rows: the target's sample row carries hid (unit:is_hidden()) and v (is_visible_to_alliance).
+-- either case). lane.stealth_rows: the target's sample row carries hid (unit:is_hidden()) and v (is_visible_to_alliance);
+-- stealth_rows 'both' (the snipe plan) the attacker's row too (its v: visible to the target's alliance).
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns); with lane.men_all_tg the target's and the extras' too
 -- (the artillery plan: who dies where in a block 150 m off the guns).
@@ -84,7 +85,8 @@
 -- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
 -- (the engine's own calls); event probe_damage with the men and health before and after.
 -- target_mode 'push': at the go the target gets a move order at a walk to a point push_m ahead of its front
--- (through the attacker: the game's own planner's far move point), never changed.
+-- (through the attacker: the game's own planner's far move point), never changed; lane.push_to {x, z} (the snipe plan's
+-- map lanes) a move to that world point instead.
 -- lane.t_morale (optional): the target keeps its morale (not fearless) - it can rout; its first rout is emitted as
 -- probe_phase 'rout' and lane.at_rout says what the attacker does then: 'halt' (halts where it is) or 'none' (goes
 -- on attacking: the chase); the lane ends lane.after_rout_s after the rout. With config.men_after_rout_s the
@@ -411,6 +413,13 @@ function M.main(bm, config, globals)
         return read(function() return lane.t.unit:is_visible_to_alliance(other) end)
     end
 
+    -- (stealth_rows 'both', the snipe plan) does the target's alliance see the attacker now?
+    local function visible_to_target(lane)
+        local other = state.alliances and state.alliances[lane.t.side]
+        if not other then return nil end
+        return read(function() return lane.a.unit:is_visible_to_alliance(other) end)
+    end
+
     -- A unit row's morale fields, added to it (t_morale targets, morale_rows): MoralePercent, MoraleState, the strongest
     -- effect's text, the active effects' keys, wavering.
     local function add_morale(row, u)
@@ -472,6 +481,9 @@ function M.main(bm, config, globals)
         if lane.stealth_rows and who == 'tg' then
             row.hid = read(function() return u:is_hidden() end)
             row.v = visible_to_attacker(lane)
+        elseif lane.stealth_rows == 'both' and who == 'a' then
+            row.hid = read(function() return u:is_hidden() end)
+            row.v = visible_to_target(lane)
         end
         if lane.card_rows then row.cs = card_stats(u) end
         if lane.dd_rows and (who == 'a' or lane.dd_rows == 'both') then
@@ -805,7 +817,13 @@ function M.main(bm, config, globals)
                 if lane.a_pending and now - lane.t0 >= lane.a_go_s * 1000 then
                     -- (the busycharge plan) the attacker's order, held until a_go_s after the go
                     lane.a_pending = false
-                    attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                    if lane.mode == 'shoot' then
+                        -- (the snipe plan) the ranged attack held until a_go_s: the shooter hides first
+                        orders.set_fire_at_will(lane.a.uc, true)
+                        orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+                    else
+                        attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                    end
                     emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0})
                 end
                 if lane.mode == 'shoot' and lane.reorder_s and now - (lane.reorder_ms or lane.t0) >= lane.reorder_s * 1000 then
@@ -1198,7 +1216,11 @@ function M.main(bm, config, globals)
             end
             if lane.target_mode == 'push' then
                 -- (lane.push_run: at a run - the losmove plan's running target)
-                orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), lane.push_run == true)
+                if lane.push_to then
+                    orders.move(lane.t.uc, vec(lane.push_to.x, lane.push_to.z), lane.push_run == true)
+                else
+                    orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), lane.push_run == true)
+                end
             elseif lane.target_mode == 'skirmish' and lane.t_move then
                 -- (the shootcontact plan) a move t_move.back_m straight away from the attacker (-z), never changed
                 local L = lane.layout
@@ -1208,7 +1230,7 @@ function M.main(bm, config, globals)
                 orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
             end
             local m = lane.mode
-            if lane.a_go_s and (m == 'attack_run' or m == 'attack_walk') then
+            if lane.a_go_s and (m == 'attack_run' or m == 'attack_walk' or m == 'shoot') then
                 lane.a_pending, m = true, nil
             end
             if lane.a_on_sight and (m == 'attack_run' or m == 'attack_walk') then

@@ -568,7 +568,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove")
+UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2419,7 +2419,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
            "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B,
-           "t_halt": {}, "after2": [None] * B, "arrive": [None] * B, "clear": [None] * B}
+           "t_halt": {}, "after2": [None] * B, "arrive": [None] * B, "clear": [None] * B, "held_range": {},
+           "push_goal": {}}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     # (the cavcheck plan's recharge) the game's goto point is the formation's front centre - the knights' centre stopped
@@ -2602,8 +2603,18 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     st_["phases"][b].append({"phase": "a_seen", "t": (t + t_first[b]) * 1000,
                                              "d": round(math.hypot(ax[b] - tx[b], az[b] - tz[b]), 1)})
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
+            elif mode[b] == "shoot" and t + t_first[b] < float(sp.get("a_go_s") or 0) - 1e-6:
+                # (a_go_s, the snipe plan) the ranged attack waits that long after the game's go: a halt, its fire at
+                # will off (the entry's: no range until then)
+                sx, sz = st_["start"][b]
+                kind[b, A], target[b, A], run_[b, A], x[b, A], z[b, A] = O.HOLD, -1, False, sx, sz
+                if b not in st_["held_range"]:
+                    st_["held_range"][b] = float(st.u["range"][b, A])
+                st.u["range"][b, A] = 0.0
             elif mode[b] == "shoot":
                 # the new units' ratling plan (tools/nn/unit_probe.py): one ranged attack on the target at a walk
+                if b in st_["held_range"]:
+                    st.u["range"][b, A] = st_["held_range"].pop(b)
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, False
             if sp.get("t_stop_fire_s") is not None and t >= float(sp["t_stop_fire_s"]) - 1e-6:
                 # the suppress2 plan: the target (a shooter) falls silent then (fire at will off, a halt): no range
@@ -2695,6 +2706,17 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 x[b, T], z[b, T] = st_["t_halt"][b]
             elif tmode[b] in ("both", "both_walk") or (sp.get("answer") and c is not None):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
+            elif tmode[b] == "push" and sp.get("push_to"):
+                # (the snipe plan) a walk to a world point: the game's goal is the formation's front centre (the cavcheck
+                # plan's recharge), the twin's MOVE its centre - half its depth short of the point, from where it began
+                if b not in st_["push_goal"]:
+                    gx, gz = float(sp["push_to"]["x"]), float(sp["push_to"]["z"])
+                    dx_, dz_ = gx - float(tx[b]), gz - float(tz[b])
+                    n_ = max(math.hypot(dx_, dz_), 1e-6)
+                    h_ = float(sp.get("t_depth") or 0) / 2
+                    st_["push_goal"][b] = (gx - dx_ / n_ * h_, gz - dz_ / n_ * h_)
+                kind[b, T], run_[b, T] = O.MOVE, bool(sp.get("push_run"))
+                x[b, T], z[b, T] = st_["push_goal"][b]
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = (O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60),
                                                             bool(sp.get("push_run")))

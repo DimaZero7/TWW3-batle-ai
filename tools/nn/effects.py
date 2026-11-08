@@ -88,6 +88,8 @@ SIM_RULES = {
     "fire_while_moving": "aims and shoots while moving (battle.py)",
     "fatigue_immune": "gains no fatigue (fatigue.py)",
     "stalk": "hides anywhere: any ground is cover for it (tools/nn/sim/stealth.py; config/nn/sim.json stealth)",
+    "snipe": "its own fire (at will, on the move) does not reveal it while hidden (tools/nn/sim/stealth.py; config/nn/sim.json "
+             "stealth.reveal.snipe)",
     "unspottable": "seen while hidden only within unspottable_unit_reveal_distance 20 m, edge to edge, no other term "
                    "(tools/nn/sim/stealth.py; config/nn/sim.json stealth.unspottable_m)",
     "charge_defence_vs_large": "braced (slower than melee.braced_speed), cancels the charge bonus of a large charger "
@@ -156,10 +158,9 @@ ATTRIBUTES = {
                        "kb": KB + "fatigue.md"},
     "ignore_trees": {"name": "Ignore Trees", "rules": ["ignore_trees"], "does": "shoots through trees",
                      "kb": KB + "abilities.md#attributes-selection", "schema_why": "flat maps only: no trees"},
-    "snipe": {"name": "Snipe", "rules": ["snipe"], "does": "firing does not reveal the hidden unit (fandom 'Snipe')",
-              "kb": KB + "abilities.md#attributes-selection",
-              "schema_why": "the unit that has it (Hochland Long Rifles) hides only in woods (hide_forest): no woods on "
-                            "our maps, it is never hidden"},
+    "snipe": {"name": "Snipe", "rules": ["snipe"], "does": "firing does not reveal the hidden unit (the game: 'This "
+              "unit remains hidden while firing'; the program: build/diag_g49/terrain/stealth.md 1)",
+              "kb": KB + "abilities.md#attributes-selection"},
     "strider": {"name": "Strider", "rules": ["strider"], "does": "ignores terrain penalties, passes trees",
                 "kb": KB + "abilities.md#attributes-selection", "schema_why": "flat maps only"},
     "moulder_monster": {"name": "Moulder Monster", "rules": ["moulder_monster"],

@@ -53,6 +53,17 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             it ('shoot') or with no order and fire at will on (a_free: our 'hold' of a shooter) - 1 battle of 8 lanes,
             LOSMOVE_S. Measures: the first shot and the distance then, shots before the contact, how far the shooter
             walked forward;
+  snipe     snipers in the woods (08.11, build/diag_snipe: the attribute snipe - firing does not reveal a hidden unit -
+            and gunpowder fired from the forest's depth): on Kislev (ksl_plains_01), the shooter's front at SNIPE_SITES' P,
+            facing b - 'edge' 15-19 m inside the forest's edge, 'deep' 55-68 m inside, 'open' on grass (the control): a
+            ranged attack ('shoot') SNIPE_GO_S after the go (it hides first: 5 s in the woods) on a held target SNIPE_GAP m
+            off (front to front) on open ground; 'approach': 15 m inside the edge, fire at will and no order (the bridge's
+            'stand' of a shooter), an enemy walks at it from SNIPE_APPROACH_GAP m and stops SNIPE_STOP_M m off its front
+            (push_to). Battle 1 the Hochland Long Rifles (hide_forest + snipe) on clanrats, battle 2 the Jezzails
+            (hide_forest) on swordsmen - 2 battles of 4 lanes, SNIPE_S / SNIPE_APPROACH_S. Both rows carry hid
+            (is_hidden) and v (visible to the other alliance; stealth_rows 'both'). Measures: ratling's shots and HP per
+            bullet, the shooter hidden / seen at the order, while firing and after it, the gap (edge to edge) when the
+            approaching enemy first saw it and its state at 100 / 60 / 40 m;
   wolfpoison the poison (W3): poisoned wolf rats -> swordsmen, plain ones (the control), the poisoned leaving 15 s after
             contact with the swordsmen halting or chasing them, the plain leaving chased (the control) - 2 battles of 5 lanes.
 
@@ -137,6 +148,13 @@ LOSRANGE_S = 90
 LOSMOVE_LANES = tuple((f"{s}_{o}_{p}", key, tg, o, p) for s, key, tg in (("lr", LR, "clanrat"), ("jz", JZ, "swords"))
                       for p in ("walk", "run") for o in ("shoot", "free"))
 LOSMOVE_GAP, LOSMOVE_S = 320, 300
+# the snipe plan (build/diag_snipe/find_sites.py, sites.png): kind -> (P x, z: the shooter's front centre, its bearing,
+# the forest it fires through m); the target SNIPE_GAP m off (front to front) on open level ground, the line of sight
+# over the ground clear; the approach: the enemy from SNIPE_APPROACH_GAP m to SNIPE_STOP_M m off the shooter's front
+SNIPE_SITES = {"edge": (416.0, 376.0, 165.0, 19), "deep": (-40.0, 376.0, 120.0, 62), "open": (-328.0, 160.0, 195.0, 0),
+               "approach": (-40.0, -312.0, 75.0, 16)}
+SNIPE_SHOOTERS = ((LR, "clanrat"), (JZ, "swords"))       # battle 1, battle 2
+SNIPE_GAP, SNIPE_APPROACH_GAP, SNIPE_STOP_M, SNIPE_GO_S, SNIPE_S, SNIPE_APPROACH_S = 150, 240, 25, 8, 100, 240
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -211,6 +229,8 @@ def battles(plan):
                                  push_m=round(LOSMOVE_GAP + cp.depth(ak, am) + 20, 1), push_run=pace == "run",
                                  **FX, **extra))
         return [_placed(lanes, 0)]
+    if plan == "snipe":
+        return snipe_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -303,6 +323,36 @@ def battles(plan):
                 p("poison_leave_chase", WOLFP, "chase"), p("plain_leave_chase", WOLF, "chase")]
         return [_placed(base, k) for k in (0, 2)]
     raise ValueError(plan)
+
+
+def snipe_battles():
+    """The snipe plan's two battles (module doc): the four SNIPE_SITES lanes with the long rifles, then the jezzails."""
+    g = cp.TERRAIN
+    out = []
+    for shooter, target in SNIPE_SHOOTERS:
+        ak, am, _ = cp.UNITS[shooter]
+        tk, tm, _ = cp.UNITS[target]
+        ad, td = cp.depth(ak, am), cp.depth(tk, tm)
+        lanes = []
+        for kind, (px, pz, b, _) in SNIPE_SITES.items():
+            r = math.radians(b)
+            fx, fz = math.sin(r), math.cos(r)
+            gap = SNIPE_APPROACH_GAP if kind == "approach" else SNIPE_GAP
+            a_at = {"x": round(px - fx * ad / 2, 1), "z": round(pz - fz * ad / 2, 1), "b": b}
+            t_at = {"x": round(px + fx * (gap + td / 2), 1), "z": round(pz + fz * (gap + td / 2), 1),
+                    "b": (b + 180) % 360}
+            common = dict(answer=False, kind=kind, map=g["map"], catchment=g["catchment"], a_at=a_at, t_at=t_at,
+                          place=(a_at["x"], a_at["z"]), stealth_rows="both", **FX)
+            if kind == "approach":
+                # the move's goal is the formation's front centre (the cavcheck plan's recharge): SNIPE_STOP_M off
+                push_to = {"x": round(px + fx * SNIPE_STOP_M, 1), "z": round(pz + fz * SNIPE_STOP_M, 1)}
+                lanes.append(cp.lane(shooter, target, "hold", "push", gap_m=gap, fight_s=10, max_s=SNIPE_APPROACH_S,
+                                     a_free=True, push_to=push_to, push_run=False, **common))
+            else:
+                lanes.append(cp.lane(shooter, target, "shoot", "hold", gap_m=gap, fight_s=SNIPE_S, max_s=SNIPE_S,
+                                     a_go_s=SNIPE_GO_S, **common))
+        out.append(lanes)
+    return out
 
 
 # ---------------------------------------------------------------- the recordings
@@ -720,6 +770,61 @@ def losrange_measure(lane):
     return out
 
 
+def _gap_edges(lane):
+    """[samples] the gap between the shooter's and the target's blocks along the line between their centres, m (the
+    centres' distance less the half depths: the approach lane's head-on walk)."""
+    s, spec = lane["samples"], lane["spec"]
+    d = np.hypot(cp.series(s, "a", "x") - cp.series(s, "tg", "x"), cp.series(s, "a", "z") - cp.series(s, "tg", "z"))
+    return d - (float(spec.get("a_depth") or 0) + float(spec.get("t_depth") or 0)) / 2
+
+
+def snipe_measure(lane):
+    """ratling_measure's shots (bullets, HP per bullet, the target's HP a second) and the shooter's hiding: hidden at
+    the go and at the order (a_go_s), the share of the samples hidden / seen by the enemy from the first shot to the
+    lane's end, its first reveal after the first shot; the approach lane: the gap (edge to edge) when the enemy first saw
+    it (v) and when it lost its hiding, its hid / v at 100 / 60 / 40 m, the shots before the enemy saw it."""
+    out = ratling_measure(lane)
+    s, spec = lane["samples"], lane["spec"]
+    t = _t(lane)
+    hid, v = cp.series(s, "a", "hid"), cp.series(s, "a", "v")
+    if not np.isfinite(hid).any():
+        return out
+    hid_b, v_b = np.nan_to_num(hid) > 0, np.nan_to_num(v) > 0
+    out["hid_go"] = float(hid_b[0])
+    go = float(spec.get("a_go_s") or 0)
+    k_go = min(int(np.searchsorted(t, go)), len(t) - 1)
+    out["hid_order"] = float(hid_b[k_go])
+    first = out.get("first_shot_s")
+    if first is not None:
+        after = t >= first - 1e-6
+        out["hid_firing_share"] = float(hid_b[after].mean())
+        out["seen_firing_share"] = float(v_b[after].mean())
+        off = after & ~hid_b
+        out["revealed_s"] = float(t[off][0] - first) if off.any() else None
+    else:
+        out["hid_share"] = float(hid_b.mean())
+    if spec.get("target_mode") == "push":
+        gap = _gap_edges(lane)
+        # seen by the enemy after it first hid (before: not yet hidden - its 5 s in the woods after the placement)
+        k0 = int(np.argmax(hid_b)) if hid_b.any() else 0
+        seen = v_b & np.isfinite(gap) & (np.arange(len(t)) >= k0)
+        out["gap_seen_m"] = float(gap[seen][0]) if seen.any() else None
+        lost = ~hid_b & np.isfinite(gap) & (np.arange(len(t)) >= k0)
+        out["gap_unhid_m"] = float(gap[lost][0]) if lost.any() else None
+        out["gap_min_m"] = float(np.nanmin(gap))
+        for m in (100, 60, 40):
+            k = np.flatnonzero(np.nan_to_num(gap, nan=1e9) <= m)
+            out[f"hid_{m}"] = float(hid_b[k[0]]) if len(k) else None
+            out[f"v_{m}"] = float(v_b[k[0]]) if len(k) else None
+        ammo = cp.series(s, "a", "ammo")
+        ok = np.isfinite(ammo)
+        if ok.any():
+            end = float(t[seen][0]) if seen.any() else float(t[-1])
+            before = ok & (t <= end)
+            out["shots_unseen"] = float(ammo[ok][0] - ammo[before][-1]) if before.any() else 0.0
+    return out
+
+
 def ratcover_measure(lane):
     """ratling_measure's numbers for the lone man, and the HP his cover (the lane's extra unit) lost per bullet over the
     same span (e_hp_per_bullet)."""
@@ -737,7 +842,7 @@ def ratcover_measure(lane):
     return out
 
 
-MEASURE = {"losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+MEASURE = {"snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -773,7 +878,10 @@ def _fmt(v):
 
 
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
-KEY = {"losmove": ("first_shot_s", "dist_at_shot_m", "shots_before_contact", "contact_s", "fwd_max_m", "walked_m"),
+KEY = {"snipe": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "hid_go", "hid_order", "hid_firing_share",
+                 "seen_firing_share", "revealed_s", "hid_share", "gap_seen_m", "gap_unhid_m", "hid_100", "hid_60",
+                 "hid_40", "v_100", "v_60", "v_40", "shots_unseen", "gap_min_m"),
+       "losmove": ("first_shot_s", "dist_at_shot_m", "shots_before_contact", "contact_s", "fwd_max_m", "walked_m"),
        "losrange": ("first_shot_s", "bullets", "dist0_m", "dist_at_shot_m", "dist_end_m", "walked_m", "moved_until_s",
                     "b0", "b_end"),
        "losfriend": ("first_shot_s", "bullets", "hp_per_bullet", "cover_hp_lost", "moved_until_s", "fwd_max_m",
@@ -811,6 +919,10 @@ def measure_lanes(lanes):
     return rows
 
 
+# the plans whose lanes stand on a map (their twin: the map's heights, ground and trunks)
+MAP_TWIN = {"snipe": cp.project.ROOT / "build" / "maps" / "ksl_plains_01" / "heights.npz"}
+
+
 def twin(lanes, device="cpu", copies=4, params=None):
     """The simulator on the recorded lanes (tools/nn/charge_probe.sim_lanes: each lane its own battle, its units at
     their places at the go, the same scripted orders), `copies` a lane, in the game's shape with each lane's plan."""
@@ -819,8 +931,13 @@ def twin(lanes, device="cpu", copies=4, params=None):
         mine = [ln for ln in lanes if ln.get("plan") == plan]
         if not mine:
             continue
+        mid = None
+        if plan in MAP_TWIN:
+            # (the snipe plan) the lanes stand on Kislev: its heights, ground and trunks (tools/nn/sim/terrain.py)
+            from tools.nn.sim import terrain as sim_terrain
+            mid = sim_terrain.load_npz(MAP_TWIN[plan])
         for ln, s in zip([ln for ln in mine for _ in range(copies)],
-                         cp.sim_lanes(mine, params=params, device=device, copies=copies)):
+                         cp.sim_lanes(mine, params=params, device=device, copies=copies, terrain_map=mid)):
             s.update(plan=plan, battle=ln.get("battle"))
             out.append(s)
     return out
