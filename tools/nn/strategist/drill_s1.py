@@ -61,6 +61,7 @@ DC1 = cfg()["drill_s1"]                    # config/nn/strategist.json drill_s1 
 ENEMIES = tuple(DC1["enemies"].items())
 LIMIT_S = int(DC1["limit_s"])
 KEPT_S = int(DC1["kept_s"])
+BEHIND_M = 44.0                            # the hand-made 'behind': this far behind the infantry's front row
 DEEP_M = 150.0                             # the bad 'deep': the snipers this far behind the front row
 PER_SIDE = 12                              # (the drill's armies are at most 12 a side: a smaller state, a faster step)
 _ROLE = {}
@@ -110,13 +111,18 @@ def _transform(sp, mirror, rot, dz, back):
     m["z"] -= back * math.cos(a)
 
 
-def _enemy_script(rnd):
-    names, w = zip(*ENEMIES)
+def _enemy_script(rnd, mix=None):
+    names, w = zip(*(tuple(mix.items()) if mix else ENEMIES))
     return rnd.choices(names, weights=w)[0]
 
 
-def spec(rnd, src=None):
-    """One drill battle (module doc)."""
+def spec(rnd, src=None, enemy_full=None, vary=None, mix=None, turn=None):
+    """One drill battle (module doc). enemy_full: the enemy the whole matchup's (its units at the game AI's places,
+    0-2 out as armies.augment), not 8-12 of it; vary: the mirror, the turn, the shifts; turn: the 180 deg turn among
+    them; mix {script: weight} - the defaults config drill_s1 enemy_full, vary, turn, enemies."""
+    enemy_full = bool(DC1.get("enemy_full", False)) if enemy_full is None else enemy_full
+    vary = bool(DC1.get("vary", True)) if vary is None else vary
+    turn = bool(DC1.get("turn", True)) if turn is None else turn       # (the 180 deg turn: my zone the east one)
     src = src or rnd.choice(SOURCES)
     base = AR.base(src)
     r1, r2 = _by_role(base[1]), _by_role(base[2])
@@ -151,19 +157,29 @@ def spec(rnd, src=None):
         sign = {"left": 1.0, "right": -1.0}.get(flank, 1.0 if k % 2 == 0 else -1.0)
         foes.append(_unit(src, u, general=False, x=rnd.uniform(130.0, 230.0), z=sign * rnd.uniform(90.0, 190.0),
                           b=270.0))
+    if enemy_full:
+        # (the same draws as before were made: the drill's battles of either kind come from one generator)
+        foes = [_unit(src, u) for u in AR.augment({1: [], 2: base[2]}, rnd, aug=dict(AR.cfg()["augment"], mirror=0.0,
+                                                                                     jitter_m=0.0, turn_deg=0.0))[2]]
+        n_f = sum(role(u["key"]) == "fast" for u in foes)
+        flank = "both"
     mz, ez = _zones()
     sp = {"src": src, "battle": {1: mine, 2: foes,
                                  "factions": {1: AR.faction(src, 1), 2: AR.faction(src, 2)}},
-          "mine": mz, "theirs": ez, "enemy": _enemy_script(rnd), "n_fast": n_f, "flank": flank, "n_sn": n_sn,
+          "mine": mz, "theirs": ez, "enemy": _enemy_script(rnd, mix), "n_fast": n_f, "flank": flank, "n_sn": n_sn,
           "mirror": rnd.random() < 0.5, "rot": rnd.random() < 0.5,
           "dz": rnd.uniform(-float(DC1["dz_m"]), float(DC1["dz_m"])), "back": rnd.uniform(0.0, float(DC1["back_m"])),
           "kind": "drill"}
-    _transform(sp, sp["mirror"], sp["rot"], sp["dz"], sp["back"])
+    if vary:
+        sp["rot"] = sp["rot"] and turn
+        _transform(sp, sp["mirror"], sp["rot"], sp["dz"], sp["back"])
+    else:
+        sp.update(mirror=False, rot=False, dz=0.0, back=0.0)
     return sp
 
 
-def specs(n, rnd):
-    return [spec(rnd) for _ in range(n)]
+def specs(n, rnd, **kw):
+    return [spec(rnd, **kw) for _ in range(n)]
 
 
 def full_specs(names, n, rnd, enemy="ai_game"):
@@ -250,6 +266,21 @@ def sniper_groups(inp, comp):
     return out.to(inp["own"].device)
 
 
+def infantry_groups(inp, members):
+    """[B, G] bool: the groups with a line or anti (melee infantry) member (operative/army.roles)."""
+    cards = inp["rows"][..., :69].cpu().numpy()
+    own = inp["own"].cpu().numpy()
+    mem = members.cpu().numpy()
+    B, G, K = mem.shape
+    out = torch.zeros((B, G), dtype=torch.bool)
+    for b in range(B):
+        rows = [j for j in range(K) if own[b, j]]
+        rl = dict(zip(rows, AM.roles(cards[b][rows])))
+        for g in range(G):
+            out[b, g] = any(rl.get(j) in ("line", "anti") for j in range(K) if mem[b, g, j])
+    return out.to(inp["own"].device)
+
+
 @torch.no_grad()
 def decide(inp, ctx, who, temp=None, greedy=True):
     """The strategist's choice net.choose output (module doc). who: 'teacher', 'exposed', 'sample' (temp [B] the cells'
@@ -265,6 +296,32 @@ def decide(inp, ctx, who, temp=None, greedy=True):
             # the formula's cells without its nudge (what a network's walk can do: its candidate in the search)
             bias["nudge"] = torch.zeros_like(bias["nudge"])
             return NN.choose(NN.null_enc(B, K, G, dev), inp, ctx, NN.NullHeads(B, dev), greedy=True, bias=bias)
+        if who == "behind":
+            # what the search found (step 3: 20-60 m behind the middle of the infantry, inside its ends) as a hand-made
+            # comparison: after the walk each snipers' group is moved to BEHIND_M behind the frontmost infantry group's
+            # centre, round the infantry's middle 40 m apart (the walk's bans do not see the move - deploy_errors counts
+            # what it costs)
+            comp = bias["comp"].argmax(2)
+            sg = sniper_groups(inp, comp)
+            f_back = (-ctx.mine["depth"][:, None] / 2 + 32.0).expand(B, G)
+            k = torch.cumsum(sg.long(), 1)
+            s = (k.float() - (sg.sum(1, keepdim=True).float() + 1) / 2) * 40.0
+            gx, gz = ZS.world(ctx.mine, s, f_back)
+            bias["goal_x"] = torch.where(sg, gx, bias["goal_x"])
+            bias["goal_z"] = torch.where(sg, gz, bias["goal_z"])
+            bias["nudge"] = torch.where(sg, torch.zeros_like(bias["nudge"]), bias["nudge"])
+            out = NN.choose(NN.null_enc(B, K, G, dev), inp, ctx, NN.NullHeads(B, dev), greedy=True, bias=bias)
+            plan = out["plan"]
+            inf = infantry_groups(inp, plan["members"]) & plan["on"]
+            sc, fc = ZS.local(ctx.mine, plan["cx"], plan["cz"])
+            f_inf = torch.where(inf, fc, torch.full_like(fc, -1e9)).amax(1, keepdim=True)
+            s_mid = (torch.where(inf, sc, torch.full_like(sc, -1e9)).amax(1, keepdim=True)
+                     + torch.where(inf, sc, torch.full_like(sc, 1e9)).amin(1, keepdim=True)) / 2
+            px, pz = ZS.world(ctx.mine, s_mid + s, (f_inf - BEHIND_M).expand(B, G))
+            put = sg & plan["on"]
+            plan["cx"], plan["cz"] = torch.where(put, px, plan["cx"]), torch.where(put, pz, plan["cz"])
+            plan["nudge"] = torch.where(put, torch.zeros_like(plan["nudge"]), plan["nudge"])
+            return out
         if who == "deep":
             # the bad one the other way: the snipers' groups behind the middle, DEEP_M behind the front row's cells
             # (out of the zone's depth 176 m: a deployment error by design - hidden, out of everyone's range)
@@ -379,6 +436,23 @@ def roles_of_state(st):
 
 
 @torch.no_grad()
+class GpuShare:
+    """The GPU busy at most `share` of the time (the user's game mode, CLAUDE.md rule 11: --gpu-duty 0.45): after each
+    piece of work (a second of battle, a training step) sleep (1 - share) / share of its length (unit/train.Duty, timed
+    piece by piece)."""
+
+    def __init__(self, device, share):
+        from tools.nn.unit import train as UT
+        self.inner = UT.Duty(device, share)
+
+    def end(self):
+        self.inner.end()
+        self.inner.start()
+
+
+DUTY = None                                # a GpuShare for every battle and step of this process (drill_train --gpu-duty)
+
+
 def play(batch, out, unit_net, P, device, limit=LIMIT_S, inp=None, enemies=None):
     """(measures {name: [B]}, stats) of the battles (module doc)."""
     battles, g0, pl = placed(batch, out, inp)
@@ -401,7 +475,7 @@ def play(batch, out, unit_net, P, device, limit=LIMIT_S, inp=None, enemies=None)
     DU.build = build
     try:
         rd, stats = DU.play(names, battles, {1: chain, 2: enemy}, unit_net, P, device, limit_s=limit,
-                            per_side=batch.per_side, watch=watch)
+                            per_side=batch.per_side, watch=watch, duty=DUTY)
     finally:
         DU.build = _b
     st = cap["st"]

@@ -16,7 +16,7 @@ P = load()
 
 def test_the_generator_gives_small_armies_with_snipers_and_fast_enemies():
     from tools.nn.strategist import drill_s1 as D
-    sp = D.specs(40, random.Random(3))
+    sp = D.specs(40, random.Random(3), turn=True)
     for s in sp:
         mine, foes = s["battle"][1], s["battle"][2]
         assert 9 <= len(mine) <= 12 and mine[0]["general"] and not any(u["general"] for u in mine[1:])
@@ -98,3 +98,30 @@ def test_the_deep_deployment_puts_the_snipers_far_behind_the_infantry():
         inf = [i for i in range(n) if rl[k][i] in ("line", "anti")]
         sn = [i for i in range(n) if rl[k][i] == "sniper"]
         assert max(float(f[k, inf].max()) - float(f[k, i]) for i in sn) >= 120.0
+
+
+def test_the_variants_give_the_whole_enemy_and_no_variation():
+    from tools.nn.matchup import armies as AR
+    from tools.nn.strategist import drill_s1 as D
+    for s in D.specs(6, random.Random(2), enemy_full=True, vary=False, mix={"ai_game": 1}):
+        n = len(AR.base(s["src"])[2])
+        assert n - 2 <= len(s["battle"][2]) <= n and s["battle"][2][0]["general"]
+        assert s["enemy"] == "ai_game" and not s["mirror"] and not s["rot"] and s["dz"] == 0.0
+        assert s["mine"]["x"] == AR.zones()[0]["x"]
+
+
+def test_the_behind_deployment_puts_the_snipers_behind_the_infantry_inside_its_ends():
+    from tools.nn.strategist import drill_s1 as D
+    from tools.nn.strategist import zones as ZS
+    sp = D.specs(4, random.Random(5))
+    b = D.Batch(sp, P, "cpu")
+    _, _, pl = D.placed(b, D.decide(b.inp, b.ctx, "behind"))
+    s, f = ZS.local(b.mine_zone, pl["x"], pl["z"])
+    rl = D.roles_of_state(b.st0)
+    for k in range(len(sp)):
+        n = len(sp[k]["battle"][1])
+        inf = [i for i in range(n) if rl[k][i] in ("line", "anti")]
+        for i in (i for i in range(n) if rl[k][i] == "sniper"):
+            assert 25.0 <= float(f[k, inf].max()) - float(f[k, i]) <= 65.0
+            mid = (float(s[k, inf].min()) + float(s[k, inf].max())) / 2
+            assert abs(float(s[k, i]) - mid) <= 41.0                 # round the middle of the infantry

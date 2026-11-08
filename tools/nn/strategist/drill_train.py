@@ -34,7 +34,7 @@ CAND_TEMPS = (1.5, 2.0, 2.0, 3.0, 3.0)
 
 
 def deployer(who, dev):
-    if who in ("teacher", "exposed", "teacher0", "deep"):
+    if who in ("teacher", "exposed", "teacher0", "deep", "behind"):
         return who
     net, _, _ = ST.restore(who, dev)
     net.eval()
@@ -141,6 +141,8 @@ def fit(net, opt, chunks, steps, mb, weights=None, log=None):
         term.backward()
         torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step()
+        if D.DUTY is not None:
+            D.DUTY.end()
         terms.append(float(term.detach()))
         for h, v in st.items():
             if v is not None:
@@ -367,7 +369,10 @@ def main(argv=None):
     ap.add_argument("--init", default=None, help="a strategist checkpoint to start from")
     ap.add_argument("--labels", default="", help="comma-separated labels.pt of earlier steps")
     ap.add_argument("--rounds", type=int, default=1000)
+    ap.add_argument("--gpu-duty", type=float, default=1.0, help="the GPU's share of the time (the game mode: 0.45)")
     a = ap.parse_args(argv)
+    if a.gpu_duty < 1.0:
+        D.DUTY = D.GpuShare(a.device, a.gpu_duty)
     if a.what == "train":
         return train(a)
     if a.what == "overfit":
