@@ -584,6 +584,53 @@ class TestNnArena:
         assert len(got) == 1 and len(got[0]["units"]) == 4                          # the one reading, once
         assert got[0]["units"][0]["xz_dm"] and {u["side"] for u in got[0]["units"]} == {1, 2}
 
+    def test_the_chains_idle_shooter_is_never_released_and_its_run_flag_alone_is_no_new_order(self, lua, tmp_path):
+        # companion --chain answers with 'mode chain': the bridge gives its orders as the simulator does - an idle
+        # shooter under an attack is not released to fire at will (the simulator has no such rule), and the same
+        # target with another run flag is not given again (any order restarts a shooter's aim; 08.11,
+        # build/diag_mem/plan.md Н-прямой-огонь)
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            archer = fake.unit('own_archer_1', 'archers', -200, 40)
+            archer.ammo, archer.range = 1800, 150
+            table.insert(own, archer)
+            table.insert(CONFIG.units.own, {script_name = 'own_archer_1', slot = 'archer_1', key = 'archers'})
+            fake.cco['uid_own_archer_1'] = {IsFiringMissiles = false}
+            CONFIG.own_ai, CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'net', 'attack', 1000, 100
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        answered = [0]
+
+        def play(seconds, run):
+            orders = [{"unit": "own_spear_1", "kind": "keep"},
+                      {"unit": "own_archer_1", "kind": "attack", "target": "enemy_spear_1", "run": run}]
+            for _ in range(seconds * 10):
+                doc = exchange.read_state(tmp_path / exchange.STATE)
+                if doc["move"] > answered[0]:
+                    answered[0] = doc["move"]
+                    exchange.write_atomic(tmp_path / exchange.ORDERS,
+                                          exchange.orders_text(doc["batch"], doc["move"], orders, 1.0, mode="chain"))
+                lua.execute("bm:tick(100)")
+
+        def log():
+            return list(lua.eval("bm.orders").values())
+        play(3, False)
+        assert log() == ["attack enemy_spear_1"]
+        play(3, True)                                # only the run flag: nothing new for the game
+        play(3, False)
+        assert log() == ["attack enemy_spear_1"]
+        play(15, False)                              # idle 20 decisions: never released ('halt') under the chain
+        assert "halt" not in log()
+        lua.execute("""
+            bm.outcome, bm.winner = true, 2
+            for _ = 1, 10 do bm:tick(100) end
+        """)
+        rows = [json.loads(x) for x in (tmp_path / "tww3_bai_events.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert [r["mode"] for r in rows if r["event"] == "nn_mode"] == ["chain"]
+        assert not [r for r in rows if r["event"] == "nn_duty" and r.get("action") == "release"]
+
     def test_net_runs_shooters_frees_idle_ones_and_gives_orders_again_after_a_rally(self, lua, tmp_path):
         # The gate's in-game findings (01.10.2026): a ranged attack must pass the run flag; a unit that
         # routed and rallied gets its order again; a shooter that cannot hit its target (the target in
@@ -626,7 +673,7 @@ class TestNnArena:
         play(2)
         assert log() == ["attack enemy_lord", "attack enemy_spear_1", "attack enemy_lord"]
         lua.execute("fake.cco['uid_own_archer_1'].IsFiringMissiles = false; enemy[2].melee = true")
-        play(5)                                      # 4 decisions idle: released to fire at will
+        play(11)                                     # RELEASE_AFTER (10) decisions idle: released to fire at will
         assert log()[3:] == ["halt"] and lua.eval("archer.free_fire") is True
         lua.execute("fake.cco['uid_own_archer_1'].IsFiringMissiles = true")
         play(12)                                     # the target still in melee: stays free

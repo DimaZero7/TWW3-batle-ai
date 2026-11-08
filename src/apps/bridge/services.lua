@@ -74,6 +74,8 @@ function M.parse_orders(text)
             doc.batch = w[2]
         elseif w[1] == 'think_ms' then
             doc.think_ms = tonumber(w[2])
+        elseif w[1] == 'mode' then
+            doc.mode = w[2]
         elseif w[1] == 'unit' then
             local name, order = unit_order(w)
             if not name then return nil, order end
@@ -93,11 +95,15 @@ end
 
 -- Is `new` a different order from `old` (the one in force)? The facing: given or taken away, or
 -- another one (more than FACE_SAME_DEG off: the engine's 64 sectors are 5.6 deg); the width: a new one
--- given more than WIDTH_SAME_M off (none given: the width in force stays - no change), as the simulator.
+-- given more than WIDTH_SAME_M off (none given: the width in force stays - no change), as the simulator;
+-- a point within REPEAT_M. shooter: an attack of a shooter on the same target with only its run flag changed is
+-- the same order - any order restarts a shooter's aim in the game (3-8.5 s to the first shot: the losrange probe,
+-- 08.11), and a shooter's ranged attack within range does not walk (build/diag_mem/plan.md Н-прямой-огонь).
 M.FACE_SAME_DEG = 1
 M.WIDTH_SAME_M = 1
-function M.changed(old, new)
+function M.changed(old, new, shooter)
     if not old then return true end
+    if shooter and old.kind == 'attack' and new.kind == 'attack' and old.target == new.target then return false end
     if old.kind ~= new.kind or old.run ~= new.run or old.target ~= new.target then return true end
     if (old.face == nil) ~= (new.face == nil) then return true end
     if new.face and math.abs((new.face - old.face + 180) % 360 - 180) > M.FACE_SAME_DEG then return true end
@@ -121,7 +127,10 @@ end
 --   * fire at will: the game chooses the target, as its own AI's shooters do. The
 --     ordered target is taken again once it is out of melee, after at least FREE_MIN
 --     decisions.
-M.RELEASE_AFTER = 4
+-- (10, was 4 until 08.11: a fresh order needs 3-8.5 s to its first shot - the losrange probe; 4 released the
+-- jezzails before they could fire, 4 times in 30 s of the M3 chain battle). The chain (the answer's 'mode chain')
+-- releases never: the simulator has no such rule (missile_duty's release_after nil).
+M.RELEASE_AFTER = 10
 M.FREE_MIN = 10
 
 local function up(row)
@@ -156,7 +165,8 @@ end
 
 -- duty = {idle, free, free_for} (kept per unit between calls; {} to start).
 -- Returns 'release', 'resume' or nil.
-function M.missile_duty(duty, me, target)
+function M.missile_duty(duty, me, target, release_after)
+    if release_after == nil then release_after = M.RELEASE_AFTER end
     duty.idle, duty.free_for = duty.idle or 0, duty.free_for or 0
     if duty.free then
         duty.free_for = duty.free_for + 1
@@ -167,7 +177,7 @@ function M.missile_duty(duty, me, target)
         return nil
     end
     duty.idle = M.shooter_idle(me) and duty.idle + 1 or 0
-    if duty.idle >= M.RELEASE_AFTER then
+    if release_after ~= false and duty.idle >= release_after then
         duty.free, duty.free_for, duty.idle = true, 0, 0
         return 'release'
     end

@@ -189,6 +189,7 @@ class Chain:
     """Our side in the game under the chain (module doc). plans: {batch: strategist plan} filled by the strategist's
     deployment (deploy.Strategist.plans), None or no plan of the batch: no starting groups; task: the command without a
     strategist ('hold' | 'destroy')."""
+    MODE = "chain"            # the answer's 'mode' line (exchange.orders_text): the bridge's chain rules
 
     def __init__(self, unit_net, op_net=None, tactic_net=None, op_greedy=False, tactic_greedy=False, unit_greedy=False,
                  plans=None, task="hold", params=None, device="cpu", map_root=UI.MAPS, allow_flat=True, own=1,

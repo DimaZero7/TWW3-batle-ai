@@ -163,6 +163,13 @@ function M.start(opts)
         end
     end
 
+    -- The release of an idle shooter (services.missile_duty): never under the chain (the answer's 'mode chain'),
+    -- else after services.RELEASE_AFTER decisions (false / nil; not 'cond and false or nil': that is nil).
+    local function release_after()
+        if handle.chain then return false end
+        return nil
+    end
+
     -- A shooter fires at will instead of holding a target it cannot hit (services.missile_duty).
     local function free_fire(it, target, action)
         local d = duty[it.name]
@@ -396,7 +403,7 @@ function M.start(opts)
         elseif pick and duty[it.name] and drifted(it, duty[it.name], pick) then
             aim(it, pick, false)
         elseif pick and duty[it.name] then
-            local action = services.missile_duty(duty[it.name], me, seen[pick])
+            local action = services.missile_duty(duty[it.name], me, seen[pick], release_after())
             if action == 'release' then
                 free_fire(it, pick, 'release')
             elseif action == 'resume' then
@@ -442,7 +449,7 @@ function M.start(opts)
             elseif d and order and order.kind == 'attack' and drifted(it, d, order.target) then
                 give(it, order)
             elseif d and order and order.kind == 'attack' then
-                local action = services.missile_duty(d, seen[it.name], seen[order.target])
+                local action = services.missile_duty(d, seen[it.name], seen[order.target], release_after())
                 if action == 'release' then
                     free_fire(it, order.target, 'release')
                 elseif action == 'resume' then
@@ -550,6 +557,11 @@ function M.start(opts)
         end
         if doc.batch ~= opts.meta.batch or doc.move <= handle.answered or doc.move > handle.written then return end
         handle.answered = doc.move
+        -- the chain's answer (mode chain): its rules from now on (services.missile_duty: no release)
+        if doc.mode == 'chain' and not handle.chain then
+            handle.chain = true
+            opts.emit('nn_mode', {t = opts.now_ms(), mode = 'chain'})
+        end
         local sent = times[doc.move] or {}
         local row = {t = opts.now_ms(), move = doc.move, lag = handle.written - doc.move,
             wait_model_ms = sent.model and opts.model_ms() - sent.model,
@@ -564,7 +576,7 @@ function M.start(opts)
                 row.keeps = row.keeps + 1
             elseif order and not up then
                 row.skipped = row.skipped + 1
-            elseif order and services.changed(current[it.name], order) then
+            elseif order and services.changed(current[it.name], order, shooter(it.unit)) then
                 local status = give(it, order)
                 if status ~= 'unknown_target' then current[it.name], lost[it.name] = order, nil end
                 if status ~= 'kept' then handle.given = handle.given + 1 end

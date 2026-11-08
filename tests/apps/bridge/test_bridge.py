@@ -58,6 +58,37 @@ def test_an_order_is_given_again_only_when_it_changed(lua):
     assert changed(attack, t({"kind": "hold", "run": False}))
 
 
+def test_a_shooters_attack_on_the_same_target_with_only_its_run_changed_is_not_given_again(lua):
+    """Any order restarts a shooter's aim in the game (3-8.5 s to the first shot, the losrange probe 08.11): its run
+    flag alone is no new order; a melee unit's run is (the charge)."""
+    changed = lua.eval("function(a, b, s) return bridge.changed(a, b, s) end")
+    t = lua.table_from
+    walk = t({"kind": "attack", "target": "enemy_1", "run": False})
+    run = t({"kind": "attack", "target": "enemy_1", "run": True})
+    assert not changed(walk, run, True) and not changed(run, walk, True)
+    assert changed(walk, run, False) and changed(walk, run, None)
+    assert changed(walk, t({"kind": "attack", "target": "enemy_2", "run": False}), True)
+    assert changed(walk, t({"kind": "hold", "run": False}), True)
+
+
+def test_the_chains_answer_says_its_mode_and_its_idle_shooter_is_never_released(lua):
+    """'mode chain' in the answer (companion --chain): the bridge's release of an idle shooter is off - the simulator
+    has none (build/diag_mem/plan.md Н-прямой-огонь); the old mode releases after RELEASE_AFTER 10."""
+    doc, _ = parse(lua, exchange.orders_text("b", 3, [{"unit": "own_a", "kind": "hold"}], mode="chain"))
+    assert doc is not None and doc.mode == "chain"
+    doc, _ = parse(lua, exchange.orders_text("b", 3, [{"unit": "own_a", "kind": "hold"}]))
+    assert doc is not None and doc.mode is None
+    duty = lua.eval("function(d, me, tg, r) return bridge.missile_duty(d, me, tg, r) end")
+    t = lua.table_from
+    idle = t({"men": 90, "a": 1800, "fire": False, "mv": False, "m": False})
+    tg = t({"men": 100, "m": False})
+    d = t({})
+    assert [duty(d, idle, tg, False) for _ in range(30)] == [None] * 30 and not d.free
+    assert lua.eval("bridge.RELEASE_AFTER") == 10
+    d = t({})
+    assert [duty(d, idle, tg, None) for _ in range(10)][-1] == "release"
+
+
 def test_real_time_from_os_clock(lua):
     real_ms = lua.eval("function(a, b) return bridge.real_ms(a, b) end")
     assert real_ms(1.5, 1.5234) == 23 and real_ms(None, 2) is None

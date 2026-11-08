@@ -693,13 +693,18 @@ def ability_list(names, side, ability, slots, own=1, cast=None):
     return out
 
 
-def orders_text(batch, move, orders, think_ms=None, abilities=()):
+def orders_text(batch, move, orders, think_ms=None, abilities=(), mode=None):
     """The orders file for the game (parsed by src/apps/bridge/services.lua). abilities: [{unit, key,
     target (optional: the unit a spell is cast on; none: the unit itself)}] to use now, one line each. A unit that takes no orders (marked "out" by the loop: dead, routing,
     shattered) gets no line: the network's HOLD for it is only a filler, and given to a unit that
     rallied before the answer came it halted it (gate 02.10.2026: 42 of 102 rallies; the bridge
     also ignores it, docs/en/apps/bridge.md)."""
     lines = [FORMAT, f"move {int(move)}", f"batch {batch}"]
+    if mode:
+        # 'mode chain' (companion --chain): the bridge gives the orders as the simulator does - no release of an idle
+        # shooter under an attack (src/apps/bridge/services.lua missile_duty; 08.11, build/diag_mem/plan.md
+        # Н-прямой-огонь)
+        lines.append(f"mode {mode}")
     if think_ms is not None:
         lines.append(f"think_ms {think_ms:.1f}")
     for o in orders:

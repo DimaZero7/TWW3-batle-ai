@@ -244,8 +244,8 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                 continue
             seat.done = False
             orders, think_ms, uses = seat.decide(doc)
-            attempts = exchange.write_atomic(seat.orders, exchange.orders_text(doc["batch"], doc["move"], orders,
-                                                                               think_ms, uses))
+            attempts = exchange.write_atomic(seat.orders, exchange.orders_text(
+                doc["batch"], doc["move"], orders, think_ms, uses, mode=getattr(seat.owner, "MODE", None)))
             turn_ms = (time.perf_counter() - seen) * 1000
             used = "".join(f" | ability {a['unit'].removeprefix('own_').removeprefix('enemy_')} {a['key']}"
                            for a in uses)

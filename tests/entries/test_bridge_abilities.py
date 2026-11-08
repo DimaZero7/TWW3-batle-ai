@@ -193,11 +193,11 @@ def test_a_shooter_firing_at_its_target_is_not_given_it_again(lua, tmp_path):
     assert "error" not in [r["event"] for r in rows]
     status = [(r["move"], o["k"], o["status"]) for r in rows if r["event"] == "nn_orders" for o in r["orders"]
               if o["u"] == "own_spear_1"]
-    assert status == [(1, "attack", "kept"), (2, "attack", "kept"), (3, "hold", "kept"),
-                      (5, "attack", "given")]
+    # (move 2: the same target, only the run flag changed - no new order for a shooter at all, 08.11)
+    assert status == [(1, "attack", "kept"), (3, "hold", "kept"), (5, "attack", "given")]
     assert [(r["action"], r["tg"]) for r in rows if r["event"] == "nn_hold"] == [("keep", "enemy_spear_1")]
     assert [(r["action"], r["tg"]) for r in rows if r["event"] == "nn_duty"] == [("engine_off", "enemy_spear_1")]
-    assert rows[-1]["nn_aims_kept"] == 3
+    assert rows[-1]["nn_aims_kept"] == 2
 
 
 def test_a_shooter_shooting_standing_is_not_halted_to_fire_at_will(lua, tmp_path):
