@@ -317,7 +317,9 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None, bias=None)
         lw = heads.where(h, enc["map"], extra)
         if bias is not None:
             d2 = (ctx.cx - bias["goal_x"][:, g, None]) ** 2 + (ctx.cz - bias["goal_z"][:, g, None]) ** 2
-            lw = lw - d2 / (cell_m * cell_m)
+            # (bias cell_temp [B]: the cells drawn wider round the goal - the search's candidates, strategist/drill_s1)
+            temp = bias["cell_temp"][:, None] if "cell_temp" in bias else 1.0
+            lw = lw - d2 / (cell_m * cell_m * temp * temp)
         lw = lw.masked_fill(~ok, NEG)
         cl = _pick(lw, None if A["cell"] is None else A["cell"][:, g], greedy)
         qc = None

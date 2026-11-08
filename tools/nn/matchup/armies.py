@@ -116,7 +116,7 @@ def description(name, units, attacker=None):
     att = int(cfg()["attacker"] if attacker is None else attacker)
     sides = {}
     for s in (1, 2):
-        sides[s] = {"faction": faction(name, s),
+        sides[s] = {"faction": (units.get("factions") or {}).get(s) or faction(name, s),
                     "units": [{"key": u["key"], "x": u["x"], "z": u["z"], "b": u["b"], "general": u["general"],
                                "width": u["width"]} for u in units[s]]}
     return {"attacker": att, "sides": sides}

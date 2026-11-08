@@ -53,8 +53,9 @@ class _SideSetup:
 
 class Chain:
     def __init__(self, side, op="formula", tactic=None, command="hold", op_greedy=True, targets=True, unit_greedy=True, still=True,
-                 aim=True):
+                 aim=True, groups0=None):
         self.aim = aim
+        self.groups0 = groups0          # the strategist's groups (strategist/battle.placed): the operative's last groups
         self.side, self.op, self.tactic, self.command_word, self.op_greedy = side, op, tactic, command, op_greedy
         self.targets = targets
         self.unit_greedy = unit_greedy
@@ -64,7 +65,8 @@ class Chain:
         B, N = st.B, st.N
         self.setup = _SideSetup(st, P, device, self.side, card)
         self.G = int(ocfg()["groups"])
-        self.groups = GR.Groups.empty(B, N, self.G, device)
+        self.groups = GR.Groups.empty(B, N, self.G, device) if self.groups0 is None else self.groups0.padded(self.G)
+        self._parcels0 = self.groups0 is not None
         self.tac = LW.Tacticians(B, N, self.G, device, net=self.tactic)
         self.units = LW.Units(self.setup, unit_net, unit_greedy=self.unit_greedy, targets=self.targets,
                               still=self.still, aim=self.aim)
@@ -100,6 +102,10 @@ class Chain:
     def decide(self, st, raw, K):
         if self.axes is None:
             self.axes = FR.Axes.of(raw, self.sidev, None)
+        if self._parcels0:
+            # second 0 with the strategist's groups: their parcels first, as the game's chain (companion/chain.start)
+            self._parcels0 = False
+            self.tac.apply(self.groups, self.groups.on, torch.zeros_like(self.groups.on), raw)
         self.groups.drop_dead(raw)
         inp = OIN.build(raw, self.setup.card, self.sidev, self.axes, self.groups, self.command, K=K)
         ctx = ONN.ctx_of(inp, raw, self.axes, self.groups)
@@ -154,19 +160,22 @@ class Script:
         return self.fn(st)
 
 
-def build(name, battles, device, P):
-    """(st, card) of the battles (each {1: units, 2: units}: armies.base / augment) on the matchup's map."""
-    st = scenario.build([AR.description(name, b) for b in battles], P, device=device, per_side=20)
+def build(name, battles, device, P, per_side=20):
+    """(st, card) of the battles (each {1: units, 2: units}: armies.base / augment) on the matchup's map; name - a
+    matchup, or one per battle (its factions); a battle with its own 'factions' {1: .., 2: ..} takes those."""
+    names = name if isinstance(name, (list, tuple)) else [name] * len(battles)
+    st = scenario.build([AR.description(n, b) for n, b in zip(names, battles)], P, device=device, per_side=per_side)
     terrain.set_map(st, map_id(cfg()["map"]))
     return st, UT.cards(st, device).float()
 
 
 @torch.no_grad()
-def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, duty=None):
-    """sides {1: Chain | Script, 2: ...}; battles [{1: units, 2: units}]. Returns (readings, stats)."""
+def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, duty=None, per_side=20, watch=None):
+    """sides {1: Chain | Script, 2: ...}; battles [{1: units, 2: units}]; watch(sec, st) after every second (a
+    reading of its own). Returns (readings, stats)."""
     from tools.nn.sim.params import load
     P = P or load()
-    st, card = build(name, battles, device, P)
+    st, card = build(name, battles, device, P, per_side)
     B, N = st.B, st.N
     limit = int(limit_s or cfg()["limit_s"])
     every, t_every = int(ocfg()["decide_s"]), int(tcfg()["decide_s"])
@@ -244,6 +253,8 @@ def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, dut
         for sd in sides.values():
             if isinstance(sd, Chain):
                 sd.end_second()
+        if watch is not None:
+            watch(sec, st)
         if duty is not None:
             duty.end()
     m1 = reward.measure(st)
