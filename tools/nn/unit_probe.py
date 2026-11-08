@@ -34,6 +34,12 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             120 m on swordsmen (the charge speed), from 40 m on braced spearmen, on swordsmen facing away (the rear), on the
             General, a recharge (30 m out, 3 s, in again), the chase of routed swordsmen (half their men killed at
             placement, routed 15 s after contact) and the same chase by clanrats (the control) - 2 battles of 8 lanes;
+  losfriend flat fire past friends (08.11, the bridge's chain battles: long rifles / jezzails behind their infantry
+            walked through it into melee or did not fire; the simulator holds or takes another target): the shooter
+            (long rifles, jezzails) ordered to attack ('shoot') an enemy LOSFRIEND_GAP m off (front to front, within
+            range), its own infantry unit standing LOSFRIEND_COVER m ahead of it (between it and the target, as wide),
+            and the control without it - 1 battle of 4 lanes, LOSFRIEND_S. Measures: the first shot, bullets, how far the
+            shooter moved forward / aside and when it stopped, its offset from the cover at the first shot;
   wolfpoison the poison (W3): poisoned wolf rats -> swordsmen, plain ones (the control), the poisoned leaving 15 s after
             contact with the swordsmen halting or chasing them, the plain leaving chased (the control) - 2 battles of 5 lanes.
 
@@ -97,6 +103,13 @@ RATFORM_S = 200
 RATSHAPE_LANES = (("w6", "swords", 6), ("w6b", "swords", 6), ("w12", "swords", 12), ("w12b", "swords", 12),
                   ("w30", "swords", 30), ("lone", "goldwiz", 5))
 RATSHAPE_S = 60
+# the losfriend plan: (kind, shooter, its cover (None: the control), the target); the cover LOSFRIEND_COVER m ahead of the
+# shooter's front edge (its back edge), the target LOSFRIEND_GAP m off the shooter (front to front)
+LOSFRIEND_LANES = (("lr_cover", "wh3_dlc25_emp_inf_hochland_long_rifles", "swords", "clanrat"),
+                   ("lr_alone", "wh3_dlc25_emp_inf_hochland_long_rifles", None, "clanrat"),
+                   ("jz_cover", "wh2_dlc12_skv_inf_warplock_jezzails_0", "clanrat", "swords"),
+                   ("jz_alone", "wh2_dlc12_skv_inf_warplock_jezzails_0", None, "swords"))
+LOSFRIEND_GAP, LOSFRIEND_COVER, LOSFRIEND_S = 180, 20, 120
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -149,6 +162,18 @@ def battles(plan):
                            max_s=RATLORD_S, answer=False, kind=kind, **FX, **extra)
         base = [rc(*x) for x in RATCOVER_LANES]
         return [_placed(base, k) for k in (0, 4)]
+    if plan == "losfriend":
+        def lf(kind, shooter, cover, target):
+            extra = {}
+            if cover:
+                tk, tm, _ = cp.UNITS[target]
+                ck, cm, _ = cp.UNITS[cover]
+                td, cd = cp.depth(tk, tm), cp.depth(ck, cm)
+                dz = td / 2 + LOSFRIEND_GAP - LOSFRIEND_COVER - cd / 2      # from the target's centre, towards the shooter
+                extra["extras"] = [{"short": cover, "dx": 0.0, "dz": round(dz, 1), "width": cp.WIDTH_M}]
+            return cp.lane(shooter, target, "shoot", "hold", gap_m=LOSFRIEND_GAP, fight_s=LOSFRIEND_S,
+                           max_s=LOSFRIEND_S, answer=False, kind=kind, **FX, **extra)
+        return [_placed([lf(*x) for x in LOSFRIEND_LANES], 0)]
     if plan == "ratlone":
         return [_placed([cp.lane(a, t, "shoot", "hold", gap_m=gap, fight_s=RATLONE_S, max_s=RATLONE_S, answer=False,
                                  kind=kind, **FX) for kind, a, t, gap in RATLONE_LANES], 0)]
@@ -559,6 +584,39 @@ def wolfpoison_measure(lane):
     return out
 
 
+def losfriend_measure(lane):
+    """ratling_measure's shots, and the shooter's way: its place along the lane (z towards the target: -) and across at
+    the go, at the first shot and at the end; when it last moved (> 0.5 m in a half second); its offset across from the
+    cover's centre at the first shot (the cover's half width: is the line clear?)."""
+    out = ratling_measure(lane)
+    s = lane["samples"]
+    t = _t(lane)
+    x, z = cp.series(s, "a", "x"), cp.series(s, "a", "z")
+    ok = np.isfinite(x) & np.isfinite(z)
+    if not ok.any():
+        return out
+    x0, z0 = float(x[ok][0]), float(z[ok][0])
+    fwd = z0 - z                                          # metres towards the target (the shooter faces -z)
+    side = x - x0
+    out["fwd_end_m"], out["side_end_m"] = float(fwd[ok][-1]), float(side[ok][-1])
+    out["fwd_max_m"] = float(np.nanmax(fwd))
+    step = np.hypot(np.diff(x), np.diff(z))
+    moving = np.nan_to_num(step) > 0.5
+    out["moved_until_s"] = float(t[1:][moving][-1]) if moving.any() else 0.0
+    out["started_s"] = float(t[1:][moving][0]) if moving.any() else None
+    if out.get("first_shot_s") is not None:
+        k = int(np.searchsorted(t, out["first_shot_s"]))
+        k = min(k, len(t) - 1)
+        out["fwd_at_shot_m"], out["side_at_shot_m"] = float(fwd[k]), float(side[k])
+    ex = lane.get("extras") or []
+    if ex and out.get("first_shot_s") is not None:
+        # the cover's HP lost while the shooter fired (its own bullets through / into it?)
+        te = np.array([tt for tt, _ in ex])
+        he = np.array([np.nan if not rows or rows[0].get("hp") is None else float(rows[0]["hp"]) for _, rows in ex])
+        out["cover_hp_lost"] = cp.at(te, he, out["first_shot_s"] - 0.5) - cp.at(te, he, float(te[-1]))
+    return out
+
+
 def ratcover_measure(lane):
     """ratling_measure's numbers for the lone man, and the HP his cover (the lane's extra unit) lost per bullet over the
     same span (e_hp_per_bullet)."""
@@ -576,7 +634,7 @@ def ratcover_measure(lane):
     return out
 
 
-MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+MEASURE = {"losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -612,7 +670,9 @@ def _fmt(v):
 
 
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
-KEY = {"ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts", "burst_bullets", "burst_s",
+KEY = {"losfriend": ("first_shot_s", "bullets", "hp_per_bullet", "cover_hp_lost", "moved_until_s", "fwd_max_m",
+                     "fwd_end_m", "side_end_m"),
+       "ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts", "burst_bullets", "burst_s",
                    "burst_every_s", "hp_per_bullet", "tg_hp_per_s", "tg_men_lost", "tg_fx_first_s", "tg_card_speed_fx"),
        "ratlord": ("first_shot_s", "bullets_per_s", "bursts", "burst_bullets", "hp_per_bullet", "tg_hp_per_s"),
        "ratcover": ("first_shot_s", "bullets", "hp_per_bullet", "e_hp_per_bullet", "tg_hp_per_s"),

@@ -222,12 +222,22 @@ def test_the_formula_fits_20_units_into_the_games_zone_by_the_army_teachers_role
         rs = {role[n] for n in g["units"]}
         assert len(rs) == 1 and len(g["units"]) <= SA.SIZE[rs.pop()], g
         by.setdefault(role[g["units"][0]], []).append(g)
-    assert [len(by[r]) for r in ("line", "anti", "shooter", "sniper", "art", "lord")] == [4, 3, 1, 1, 1, 1]
+    # (the long rifles fire flat: one each, at the front row's ends; the mortars arc: behind with the lord)
+    assert [len(by[r]) for r in ("line", "anti", "shooter", "sniper", "art", "lord")] == [4, 3, 1, 2, 1, 1]
     line_x = max(g["cx"] for g in by["line"])
     assert by["art"][0]["cx"] < line_x and by["lord"][0]["cx"] < line_x                # behind the line (east = +x)
+    pl = rec["places"]
+    for g in by["sniper"]:
+        (n,) = g["units"]
+        x, z, _, w = pl[n]
+        assert x >= line_x - 1.0                                                   # in the front row
+        assert not [m for m in pl if m != n and pl[m][0] > x + 2 and abs(pl[m][1] - z) < (w + pl[m][3]) / 2]
+        near = min(math.hypot(pl[m][0] - x, pl[m][1] - z) for m in pl if role[m] in ("line", "anti"))
+        assert 30.0 <= near <= 70.0, near
     # the operative's army teacher at second 0 keeps the strategist's groups
     torch.manual_seed(0)
-    chain = CH.Chain(Nt.UnitNet().eval(), plans={doc["batch"]: S.plans[doc["batch"]]}, params=P, task=task)
+    chain = CH.Chain(Nt.UnitNet().eval(), plans={doc["batch"]: S.plans[doc["batch"]]}, params=P, task=task,
+                     aim=False)                                  # (the teacher's decision is checked, not the units')
     from tools.nn.sim import scenario
     rows = [dict(u) for u in doc["units"]]
     st = scenario.build([{"attacker": 2, "sides": {

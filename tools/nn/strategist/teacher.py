@@ -115,7 +115,7 @@ def army_wishes(inp, ctx, destroy, g, s, f, G):
         if len(mine) < amin:
             continue
         rl = SA.roles(cards[b][mine])
-        gs = SA.groups(rl, mine)
+        gs = SA.groups(rl, mine, {j for j in mine if cards[b][j][SA.DIRECT_COL] > 0.5})
         if len(gs) > G:
             continue
         fw, fd = [], []
@@ -130,7 +130,8 @@ def army_wishes(inp, ctx, destroy, g, s, f, G):
         inside = (cs[b].abs() <= F_ / 2) & (cf[b].abs() <= D_ / 2)
         s_grid = sorted({round(float(v), 1) for v in cs[b][inside]})
         f_grid = sorted({round(float(v), 1) for v in cf[b][inside]})
-        pl = SA.layout(gs, fw, fd, s_grid, f_grid, F_, edge, bool(destroy[b]))
+        flat = SA.direct(gs, lambda j: cards[b][j])
+        pl = SA.layout(gs, fw, fd, s_grid, f_grid, F_, edge, bool(destroy[b]), flat)
         num = {i: k for k, i in enumerate(SA.order(gs, pl))}
         s[b], f[b] = 0.0, 0.0
         g[b] = 0
