@@ -113,7 +113,9 @@ class GameUnits(LW.Units):
         again)."""
         I = V.I
         u = self.setup.st.u
-        for k in ("x", "z", "b", "range", "front"):
+        # (vx, vz: the game's centre shift over the last second - the simulator's velocity; run: the passport's
+        # running speed - the rule 'no attack on a fast side-stepping target', lower.Units.fast_rule)
+        for k in ("x", "z", "b", "range", "front", "vx", "vz", "run"):
             u[k] = raw_u[..., I[k]]
         u["side"] = raw_u[..., I["side"]].long()
         if order is not None:
@@ -157,7 +159,9 @@ class GameUnits(LW.Units):
             if self.aim:
                 intended = self.stay_rule(intended, st, inside)
                 intended = self.aim_rule(intended, st, inside)
+                intended = self.fast_rule(intended, st)
                 intended = self.sticky_rule(intended, st, inside)
+                intended = self.fast_rule(intended, st)
             self.n += int(bl.numel())
         self.intended = intended
         return intended, inside

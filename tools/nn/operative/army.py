@@ -285,6 +285,16 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
                 gl = pos[seed] - d / n * (reach - float(tc.get("range_margin_m", 10.0)))
                 # (not past my infantry's front edge by more than ahead_m: the step stops there)
                 lim = None if front is None else front + float(tc.get("ahead_m", 10.0))
+                # the snipers' duel (08.11, the whole-battle exam M1: the Jezzails, range 275 against our 260, kept every
+                # man): on an enemy sniper or shooter that outranges them, with no enemy melee unit within duel_safe_m
+                # of the snipers or of the point, they go just far enough to have it in range (range - duel_in_m), at
+                # most duel_ahead_m past my infantry's front; an enemy melee unit within back_m sends them back (above)
+                if (r == "sniper" and tc.get("duel_ahead_m") and rl[seed] in ("sniper", "shooter")
+                        and float(ranges[seed]) > reach and front is not None):
+                    gd = pos[seed] - d / n * (reach - float(tc.get("duel_in_m", 5.0)))
+                    safe = float(tc.get("duel_safe_m", 75.0))
+                    if all(min(math.hypot(*(pos[e] - c)), math.hypot(*(pos[e] - gd))) > safe for e in enemy_melee):
+                        gl, lim = gd, front + float(tc["duel_ahead_m"])
                 if lim is not None and float(gl @ f) > lim:
                     gl = gl - f * (float(gl @ f) - lim)
                 if lim is None or float(gl @ f) > float(c @ f) + 1.0:

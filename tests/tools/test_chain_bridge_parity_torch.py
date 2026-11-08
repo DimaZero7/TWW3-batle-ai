@@ -186,7 +186,7 @@ def test_the_leash_reads_the_raw_state_as_the_simulators_state():
         assert torch.allclose(getattr(oa, f).float(), getattr(ob, f).float()), f
 
 
-MATCHUP_SECONDS = 50     # the operative at 0, 15, 30, 45; the tacticians every 5 s
+MATCHUP_SECONDS = 90     # the operative at 0, 15, .., 75; the tacticians every 5 s
 
 
 def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(monkeypatch):
@@ -252,7 +252,10 @@ def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(m
             a, b = getattr(intended, f)[0, own], getattr(want, f)[0, own]
             assert torch.allclose(a.float(), b.float(), atol=1e-4), (s, f, a.tolist(), b.tolist())
         attacks += int((want.kind[0, shooter] == O.ATTACK).sum())
-    assert game.stats["op_decisions"] == 4 and game.stats["parcel_errors"] == 0
-    assert attacks > 0                     # the shooters' rule fired: the comparison covers it
-    assert getattr(game.units, "n_stay", 0) > 0     # and the rule "stay in the area" (stay_rule)
-    assert getattr(game.units, "n_keep", 0) > 0     # and the rule "a shooter keeps its target" (sticky_rule)
+    assert game.stats["op_decisions"] == 6 and game.stats["parcel_errors"] == 0
+    # the translator's rules fired, so the comparison covers them: the shooters' attacks (aim_rule) or their refusal
+    # on a fast side-stepping target (fast_rule; 08.11 the M3 Skaven shoot at Empire cavalry), "stay in the area"
+    # (stay_rule); "keep the target" (sticky_rule) keeps an attack in force - none here once fast_rule refuses them
+    assert attacks + getattr(game.units, "n_fast", 0) > 0
+    assert getattr(game.units, "n_fast", 0) > 0
+    assert getattr(game.units, "n_stay", 0) > 0

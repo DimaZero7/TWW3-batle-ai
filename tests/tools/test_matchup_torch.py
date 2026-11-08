@@ -279,3 +279,35 @@ def test_no_attack_on_a_fast_target_going_aside():
     assert int(units.fast_rule(o, st).kind[0, i]) == O.HOLD
     u["vx"][0, f], u["vz"][0, f] = -7.0, 0.0                               # at the shooter
     assert int(units.fast_rule(o, st).kind[0, i]) == O.ATTACK
+
+
+def test_the_snipers_duel():
+    """army.plan: snipers on enemy Jezzails that outrange them (275 against 260), no enemy melee unit near, step past
+    the +ahead_m limit to have them in range - duel_in_m (at most duel_ahead_m past the infantry's front); with an
+    enemy melee unit near the point they stay within ahead_m."""
+    from tools.nn.operative import cfg as ocfg
+    keys = [u["key"] for u in AR.base("m1")[1]] + [u["key"] for u in AR.base("m1")[2]]
+    cards = np.asarray(PP.table(keys))
+    rl = AM.roles(cards)
+    K = len(keys)
+    own, foes = list(range(20)), list(range(20, K))
+    pos = np.zeros((K, 2))
+    pos[:20, 0] = -200.0
+    pos[:20, 1] = np.linspace(-150, 150, 20)
+    pos[20:, 0] = 600.0
+    snip = [j for j in own if rl[j] == "sniper"]
+    pos[snip] = (-200.0, 0.0)
+    jz = [e for e in foes if rl[e] == "sniper"]
+    pos[jz] = (90.0, 0.0)                                                      # 290 m: beyond 260, within 275 + 100
+    ranges = cards[:, 29] * 500.0
+    tc = dict(ocfg()["teacher"]["army"])
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
+    g = [x for x in out if set(x[0]) == set(snip)][0]
+    assert g[1] in jz and g[2] is not None
+    assert -200.0 + float(tc["ahead_m"]) < float(g[2][0]) <= -200.0 + float(tc["duel_ahead_m"]) + 1e-6
+    assert abs(float(np.hypot(*(pos[g[1]] - g[2]))) - (260.0 - float(tc["duel_in_m"]))) < 1.0
+    melee = [e for e in foes if rl[e] in ("line", "anti")][0]
+    pos[melee] = (-110.0, 0.0)                                                 # an enemy melee unit by the duel point
+    out = AM.plan(0, own, foes, pos, cards, np.zeros(K, bool), {}, False, tc, ranges)
+    g = [x for x in out if set(x[0]) == set(snip)][0]
+    assert g[2] is None or float(g[2][0]) <= -200.0 + float(tc["ahead_m"]) + 2.0   # (the forward axis tilts a little)
