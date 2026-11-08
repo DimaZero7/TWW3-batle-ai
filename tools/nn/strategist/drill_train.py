@@ -34,7 +34,7 @@ CAND_TEMPS = (1.5, 2.0, 2.0, 3.0, 3.0)
 
 
 def deployer(who, dev):
-    if who in ("teacher", "exposed", "teacher0"):
+    if who in ("teacher", "exposed", "teacher0", "deep"):
         return who
     net, _, _ = ST.restore(who, dev)
     net.eval()
@@ -64,14 +64,25 @@ def decide_all(batch, whos, dev, inp=None, ctx=None):
     return D.cat_out(outs)
 
 
+def with_ref(m, K, S):
+    """m + useful (drill_s1.useful against the first slice's - the teacher's - damage on the same battle) and score2
+    (useful + trade): the batch K slices of S battles."""
+    ref = m["sniper_shots150"].view(K, S)[0].repeat(K)
+    m["useful"] = D.useful(m, ref)
+    m["score2"] = m["useful"] + m["trade"]
+    return m
+
+
 def exam(whos, dev, unit_net, P, n=EXAM_N, seed=EXAM_SEED, limit=D.LIMIT_S):
-    """{who: summary} on the drill's held-out battles (every deployer the same battles)."""
+    """{who: summary} on the drill's held-out battles (every deployer the same battles; the teacher first - the
+    damage the measure is reckoned against)."""
     sp = D.specs(n, random.Random(seed))
-    names = list(whos)
+    names = ["teacher"] + [w for w in whos if w != "teacher"]
     ds = [deployer(w, dev) for w in names]
     batch = D.Batch(sp * len(ds), P, dev)
     out = decide_all(batch, ds, dev)
     m, st = D.play(batch, out, unit_net, P, dev, limit=limit)
+    with_ref(m, len(ds), n)
     res = {}
     for i, w in enumerate(names):
         sel = torch.zeros(len(sp) * len(ds), dtype=torch.bool, device=dev)
@@ -80,7 +91,8 @@ def exam(whos, dev, unit_net, P, n=EXAM_N, seed=EXAM_SEED, limit=D.LIMIT_S):
         res[w]["by_enemy"] = {e: D.summary(m, sel & torch.tensor([s["enemy"] == e for s in batch.sp], device=dev))
                               ["sniper_kept"] for e in ("ai_game", "nearest", "hold_shoot")}
         fast = torch.tensor([s["n_fast"] > 0 for s in batch.sp], device=dev)
-        res[w]["with_fast"] = {k: D.summary(m, sel & fast)[k] for k in ("sniper_kept", "sn_first", "fast60_s")}
+        res[w]["with_fast"] = {k: D.summary(m, sel & fast)[k] for k in ("useful", "sniper_kept", "sn_first",
+                                                                          "fast60_s")}
     res["seconds"] = st.get("wall_s")
     return res, m
 
@@ -90,12 +102,14 @@ def transfer(whos, dev, unit_net, P, n=32, limit=900, names=("m1", "m2", "m3")):
     sp = []
     for name in names:
         sp += D.full_specs([name], n, random.Random(TRANSFER_SEED))
+    whos = ["teacher"] + [w for w in whos if w != "teacher"]
     ds = [deployer(w, dev) for w in whos]
     batch = D.Batch(sp * len(ds), P, dev, per_side=20)
     out = decide_all(batch, ds, dev)
     m, st = D.play(batch, out, unit_net, P, dev, limit=limit)
-    res = {}
     N = len(sp)
+    with_ref(m, len(ds), N)
+    res = {}
     for i, w in enumerate(whos):
         res[w] = {}
         for j, name in enumerate(names):
@@ -150,14 +164,30 @@ def fit(net, opt, chunks, steps, mb, weights=None, log=None):
             "agree": {h: round(sum(v[-50:]) / len(v[-50:]), 3) for h, v in agree.items()}}
 
 
+@torch.no_grad()
+def agreement(net, chunks):
+    """{head: share} of the network's greedy choices that match the labels (teacher.loss's agreement)."""
+    was = net.training
+    net.eval()
+    acc = {}
+    for inp, ctx, lab in chunks:
+        _, st = TC.loss(net, inp, ctx, lab)
+        for h, v in st.items():
+            if v is not None:
+                acc.setdefault(h, []).append(v)
+    net.train(was)
+    return {h: round(sum(v) / len(v), 3) for h, v in acc.items()}
+
+
 def search(sp, cands, dev, unit_net, P, mark):
     """(batch of sp, best act [S], marks [K, S], the chosen candidate [S]): every candidate of every seed played."""
     S, K = len(sp), len(cands)
     batch = D.Batch(sp * K, P, dev)
     out = decide_all(batch, cands, dev)
     m, st = D.play(batch, out, unit_net, P, dev)
+    with_ref(m, K, S)                                       # (cands[0]: the teacher - the damage reckoned against)
     score = m[mark].view(K, S)
-    best = score.argmax(0)                                  # ties: the first (the formula's cells)
+    best = score.argmax(0)                                  # ties: the first (the formula)
     idx = best * S + torch.arange(S, device=dev)
     lab = D.take_out(out, idx)["act"]
     one = D.Batch(sp, P, dev)
@@ -208,8 +238,10 @@ def train(a):
         log.write(json.dumps(row) + "\n")
         log.flush()
     unit_net = TT.unit_network(dev)
-    net = NN.StrategistNet().to(dev)
-    critic = NN.StrategistCritic().to(dev)
+    if a.init:
+        net, critic, _ = ST.restore(a.init, dev)
+    else:
+        net, critic = NN.StrategistNet().to(dev), NN.StrategistCritic().to(dev)
     opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=a.lr)
     with TT.lock(dev, f"strategist drill_s1 {out.name}"):
         _train(a, P, dev, out, say, unit_net, net, critic, opt)
@@ -220,45 +252,60 @@ def _train(a, P, dev, out, say, unit_net, net, critic, opt):
     t0 = time.time()
     base = pool(a.pool_drill, a.pool_full, 100, P, dev)
     say({"pool": len(base), "s": round(time.time() - t0, 1)})
-    r = fit(net, opt, base, a.imitate, a.mb, log=say)
-    say({"imitate": a.imitate, **r, "minutes": round((time.time() - t0) / 60, 2)})
-    ST.save(out / "imitated.pt", net, critic, opt, 0, a.imitate)
-    labelled = []
+    if a.imitate > 0:
+        r = fit(net, opt, base, a.imitate, a.mb, log=say)
+        say({"imitate": a.imitate, **r, "minutes": round((time.time() - t0) / 60, 2)})
+        ST.save(out / "imitated.pt", net, critic, opt, 0, a.imitate)
+    # the labels of the earlier steps (their seeds' specs and the chosen act: the inputs rebuilt from the specs)
+    labelled, saved = [], []
+    for f in [x for x in a.labels.split(",") if x]:
+        for sp, act in torch.load(f, weights_only=False):
+            act = {k: v.to(dev) for k, v in act.items()}
+            b = D.Batch(sp, P, dev)
+            labelled.append((b.inp, b.ctx, act))
+            saved.append((sp, act))
+    say({"labels_loaded": len(labelled)})
     rnd = random.Random(a.seed + 7)
     rd = 0
     t_r = time.time()                      # (--minutes: the search rounds' budget, after the imitation)
-    while time.time() - t_r < a.minutes * 60:
+    while time.time() - t_r < a.minutes * 60 and rd < a.rounds:
         sp_d = D.specs(a.seeds, rnd)
         sp_f = D.full_specs(D.SOURCES, a.full_seeds, rnd, enemy="mixed")
         for s in sp_f:
             s["enemy"] = D._enemy_script(rnd)
-        cands = ["teacher0"] + [("sample", t) for t in CAND_TEMPS]
-        if rd > 0:
+        cands = ["teacher"] + [("sample", t) for t in CAND_TEMPS]
+        if rd > 0 or a.init:
             net.eval()
             cands += [("net", net, True), ("net", net, False)]
         row = {"round": rd}
-        for kind, sp, mark in (("drill", sp_d, "score"), ("full", sp_f, "trade")):
+        for kind, sp, mark in (("drill", sp_d, "score2"), ("full", sp_f, "trade")):
             if not sp:
                 continue
             t1 = time.time()
             one, lab, score, best, m, st = search(sp, cands, dev, unit_net, P, mark)
+            # the network's choice against the search's on these new seeds, before it learns them
+            row.setdefault("agree_new", {})[kind] = agreement(net, [(one.inp, one.ctx, lab)])
             labelled.append((one.inp, one.ctx, lab))
+            saved.append((sp, lab))
             K = len(cands)
             S = len(sp)
-            row[kind] = {"seeds": S, "cands": K, "teacher0": round(float(score[0].mean()), 3),
+            V = lambda k: m[k].view(K, S)                                                    # noqa: E731
+            pick = lambda k: round(float(V(k).gather(0, best[None])[0].mean()), 3)           # noqa: E731
+            row[kind] = {"seeds": S, "cands": K, "teacher": round(float(score[0].mean()), 3),
                          "best": round(float(score.max(0).values.mean()), 3),
-                         "net_greedy": round(float(score[K - 2].mean()), 3) if rd > 0 else None,
+                         "net_greedy": round(float(score[K - 2].mean()), 3) if (rd > 0 or a.init) else None,
                          "chosen": torch.bincount(best, minlength=K).tolist(),
-                         "kept_teacher0": round(float(m["sniper_kept"].view(K, S)[0].mean()), 3),
-                         "kept_best": round(float(m["sniper_kept"].view(K, S).gather(0, best[None])[0].mean()), 3),
-                         "sn_first_teacher0": round(float(m["sn_first"].view(K, S)[0].mean()), 3),
-                         "sn_first_best": round(float(m["sn_first"].view(K, S).gather(0, best[None])[0].mean()), 3),
+                         **{f"{k}_teacher": round(float(V(k)[0].mean()), 3) for k in
+                            ("useful", "sniper_kept", "sn_first", "sniper_shots150")},
+                         **{f"{k}_best": pick(k) for k in ("useful", "sniper_kept", "sn_first", "sniper_shots150")},
                          "where_best": where_snipers(one, lab, dev), "s": round(time.time() - t1, 1)}
         net.train()
         n_l = len(labelled)
         w_base = a.base_weight * max(0.0, 1.0 - rd / max(a.base_decay, 1))
         ws = [w_base / len(base)] * len(base) + [(1.0 - w_base) / n_l] * n_l
         row["fit"] = fit(net, opt, base + labelled, a.steps, a.mb, ws, log=say)
+        row["agree_all_labels"] = agreement(net, labelled)
+        torch.save([(sp, {k: v.cpu() for k, v in act.items()}) for sp, act in saved], out / "labels.pt")
         row["minutes"] = round((time.time() - t0) / 60, 2)
         say(row)
         ST.save(out / "latest.pt", net, critic, opt, rd + 1, a.imitate)
@@ -287,6 +334,9 @@ def main(argv=None):
     ap.add_argument("--base-weight", type=float, default=0.3)
     ap.add_argument("--base-decay", type=int, default=6)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--init", default=None, help="a strategist checkpoint to start from")
+    ap.add_argument("--labels", default="", help="comma-separated labels.pt of earlier steps")
+    ap.add_argument("--rounds", type=int, default=1000)
     a = ap.parse_args(argv)
     if a.what == "train":
         return train(a)

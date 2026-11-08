@@ -15,7 +15,7 @@ battles: the snipers rout first in 10).
                            across its zone (the companion's StrategistSeer lays out the deployment document so), the
                            strategist's input (inputs.build - the same as the game's), the zones
     decide(batch, who)     'teacher' (the formula, greedy), 'exposed' (the bad one: the snipers at the front row's ends,
-                           15 m ahead), 'sample' (the teacher's walk drawn round its wishes - the search's candidates;
+                           15 m ahead), 'deep' (the other bad one: behind the middle, 150 m behind the front row), 'sample' (the teacher's walk drawn round its wishes - the search's candidates;
                            no nudge: what a network can do), a StrategistNet (greedy, or sampled)
     play(batch, out, ...)  the places (deploy.places) -> the battle (matchup/duel.play: the chain from the strategist's
                            groups) -> the readings and the measures:
@@ -23,7 +23,8 @@ battles: the snipers rout first in 10).
         sn_first      the first of my units to rout (or die) is a sniper (by the battle's end)
         fast60_s      the first second an enemy fast unit comes within 60 m of one of my snipers (none: the limit)
         trade         the enemy's share of gold lost less mine
-        score         sniper_kept + trade (the search's mark; config reward: measure + trade)
+        useful        sniper_kept x min(1, their shots by 150 s / the teacher's on the same battle) - useful(m, ref)
+        score         useful + trade (the search's mark; config reward: measure + trade)
 """
 import copy
 import math
@@ -56,6 +57,7 @@ SOURCES = ("m1", "m2", "m3")
 DC1 = cfg()["drill_s1"]                    # config/nn/strategist.json drill_s1 (each number with its reason)
 ENEMIES = tuple(DC1["enemies"].items())
 LIMIT_S = int(DC1["limit_s"])
+DEEP_M = 150.0                             # the bad 'deep': the snipers this far behind the front row
 PER_SIDE = 12                              # (the drill's armies are at most 12 a side: a smaller state, a faster step)
 _ROLE = {}
 
@@ -259,6 +261,20 @@ def decide(inp, ctx, who, temp=None, greedy=True):
             # the formula's cells without its nudge (what a network's walk can do: its candidate in the search)
             bias["nudge"] = torch.zeros_like(bias["nudge"])
             return NN.choose(NN.null_enc(B, K, G, dev), inp, ctx, NN.NullHeads(B, dev), greedy=True, bias=bias)
+        if who == "deep":
+            # the bad one the other way: the snipers' groups behind the middle, DEEP_M behind the front row's cells
+            # (out of the zone's depth 176 m: a deployment error by design - hidden, out of everyone's range)
+            comp = bias["comp"].argmax(2)
+            sg = sniper_groups(inp, comp)
+            f_back = (-ctx.mine["depth"][:, None] / 2 + 32.0).expand(B, G)
+            k = torch.cumsum(sg.long(), 1)
+            s = (k.float() - (sg.sum(1, keepdim=True).float() + 1) / 2) * 40.0
+            gx, gz = ZS.world(ctx.mine, s, f_back)
+            bias["goal_x"] = torch.where(sg, gx, bias["goal_x"])
+            bias["goal_z"] = torch.where(sg, gz, bias["goal_z"])
+            back = torch.full((B, G), DEEP_M - float(cfg()["cell_m"]), device=dev)   # (the rows: a cell apart)
+            bias["nudge"] = torch.where(sg, -back, bias["nudge"])
+            return NN.choose(NN.null_enc(B, K, G, dev), inp, ctx, NN.NullHeads(B, dev), greedy=True, bias=bias)
         if who == "exposed":
             # the snipers' groups at the front row's ends, 15 m ahead of their cells (the chain's game battles: 22-58 m
             # ahead of the infantry's middle at the line's ends)
@@ -305,6 +321,7 @@ class Watch:
         self.rout = None
         self.fast60 = None
         self.men_at = None
+        self.shots_at = None
 
     def __call__(self, sec, st):
         u = st.u
@@ -321,6 +338,7 @@ class Watch:
         self.fast60 = torch.where(near & (self.fast60 < 0), torch.full_like(self.fast60, t), self.fast60)
         if sec + 1 == self.at:
             self.men_at = (u["men"].float() * (~out).float()).clone()
+            self.shots_at = (u["ammo0"] - u["a"]).float().clone()
 
 
 def placed(batch, out, inp=None):
@@ -400,9 +418,26 @@ def play(batch, out, unit_net, P, device, limit=LIMIT_S, inp=None, enemies=None)
     m = {"sniper_kept": kept, "sn_first": sn_first.float(), "any_rout": (first < 1e9).float(),
          "fast60_s": fast60, "trade": trade, "score": kept + trade, "winner": rd["winner"].float(),
          "lost_own": rd["lost"][:, 0], "lost_enemy": rd["lost"][:, 1], "deploy_errors": errs.float(),
-         "has_sn": (n_sn > 0).float(), "sniper_dealt": ((u["shot_dealt"].float() * sn.float()).sum(1)
-                                                        / n_sn.clamp(min=1))}
+         "has_sn": (n_sn > 0).float(), "sniper_recent_dealt": ((u["shot_dealt"].float() * sn.float()).sum(1)
+                                                               / n_sn.clamp(min=1))}
+    # (shot_dealt is the recent damage, decaying - the morale's balance - not a total: the fire is the projectiles
+    # spent, a total)
+    shots = (u["ammo0"] - u["a"]).float()
+    s150 = watch.shots_at if watch.shots_at is not None else shots
+    m["sniper_shots150"] = (s150 * sn.float()).sum(1) / n_sn.clamp(min=1)
+    m["sniper_shots"] = (shots * sn.float()).sum(1) / n_sn.clamp(min=1)
     return m, stats
+
+
+def useful(m, ref):
+    """[B] the drill's measure (08.11, the orchestrator: a sniper is of use only alive AND firing): my snipers' men kept
+    at 150 s x their projectiles spent by 150 s over the teacher's on the same battle, at most 1 (ref [B] the
+    teacher's sniper_shots150; none fired by the teacher: the men alone) - hiding them deep keeps the men and loses the
+    fire, standing them ahead fires and loses the men; fire beyond the teacher's buys nothing (the drill is the
+    cover)."""
+    fire = torch.where(ref > 1.0, (m["sniper_shots150"] / ref.clamp(min=1.0)).clamp(max=1.0),
+                       torch.ones_like(ref))
+    return m["sniper_kept"] * fire
 
 
 def summary(m, sel=None):
