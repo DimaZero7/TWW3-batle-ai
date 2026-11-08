@@ -54,12 +54,13 @@ from tools.nn.unit import net as Nt
 from tools.nn.unit import train as UT
 from tools.nn.unit import view as V
 
-STATIC_U = ("men0", "wmin_k", "sp_h", "sp_v")
+STATIC_U = ("men0", "wmin_k", "sp_h", "sp_v", "arc")
 
 
 def static_u(keys, params, device="cpu"):
-    """{men0, wmin_k, sp_h, sp_v} [1, N] of the units by key (params.static; unknown: zeros) - what lower.Units reads of
-    the simulator's state for the width limits (decode.width_limits)."""
+    """{men0, wmin_k, sp_h, sp_v, arc} [1, N] of the units by key (params.static; unknown: zeros) - what lower.Units
+    reads of the simulator's state for the width limits (decode.width_limits) and the rule 'a shooter shoots its
+    target' (its own fire arc)."""
     out = {k: torch.zeros((1, len(keys)), device=device) for k in STATIC_U}
     for i, key in enumerate(keys):
         if key in params.units:
@@ -79,9 +80,12 @@ def leash_state(raw_u):
 
 class GameUnits(LW.Units):
     """lower.Units on the bridge's raw state: the same area, arrival, pace, memory, views, choice and decoder; the
-    simulator's state only gave it V.raw (here the seer's columns) and who still decides (alive, not routing)."""
+    simulator's state only gave it V.raw (here the seer's columns) and who still decides (alive, not routing). The
+    translator's rules of the simulator's matchup chain (lower.Units targets / still / aim; matchup/duel.Chain) read
+    the state the game gives each second (refresh): places, men, alive, seen, routing, range, in melee, the target a
+    shooter aims at (the document's 't'), its fire arc (the key's)."""
 
-    def __init__(self, raw_u, keys, card, params, unit_net, unit_greedy=False):
+    def __init__(self, raw_u, keys, card, params, unit_net, unit_greedy=False, targets=False, still=False, aim=False):
         I = V.I
         own = raw_u[..., I["side"]] == 1
         u = {"x": raw_u[..., I["x"]].clone(), "z": raw_u[..., I["z"]].clone(), "b": raw_u[..., I["b"]].clone(),
@@ -89,7 +93,24 @@ class GameUnits(LW.Units):
         st = SimpleNamespace(B=1, N=raw_u.shape[1], u=u, device=raw_u.device)
         setup = SimpleNamespace(st=st, P=params, device=raw_u.device, own=own,
                                 shooter=(raw_u[..., I["range"]] > 0) & own, card=card)
-        super().__init__(setup, unit_net, unit_greedy)
+        super().__init__(setup, unit_net, unit_greedy, targets=targets, still=still, aim=aim)
+        self.refresh(raw_u)
+
+    def refresh(self, raw_u, aim_tgt=None, contact=None):
+        """The state the rules read (class doc) from the unit level's raw [1, N, RAW]; aim_tgt [1, N] long each unit's
+        target slot (-1 none), contact [1, N] bool in melee contact (None: the raw's melee flag)."""
+        I = V.I
+        u = self.setup.st.u
+        for k in ("x", "z", "b", "range"):
+            u[k] = raw_u[..., I[k]]
+        u["men"] = raw_u[..., I["men"]]
+        u["gone"] = ~(raw_u[..., I["alive"]] > 0)
+        u["vis"] = raw_u[..., I["vis"]] > 0
+        u["r"] = raw_u[..., I["r"]] > 0
+        m = (raw_u[..., I["m"]] > 0) if contact is None else contact
+        u["contact_s"] = m.float()
+        none = torch.full(raw_u.shape[:2], -1, dtype=torch.long, device=raw_u.device)
+        u["aim_tgt"] = none if aim_tgt is None else aim_tgt
 
     def second_raw(self, raw_u):
         """lower.Units.second with raw_u for V.raw(st) (module doc): the intended orders of this second."""
@@ -107,11 +128,18 @@ class GameUnits(LW.Units):
         intended.kind[:] = O.KEEP
         if bl.numel():
             idx = torch.full_like(bl, V.T)
-            v = UT.views(self.ubuf, idx, bl, il, self.setup.card, self.area, LW.UNIT_CFG, wlim=self.wlim)
+            prio = self.prio if self.targets else None
+            v = UT.views(self.ubuf, idx, bl, il, self.setup.card, self.area, LW.UNIT_CFG, wlim=self.wlim, prio=prio)
             ord_u = Nt.order_of(raw_u[bl, il], {k: a[bl, il] for k, a in self.area.items() if k != "on"},
-                                self.pace[bl, il], self.arrived[bl, il])
+                                self.pace[bl, il], self.arrived[bl, il],
+                                has_target=None if prio is None else v["prio"] >= 0)
             act = Nt.sample(self.net(v, ord_u, v["cell_m"]), greedy=self.greedy)
             intended = Dc.to_orders(act, v, raw_u, v["cell_m"], B, N, wlim=self.wlim)
+            st = self.setup.st
+            if self.still:
+                intended = self.stand_still(intended, st, inside)
+            if self.aim:
+                intended = self.aim_rule(intended, st, inside)
             self.n += int(bl.numel())
         self.intended = intended
         return intended, inside
@@ -158,7 +186,7 @@ class Chain:
 
     def __init__(self, unit_net, op_net=None, tactic_net=None, op_greedy=False, tactic_greedy=False, unit_greedy=False,
                  plans=None, task="hold", params=None, device="cpu", map_root=UI.MAPS, allow_flat=True, own=1,
-                 check=True, op_mode="formula"):
+                 check=True, op_mode="formula", targets=True, still=True, aim=True):
         assert own == 1, "the chain commands side 1"
         self.seer = TI.TacticSeer(map_root, device, own, params, allow_flat)
         self.P = self.seer.P
@@ -166,6 +194,10 @@ class Chain:
         self.unit_net, self.op_net, self.tactic_net = unit_net, op_net, tactic_net
         self.op_greedy, self.tactic_greedy, self.unit_greedy = op_greedy, tactic_greedy, unit_greedy
         self.op_mode = op_mode
+        # the translator's rules of the simulator's matchup chain (matchup/duel.Chain; lower.Units; 07-08.11,
+        # build/diag_m1/night.md 6, 11, 18): the group's target to its units, a unit in its area stands, a shooter in
+        # its area attacks its target within range (False: the plain chain of strategist/battle.play)
+        self.targets, self.still, self.aim = targets, still, aim
         self.op_decide = None          # callable (inp, ctx, raw) -> the walk's output: the operative's decision by
         #                                someone else (the labelling over the game: the person, tools/label/game.py)
         self.plans = plans if plans is not None else {}
@@ -198,7 +230,8 @@ class Chain:
         self.K = OEN.rows_of(N)
         self.tac = LW.Tacticians(1, N, self.G, dev, net=self.tactic_net, greedy=self.tactic_greedy)
         base = r[..., :TR.BASE]
-        self.units = GameUnits(base, self.keys, card, self.P, self.unit_net, self.unit_greedy)
+        self.units = GameUnits(base, self.keys, card, self.P, self.unit_net, self.unit_greedy, targets=self.targets,
+                               still=self.still, aim=self.aim)
         self.next_op = self.next_tac = None
         self.stats = {"parcels": 0, "parcel_errors": 0, "errors": [], "op_decisions": 0, "op_reforms": 0.0,
                       "tactic_ticks": 0, "unit_seconds": 0, "from_strategist": plan is not None}
@@ -252,12 +285,17 @@ class Chain:
         return out
 
     @torch.no_grad()
-    def step(self, r, sec, raw_u=None):
+    def step(self, r, sec, raw_u=None, aim_tgt=None, contact=None):
         """One second of the chain on the raw state r [1, N, RAW] at battle second sec: the levels due (module doc) ->
         (the orders with the leash, the units' intended orders before it, inside [1, N] each unit in its area). raw_u:
         the unit level's raw (tests: the simulator's own, its leash column included); None - r's base columns with
-        this chain's leash."""
+        this chain's leash. aim_tgt [1, N] each unit's target slot (the document's 't'), contact [1, N] in melee
+        contact (None: the raw's melee flag) - GameUnits.refresh."""
         t1 = time.perf_counter()
+        if raw_u is None:
+            raw_u = r[..., :TR.BASE].clone()
+            raw_u[..., V.I["leash"]] = self.units.leash.on.float()
+        self.units.refresh(raw_u, aim_tgt, contact)
         if self.next_op is None:
             self.next_op, self.next_tac = sec, sec
         self.plans_log = []
@@ -275,9 +313,6 @@ class Chain:
                 self.next_tac += self.t_every
         t3 = time.perf_counter()
         self.times["tac_ms"] = (t3 - t2) * 1000
-        if raw_u is None:
-            raw_u = r[..., :TR.BASE].clone()
-            raw_u[..., V.I["leash"]] = self.units.leash.on.float()
         intended, inside = self.units.second_raw(raw_u)
         o = self.units.leashed(raw_u)
         self.stats["unit_seconds"] += 1
@@ -296,7 +331,10 @@ class Chain:
                        self.seer.card, r)
         self.times["raw_ms"] = (time.perf_counter() - t0) * 1000
         sec = int(round(float(doc.get("t", 0)) / 1000.0))
-        o, _, _ = self.step(r, sec)
+        slot = {n: i for i, n in enumerate(self.names)}
+        aim = torch.tensor([[slot.get(u.get("t"), -1) if u.get("t") else -1 for u in doc["units"]]],
+                           dtype=torch.long, device=self.device)
+        o, _, _ = self.step(r, sec, aim_tgt=aim)
         t4 = time.perf_counter()
         col = lambda f: getattr(o, f)[0].cpu().numpy()        # noqa: E731
         side = [int(u["side"]) for u in doc["units"]]

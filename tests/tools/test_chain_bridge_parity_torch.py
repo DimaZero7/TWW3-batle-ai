@@ -89,7 +89,8 @@ def test_the_companions_chain_gives_the_simulators_orders_second_by_second(monke
     assert D == SECONDS and len(rec["intended"]) == D
     st, _, _, _ = BT.placed(pre, out, inp)
     N = st.N
-    chain = CH.Chain(unit_net, plans={"sim": plan}, params=P)
+    # (strategist/battle.play: the plain chain, no translator rules)
+    chain = CH.Chain(unit_net, plans={"sim": plan}, params=P, targets=False, still=False, aim=False)
     chain.start("sim", [f"u{i}" for i in range(N)], st.keys[0], UT.cards(st, "cpu").float()[:1], rec["raw"][0])
     own = pre.own[0]
     moved = 0
@@ -183,3 +184,72 @@ def test_the_leash_reads_the_raw_state_as_the_simulators_state():
     assert torch.equal(a.on, b.on)
     for f in O.FIELDS:
         assert torch.allclose(getattr(oa, f).float(), getattr(ob, f).float()), f
+
+
+MATCHUP_SECONDS = 50     # the operative at 0, 15, 30, 45; the tacticians every 5 s
+
+
+def test_the_companions_chain_gives_the_matchup_chains_orders_second_by_second(monkeypatch):
+    """The game's chain (companion --chain: Chain with the translator's rules targets / still / aim, the army's
+    formula of the operative from 9 units, zone_stick_m) gives, second by second, the units' intended orders of the
+    simulator's matchup chain (matchup/duel.Chain, as the night's exam plays it) on M3 (Skaven with guns and
+    jezzails on ksl_plains_01): the same raw states, the shooter's own target (the document's 't': the simulator's
+    aim_tgt) and its melee contact given as the game gives them."""
+    from tools.nn import arena_map
+    from tools.nn.matchup import armies as AR
+    from tools.nn.matchup import duel as DU
+    from tools.nn.operative import cfg as ocfg
+    from tools.nn.operative import env as OEN
+    from tools.nn.sim import battle
+    from tools.nn.tactic import cfg as tcfg
+    if not (arena_map.MAPS / "ksl_plains_01" / "meta.json").exists():
+        pytest.skip("build/maps/ksl_plains_01 (the captured map) is not here")
+    unit_net = fresh_unit_net(1)
+    st, card = DU.build("m3", [AR.base("m3")], "cpu", P)
+    chain = DU.Chain(1, "formula", command="hold")
+    chain.start(st, P, "cpu", card, unit_net)
+    rec = {"raw": [], "raw_u": [], "intended": [], "aim": [], "contact": []}
+    second = LW.Units.second
+
+    def units_second(self, s):
+        rec["aim"].append(s.u["aim_tgt"].clone())
+        rec["contact"].append(s.u["contact_s"] > 0)
+        lands = second(self, s)
+        rec["raw_u"].append(self.ubuf[-1].clone())
+        rec["intended"].append(self.intended.clone())
+        return lands
+
+    monkeypatch.setattr(LW.Units, "second", units_second)
+    seer = TR.Seer(P)
+    every, t_every = int(ocfg()["decide_s"]), int(tcfg()["decide_s"])
+    K = OEN.rows_of(st.N)
+    side = st.u["side"]
+    from tools.nn.train import opponents
+    for sec in range(MATCHUP_SECONDS):
+        raw = seer.raw(st)
+        rec["raw"].append(raw.clone())
+        if sec % every == 0:
+            chain.decide(st, raw, K)
+        if sec % t_every == 0:
+            chain.tick(st, raw)
+        chain.second(st)
+        for j in range(round(1.0 / P.dt)):
+            o = O.merge(chain.orders(st, j), opponents.nearest(st), side == 2)
+            battle.step(st, o, P)
+        chain.end_second()
+    monkeypatch.setattr(LW.Units, "second", second)
+    game = CH.Chain(unit_net, unit_greedy=True, params=P, task="hold")
+    game.start("sim", [f"u{i}" for i in range(st.N)], st.keys[0], card[:1], rec["raw"][0])
+    own = side[0] == 1
+    shooter = own & (st.u["range"][0] > 0)
+    attacks = 0
+    for s in range(MATCHUP_SECONDS):
+        _, intended, _ = game.step(rec["raw"][s], s, raw_u=rec["raw_u"][s], aim_tgt=rec["aim"][s],
+                                   contact=rec["contact"][s])
+        want = rec["intended"][s]
+        for f in O.FIELDS:
+            a, b = getattr(intended, f)[0, own], getattr(want, f)[0, own]
+            assert torch.allclose(a.float(), b.float(), atol=1e-4), (s, f, a.tolist(), b.tolist())
+        attacks += int((want.kind[0, shooter] == O.ATTACK).sum())
+    assert game.stats["op_decisions"] == 4 and game.stats["parcel_errors"] == 0
+    assert attacks > 0                     # the shooters' rule fired: the comparison covers it
