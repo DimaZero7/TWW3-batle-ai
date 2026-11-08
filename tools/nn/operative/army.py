@@ -119,7 +119,8 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
     lords = [e for e in enemy_rows if rl[e] == "lord" and not routing[e]]
     n_enemy = max(len(enemy_rows), 1)
     my_lord = [j for j in own_rows if rl[j] == "lord"]
-    shake = (sum(bool(routing[e]) for e in enemy_rows) / n_enemy >= tc["shake"]) or bool(
+    wavers = sum(bool(routing[e]) for e in enemy_rows) / n_enemy >= tc["shake"]
+    shake = wavers or bool(
         lords and my_lord and math.hypot(*(pos[lords[0]] - pos[my_lord[0]])) <= tc["lord_m"])
     out = []
     for g in groups:
@@ -161,8 +162,22 @@ def plan(b, own_rows, enemy_rows, pos, cards, routing, have, destroy, tc, ranges
                     seed, holds = _nearest(c, soft, pos), False
         elif r == "lord":
             # the general stays behind the line (the bridge agent's base: our lord in melee at 210 / 234 s and lost; the
-            # user's lord in M2 stood back to 275 s): his target the nearest enemy, his zone the one he got
-            seed = _nearest(c, foes, pos)
+            # user's lord in M2 stood back to 275 s): no target, his zone the one he got - until the enemy's front wavers
+            # (wavers: shake's share of routing units): then the nearest enemy, to finish (the user: the lord is let go
+            # when the enemy runs; 08.11, the bridge's teacher battles: the lord in melee in M2, M3 - his target was the
+            # nearest enemy)
+            if tc.get("lord_target", "wavers") == "nearest":
+                seed = _nearest(c, foes, pos)                    # (the rule before 08.11, for the checks)
+            elif wavers:
+                seed, holds = _nearest(c, foes, pos), False
+            else:
+                # his place: lord_back_m behind my melee line's centre (the user: -19 / -15 m in M1 / M2); the zone
+                # moves there once it is move_m off (teacher phase B), else it stays
+                mel = [j for j in own_rows if rl[j] in ("line", "anti") and not routing[j]]
+                if mel and tc.get("lord_back_m") is not None:
+                    lc = np.mean([pos[j] for j in mel], 0)
+                    out.append((g, None, lc - f * float(tc["lord_back_m"]), False))
+                    continue
         else:                                                    # line
             seed = _nearest(c, foes, pos)
             holds = not destroy

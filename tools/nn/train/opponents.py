@@ -157,6 +157,12 @@ class Line:
     #                               (pool, the game's attacking Empire line: every unit marched at 2.8-2.9 m/s, the
     #                               greatswords' pace, 16-17 m deep; ai_like waiting on the line's centre: 3.0-3.6 m/s,
     #                               27-29 m deep, contact 8 s sooner)
+    step_around: bool = False     # a move whose point lies on 'cannot stand' ground (the game refuses it: sim ground.blocked)
+    #                               goes to the nearest free point beside it (across, then shorter): the game AI paths
+    #                               round such ground. On ksl_plains_01 a patch at x 140-160, z -120..0 lies 30 m in front
+    #                               of the AI's M1 centre: its march points there were refused, the line waited for those
+    #                               units and stopped after 47 m (the game: 190 m in 3 min; build/diag_m1/night.md 28).
+    #                               Off: as before (the old arenas have no such ground)
     switch_m: float = 15.0        # target hysteresis: a new target must score this much better
     # Melee targets: score = distance - bonuses + penalties - pick_noise_m * Gumbel (lowest wins). The numbers are
     # a conditional logit fitted on the game AI's 3,397 new targets of melee units out of melee in the pool
@@ -660,8 +666,42 @@ def ai_like(st, p=Line()):
     ok = standing & has
     kind = torch.where(ok | (kind == O.HOLD), kind, torch.full_like(kind, O.HOLD))
     target = torch.where(kind == O.ATTACK, target, torch.full_like(target, -1))
+    if p.step_around:
+        tx, tz = _around(u, kind, x, z, tx, tz)
     return O.Orders(kind=kind, x=tx, z=tz, target=target, run=run & ((kind == O.ATTACK) | (kind == O.MOVE)
                                                                        | (kind == O.WITHDRAW)))
+
+
+AROUND = ((1.0, 0.0), (1.0, 15.0), (1.0, -15.0), (1.0, 30.0), (1.0, -30.0), (1.0, 45.0), (1.0, -45.0),
+          (0.5, 0.0), (0.5, 30.0), (0.5, -30.0), (1.0, 60.0), (1.0, -60.0))
+
+
+def _around(u, kind, x, z, tx, tz):
+    """Line.step_around: a MOVE / WITHDRAW point on 'cannot stand' ground -> the first free of AROUND (the way's share,
+    a shift across it in m) from the unit's place; none free: the point as it was."""
+    from tools.nn.sim import ground
+    point = (kind == O.MOVE) | (kind == O.WITHDRAW)
+    bad = point & ground.blocked(u, tx, tz)
+    if not bool(bad.any()):
+        return tx, tz
+    vx, vz = tx - x, tz - z
+    n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
+    ax, az = -vz / n, vx / n                                    # across the way
+    nx, nz = tx.clone(), tz.clone()
+    left = bad.clone()
+    for share, side_m in AROUND:
+        cx, cz = x + vx * share + ax * side_m, z + vz * share + az * side_m
+        free = left & ~ground.blocked(u, cx, cz)
+        nx, nz = torch.where(free, cx, nx), torch.where(free, cz, nz)
+        left = left & ~free
+        if not bool(left.any()):
+            break
+    return nx, nz
+
+
+def ai_game(st):
+    """ai_like for the user's matchups (tools/nn/matchup): the same line, stepping round 'cannot stand' ground."""
+    return ai_like(st, Line(step_around=True))
 
 
 @dataclass(frozen=True)

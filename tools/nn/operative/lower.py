@@ -277,6 +277,42 @@ class Units:
         kind = torch.where(quiet, torch.full_like(o.kind, O.HOLD), o.kind)
         return O.Orders(kind, o.x, o.z, o.target, o.run & ~quiet, o.ability, o.cast_target, o.face, o.width)
 
+    def stay_rule(self, o, st, inside):
+        """The rule 'shooters, guns and the lord stay in their area' (08.11, the bridge's game battles: a catapult 138 of
+        138 s out of its area under 91 attack orders on a far target, 100 s in melee, 0 shots; build/diag_m1/night.md 29)
+        on the intended orders o, for my units out of melee and not routing:
+        * a shooter's ATTACK on a target beyond its range: out of its area - a MOVE to the area's centre (at the order's
+          pace), in it - a HOLD (the unit network's attack walks it at the target);
+        * a gun (an artillery unit: guns of its own) goes only to its area and stands: out of it any MOVE / ATTACK is a
+          MOVE to the area's centre, in it a MOVE out of it or an ATTACK beyond range is a HOLD;
+        * the lord without a main target (the army's formula names one only when the enemy's front wavers): an ATTACK
+          on an enemy farther than lord_guard_m - in his area a HOLD, out of it a MOVE to the area's centre.
+        A WITHDRAW stays (the unit network's step back from melee)."""
+        u = st.u
+        own = self.setup.own
+        ar = {k: self.area[k] for k in ("x", "z", "b", "front", "depth")}
+        free = own & (u["men"] > 0) & ~u["r"] & (u["contact_s"] <= 0)
+        tc = o.target.clamp(min=0)
+        d = torch.sqrt((u["x"].gather(1, tc) - u["x"]) ** 2 + (u["z"].gather(1, tc) - u["z"]) ** 2)
+        att = (o.kind == O.ATTACK) & (o.target >= 0)
+        out_pt = (o.kind == O.MOVE) & (Dc.signed_dist(o.x, o.z, ar) < 0)
+        ranged = u["range"] > 0
+        gun = ranged & (u["eng0"] > 0) if "eng0" in u else torch.zeros_like(ranged)
+        far = att & (d > u["range"])
+        guard = float(cfg().get("lord_guard_m") or 0.0)
+        lord = u["lord"] & ~ranged & (self.prio < 0) & (guard > 0)        # (lord_guard_m 0: the lord's part off)
+        to_area = free & ~inside & ((ranged & far) | (gun & (att | (o.kind == O.MOVE))) | (lord & att & (d > guard)))
+        stand = free & inside & ~to_area & ((ranged & far) | (gun & out_pt) | (lord & att & (d > guard)))
+        if not bool((to_area | stand).any()):
+            return o
+        kind = torch.where(to_area, torch.full_like(o.kind, O.MOVE), torch.where(stand, torch.full_like(o.kind, O.HOLD),
+                                                                                  o.kind))
+        x = torch.where(to_area, self.area["x"], torch.where(stand, u["x"], o.x))
+        z = torch.where(to_area, self.area["z"], torch.where(stand, u["z"], o.z))
+        tg = torch.where(to_area | stand, torch.full_like(o.target, -1), o.target)
+        self.n_stay = getattr(self, "n_stay", 0) + int((to_area | stand).sum())
+        return O.Orders(kind, x, z, tg, o.run & ~stand, o.ability, o.cast_target, o.face, o.width)
+
     def aim_rule(self, o, st, inside):
         """The rule 'a shooter shoots its target' (module: aim) on the intended orders o."""
         u = st.u
@@ -336,6 +372,7 @@ class Units:
             if self.still:
                 intended = self.stand_still(intended, st, inside)
             if self.aim:
+                intended = self.stay_rule(intended, st, inside)
                 intended = self.aim_rule(intended, st, inside)
             self.n += int(bl.numel())
         self.intended = intended

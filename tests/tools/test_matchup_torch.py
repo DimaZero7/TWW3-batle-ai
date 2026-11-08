@@ -133,3 +133,62 @@ def test_snipers_step_up_to_their_range():
     rows, seed, goal, holds = g
     assert seed == jz and not holds and goal is not None
     assert abs(float(np.hypot(*(pos[jz] - goal))) - (260.0 - float(tc["range_margin_m"]))) < 1.0
+
+
+def test_shooters_guns_and_the_lord_stay_in_their_area():
+    """lower.Units.stay_rule: a gun out of its area under an attack goes to the area's centre; a shooter in its area with
+    an attack beyond range holds; the lord without a main target does not go at a far enemy; a withdraw stays."""
+    from tools.nn.operative import lower as LW
+    from tools.nn.sim import orders as O
+    st, card = DU.build("m2", [AR.base("m2")], "cpu", P)
+    setup = DU._SideSetup(st, P, "cpu", 1, card)
+    units = LW.Units(setup, None, targets=True, aim=True)
+    u = st.u
+    own = setup.own[0]
+    gun = [i for i in range(st.N) if bool(own[i]) and float(u["eng0"][0, i]) > 0][0]
+    shot = [i for i in range(st.N) if bool(own[i]) and float(u["range"][0, i]) > 0 and float(u["eng0"][0, i]) <= 0][0]
+    lord = [i for i in range(st.N) if bool(own[i]) and bool(u["lord"][0, i])][0]
+    foe = [i for i in range(st.N) if not bool(own[i])][1]
+    u["x"][0, foe] = u["x"][0, gun] + 600.0                      # beyond every range
+    units.area["x"][0, gun] = u["x"][0, gun] - 100.0             # the gun out of its area
+    o = O.hold(st.B, st.N)
+    o.kind[:] = O.ATTACK
+    o.target[:] = foe
+    o.kind[0, lord + 0] = O.ATTACK
+    inside = torch.ones_like(setup.own)
+    inside[0, gun] = False
+    out = units.stay_rule(o, st, inside)
+    assert int(out.kind[0, gun]) == O.MOVE and abs(float(out.x[0, gun] - units.area["x"][0, gun])) < 1e-3
+    assert int(out.kind[0, shot]) == O.HOLD
+    assert int(out.kind[0, lord]) == O.ATTACK                    # (config lord_guard_m 0: the lord's part off)
+    from tools.nn.operative import cfg as ocfg
+    old = ocfg().get("lord_guard_m")
+    ocfg()["lord_guard_m"] = 30.0
+    try:
+        assert int(units.stay_rule(o, st, inside).kind[0, lord]) == O.HOLD
+        units.prio[0, lord] = foe                                # a main target named: the lord goes
+        assert int(units.stay_rule(o, st, inside).kind[0, lord]) == O.ATTACK
+    finally:
+        ocfg()["lord_guard_m"] = old
+    o.kind[0, shot] = O.WITHDRAW
+    assert int(units.stay_rule(o, st, inside).kind[0, shot]) == O.WITHDRAW
+
+
+def test_ai_game_steps_round_cannot_stand_ground():
+    """opponents.ai_game (ai_like, Line.step_around): a march point on 'cannot stand' ground of ksl_plains_01 (the patch
+    30 m before the AI's M1 centre) goes to a free point beside it; a free point stays."""
+    from tools.nn.sim import ground
+    from tools.nn.sim import orders as O
+    from tools.nn.train import opponents as OP
+    st, _ = DU.build("m1", [AR.base("m1")], "cpu", P)
+    u = st.u
+    kind = torch.full_like(u["x"], O.MOVE, dtype=torch.long)
+    x = torch.full_like(u["x"], 188.0)
+    z = torch.full_like(u["x"], -32.0)
+    tx, tz = torch.full_like(x, 158.0), torch.full_like(z, -31.0)
+    assert bool(ground.blocked(u, tx, tz).all())
+    nx, nz = OP._around(u, kind, x, z, tx, tz)
+    assert not bool(ground.blocked(u, nx, nz).any())
+    fx, fz = torch.full_like(x, 120.0), torch.full_like(z, -31.0)
+    ox, oz = OP._around(u, kind, x, z, fx, fz)
+    assert torch.equal(ox, fx) and torch.equal(oz, fz)
