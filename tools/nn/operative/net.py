@@ -134,6 +134,10 @@ class Heads(nn.Module):
         self.empty_b = nn.Parameter(torch.tensor(-float(c["teacher"]["join_m"]) / 100.0))
         # and the members so far x a learned weight (start 0: as run5): the formula cuts an army into groups of 3 (07.11)
         self.count_w = nn.Parameter(torch.tensor(0.0))
+        # the target's prior (08.11, build/diag_m1/night.md 19): - distance from the group's members to each enemy / 100 m
+        # x a learned weight, + a learned bias for the group's target in force (its plan: keep by default)
+        self.tnear_w = nn.Parameter(torch.tensor(1.0))
+        self.tkeep_b = nn.Parameter(torch.tensor(1.0))
         self.cmd = nn.Linear(len(DC.VERBS) + len(DC.PACES), W)
         self.where_b = nn.Conv2d(32, 1, 1)
         self.verb = nn.Linear(W, len(DC.VERBS))
@@ -256,6 +260,15 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         if labels is not None and bool(use.any()):
             if q is None:
                 q = F.one_hot(hard.clamp(min=0), lg.shape[-1]).float()
+            # (a label on a choice the rules close teaches nothing - its mass dropped, a sample with none left skipped;
+            # 07.11: such labels made the term 2.4e6 on the matchups)
+            q = q * (lg > NEG / 2).float()
+            qs = q.sum(-1, keepdim=True)
+            teach["closed"] = teach.get("closed", 0.0) + float(((qs[:, 0] <= 0) & use).sum())
+            use = use & (qs[:, 0] > 0)
+            if not bool(use.any()):
+                return
+            q = q / qs.clamp(min=1e-12)
             ce = _soft_ce(lg, q)
             teach["term"] = teach["term"] + (ce * use).sum()
             if name == "keep":
@@ -354,15 +367,18 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         n_al = n_new[:, g].clamp(min=1)
         near_m = SP.near(n_al, line)
         # the target: a seed or none
-        keys = heads.tk(units)
-        lt = torch.einsum("bq,bkq->bk", heads.tq(h), keys) / Q ** 0.5
-        lt = torch.cat([lt.masked_fill(~ctx.enemy, NEG), heads.tnone(h)], 1)
-        tt = _pick(lt, None if A["target"] is None else A["target"][:, g], greedy)
-        score("target", lt, tt, a, q=None if L is None else L["target"])
         w = sel.float()
         nw = w.sum(1).clamp(min=1)
         gx = (ctx.J[..., I["x"]] * w).sum(1) / nw
         gz = (ctx.J[..., I["z"]] * w).sum(1) / nw
+        keys = heads.tk(units)
+        lt = torch.einsum("bq,bkq->bk", heads.tq(h), keys) / Q ** 0.5
+        td = torch.sqrt((ctx.J[..., I["x"]] - gx[:, None]) ** 2 + (ctx.J[..., I["z"]] - gz[:, None]) ** 2)
+        held = old.target[:, g].gather(1, ctx.slot.clamp(min=0)) & on[:, g, None] & same[:, g, None]
+        lt = lt - heads.tnear_w * td / 100.0 + heads.tkeep_b * held.float()
+        lt = torch.cat([lt.masked_fill(~ctx.enemy, NEG), heads.tnone(h)], 1)
+        tt = _pick(lt, None if A["target"] is None else A["target"][:, g], greedy)
+        score("target", lt, tt, a, q=None if L is None else L["target"])
         seed = torch.where(tt < K, ctx.slot.gather(1, tt.clamp(max=K - 1)[:, None])[:, 0], torch.full_like(tt, -1))
         seed = torch.where(a, seed, torch.full_like(seed, -1))
         tgt = TG.grow(raw, idx, seed, ctx.cand, gx, gz, near_m)
@@ -380,6 +396,12 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         h = h + heads.tmix(_mean(units, trows[:, None])[:, 0])
         lr = heads.turn(h).masked_fill(~ok, NEG)
         tr = _pick(lr, None if A["turn"] is None else A["turn"][:, g], greedy)
+        # (a given sector the target's rules close - the formula keeping a holding group's heading: the nearest open)
+        bad_t = ~ok.gather(1, tr[:, None])[:, 0]
+        if bool(bad_t.any()):
+            ds = (torch.arange(S, device=dev)[None] - tr[:, None]).abs()
+            ds = torch.minimum(ds, S - ds).float().masked_fill(~ok, 1e9)
+            tr = torch.where(bad_t, ds.argmin(1), tr)
         qt = None
         if L is not None:
             sg = float(cfg()["teacher"]["sigma_sectors"])
@@ -415,6 +437,22 @@ def choose(enc, inp, ctx, heads, act=None, greedy=False, labels=None):
         score("cell", lw, cl, a, q=qc)
         qx, qz = cx_.gather(1, cl[:, None])[:, 0], cz_.gather(1, cl[:, None])[:, 0]
         zx, zz = SP.clamp(gx, gz, qx, qz, near_m, front, depth, heading, axes.field)
+        # the same zone again (the same members and form, the cell of the zone in force, the turn within half a sector):
+        # the zone in force exactly - a new target of a group that holds does not shift it by the cells' grid (07.11)
+        ocx, ocz, ohd = old.cx[:, g], old.cz[:, g], old.heading[:, g]
+        dhd = (torch.remainder(heading - ohd + 180.0, 360.0) - 180.0).abs()
+        lim = near_m / 2 - float(c["step_margin_m"])
+        near_ok = (ocx - gx) ** 2 + (ocz - gz) ** 2 <= lim * lim               # (the step's rule still kept)
+        # (and a zone that moved less than zone_stick_m stays where it was: 08.11, build/diag_m1/night.md 22 - the
+        # network's zones crept by a cell or two each decision, its units walked 1.5-2x the teacher's)
+        stick = float(c.get("zone_stick_m", 0.0))
+        small = (zx - ocx) ** 2 + (zz - ocz) ** 2 <= stick * stick
+        exact = keep_tiles & ((cl == SP.cell_of(axes, ocx, ocz)) | small) & (dhd <= 180.0 / S + 1e-3) & near_ok
+        if bool(exact.any()):
+            zx, zz = torch.where(exact, ocx, zx), torch.where(exact, ocz, zz)
+            # (the old turn only while the target's rules still hold in it)
+            ok_old = TG.turn_ok(raw, idx, tgt, ohd, near_m, gx, gz)[:, 0]
+            heading = torch.where(exact & ok_old, ohd, heading)
         lv = heads.verb(h).masked_fill(~vopen, NEG)
         vb = _pick(lv, None if A["verb"] is None else A["verb"][:, g], greedy)
         score("verb", lv, vb, a & (vopen.sum(1) > 1), hard=None if L is None else L["verb"])
@@ -489,6 +527,8 @@ class NullHeads:
     near_w = 0.0
     empty_b = 0.0
     count_w = 0.0
+    tnear_w = 0.0
+    tkeep_b = 0.0
 
     def join(self, x):
         return torch.zeros_like(x)

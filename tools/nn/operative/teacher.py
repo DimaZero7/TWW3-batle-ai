@@ -24,6 +24,7 @@ import math
 import numpy as np
 import torch
 
+from tools.nn.operative import army as AM
 from tools.nn.operative import cfg
 from tools.nn.operative import groups as GR
 from tools.nn.operative import net as NN
@@ -128,9 +129,65 @@ def formula(inp, ctx, destroy, mode="formula"):
     off = np.zeros((B, G), dtype=np.float32)             # the group's place in the line (m right of the anchor)
     rng = ctx.J[..., I["range"]].cpu().numpy()
     line_n, lat_m = int(tc["line_units"]), float(tc["line_m"])
+    # the army's formula (army.py) for a battle of army.min own units or more: roles, a target order, zones held
+    ac = tc["army"]
+    cards = inp["rows"][..., :69].cpu().numpy()
+    routing = (ctx.J[..., I["r"]] > 0).cpu().numpy()
+    arm = np.zeros((B, G), dtype=bool)                   # a group of the army's formula
+    holds = np.zeros((B, G), dtype=bool)
+    goal = np.zeros((B, G, 2), dtype=np.float32)
+    has_goal = np.zeros((B, G), dtype=bool)
+    oldc = np.stack([old.cx.cpu().numpy(), old.cz.cpu().numpy()], -1)
     for b in range(B):
         mine = [j for j in range(K) if own[b, j]]
         if not mine:
+            continue
+        if mode in ("formula", "stay", "go") and len(mine) >= int(ac["min"]):
+            have = {g: set(j for j in mine if rg[b, j] == g) for g in range(G) if on[b, g]}
+            foes = [j for j in range(K) if enemy[b, j]]
+            P_ = AM.plan(b, mine, foes, J[b], cards[b], routing[b], have, bool(destroy[b]), ac, rng[b])
+            taken, index, fresh = set(), [], []
+            for rows, *_ in P_:
+                rs = set(rows)
+                g = next((g for g, m in have.items() if m == rs and g not in taken), None)
+                if g is None:
+                    best = sorted(((len(m & rs), -g) for g, m in have.items() if g not in taken and m & rs),
+                                  reverse=True)
+                    g = -best[0][1] if best else None
+                fresh.append(g is None)
+                if g is None:
+                    g = next((g for g in range(G) if g not in taken and not on[b, g]),
+                             next(g for g in range(G) if g not in taken))
+                taken.add(g)
+                index.append(g)
+            # new groups take the free places in the order the network's walk meets them (its first row): the empty
+            # places are alike, so a label must not hang on the plan's order of roles
+            nk = [k for k, f in enumerate(fresh) if f]
+            for k, g in zip(sorted(nk, key=lambda k: min(P_[k][0])), sorted(index[k] for k in nk)):
+                index[k] = g
+            for (rows, seed, gl, hl), g in zip(P_, index):
+                want[b, g] = arm[b, g] = True
+                holds[b, g] = hl
+                ident[b, g] = bool(on[b, g]) and have.get(g) == set(rows)
+                c = np.mean([J[b, j] for j in rows], 0)
+                gxy[b, g] = axy[b, g] = c
+                if seed is not None:
+                    has_t[b, g] = True
+                    txy[b, g] = J[b, seed]
+                    tgt_rows[b, g, seed] = 1.0
+                    tgt_act[b, g] = seed
+                    changed_t[b, g] = not bool(old_t[b, g, slot[b, seed]])
+                else:
+                    tgt_rows[b, g, K] = 1.0
+                    changed_t[b, g] = bool(old_t[b, g].any())
+                if gl is not None:
+                    goal[b, g], has_goal[b, g] = gl, True
+                elif ident[b, g]:
+                    goal[b, g], has_goal[b, g] = oldc[b, g], True          # (holds: its zone in force)
+                else:
+                    goal[b, g], has_goal[b, g] = c, True                   # (holds: formed here)
+                for j in rows:
+                    comp_l[b, j] = g
             continue
         pcs = comps[b]
         pc_xy = [np.mean([J[b, row_of[b][s]] for s in pc], 0) for pc in pcs]
@@ -190,6 +247,7 @@ def formula(inp, ctx, destroy, mode="formula"):
     want, ident, changed_t, has_t = T(want), T(ident), T(changed_t), T(has_t)
     gxy, txy, axy, rxy, off = T(gxy), T(txy), T(axy), T(rxy), T(off)
     in_line = off.abs() > 1e-6
+    arm, holds, goal, has_goal = T(arm), T(holds), T(goal), T(has_goal)
     # phase B: the goals, the cells, keep or move (tensors over B x G)
     gx, gz, tx, tz = gxy[..., 0], gxy[..., 1], txy[..., 0], txy[..., 1]
     up = axes.heading[:, None].expand(B, G)
@@ -201,6 +259,10 @@ def formula(inp, ctx, destroy, mode="formula"):
     go = destroy[:, None] & has_t
     qx = torch.where(go, tx - dx / d * torch.minimum(torch.full_like(d, ap), d), ax) + off * rxy[..., 0]
     qz = torch.where(go, tz - dz / d * torch.minimum(torch.full_like(d, ap), d), az) + off * rxy[..., 1]
+    qx, qz = torch.where(has_goal, goal[..., 0], qx), torch.where(has_goal, goal[..., 1], qz)
+    # (a group that holds keeps its heading: the sector nearest the zone's in force; army.py)
+    keep_h = arm & holds & ident
+    turn_hold = torch.remainder(torch.round((old.heading - base) / 22.5), 16).long()
     members_n = torch.zeros((B, G), dtype=torch.long, device=dev)
     cl_t = T(comp_l)
     for g in range(G):
@@ -226,12 +288,13 @@ def formula(inp, ctx, destroy, mode="formula"):
     # centre now, which creeps forward as the infantry goes to the front rows)
     placing = in_line & (old.age < float(tc["place_s"]))
     need = changed_t | turned | ((destroy[:, None] | placing) & far)
+    need = torch.where(arm, changed_t | (~holds & far), need)
     keepT = torch.where(ident & ~need, GR.KEEP, torch.where(ident, GR.MOVE, GR.REFORM))
     keepT = torch.where(old.on, keepT, torch.full_like(keepT, GR.REFORM))
     # the act and the labels
     hold_i, any_i = DC.VERBS.index("hold"), DC.PACES.index("any")
     act = {"keep": keepT, "comp": cl_t, "form": torch.zeros((B, G), dtype=torch.long, device=dev),
-           "target": T(tgt_act), "turn": torch.zeros((B, G), dtype=torch.long, device=dev),
+           "target": T(tgt_act), "turn": torch.where(keep_h, turn_hold, torch.zeros_like(turn_hold)),
            "cell": cell.view(B, G), "verb": torch.full((B, G), hold_i, dtype=torch.long, device=dev),
            "pace": torch.full((B, G), any_i, dtype=torch.long, device=dev)}
     labels = dict(act)

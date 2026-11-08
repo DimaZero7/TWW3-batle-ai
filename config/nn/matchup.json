@@ -1,0 +1,18 @@
+{
+  "_description": "Матчапы пользователя в симуляторе (tools/nn/matchup, build/diag_m1/night.md): армии и места — тем же кодом, что собирает бой игры (tools.build human), карта Кислева с зонами игры; противник — скрипт симулятора или цепочка формул.",
+  "map": "ksl_plains_01",
+  "_map_why": "все три матчапа пользователя — на ksl_plains_01 с зонами расстановки игры (build/maps/ksl_plains_01/meta.json game_deployment_zones: 416 × 176 м, фронты в 192 м)",
+  "matchups": {
+    "m1": {"run": "build/human/runs/20261025-192124", "replace": {"wh3_dlc25_emp_inf_nuln_ironsides": "wh3_dlc25_emp_inf_hochland_long_rifles"}, "places": "build/human/runs/20261107-204458", "title": "М1: Империя со снайперами против скавенов"},
+    "m2": {"run": "build/human/runs/20261107-171600", "places": "build/human/runs/20261107-212533", "title": "М2: Империя с конницей и артиллерией против скавенов"},
+    "m3": {"seed": 1000702112, "armies": "v3", "swap": false, "places": "build/human/runs/20261107-214531", "title": "М3: скавены против Империи (tools/label/live_matches.json № 1)"}
+  },
+  "_matchups_why": "places — t = 0 боёв пользователя на этой карте (его расстановка и ИИ игры; build/diag_m1/episodes.md: прогоны 204458, 212533, 214531 — повторы ростеров на ksl_plains_01). М1 — как tools/label/live.ps1 по умолчанию (прогон 25.10 и замена железнобоких на длинноствольных); М2 — прогон 17:16; М3 — live_matches.json № 1 (seed 1000702112, v3, без перестановки: свои — скавены)",
+  "attacker": 2,
+  "_attacker_why": "нападает враг (ИИ игры идёт на нас в боях пользователя); скрипт ai_like у нападающего не ждёт",
+  "limit_s": 900,
+  "_limit_why": "бои пользователя шли 1081 с (М1 вживую) до полной победы; 900 с хватает, чтобы решилось, кто ломается",
+  "augment": {"jitter_m": 20.0, "turn_deg": 10.0, "mirror": 0.5, "drop": [0, 2], "_why": "места ± 20 м и поворот ± 10° внутри зоны, зеркало поперёк фронта (z → −z) в половине боёв, у каждой стороны 0–2 случайных отряда (не лорд) выбывают"},
+  "enemies": ["ai_like", "nearest", "hold_shoot"],
+  "_enemies_why": "противники-скрипты симулятора (tools/nn/train/opponents.py): ai_like сделан по записям боёв с ИИ игры — ближе всего к нему; nearest — толпа на ближайшего бегом; hold_shoot — стоит и стреляет, контрудар с 80 м"
+}
