@@ -64,25 +64,15 @@ def decide_all(batch, whos, dev, inp=None, ctx=None):
     return D.cat_out(outs)
 
 
-def with_ref(m, K, S):
-    """m + useful (drill_s1.useful against the first slice's - the teacher's - damage on the same battle) and score2
-    (useful + trade): the batch K slices of S battles."""
-    ref = m["sniper_shots150"].view(K, S)[0].repeat(K)
-    m["useful"] = D.useful(m, ref)
-    m["score2"] = m["useful"] + m["trade"]
-    return m
-
-
 def exam(whos, dev, unit_net, P, n=EXAM_N, seed=EXAM_SEED, limit=D.LIMIT_S):
     """{who: summary} on the drill's held-out battles (every deployer the same battles; the teacher first - the
     damage the measure is reckoned against)."""
     sp = D.specs(n, random.Random(seed))
-    names = ["teacher"] + [w for w in whos if w != "teacher"]
+    names = list(whos)
     ds = [deployer(w, dev) for w in names]
     batch = D.Batch(sp * len(ds), P, dev)
     out = decide_all(batch, ds, dev)
     m, st = D.play(batch, out, unit_net, P, dev, limit=limit)
-    with_ref(m, len(ds), n)
     res = {}
     for i, w in enumerate(names):
         sel = torch.zeros(len(sp) * len(ds), dtype=torch.bool, device=dev)
@@ -91,7 +81,7 @@ def exam(whos, dev, unit_net, P, n=EXAM_N, seed=EXAM_SEED, limit=D.LIMIT_S):
         res[w]["by_enemy"] = {e: D.summary(m, sel & torch.tensor([s["enemy"] == e for s in batch.sp], device=dev))
                               ["sniper_kept"] for e in ("ai_game", "nearest", "hold_shoot")}
         fast = torch.tensor([s["n_fast"] > 0 for s in batch.sp], device=dev)
-        res[w]["with_fast"] = {k: D.summary(m, sel & fast)[k] for k in ("useful", "sniper_kept", "sn_first",
+        res[w]["with_fast"] = {k: D.summary(m, sel & fast)[k] for k in ("fire_share", "sniper_end", "sn_first",
                                                                           "fast60_s")}
     res["seconds"] = st.get("wall_s")
     return res, m
@@ -102,13 +92,11 @@ def transfer(whos, dev, unit_net, P, n=32, limit=900, names=("m1", "m2", "m3")):
     sp = []
     for name in names:
         sp += D.full_specs([name], n, random.Random(TRANSFER_SEED))
-    whos = ["teacher"] + [w for w in whos if w != "teacher"]
     ds = [deployer(w, dev) for w in whos]
     batch = D.Batch(sp * len(ds), P, dev, per_side=20)
     out = decide_all(batch, ds, dev)
     m, st = D.play(batch, out, unit_net, P, dev, limit=limit)
     N = len(sp)
-    with_ref(m, len(ds), N)
     res = {}
     for i, w in enumerate(whos):
         res[w] = {}
@@ -179,13 +167,22 @@ def agreement(net, chunks):
     return {h: round(sum(v) / len(v), 3) for h, v in acc.items()}
 
 
-def search(sp, cands, dev, unit_net, P, mark):
-    """(batch of sp, best act [S], marks [K, S], the chosen candidate [S]): every candidate of every seed played."""
+def search(sp, cands, dev, unit_net, P, mark, rnd, R=None):
+    """(batch of sp, best act [S], marks [K, S], the chosen candidate [S], readings [R, K, S]): every candidate of every
+    seed played R times (config drill_s1 repeats: the seed's own enemy, then others of the mix - another script and
+    another draw of the dice), its mark the mean."""
     S, K = len(sp), len(cands)
+    R = int(R or D.DC1["repeats"])
     batch = D.Batch(sp * K, P, dev)
     out = decide_all(batch, cands, dev)
-    m, st = D.play(batch, out, unit_net, P, dev)
-    with_ref(m, K, S)                                       # (cands[0]: the teacher - the damage reckoned against)
+    idx = torch.arange(K * S, device=dev).repeat(R)                      # copy r of candidate k, seed s: r*K*S + k*S + s
+    big = D.Batch(sp * K * R, P, dev)
+    enemies = [s_["enemy"] for s_ in sp] * K
+    for _ in range(R - 1):
+        other = [D._enemy_script(rnd) for _ in sp]
+        enemies += other * K
+    m, st = D.play(big, D.take_out(out, idx), unit_net, P, dev, enemies=enemies)
+    m = {k: v.view(R, K * S).mean(0) for k, v in m.items()}
     score = m[mark].view(K, S)
     best = score.argmax(0)                                  # ties: the first (the formula)
     idx = best * S + torch.arange(S, device=dev)
@@ -278,11 +275,11 @@ def _train(a, P, dev, out, say, unit_net, net, critic, opt):
             net.eval()
             cands += [("net", net, True), ("net", net, False)]
         row = {"round": rd}
-        for kind, sp, mark in (("drill", sp_d, "score2"), ("full", sp_f, "trade")):
+        for kind, sp, mark in (("drill", sp_d, "score3"), ("full", sp_f, "trade")):
             if not sp:
                 continue
             t1 = time.time()
-            one, lab, score, best, m, st = search(sp, cands, dev, unit_net, P, mark)
+            one, lab, score, best, m, st = search(sp, cands, dev, unit_net, P, mark, rnd)
             # the network's choice against the search's on these new seeds, before it learns them
             row.setdefault("agree_new", {})[kind] = agreement(net, [(one.inp, one.ctx, lab)])
             labelled.append((one.inp, one.ctx, lab))
@@ -296,8 +293,8 @@ def _train(a, P, dev, out, say, unit_net, net, critic, opt):
                          "net_greedy": round(float(score[K - 2].mean()), 3) if (rd > 0 or a.init) else None,
                          "chosen": torch.bincount(best, minlength=K).tolist(),
                          **{f"{k}_teacher": round(float(V(k)[0].mean()), 3) for k in
-                            ("useful", "sniper_kept", "sn_first", "sniper_shots150")},
-                         **{f"{k}_best": pick(k) for k in ("useful", "sniper_kept", "sn_first", "sniper_shots150")},
+                            ("fire_share", "sniper_end", "sn_first", "sniper_shots")},
+                         **{f"{k}_best": pick(k) for k in ("fire_share", "sniper_end", "sn_first", "sniper_shots")},
                          "where_best": where_snipers(one, lab, dev), "s": round(time.time() - t1, 1)}
         net.train()
         n_l = len(labelled)
@@ -313,9 +310,42 @@ def _train(a, P, dev, out, say, unit_net, net, critic, opt):
     say({"rounds": rd, "minutes": round((time.time() - t0) / 60, 2)})
 
 
+def overfit(a):
+    """Can the network learn a small set of the search's labels by heart (the drill's seeds of --labels, the first
+    --n of them)? The agreement per head every 100 steps; --init the start (none: a fresh network)."""
+    P = load()
+    dev = a.device
+    torch.manual_seed(a.seed)
+    if a.init:
+        net, critic, _ = ST.restore(a.init, dev)
+    else:
+        net, critic = NN.StrategistNet().to(dev), NN.StrategistCritic().to(dev)
+    opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=a.lr)
+    sp, acts = [], []
+    for f in [x for x in a.labels.split(",") if x]:
+        for spx, act in torch.load(f, weights_only=False):
+            if spx[0].get("kind") != "drill":
+                continue
+            for k, one in enumerate(spx):
+                sp.append(one)
+                acts.append({h: v[k] for h, v in act.items()})
+    n = min(a.n or 64, len(sp))
+    b = D.Batch(sp[:n], P, dev)
+    lab = {h: torch.stack([x[h] for x in acts[:n]]).to(dev) for h in acts[0]}
+    chunk = [(b.inp, b.ctx, lab)]
+    rows = []
+    for k in range(0, a.steps, 100):
+        r = fit(net, opt, chunk, 100, min(a.mb, n))
+        row = {"steps": k + 100, "term": r["term"], "agree": agreement(net, chunk), "seeds": n}
+        print(json.dumps(row), flush=True)
+        rows.append(row)
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.out).write_text(json.dumps(rows), encoding="utf-8")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("what", choices=("exam", "transfer", "train"))
+    ap.add_argument("what", choices=("exam", "transfer", "train", "overfit"))
     ap.add_argument("--who", default="teacher,exposed")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", default="build/diag_drill_s1/exam.json")
@@ -340,6 +370,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.what == "train":
         return train(a)
+    if a.what == "overfit":
+        return overfit(a)
     P = load()
     unit_net = TT.unit_network(a.device)
     whos = a.who.split(",")

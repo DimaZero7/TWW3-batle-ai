@@ -23,8 +23,11 @@ battles: the snipers rout first in 10).
         sn_first      the first of my units to rout (or die) is a sniper (by the battle's end)
         fast60_s      the first second an enemy fast unit comes within 60 m of one of my snipers (none: the limit)
         trade         the enemy's share of gold lost less mine
-        useful        sniper_kept x min(1, their shots by 150 s / the teacher's on the same battle) - useful(m, ref)
-        score         useful + trade (the search's mark; config reward: measure + trade)
+        fire_share    the drill's measure: my snipers' projectiles spent in the battle / what they could spend in it
+                      (their men at the start x the limit / their reload: the passport's cycle the simulator fires at)
+                      - death, rout and hiding with no target in range all cut it
+        sniper_end    my snipers' men at the battle's end / at the start, a routed unit 0
+        score3        fire_share + trade (the search's mark; config reward: measure + trade)
 """
 import copy
 import math
@@ -57,6 +60,7 @@ SOURCES = ("m1", "m2", "m3")
 DC1 = cfg()["drill_s1"]                    # config/nn/strategist.json drill_s1 (each number with its reason)
 ENEMIES = tuple(DC1["enemies"].items())
 LIMIT_S = int(DC1["limit_s"])
+KEPT_S = int(DC1["kept_s"])
 DEEP_M = 150.0                             # the bad 'deep': the snipers this far behind the front row
 PER_SIDE = 12                              # (the drill's armies are at most 12 a side: a smaller state, a faster step)
 _ROLE = {}
@@ -386,7 +390,7 @@ def play(batch, out, unit_net, P, device, limit=LIMIT_S, inp=None, enemies=None)
     side = st0.u["side"]
     sn = torch.tensor([[r == "sniper" for r in rr] for rr in rl], device=device) & (side == 1)
     fast_e = torch.tensor([[r == "fast" for r in rr] for rr in rl], device=device) & (side == 2)
-    watch = Watch(sn, fast_e, at=min(LIMIT_S, limit))
+    watch = Watch(sn, fast_e, at=min(KEPT_S, limit))
     cap = {}
     _b = DU.build
 
@@ -426,18 +430,12 @@ def play(batch, out, unit_net, P, device, limit=LIMIT_S, inp=None, enemies=None)
     s150 = watch.shots_at if watch.shots_at is not None else shots
     m["sniper_shots150"] = (s150 * sn.float()).sum(1) / n_sn.clamp(min=1)
     m["sniper_shots"] = (shots * sn.float()).sum(1) / n_sn.clamp(min=1)
+    could = (u["men0"].float() * float(limit) / u["reload"].float().clamp(min=0.1)) * sn.float()
+    m["fire_share"] = (shots * sn.float()).sum(1) / could.sum(1).clamp(min=1.0)
+    end_men = u["men"].float() * (~(u["r"] | u["gone"])).float()
+    m["sniper_end"] = ((end_men / men0) * sn.float()).sum(1) / n_sn.clamp(min=1)
+    m["score3"] = m["fire_share"] + trade
     return m, stats
-
-
-def useful(m, ref):
-    """[B] the drill's measure (08.11, the orchestrator: a sniper is of use only alive AND firing): my snipers' men kept
-    at 150 s x their projectiles spent by 150 s over the teacher's on the same battle, at most 1 (ref [B] the
-    teacher's sniper_shots150; none fired by the teacher: the men alone) - hiding them deep keeps the men and loses the
-    fire, standing them ahead fires and loses the men; fire beyond the teacher's buys nothing (the drill is the
-    cover)."""
-    fire = torch.where(ref > 1.0, (m["sniper_shots150"] / ref.clamp(min=1.0)).clamp(max=1.0),
-                       torch.ones_like(ref))
-    return m["sniper_kept"] * fire
 
 
 def summary(m, sel=None):

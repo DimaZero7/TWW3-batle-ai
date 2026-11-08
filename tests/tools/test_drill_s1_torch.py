@@ -64,7 +64,8 @@ def test_a_short_battle_keeps_the_strategists_groups_and_counts_the_measures():
     assert float(m["deploy_errors"].sum()) == 0
     assert st["side1"]["reforms"] == 0                    # the operative's army teacher keeps the strategist's groups
     assert torch.all((m["sniper_kept"] >= 0) & (m["sniper_kept"] <= 1))
-    assert set(m) >= {"sniper_kept", "sn_first", "fast60_s", "trade", "score"}
+    assert set(m) >= {"fire_share", "sniper_end", "sn_first", "fast60_s", "trade", "score3"}
+    assert torch.all((m["fire_share"] >= 0) & (m["fire_share"] <= 1.0 + 1e-6))
 
 
 def test_the_watch_finds_the_first_unit_to_rout():
@@ -82,15 +83,6 @@ def test_the_watch_finds_the_first_unit_to_rout():
     w(1, st)
     assert w.rout.tolist() == [[-1.0, 2.0, -1.0]] and w.fast60.tolist() == [2.0]
     assert w.men_at.tolist() == [[10.0, 0.0, 10.0]]              # a routed unit's men count 0
-
-
-def test_the_measure_is_the_men_kept_times_the_fire_against_the_teachers():
-    from tools.nn.strategist import drill_s1 as D
-    m = {"sniper_kept": torch.tensor([1.0, 0.5, 1.0, 0.8]), "sniper_shots150": torch.tensor([0.0, 300.0, 600.0, 50.0])}
-    ref = torch.tensor([400.0, 300.0, 300.0, 0.0])
-    # hidden and silent: 0; half the men, the teacher's fire: 0.5; more fire than the teacher buys nothing; the
-    # teacher fired nothing: the men alone
-    assert torch.allclose(D.useful(m, ref), torch.tensor([0.0, 0.5, 1.0, 0.8]))
 
 
 def test_the_deep_deployment_puts_the_snipers_far_behind_the_infantry():
