@@ -1,0 +1,50 @@
+{
+  "_why": "М1: Империя со снайперами против скавенов: frozen 09.11 by tmp/clean_net.py from tools/nn/matchup/armies.base of the old project ({\"run\": \"build/human/runs/20261025-192124\", \"replace\": {\"wh3_dlc25_emp_inf_nuln_ironsides\": \"wh3_dlc25_emp_inf_hochland_long_rifles\"}, \"places\": \"build/human/runs/20261107-204458\"}; the runs: tmp/old-build/human/runs)",
+  "factions": {"1": "wh_main_emp_empire", "2": "wh2_main_skv_skaven"},
+  "units": {
+    "1": [
+      {"key": "wh_main_emp_cha_general_0", "slot": "lord", "name": "own_lord", "x": -216.19999694824, "z": -3.5999999046326, "b": 111.0, "general": true, "width": 5.0, "men": 1},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_1", "name": "own_halberd_1", "x": -175.30000305176, "z": 172.10000610352, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_1", "name": "own_greatsword_1", "x": -200.19999694824, "z": 30.799999237061, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_2", "name": "own_greatsword_2", "x": -200.89999389648, "z": 7.0999999046326, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_3", "name": "own_greatsword_3", "x": -201.69999694824, "z": -16.700000762939, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_4", "name": "own_greatsword_4", "x": -202.39999389648, "z": -40.400001525879, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_5", "name": "own_greatsword_5", "x": -203.30000305176, "z": -64.199996948242, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_6", "name": "own_greatsword_6", "x": -199.39999389648, "z": 56.299999237061, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_2", "name": "own_halberd_2", "x": -176.19999694824, "z": 142.19999694824, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_swordsmen", "slot": "sword_1", "name": "own_sword_1", "x": -165.5, "z": 13.60000038147, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_3", "name": "own_halberd_3", "x": -246.5, "z": 6.6999998092651, "b": 98.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_4", "name": "own_halberd_4", "x": -249.19999694824, "z": -20.10000038147, "b": 98.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_5", "name": "own_halberd_5", "x": -184.80000305176, "z": -130.60000610352, "b": 98.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_6", "name": "own_halberd_6", "x": -187.39999389648, "z": -151.5, "b": 98.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_swordsmen", "slot": "sword_2", "name": "own_sword_2", "x": -165.5, "z": -29.60000038147, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_dlc13_emp_inf_huntsmen_0", "slot": "huntsmen_1", "name": "own_huntsmen_1", "x": -117.69999694824, "z": 77.599998474121, "b": 98.0, "general": false, "width": 40.0, "men": 90},
+      {"key": "wh3_dlc25_emp_inf_hochland_long_rifles", "slot": "long_rifles_1", "name": "own_long_rifles_1", "x": -175.69999694824, "z": 109.19999694824, "b": 104.0, "general": false, "width": 40.0, "men": 32},
+      {"key": "wh3_dlc25_emp_inf_hochland_long_rifles", "slot": "long_rifles_2", "name": "own_long_rifles_2", "x": -182.39999389648, "z": 85.900001525879, "b": 104.0, "general": false, "width": 40.0, "men": 32},
+      {"key": "wh2_dlc13_emp_inf_huntsmen_0", "slot": "huntsmen_2", "name": "own_huntsmen_2", "x": -109.69999694824, "z": 106.30000305176, "b": 98.0, "general": false, "width": 40.0, "men": 90},
+      {"key": "wh_main_emp_inf_handgunners", "slot": "handgun_1", "name": "own_handgun_1", "x": -219.10000610352, "z": 85.199996948242, "b": 87.0, "general": false, "width": 40.0, "men": 90}
+    ],
+    "2": [
+      {"key": "wh2_main_skv_cha_warlord_0", "slot": "lord", "name": "enemy_lord", "x": 217.19999694824, "z": 18.299999237061, "b": 76.0, "general": true, "width": 5.0, "men": 1},
+      {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword_1", "name": "enemy_slave_sword_1", "x": 185.39999389648, "z": 33.900001525879, "b": 4.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_1", "name": "enemy_giant_rat_poison_1", "x": 224.5, "z": -97.800003051758, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_main_skv_inf_stormvermin_0", "slot": "stormvermin_1", "name": "enemy_stormvermin_1", "x": 187.5, "z": 67.699996948242, "b": 273.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_main_skv_inf_stormvermin_0", "slot": "stormvermin_2", "name": "enemy_stormvermin_2", "x": 188.10000610352, "z": -32.5, "b": 273.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_2", "name": "enemy_giant_rat_poison_2", "x": 224.69999694824, "z": 100.40000152588, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_3", "name": "enemy_giant_rat_poison_3", "x": 224.80000305176, "z": -128.5, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword_2", "name": "enemy_slave_sword_2", "x": 186.5, "z": 2.9000000953674, "b": 3.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_main_skv_inf_gutter_runner_slingers_0", "slot": "gutter_runner_slings_1", "name": "enemy_gutter_runner_slings_1", "x": 253.10000610352, "z": 127.80000305176, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_gutter_runner_slingers_0", "slot": "gutter_runner_slings_2", "name": "enemy_gutter_runner_slings_2", "x": 253.10000610352, "z": 96.0, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_dlc12_skv_inf_warplock_jezzails_0", "slot": "jezzails_1", "name": "enemy_jezzails_1", "x": 224.80000305176, "z": -5.3000001907349, "b": 273.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_dlc12_skv_inf_warplock_jezzails_0", "slot": "jezzails_2", "name": "enemy_jezzails_2", "x": 225.60000610352, "z": 38.0, "b": 273.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_dlc12_skv_inf_ratling_gun_0", "slot": "ratling_1", "name": "enemy_ratling_1", "x": 221.69999694824, "z": -35.5, "b": 273.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_main_skv_inf_gutter_runner_slingers_0", "slot": "gutter_runner_slings_3", "name": "enemy_gutter_runner_slings_3", "x": 251.89999389648, "z": 64.199996948242, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_gutter_runner_slingers_0", "slot": "gutter_runner_slings_4", "name": "enemy_gutter_runner_slings_4", "x": 253.19999694824, "z": 32.400001525879, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_night_runners_1", "slot": "night_runner_1", "name": "enemy_night_runner_1", "x": 255.39999389648, "z": -0.80000001192093, "b": 93.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_gutter_runners_0", "slot": "gutter_runner_stars_1", "name": "enemy_gutter_runner_stars_1", "x": 259.79998779297, "z": -32.099998474121, "b": 81.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_gutter_runners_0", "slot": "gutter_runner_stars_2", "name": "enemy_gutter_runner_stars_2", "x": 260.70001220703, "z": -64.300003051758, "b": 85.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_night_runners_1", "slot": "night_runner_2", "name": "enemy_night_runner_2", "x": 257.20001220703, "z": -96.199996948242, "b": 90.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_night_runners_0", "slot": "night_runner_stars_1", "name": "enemy_night_runner_stars_1", "x": 259.29998779297, "z": -126.40000152588, "b": 273.0, "general": false, "width": 30.0, "men": 120}
+    ]
+  }
+}

@@ -1,0 +1,542 @@
+"""Lord abilities cast by order or by the game's AI (docs/en/training/simulator.md). Every number comes
+from the ability passports (sim/config/abilities.json, the game's database); sim/config/sim.json
+`abilities` says which of them the simulator models (`model`), when the game's AI fires an active one
+(`triggers`) and near_m. Innate abilities - passive ones and those the game fires by itself (passport
+`auto`: Strength of the Penitent) - are innate effects (sim/effects.py): this module leaves
+their slots alone (effects.py shows a timed one's timers in its slot).
+
+Who fires an active ability:
+* a side played by the game's AI (STATIC `ai`) by a rule (measured in 139 gate battles and the lone
+  lord duels, sim/config/sim.json abilities.why): `melee` when its owner is in melee, `near` when a
+  standing enemy is within near_m of him, `waver` when a friend within the ability's range wavers or
+  routs, `never` not at all; and, for an ability in `friends_min`, only with at least that many
+  standing friends within its range (none in a lone duel);
+* any unit when ordered (Orders.ability: the slot to use, -1 none; the network's side) - only a
+  self-cast ability (passport self_cast: used on the owner, no target to choose), ready and not
+  active. A side the network plays should have `ai` false, or its lord also fires by the rule.
+It then lasts active_s and is ready again recharge_s after it ends. Switching off (passport
+off_when): out_of_melee ends an active one at once (recharge from then). An active one goes on when
+its owner routs (only a standing one fires): the recordings show Rally and Stand Your Ground on
+from a routing lord, as Hold the Line (sim/evidence/effects/spec.md 3.4).
+
+Effects (the passport's effects the simulator has a number for, SIM_STATS): on the owner himself
+(the phase targets self) while it is active, on enemies within range_m (targets enemies), and on his
+side's units (targets friends) by the passport's update_targets (the database): true - an aura that
+follows him, on the friends within range_m each step (Rally); false - laid once at the cast on the
+friends within range_m, who keep it active_s wherever they go, and a friend coming in later gets
+nothing (Stand Your Ground; state snap_s / snap_ab: one per unit, a new cast replaces it - one
+ability does not stack). Multipliers multiply, additions add.
+
+Slots: a unit's abilities in order (ordered(): the ones with timers - actives and the game-fired ones - first, then
+passives that reach other units, then the rest, each group by key); the simulator keeps timers for the first SLOTS
+(slot_keys): every timed ability of every unit of our pools fits (tests/tools/test_nn_ability_slots.py), the passives
+are innate effects (effects.py) and need no slot here. The network's input (net/cards/abilities.py) shows all of
+them, none dropped: its timed slot k is this module's slot k.
+On enemies (31.10.2026, the Warp Grinders' Warp-Quake and Seismic Snare: passport targets enemies, column t_en; the game's
+program sim/evidence/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md W1, W5, T1): an active one lies on every enemy
+unit whose centre is within range_m of its owner's centre, and stays on it while that centre is within range_m +
+enemy_hold_m (sim/config/sim.json abilities: 5 m) - the record of the last step, ab_en (INTERNAL, a bitmask over the
+passports' order); the targets are re-picked every step, one beyond that is dropped at once. Visibility plays no part.
+The same ability of two owners does not stack on one enemy (the game finds the record by the ability and the side): its
+stats count once. Its direct damage (the passport's direct, Warp-Quake) is sim/direct.py from_abilities; its
+cant_move (Seismic Snare) the movement's and the orders' (battle.py: snared()). The abilities without t_en (the lords')
+keep their old reach (their enemies' columns are neutral).
+Attributes of an active ability (02.11.2026, Concealment Bombs; class rule, data: the passport's attributes, the phase's
+special_ability_phase_attribute_effects; sim/config/sim.json abilities.attributes): while it is active its owner carries
+the rule flags of the phase's attributes on itself (RULES, as the innate effects' - stalk, unspottable, unbreakable...);
+an attribute on others, or one without a rule here, acts on nothing (ability_rules says which).
+Limited uses (02.11.2026; the passport's uses, the database's num_uses; abilities.uses_limit): ab{k}_n counts down at each
+fire; at 0 the ability does not fire again and its recharge does not run out (the game's program: no recharge starts, the
+button is off to the battle's end; sim/evidence/diag_roster/wh2_main_skv_inf_death_runners_0/mechanic.md 2.2) - the timers show a
+frozen recharge_s, so the network sees it not ready. -1: no limit (every other ability), its timers to the bit as before.
+Received (`ab_rx`, INTERNAL, the network's "effects on me from others"): a bitmask over the passports' order (keys())
+of the abilities of OTHER units on each unit in the last step - a friend's aura or cast laid on it (snap), an enemy's on
+it; effects.py adds the innate auras' (`fx_rx`: Hold the Line); State.observation() gives their union.
+Only json here and in slot_keys(); the tensors need torch.
+"""
+import math
+
+try:
+    import torch
+except ImportError:          # slots_of() is used without torch (params)
+    torch = None
+
+SLOTS = 3
+TRIGGERS = {"passive": 0, "melee": 1, "near": 2, "waver": 3, "losing": 4, "ready": 5, "never": 6}
+OFF = ("out_of_melee", "morale_is_lower_than_half_of_base_morale", "morale_is_higher_than_wavering",
+       "health_below_50%_base")
+GROUPS = ("self", "friends", "enemies")
+STATS = ("speed", "charge_speed", "attack", "defence", "damage", "ap", "charge", "leadership", "resist_physical")
+MULT = ("speed", "charge_speed", "damage", "ap", "charge")
+# (stat, how) of the game's database -> the simulator's stat
+SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"): "charge_speed",
+             ("stat_melee_attack", "add"): "attack", ("stat_melee_defence", "add"): "defence",
+             ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
+             ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
+             ("stat_resistance_physical", "add"): "resist_physical"}
+# The rules a unit's attribute can set -> the unit field that carries the flag for the step (the innate effects' as well:
+# effects.py); unspottable (02.11.2026): an enemy sees it hidden only within stealth.unspottable_m (stealth.py); snipe
+# (08.11.2026): its fire does not reveal it while hidden (stealth.py)
+RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
+         "charge_reflection": "reflect", "fire_while_moving": "fire_move", "fatigue_immune": "fatigue_immune",
+         "stalk": "stalk", "charge_defence_vs_large": "cdl", "charge_defence": "cd", "causes_fear": "fear",
+         "immune_to_psychology": "itp", "causes_terror": "terror", "unspottable": "unsp",
+         "snipe": "snipe"}
+# the database's attribute key where it is not the rule's name (sim/passports/effects.py ATTRIBUTES)
+ATTRIBUTE_RULE = {"charge_defense": "charge_defence", "charge_defense_vs_large": "charge_defence_vs_large",
+                  "mounted_fire_move": "fire_while_moving"}
+# A list to append each step's {ability key: [B, N] bool - on the unit, own or a friend's} to, or None (training:
+# off); the probes' simulator twins read it (game/probe/morale_probe.py).
+RECEIVED = None
+HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto", "friends_min",
+        "vigour", "update") + tuple(
+    f"off_{f}" for f in OFF) + (
+    # (31.10.2026, the Warp Grinders) it lies on enemies (targets enemies: the module doc's "On enemies"); its direct
+    # damage on them - men a tick (dd_n, -1 all; 0 none), the hit's base and min_unary, the tick (s): direct.py; its
+    # phase forbids moving (cant_move)
+    "t_en", "dd_n", "dd_base", "dd_low", "dd_s", "cant_move",
+    # (the passport's loop_stance: the Grinders turn their drills in place) its owner takes no order and stands while
+    # it is active (busy())
+    "loop") + tuple(f"rule_{r}" for r in RULES)        # (02.11.2026) its phase's attributes on its owner (module doc)
+COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
+COL = {c: i for i, c in enumerate(COLS)}
+
+
+def keys(params):
+    """Ability keys in table order (the passports, sorted)."""
+    return sorted(params.abilities)
+
+
+def ordered(unit_key, units, passports):
+    """All the unit's abilities with a passport, in order: actives and game-fired ones (timers), then passives that
+    reach other units, then the rest, each group by key."""
+    own = [k for k in (units.get(unit_key) or {}).get("abilities") or () if k in passports]
+
+    def order(k):
+        p = passports[k]
+        reach = p["targets"].get("friends") or p["targets"].get("enemies")
+        return (bool(p["passive"]), bool(p["passive"]) and not reach, k)
+    return sorted(own, key=order)
+
+
+def slot_keys(unit_key, units, passports):
+    """The unit's abilities in the simulator's SLOTS slots ("" = empty): the first SLOTS of ordered()."""
+    own = ordered(unit_key, units, passports)[:SLOTS]
+    return own + [""] * (SLOTS - len(own))
+
+
+def slots_of(params, unit_key):
+    """Indices of the unit's abilities in the table (-1: none), SLOTS of them."""
+    names = keys(params)
+    return [names.index(k) if k else -1 for k in slot_keys(unit_key, params.units, params.abilities)]
+
+
+def effects(passport):
+    """{(group, stat): value} of the stats the simulator models; multipliers multiplied, additions summed."""
+    out = {}
+    for e in passport["effects"]:
+        stat = SIM_STATS.get((e["stat"], e["how"]))
+        if stat is None:
+            continue
+        for g in e["on"]:
+            k = (g, stat)
+            if stat in MULT:
+                out[k] = out.get(k, 1.0) * float(e["value"])
+            else:
+                out[k] = out.get(k, 0.0) + float(e["value"])
+    return out
+
+
+def rules_of(passport):
+    """The rules (RULES) the phase's attributes set on the ability's owner himself (module doc)."""
+    out = []
+    for a in passport.get("attributes") or ():
+        r = ATTRIBUTE_RULE.get(a.get("attribute"), a.get("attribute"))
+        if r in RULES and "self" in (a.get("on") or ()) and r not in out:
+            out.append(r)
+    return out
+
+
+def ability_rules(params):
+    """The rules any modelled active ability of the passports sets (module doc), abilities.attributes on; only json - the
+    step reads no tensor for a rule nobody gives (old armies: bit for bit)."""
+    cal = params.sim["abilities"]
+    if not (cal.get("attributes") or {}).get("on"):
+        return ()
+    model = set(cal["model"])
+    out = []
+    for k, p in params.abilities.items():
+        if k in model and not p["passive"] and not p.get("auto"):
+            out += [r for r in rules_of(p) if r not in out]
+    return tuple(out)
+
+
+def uses_table(params):
+    """[A + 1] the uses of each ability (-1: no limit, also the last row: no ability; abilities.uses_limit off: all -1).
+    Only json."""
+    on = (params.sim["abilities"].get("uses_limit") or {}).get("on")
+    return [int(params.abilities[k].get("uses", -1)) if on else -1 for k in keys(params)] + [-1]
+
+
+def row(params, key):
+    """One ability's row of the table (COLS)."""
+    p = params.abilities[key]
+    cal = params.sim["abilities"]
+    auto = bool(p.get("auto"))
+    if p["passive"]:
+        trigger = "passive"
+    elif auto:
+        trigger = "ready"            # the game fires it whenever ready (sim/effects.py times it)
+    else:
+        trigger = cal["triggers"].get(key, cal["default_trigger"])
+    eff = effects(p)
+    out = [float(p["active_s"]), float(p["recharge_s"]), float(p["passive"]), float(TRIGGERS[trigger]),
+           float(p["range_m"]), float(p["self_cast"]) * float(not auto), float(key in cal["model"]), float(auto),
+           float((cal.get("friends_min") or {}).get(key, 0)), float(p.get("vigour_per_s", 0.0)),
+           float(p.get("update_targets", True))]
+    out += [float(f in (p.get("off_when") or ())) for f in OFF]
+    d = p.get("direct") or {}
+    en = bool((p.get("targets") or {}).get("enemies")) and not p["passive"] and not auto
+    hit = en and "enemies" in (d.get("on") or ()) and float(d.get("every_s") or 0) > 0
+    out += [float(en), float(d["entities"]) if hit else 0.0,
+            float(math.floor(max(1.0, float(d["amount"]) * float(d.get("scale", 1.0))))) if hit else 0.0,
+            float(d.get("min_unary", 1.0)) if hit else 0.0, float(d["every_s"]) if hit else 0.0,
+            float(bool(p.get("cant_move")) and en), float(bool(p.get("loop_stance")) and not p["passive"])]
+    own = rules_of(p) if not p["passive"] and not auto else ()
+    out += [float(r in own) for r in RULES]
+    for g in GROUPS:
+        for s in STATS:
+            out.append(eff.get((g, s), 1.0 if s in MULT else 0.0))
+    return out
+
+
+def table(params, device):
+    """[A + 1, COLS]: every ability; the last row (index -1) is no ability."""
+    rows = [row(params, k) for k in keys(params)]
+    empty = [0.0] * len(HEAD) + [1.0 if s in MULT else 0.0 for _ in GROUPS for s in STATS]
+    return torch.tensor(rows + [empty], device=device)
+
+
+def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=None):
+    """Advance the timers, fire abilities (the game's AI by its rule, the network by `use` [B, N]:
+    the slot to fire, -1 none) and lay their effects on u (in place). Returns the fields it changed
+    with their old values, for restore(). fx_speed: {stat: the innate effects' (factor, (v - 1) sum, count)} of this
+    step (effects.apply, effects.speed_add / mult_add): a unit's multipliers of those stats from both add as the game's."""
+    T = table(params, u["men"].device)
+    near_m = float(params.sim["abilities"]["near_m"])
+    eye = torch.eye(u["men"].shape[1], dtype=torch.bool, device=u["men"].device)[None]
+    present = u["side"] > 0
+    foe_near = (~same_side & standing[:, None, :] & (dist <= near_m)).any(2)
+    shaky = (u["w"] | u["r"]) & (u["men"] > 0)
+    alive = present & (u["men"] > 0) & ~u["gone"]
+    # losing the melee: the morale's fight balance of the last step below 0 (u cmb, morale.combat_points)
+    if "cmb" in u:
+        losing = engaged & (u["cmb"] < 0)
+    else:
+        lose_ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
+        losing = engaged & ((u["taken"] + 1.0) >= lose_ratio * (u["dealt"] + 1.0))
+    # an ability laid on a unit at a friend's cast (update_targets false): its seconds left, its index
+    snap = (u["snap_s"] - dt).clamp(min=0) if "snap_s" in u else None
+    snap_ab = u["snap_ab"].clone() if "snap_ab" in u else None
+    got = {} if RECEIVED is not None else None
+    # conditions that hold an effect off (OFF)
+    L = u["leadership"].clamp(min=1)
+    off_now = {"out_of_melee": ~engaged, "morale_is_lower_than_half_of_base_morale": u["morale"] < 0.5 * L,
+               "morale_is_higher_than_wavering": ~(u["w"] | u["r"]), "health_below_50%_base": u["hp"] < 0.5}
+    zero = torch.zeros_like(u["men"])
+    log = {s: zero.clone() for s in MULT}
+    add = {s: zero.clone() for s in STATS if s not in MULT}
+    # (effects.speed_add, mult_add) the multipliers of these stats laid here: their (v - 1) summed and how many
+    stack = tuple(s for s in (fx_speed or ()) if s in MULT)
+    sd, sn = {s: zero.clone() for s in stack}, {s: zero.clone() for s in stack}
+    use = torch.full_like(u["ab0"], -1) if use is None else use
+    A = T.shape[0] - 1
+    by_targets = bool(params.sim["abilities"].get("enemies_by_targets"))
+    rx = zero[..., None].expand(-1, -1, A + 1).clone() if "ab_rx" in u else None     # [B, N, A + 1] received
+    # (the module doc's "On enemies") the abilities on enemies: the last step's records (ab_en) held to range + hold
+    hold_m = float(params.sim["abilities"].get("enemy_hold_m", 0.0))
+    t_en_any = on_enemies(params) and "ab_en" in u
+    # (module doc) the attributes' rule flags: the old values for restore(), then what the active abilities add
+    given = ability_rules(params)
+    rule_old = {RULES[r]: u[RULES[r]] for r in given}
+    rule_on = {r: torch.zeros_like(present) for r in given}
+    if t_en_any:
+        en_cnt = zero[..., None].expand(-1, -1, A + 1).clone()                            # [B, j, a] owners reaching
+        en_prev = (u["ab_en"][..., None] >> torch.arange(A + 1, device=u["men"].device)) & 1    # [B, j, a]
+    for k in range(SLOTS):
+        r = T[u[f"ab{k}"]]                          # [B, N, COLS]; -1 picks the empty last row
+        c = lambda name: r[..., COL[name]]
+        passive, trig, rng = c("passive") > 0, c("trigger"), c("range_m")
+        # innate (passive or fired by the game itself): sim/effects.py
+        has = (u[f"ab{k}"] >= 0) & ~passive & ~(c("auto") > 0)
+        on = (u[f"ab{k}_on"] - dt).clamp(min=0)
+        cd = (u[f"ab{k}_cd"] - dt).clamp(min=0)
+        friends = same_side & ~eye & present[:, None, :] & (dist <= rng[:, :, None])     # owner i -> unit j
+        enemies = ~same_side & present[:, None, :] & (rng[:, :, None] > 0) & (dist <= rng[:, :, None])
+        if by_targets:
+            # (abilities.enemies_by_targets) an ability reaches enemies only when it targets them (t_en: the passport's
+            # targets.enemies) - a friends' aura (Rally) lay on no enemy, yet the enemies within its range saw it in
+            # their ab_rx (the game's card shows a phase only on a unit it lies on: companion exchange.received)
+            enemies = enemies & (c("t_en") > 0)[:, :, None]
+        friend_shaky = (friends & shaky[:, None, :]).any(2)
+        want = torch.where(trig == 1, engaged, torch.where(trig == 2, foe_near, torch.where(
+            trig == 3, friend_shaky, torch.where(trig == 4, losing, trig == 5))))
+        # friends_min: the game's AI fires it only with that many standing friends within its range
+        want = want & ((friends & standing[:, None, :]).sum(2) >= c("friends_min"))
+        off = torch.zeros_like(engaged)
+        for f in OFF:
+            off = off | ((c(f"off_{f}") > 0) & off_now[f])
+        ready = standing & has & ~passive & (on <= 0) & (cd <= 0) & ~off
+        ordered = (use == k) & (c("self_cast") > 0)
+        n_key = f"ab{k}_n"
+        if n_key in u:
+            ready = ready & (u[n_key] != 0)       # (module doc) limited uses: none left, no fire
+        fire = ready & ((u["ai"] & want) | ordered)
+        on = torch.where(fire, c("active_s"), on)
+        cd = torch.where(fire, c("active_s") + c("recharge_s"), cd)
+        if n_key in u:
+            u[n_key] = torch.where(fire & (u[n_key] > 0), u[n_key] - 1, u[n_key])
+            # the last use: its recharge does not run out, the timers show it frozen at recharge_s
+            cd = torch.where(u[n_key] == 0, torch.maximum(cd, c("recharge_s")), cd)
+        # switched off while active: it ends now and recharges from now
+        ended = (on > 0) & off
+        cd = torch.where(ended, torch.minimum(cd, c("recharge_s").clamp(min=0)), cd)
+        on = torch.where(ended, torch.zeros_like(on), on)
+        u[f"ab{k}_on"] = torch.where(has, on, u[f"ab{k}_on"])
+        u[f"ab{k}_cd"] = torch.where(has, cd, u[f"ab{k}_cd"])
+        # active: its owner alive (routing too: it goes on, spec 3.4)
+        active = has & alive & (c("modelled") > 0) & (on > 0)
+        for rl in given:
+            rule_on[rl] = rule_on[rl] | (active & (c(f"rule_{rl}") > 0))
+        follow = c("update") > 0                    # an aura that follows the owner (update_targets)
+        reach = {"self": eye & active[:, :, None], "friends": friends & (active & follow)[:, :, None],
+                 "enemies": enemies & active[:, :, None]}
+        if t_en_any:
+            # an ability on enemies: within range_m, or held to range_m + hold_m by the last step's record; its stats
+            # once per enemy whatever the owners (below), not in the old reach
+            t_en = c("t_en") > 0
+            a_k = u[f"ab{k}"].clamp(min=0)
+            was = en_prev.gather(2, a_k[:, None, :].expand(-1, en_prev.shape[1], -1)).transpose(1, 2) > 0   # [B, i, j]
+            near = ~same_side & present[:, None, :] & (rng[:, :, None] > 0) & (
+                (dist <= rng[:, :, None]) | (was & (dist <= (rng + hold_m)[:, :, None])))
+            on_en = near & (active & t_en)[:, :, None]
+            oh_k = torch.nn.functional.one_hot(a_k, A + 1).float() * (u[f"ab{k}"] >= 0)[..., None]
+            en_cnt = en_cnt + torch.einsum("bij,bia->bja", on_en.float(), oh_k)
+            reach["enemies"] = torch.where(t_en[:, :, None], on_en, reach["enemies"])
+        if snap is not None:
+            # laid once at the cast on the friends in range (update_targets false): they keep it active_s
+            cast = friends & (fire & ~follow & (c("modelled") > 0) & (c("active_s") > 0))[:, :, None]
+            hit = cast.any(1)
+            src = torch.where(cast, u[f"ab{k}"][:, :, None].expand_as(cast),
+                              torch.full_like(cast, -1, dtype=torch.long)).max(1).values
+            snap = torch.where(hit, T[src, COL["active_s"]], snap)
+            snap_ab = torch.where(hit, src, snap_ab)
+        if rx is not None:
+            # from other units: a friend's aura or an enemy's (the owner himself is in reach["self"] only)
+            oh = torch.nn.functional.one_hot(u[f"ab{k}"].clamp(min=0), A + 1).float() * (u[f"ab{k}"] >= 0)[..., None]
+            rx = rx + torch.einsum("bij,bia->bja", (reach["friends"] | reach["enemies"]).float(), oh)
+        if got is not None:
+            for a in range(T.shape[0] - 1):
+                mine = (u[f"ab{k}"] == a)[:, :, None]
+                g = ((reach["self"] | reach["friends"]) & mine).any(1)
+                if bool(g.any()):
+                    got[a] = got.get(a, torch.zeros_like(g)) | g
+        for g in GROUPS:
+            give = reach[g].float()
+            if g == "enemies" and t_en_any:
+                give = (reach[g] & ~(c("t_en") > 0)[:, :, None]).float()      # (t_en: once per enemy, below)
+            for s in stack:
+                v = c(f"{g}_{s}")
+                sd[s] = sd[s] + torch.einsum("bij,bi->bj", give, v - 1)
+                sn[s] = sn[s] + torch.einsum("bij,bi->bj", give, (v != 1).float())
+            for s in STATS:
+                v = c(f"{g}_{s}")
+                if s in MULT:
+                    log[s] = log[s] + torch.einsum("bij,bi->bj", give, torch.log(v.clamp(min=1e-6)))
+                else:
+                    add[s] = add[s] + torch.einsum("bij,bi->bj", give, v)
+    if t_en_any:
+        # the abilities on enemies: each one's stats once on every enemy it lies on (the game's one record per ability
+        # and side), and the records for the next step's hold (ab_en)
+        on_a = (en_cnt[..., :A] > 0) & present[..., None]                                # [B, j, a]
+        for s in stack:
+            v = T[:A, COL[f"enemies_{s}"]]
+            sd[s] = sd[s] + (on_a.float() * (v - 1)).sum(-1)
+            sn[s] = sn[s] + (on_a.float() * (v != 1).float()).sum(-1)
+        for s in STATS:
+            v = T[:A, COL[f"enemies_{s}"]]
+            if s in MULT:
+                log[s] = log[s] + (on_a.float() * torch.log(v.clamp(min=1e-6))).sum(-1)
+            else:
+                add[s] = add[s] + (on_a.float() * v).sum(-1)
+        u["ab_en"] = bits(on_a)
+    if snap is not None:
+        # the friends' stats of the ability laid on each unit at a cast (on a living unit)
+        held = (snap > 0) & (snap_ab >= 0) & alive
+        r = T[snap_ab]
+        for s in stack:
+            v = r[..., COL[f"friends_{s}"]]
+            sd[s] = sd[s] + torch.where(held, v - 1, torch.zeros_like(v))
+            sn[s] = sn[s] + torch.where(held, (v != 1).float(), torch.zeros_like(v))
+        for s in STATS:
+            v = r[..., COL[f"friends_{s}"]]
+            if s in MULT:
+                log[s] = log[s] + torch.where(held, torch.log(v.clamp(min=1e-6)), torch.zeros_like(v))
+            else:
+                add[s] = add[s] + torch.where(held, v, torch.zeros_like(v))
+        if rx is not None:
+            rx = rx + torch.nn.functional.one_hot(snap_ab.clamp(min=0), A + 1).float() * held[..., None]
+        u["snap_s"] = torch.where(snap > 0, snap, torch.zeros_like(snap))
+        u["snap_ab"] = torch.where(snap > 0, snap_ab, torch.full_like(snap_ab, -1))
+        if got is not None:
+            for a in range(T.shape[0] - 1):
+                g = held & (snap_ab == a)
+                if bool(g.any()):
+                    got[a] = got.get(a, torch.zeros_like(g)) | g
+    if rx is not None:
+        u["ab_rx"] = bits(rx[..., :A] > 0)
+    if got is not None:
+        names = keys(params)
+        RECEIVED.append({names[a]: g for a, g in got.items()})
+    old = {k: u[k] for k in ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack",
+                              "defence", "morale_bonus", "resist_physical")}
+    for rl in given:
+        old[RULES[rl]] = rule_old[RULES[rl]]
+        u[RULES[rl]] = u[RULES[rl]] | rule_on[rl]
+    # scalar_charge_speed, when an ability gives it, sets the charge speed; else scalar_speed scales it too
+    charge_speed = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
+
+
+    def over(s):
+        """(effects.speed_add, mult_add) two or more multipliers of a stat on a unit, here and among the innate effects
+        (fx_speed): 1 + all their (v - 1) summed instead of the product (the game: reverse/notes/contact_effects_module.md 2.4;
+        the Warp-Quake's x0.75 with the Gutter Runners' net x0.9: 0.65, not 0.675); the field holds the innate factor
+        already, so this step's factor is the sum over it. One alone (or none here) as before, bit for bit."""
+        m = torch.exp(log[s])
+        if s not in stack:
+            return m, None
+        m_e, sd_e, sn_e = fx_speed[s]
+        two = (sn[s] >= 1) & (sn[s] + sn_e >= 2)
+        summed = (1 + sd_e + sd[s]).clamp(min=0.05) / m_e.clamp(min=1e-6)
+        return torch.where(two, summed, m), two
+    speed, two = over("speed")
+    if two is not None:
+        # the charge speed with it where no ability gives scalar_charge_speed
+        charge_speed = torch.where(two & (log["charge_speed"].abs() <= 1e-9), speed, charge_speed)
+    u["walk"], u["run"] = u["walk"] * speed, u["run"] * speed
+    u["charge_speed"] = u["charge_speed"] * charge_speed
+    u["damage"] = u["damage"] * over("damage")[0]
+    u["ap_damage"] = u["ap_damage"] * over("ap")[0]
+    u["charge_bonus"] = u["charge_bonus"] * over("charge")[0]
+    u["attack"] = u["attack"] + add["attack"]
+    u["defence"] = u["defence"] + add["defence"]
+    u["morale_bonus"] = u["morale_bonus"] + add["leadership"]
+    # resistances add up to a 90 % cap (docs/en/game/mechanics/missiles.md)
+    u["resist_physical"] = (u["resist_physical"] + add["resist_physical"] / 100).clamp(max=0.9)
+    return old
+
+
+def on_enemies(params):
+    """Is any ability of the passports an active one on enemies (the module doc's "On enemies"; only json - no tensor
+    read in the compiled step)?"""
+    return any((p.get("targets") or {}).get("enemies") and not p["passive"] and not p.get("auto")
+               for p in params.abilities.values())
+
+
+def busy(u, params):
+    """[B, N] bool or None (no such ability modelled): units with an own active ability of loop stance on (passport
+    loop_stance: the Warp Grinders' Warp-Quake and Seismic Snare) by their timers ab{k}_on - they take no order and stand
+    (battle.py; the probe 'grinder', tmp/old-build/diag_grinder: the game's status 'unorderable' all its 17 / 13 s, a move order
+    given 2 s into Warp-Quake refused and not taken up after it)."""
+    model = set(params.sim["abilities"]["model"])
+    if not any(p.get("loop_stance") and k in model for k, p in params.abilities.items()):
+        return None
+    T = table(params, u["men"].device)
+    out = torch.zeros_like(u["side"] > 0)
+    for k in range(SLOTS):
+        r = T[u[f"ab{k}"]]
+        out = out | ((u[f"ab{k}"] >= 0) & (r[..., COL["loop"]] > 0) & (r[..., COL["modelled"]] > 0)
+                     & (u[f"ab{k}_on"] > 0))
+    return out & (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+
+
+def snare_bits(params):
+    """The bitmask over keys() of the modelled abilities on enemies whose phase forbids moving (passport cant_move: the
+    Warp Grinders' Seismic Snare); 0 none. Only json."""
+    model = set(params.sim["abilities"]["model"])
+    out = 0
+    for a, k in enumerate(keys(params)):
+        p = params.abilities[k]
+        if p.get("cant_move") and (p.get("targets") or {}).get("enemies") and not p["passive"] and k in model:
+            out |= 1 << a
+    return out
+
+
+def snared(u, params):
+    """[B, N] bool or None (no such ability, or no records): the units an enemy's cant_move ability lies on by the records
+    ab_en (abilities.apply: the last step's, or this step's once apply ran) - they refuse an order to move or to attack
+    a target not within reach and do not walk (battle.py; sim/evidence/diag_roster/wh2_dlc14_skv_inf_warp_grinder_0/mechanic.md
+    T2: their melee goes on; the probe 'grinder': walking swordsmen stopped at once and stood after it - the order to move
+    is gone). A router is held too with sim/config/sim.json abilities.cant_move.routers (the probe: routers stood the 13 s
+    and ran on after it)."""
+    cm = params.sim["abilities"].get("cant_move") or {}
+    m = snare_bits(params)
+    if not m or not cm.get("on") or "ab_en" not in u:
+        return None
+    on = (u["ab_en"] & m) != 0
+    if not cm.get("routers"):
+        on = on & ~u["r"]
+    return on & (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+
+
+def restore(u, old):
+    u.update(old)
+
+
+def bits(flags):
+    """[..., A] bool -> [...] int64 bitmask (bit a: flags[..., a]); at most 62 abilities. Out of the compiled step
+    (torch.compiler.disable): fused into it, the bitmask's 13-wide reduction drew the whole tail of the step into one
+    persistent Triton kernel of ~190 arguments that Triton 3.7 cannot build ('operand does not dominate this use',
+    PassManager::run failed - 25.10.2026, the abilities of line g43)."""
+    assert flags.shape[-1] <= 62, "the received bitmask holds 62 abilities"
+    return (flags.long() << torch.arange(flags.shape[-1], device=flags.device)).sum(-1)
+
+
+if torch is not None:
+    bits = torch.compiler.disable(bits)
+
+
+def vigour(u, params, standing):
+    """[B, N] the share of the maximum fatigue each unit loses a second from its own active abilities (the
+    database's special_ability_phases fatigue_change_ratio, abilities.json vigour_per_s: Foe-Seeker -0.01, 1 % of
+    30000 a second; the in-game probe tmp/old-build/movelords). Call after apply() (the timers of this step)."""
+    T = table(params, u["men"].device)
+    out = torch.zeros_like(u["men"])
+    for k in range(SLOTS):
+        r = T[u[f"ab{k}"]]
+        has = (u[f"ab{k}"] >= 0) & ~(r[..., COL["passive"]] > 0) & ~(r[..., COL["auto"]] > 0)
+        alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+        active = has & alive & (r[..., COL["modelled"]] > 0) & (u[f"ab{k}_on"] > 0)
+        out = out + torch.where(active, r[..., COL["vigour"]], torch.zeros_like(out))
+    return out
+
+
+def set_rule(u, by_rule):
+    """Who fires abilities by the game-AI rule, per battle and side: by_rule [B, 2] bool (side 1,
+    side 2); the skirmish mode's toggle `sk` follows it (on for the rule's sides). A side a network
+    plays must be False (it fires by order), whichever side it is: scenario.build sets `ai` for side 2
+    by default. Call it again after battles restart from a bank
+    (their rows bring the bank's `ai`). In place."""
+    side = u["side"]
+    rule = by_rule.to(torch.bool)
+    u["ai"] = ((side == 1) & rule[:, 0:1]) | ((side == 2) & rule[:, 1:2])
+    if "sk" in u and "sk_m" in u:
+        # the skirmish mode's toggle goes with it (skirmish.py): on for the scripts' shooters, as the game's AI keeps it;
+        # off for a network's, as the bridge switches it off
+        u["sk"] = u["ai"] & (u["sk_m"] > 0)
+
+
+def timers(u):
+    """The abilities' state as the observation reads it: {"ab{k}_on", "ab{k}_cd"} [B, N] (s)."""
+    return {f"ab{k}_{t}": u[f"ab{k}_{t}"] for k in range(SLOTS) for t in ("on", "cd")}
+

@@ -1,0 +1,9 @@
+# reverse/: in git - notes (*.md), scripts (*.py), tools/, mem/; outside git - reverse/ghidra/ (Ghidra, JDK, project,
+# exe 15.10, tables, venv) and the raw of the topics in notes/<topic>/ (.c decompiles, .txt/.asm/.json dumps, .pkl)
+/ghidra/
+notes/**
+!notes/**/
+!notes/**/*.md
+!notes/**/*.py
+__pycache__/
+*.pyc

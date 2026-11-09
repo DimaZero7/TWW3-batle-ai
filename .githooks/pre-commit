@@ -1,11 +1,9 @@
 #!/bin/sh
-# The tests before every commit (docs/ru/testing/tests.md); CI runs them on every push
-# (.github/workflows/tests.yml).
+# The fast tests before every commit (seconds): host python, the *_torch tests skip here - the drills' measures and
+# the parity (contract/) run in the container: bash ops/dock.sh pytest -q (before a merge, by hand or by an agent).
 # Enable once: git config core.hooksPath .githooks
 # Skip only with a reason: git commit --no-verify
-if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe
-elif [ -x .venv/bin/python ]; then PY=.venv/bin/python
-else PY=python; fi
+. ops/python.sh
 "$PY" -m pytest -q -p no:cacheprovider || {
   echo "pre-commit: tests failed, commit stopped" >&2
   exit 1

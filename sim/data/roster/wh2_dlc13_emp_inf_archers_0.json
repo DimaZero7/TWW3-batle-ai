@@ -1,0 +1,169 @@
+{
+  "key": "wh2_dlc13_emp_inf_archers_0",
+  "card": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "9311677532973b64",
+    "run": "20260927T170740-roster-29",
+    "profile": {
+      "commanding": false,
+      "fast_speed": 3.2999999523163,
+      "flags": {
+        "is_anti_cavalry_infantry": false,
+        "is_artillery": false,
+        "is_cavalry": false,
+        "is_chariot": false,
+        "is_elephants": false,
+        "is_infantry": true,
+        "is_lancers": false,
+        "is_pikemen": false,
+        "is_war_beasts": false,
+        "is_war_machine": false
+      },
+      "initial_number_of_men": 90,
+      "missile_range": 130,
+      "owned_non_passive_special_abilities": {},
+      "owned_passive_special_abilities": {},
+      "slow_speed": 1.5,
+      "starting_ammo": 1800,
+      "type": "wh2_dlc13_emp_inf_archers_0",
+      "unit_class": "inf_mis"
+    },
+    "details": {
+      "HealthMax": 6210,
+      "Mass": 90,
+      "Name": "Лучники",
+      "NumEntitiesInitial": 90
+    },
+    "stats": {
+      "stat_armour": {
+        "value": 20,
+        "displayed": 20,
+        "base": 20
+      },
+      "stat_morale": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "scalar_speed": {
+        "value": 33,
+        "displayed": 33,
+        "base": 33
+      },
+      "stat_melee_attack": {
+        "value": 14,
+        "displayed": 14,
+        "base": 14
+      },
+      "stat_melee_defence": {
+        "value": 17,
+        "displayed": 17,
+        "base": 17
+      },
+      "stat_weapon_damage": {
+        "value": 24,
+        "displayed": 24,
+        "base": 24
+      },
+      "stat_charge_bonus": {
+        "value": 4,
+        "displayed": 4,
+        "base": 4
+      },
+      "stat_ammo": {
+        "value": 20,
+        "displayed": 20,
+        "base": 20
+      },
+      "scalar_missile_range": {
+        "value": 130,
+        "displayed": 130,
+        "base": 130
+      },
+      "stat_missile_damage_over_time": {
+        "value": 19,
+        "displayed": 19,
+        "base": 19
+      }
+    }
+  },
+  "formation": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "9311677532973b64",
+    "run": "20260927T170740-roster-29",
+    "widths": [
+      {
+        "ordered_m": 80,
+        "front_m": 77.3,
+        "depth_m": 7.6,
+        "reform_s": 19.0,
+        "ended": "arrived",
+        "men": 90
+      },
+      {
+        "ordered_m": 60,
+        "front_m": 59.3,
+        "depth_m": 7.9,
+        "reform_s": 13.0,
+        "ended": "arrived",
+        "men": 90
+      },
+      {
+        "ordered_m": 40,
+        "front_m": 38.9,
+        "depth_m": 11.0,
+        "reform_s": 7.0,
+        "ended": "arrived",
+        "men": 90
+      },
+      {
+        "ordered_m": 30,
+        "front_m": 29.9,
+        "depth_m": 12.8,
+        "reform_s": 5.0,
+        "ended": "arrived",
+        "men": 90
+      },
+      {
+        "ordered_m": 20,
+        "front_m": 20.2,
+        "depth_m": 18.0,
+        "reform_s": 9.0,
+        "ended": "stopped",
+        "men": 90
+      },
+      {
+        "ordered_m": 15,
+        "front_m": 14.3,
+        "depth_m": 27.1,
+        "reform_s": 14.0,
+        "ended": "stopped",
+        "men": 90
+      },
+      {
+        "ordered_m": 10,
+        "front_m": 10.9,
+        "depth_m": 36.6,
+        "reform_s": 21.0,
+        "ended": "stopped",
+        "men": 90
+      },
+      {
+        "ordered_m": 8,
+        "front_m": 9.1,
+        "depth_m": 46.3,
+        "reform_s": 28.0,
+        "ended": "stopped",
+        "men": 90
+      }
+    ]
+  },
+  "ours": {
+    "fire": "arc",
+    "roles": [],
+    "notes": "Луки: навесной огонь, могут стрелять из-за своей пехоты (решение пользователя, 27.09.2026)."
+  },
+  "battle": {}
+}

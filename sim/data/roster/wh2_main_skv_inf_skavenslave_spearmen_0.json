@@ -1,0 +1,157 @@
+{
+  "key": "wh2_main_skv_inf_skavenslave_spearmen_0",
+  "card": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "ed6db434d8414818",
+    "run": "20260927T212729-roster-56",
+    "profile": {
+      "commanding": false,
+      "fast_speed": 4.1999998092651,
+      "flags": {
+        "is_anti_cavalry_infantry": false,
+        "is_artillery": false,
+        "is_cavalry": false,
+        "is_chariot": false,
+        "is_elephants": false,
+        "is_infantry": true,
+        "is_lancers": false,
+        "is_pikemen": false,
+        "is_war_beasts": false,
+        "is_war_machine": false
+      },
+      "initial_number_of_men": 180,
+      "missile_range": 0,
+      "owned_non_passive_special_abilities": {},
+      "owned_passive_special_abilities": [
+        "wh2_main_unit_passive_strength_in_numbers",
+        "wh2_main_unit_passive_scurry_away"
+      ],
+      "slow_speed": 1.5,
+      "starting_ammo": 0,
+      "type": "wh2_main_skv_inf_skavenslave_spearmen_0",
+      "unit_class": "inf_mel"
+    },
+    "details": {
+      "HealthMax": 9000,
+      "Mass": 90,
+      "Name": "Скавенские рабы с копьями",
+      "NumEntitiesInitial": 180
+    },
+    "stats": {
+      "stat_armour": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "stat_morale": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "scalar_speed": {
+        "value": 42,
+        "displayed": 42,
+        "base": 42
+      },
+      "stat_melee_attack": {
+        "value": 9,
+        "displayed": 9,
+        "base": 9
+      },
+      "stat_melee_defence": {
+        "value": 16,
+        "displayed": 16,
+        "base": 16
+      },
+      "stat_weapon_damage": {
+        "value": 16,
+        "displayed": 16,
+        "base": 16
+      },
+      "stat_charge_bonus": {
+        "value": 3,
+        "displayed": 3,
+        "base": 3
+      }
+    }
+  },
+  "formation": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "ed6db434d8414818",
+    "run": "20260927T212729-roster-56",
+    "widths": [
+      {
+        "ordered_m": 80,
+        "front_m": 78.5,
+        "depth_m": 9.7,
+        "reform_s": 22.0,
+        "ended": "arrived",
+        "men": 180
+      },
+      {
+        "ordered_m": 60,
+        "front_m": 57.8,
+        "depth_m": 11.1,
+        "reform_s": 14.0,
+        "ended": "arrived",
+        "men": 180
+      },
+      {
+        "ordered_m": 40,
+        "front_m": 41.3,
+        "depth_m": 17.0,
+        "reform_s": 8.0,
+        "ended": "stopped",
+        "men": 180
+      },
+      {
+        "ordered_m": 30,
+        "front_m": 30.5,
+        "depth_m": 20.3,
+        "reform_s": 5.0,
+        "ended": "stopped",
+        "men": 180
+      },
+      {
+        "ordered_m": 20,
+        "front_m": 21.7,
+        "depth_m": 28.9,
+        "reform_s": 16.0,
+        "ended": "stopped",
+        "men": 180
+      },
+      {
+        "ordered_m": 15,
+        "front_m": 15.2,
+        "depth_m": 37.4,
+        "reform_s": 19.0,
+        "ended": "stopped",
+        "men": 180
+      },
+      {
+        "ordered_m": 10,
+        "front_m": 11.1,
+        "depth_m": 53.8,
+        "reform_s": 31.0,
+        "ended": "stopped",
+        "men": 180
+      },
+      {
+        "ordered_m": 8,
+        "front_m": 10.3,
+        "depth_m": 65.7,
+        "reform_s": 37.0,
+        "ended": "stopped",
+        "men": 180
+      }
+    ]
+  },
+  "ours": {
+    "fire": null,
+    "roles": [],
+    "notes": ""
+  },
+  "battle": {}
+}

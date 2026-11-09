@@ -1,0 +1,341 @@
+{
+ "name": "ksl_plains_01",
+ "map": "terrain\\battles\\wh3_main_macro_ksl_plains_01\\",
+ "catchment": "",
+ "frame": {
+  "min_x": -512,
+  "max_x": 512,
+  "min_z": -512,
+  "max_z": 512
+ },
+ "grid": {
+  "x0": -512.0,
+  "z0": -512.0,
+  "step": 1.0,
+  "columns": 1025,
+  "rows": 1025,
+  "layout": "height[iz, ix] at x = x0 + ix * step, z = z0 + iz * step (world metres)",
+  "nodes": true
+ },
+ "height_m": {
+  "min": 190.141,
+  "max": 270.632,
+  "mean": 221.523
+ },
+ "clear_share": 0.9239,
+ "ground_names": [
+  "forest",
+  "grass",
+  "mud",
+  "rock",
+  "sharp_stones",
+  "snow"
+ ],
+ "ground_share": {
+  "forest": 0.1232,
+  "grass": 0.7525,
+  "mud": 0.1013,
+  "rock": 0.0093,
+  "sharp_stones": 0.0105,
+  "snow": 0.0032
+ },
+ "deployment_zones": [
+  {
+   "alliance": 0,
+   "x": 120.0,
+   "z": -190.0,
+   "width": 200.0,
+   "depth": 120.0,
+   "bearing_deg": 270.05,
+   "corners": [
+    [
+     179.92,
+     -290.05
+    ],
+    [
+     180.08,
+     -90.05
+    ],
+    [
+     60.08,
+     -89.95
+    ],
+    [
+     59.92,
+     -289.95
+    ]
+   ]
+  },
+  {
+   "alliance": 1,
+   "x": -120.0,
+   "z": -190.0,
+   "width": 200.0,
+   "depth": 120.0,
+   "bearing_deg": 89.95,
+   "corners": [
+    [
+     -180.08,
+     -90.05
+    ],
+    [
+     -179.92,
+     -290.05
+    ],
+    [
+     -59.92,
+     -289.95
+    ],
+    [
+     -60.08,
+     -89.95
+    ]
+   ]
+  }
+ ],
+ "zones_note": "the capture scenario's deployment areas (scenarios/map_capture.xml), not the map's own",
+ "source": {
+  "run": "build\\map-capture\\runs\\20261028-191604",
+  "call": "bm:get_terrain_height(x, z) (src/apps/map/adapter.lua read_batch)",
+  "cells": 1050625,
+  "clock_elapsed_s": 14.455001831055,
+  "build": "bde90845053fff8e"
+ },
+ "date": "2026-10-28",
+ "passable": {
+  "file": "passable.npz",
+  "layout": "blocked[iz, ix] uint8, 1 = a unit cannot stand there",
+  "source": "unit:can_reach_position (both units), bm:is_area_clear outside the read",
+  "blocked": 79329,
+  "blocked_share": 0.0755,
+  "cells": 1050625,
+  "reach_read": 1050625,
+  "reach_differs": 0,
+  "clear_not_reach": 1680,
+  "not_clear_reach": 2316,
+  "blocked_by_ground": {
+   "forest": "4535 of 129390",
+   "grass": "54547 of 790594",
+   "mud": "7740 of 106402",
+   "rock": "1805 of 9781",
+   "sharp_stones": "10529 of 11082",
+   "snow": "173 of 3376"
+  },
+  "run": "build\\map-capture\\runs\\20261031-154111"
+ },
+ "game_deployment_zones": [
+  {
+   "alliance": 0,
+   "x": -184.0,
+   "z": 0.0,
+   "corners": [
+    [
+     -96.0,
+     -168.0
+    ],
+    [
+     -96.0,
+     168.0
+    ],
+    [
+     -100.0,
+     184.0
+    ],
+    [
+     -104.0,
+     192.0
+    ],
+    [
+     -112.0,
+     200.0
+    ],
+    [
+     -120.0,
+     204.0
+    ],
+    [
+     -136.0,
+     208.0
+    ],
+    [
+     -232.0,
+     208.0
+    ],
+    [
+     -248.0,
+     204.0
+    ],
+    [
+     -256.0,
+     200.0
+    ],
+    [
+     -264.0,
+     192.0
+    ],
+    [
+     -268.0,
+     184.0
+    ],
+    [
+     -272.0,
+     168.0
+    ],
+    [
+     -272.0,
+     -168.0
+    ],
+    [
+     -268.0,
+     -182.0
+    ],
+    [
+     -264.0,
+     -192.0
+    ],
+    [
+     -256.0,
+     -200.0
+    ],
+    [
+     -248.0,
+     -204.0
+    ],
+    [
+     -232.0,
+     -208.0
+    ],
+    [
+     -136.0,
+     -208.0
+    ],
+    [
+     -120.0,
+     -204.0
+    ],
+    [
+     -112.0,
+     -200.0
+    ],
+    [
+     -104.0,
+     -192.0
+    ],
+    [
+     -100.0,
+     -184.0
+    ]
+   ],
+   "width": 416.0,
+   "depth": 176.0,
+   "bearing_deg": 90.0
+  },
+  {
+   "alliance": 1,
+   "x": 184.0,
+   "z": 0.0,
+   "corners": [
+    [
+     112.0,
+     -200.0
+    ],
+    [
+     120.0,
+     -204.0
+    ],
+    [
+     136.0,
+     -208.0
+    ],
+    [
+     232.0,
+     -208.0
+    ],
+    [
+     248.0,
+     -204.0
+    ],
+    [
+     256.0,
+     -200.0
+    ],
+    [
+     264.0,
+     -192.0
+    ],
+    [
+     268.0,
+     -184.0
+    ],
+    [
+     272.0,
+     -168.0
+    ],
+    [
+     272.0,
+     168.0
+    ],
+    [
+     268.0,
+     184.0
+    ],
+    [
+     264.0,
+     192.0
+    ],
+    [
+     256.0,
+     200.0
+    ],
+    [
+     248.0,
+     204.0
+    ],
+    [
+     232.0,
+     208.0
+    ],
+    [
+     136.0,
+     208.0
+    ],
+    [
+     120.0,
+     204.0
+    ],
+    [
+     112.0,
+     200.0
+    ],
+    [
+     104.0,
+     192.0
+    ],
+    [
+     100.0,
+     184.0
+    ],
+    [
+     96.0,
+     168.0
+    ],
+    [
+     96.0,
+     -167.62
+    ],
+    [
+     100.0,
+     -184.0
+    ],
+    [
+     104.0,
+     -192.0
+    ]
+   ],
+   "width": 416.0,
+   "depth": 176.0,
+   "bearing_deg": 270.0
+  }
+ ],
+ "game_deployment_source": "terrain.pack terrain\\deployment\\east.xml: the game's deployment of a land battle on a map without its own (tools/nn/arena_map.py)"
+}

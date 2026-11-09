@@ -1,0 +1,157 @@
+{
+  "key": "wh2_main_skv_inf_clanrats_0",
+  "card": {
+    "date": "2026-10-07",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "7b29e15b9c0ba48f",
+    "run": "20261007T124711-roster-597",
+    "profile": {
+      "commanding": false,
+      "fast_speed": 4.1999998092651,
+      "flags": {
+        "is_anti_cavalry_infantry": false,
+        "is_artillery": false,
+        "is_cavalry": false,
+        "is_chariot": false,
+        "is_elephants": false,
+        "is_infantry": true,
+        "is_lancers": false,
+        "is_pikemen": false,
+        "is_war_beasts": false,
+        "is_war_machine": false
+      },
+      "initial_number_of_men": 160,
+      "missile_range": 0,
+      "owned_non_passive_special_abilities": {},
+      "owned_passive_special_abilities": [
+        "wh2_main_unit_passive_scurry_away",
+        "wh2_main_unit_passive_strength_in_numbers"
+      ],
+      "slow_speed": 1.5,
+      "starting_ammo": 0,
+      "type": "wh2_main_skv_inf_clanrats_0",
+      "unit_class": "inf_mel"
+    },
+    "details": {
+      "HealthMax": 9600,
+      "Mass": 100,
+      "Name": "Кланокрысы",
+      "NumEntitiesInitial": 160
+    },
+    "stats": {
+      "stat_armour": {
+        "value": 25,
+        "displayed": 25,
+        "base": 25
+      },
+      "stat_morale": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "scalar_speed": {
+        "value": 42,
+        "displayed": 42,
+        "base": 42
+      },
+      "stat_melee_attack": {
+        "value": 24,
+        "displayed": 24,
+        "base": 24
+      },
+      "stat_melee_defence": {
+        "value": 18,
+        "displayed": 18,
+        "base": 18
+      },
+      "stat_weapon_damage": {
+        "value": 26,
+        "displayed": 26,
+        "base": 26
+      },
+      "stat_charge_bonus": {
+        "value": 10,
+        "displayed": 10,
+        "base": 10
+      }
+    }
+  },
+  "formation": {
+    "date": "2026-10-07",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "7b29e15b9c0ba48f",
+    "run": "20261007T124711-roster-597",
+    "widths": [
+      {
+        "ordered_m": 80,
+        "front_m": 78.5,
+        "depth_m": 6.7,
+        "reform_s": 24.0,
+        "ended": "arrived",
+        "men": 160
+      },
+      {
+        "ordered_m": 60,
+        "front_m": 58.4,
+        "depth_m": 8.4,
+        "reform_s": 14.0,
+        "ended": "arrived",
+        "men": 160
+      },
+      {
+        "ordered_m": 40,
+        "front_m": 39.4,
+        "depth_m": 12.1,
+        "reform_s": 8.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 30,
+        "front_m": 28.5,
+        "depth_m": 15.0,
+        "reform_s": 3.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 20,
+        "front_m": 19.0,
+        "depth_m": 23.1,
+        "reform_s": 11.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 15,
+        "front_m": 15.9,
+        "depth_m": 30.1,
+        "reform_s": 17.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 10,
+        "front_m": 9.7,
+        "depth_m": 45.3,
+        "reform_s": 29.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 8,
+        "front_m": 7.8,
+        "depth_m": 53.6,
+        "reform_s": 36.0,
+        "ended": "stopped",
+        "men": 160
+      }
+    ]
+  },
+  "ours": {
+    "fire": null,
+    "roles": [],
+    "notes": ""
+  },
+  "battle": {}
+}

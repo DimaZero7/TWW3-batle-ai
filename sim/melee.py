@@ -1,0 +1,1262 @@
+"""Melee: who strikes whom and how much health it takes (docs/en/training/simulator.md,
+docs/en/game/mechanics/melee.md).
+
+Per pair of units in contact (i strikes j), per second:
+
+    men striking F  = fighting_files x (length of the sides in contact / the striker's spacing along its side:
+                      h across its front or back, v along a flank; its formation template, sim/config/units.json
+                      spacing; an ellipse body - a beast - takes its width there, melee.body_across), at most
+                      men (through the target's flank: the striker's own side, melee.flank_face "striker");
+                      against a single man (a lord) at most lord_max_attackers in all, however many units surround him (the lord swarm probe, docs/en/game/units/lord-swarm.md);
+                      a lone large body (a monster) the ring of men round it, a formation its face's share (ring,
+                      ring_face: half); a formation of large bodies wider apart than two (the rat ogres: contact.sparse)
+                      k_fit bodies a place, each striking (sparse_files); a single man
+                      strikes once; a unit in contact with several enemies shares out no more than its own front
+                      holds; a unit attacking another enemy strikes one it only touches at contact.unit_incidental
+                      (a lord: lord_incidental) of its rate; a formation without a missile weapon under HOLD (no
+                      attack order; a missile unit too: contact.hold_missile) or under a MOVE still in contact (contact.hold_move) strikes at contact.hold_rate
+                      of it (measured: the melee probe's held units 0.49-0.52 of the rule, move lanes 0.70 of
+                      attacking), except its blows reflecting a charge (contact.hold_reflect_full); a lone man (a lord)
+                      under HOLD strikes in full (the damage plan)
+    hit chance p    = 35 + attack + charge bonus x charge left + bonus v target - defence x direction (rounded half
+                      away from zero), within 8-90, less melee.hit_roll_offset (1), / 100 (the game's rules; the
+                      database's melee_hit_chance_*)
+    hits a second   = p / (p x interval + miss_s) a fighting man: the interval runs after a hit, a miss costs
+                      melee.miss_s (tmp/old-build/hitchance: 121 battles of formations); a lone man striking a lone man
+                      (lord against lord): p / interval (the lone lord duels: a blow every 4 s, 41 % hit)
+    per hit         = the armour-piercing part whole + the base part less the armour roll (U(0.5, 1) x armour
+                      %, at most 100 %), then resistance (at most 90 %); damage beyond the struck man's health is
+                      lost (overkill, smoothed: per_hit); bonus v infantry / large and the charge bonus split by
+                      the weapon's armour-piercing share (CA)
+    struck          = men a blow strikes: 1; a lord's splash blow on a formation contact.lord_splash_struck
+                      (measured 2.07), each taking 1 / splash_max_attacks of the blow (CA 5.1.0: divided)
+    HP/s            = F x struck x hits a second x per hit
+    first strike    = F x struck x p x per hit, once (swing), not cut by hold_rate (contact.first_strike_full): the
+                      interval runs only after a blow, so a unit coming into a fight (moving in, or its charge landing)
+                      or a standing one reached by an enemy it faces strikes once at once with every man in contact
+                      (battle.py decides when: a formation at its first contact of the battle only, contact.opening_once);
+                      F without the opening wave (contact.first_strike_steady)
+
+Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database, weight 1;
+a standing lone man: contact.lord_direction of it - the lord swarm probe's measure, the game's rules have no separate
+branch for lone men -, a routing lone man: lone_rout.direction, in full). A unit brings to each side of its formation no
+more men than that side holds. A lone man fought by the enemy lord takes lord_rival_others of the infantry's rate.
+Charge (battle.py): an attack order, a run-up and the charge's own clock, linear to 0 over charge_decay_duration
+(13 s); its first blows are the first strike above; nothing beyond the bonus (no impact, no ramp: CA,
+sim/evidence/charge/spec.md). A braced unit with
+charge_reflection strikes a charger in front of it (within bracing_attack_angle) whose charge is still at least
+charge_reflect_min_charge_factor_threshold at charge_reflect_damage_multiplier of its damage (database). A braced
+unit with charge_defense_vs_large cancels the charge bonus of a large charger (size above small: cavalry) within
+contact.charge_defence front_deg (45) of its front, one with charge_defense of any charger (the game's program).
+A splash blow strikes several men only of a target no larger than the weapon's splash_attack_target_size
+(melee.splash_by_size); the charge's front rank counts the formation template's files (contact.first_strike_rank_template).
+Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate of the
+rule and no charge (measured; the game's rules give every pursuit blow the whole charge - a known gap); a large striker
+(the cavalry) on a smaller router with the whole charge, no decay (contact.pursuit_large_charge, the game's rule); a lone
+striker on a router at the rule in full, on his routing attack target with the whole charge (the game's rules:
+lone_rout, sim/config/sim.json contact.lone_rout); a chaser that keeps up engulfs it (contact.pursue_envelop), its men running in
+from their ranks since the rout (contact.pursue_envelop_run).
+"""
+import torch
+
+from sim import fatigue, geometry, knobs, lone_rout, stack
+from sim import orders as O
+
+
+def hit_chance(attack, defence, slope=1.0, base=35.0, lo=8.0, hi=90.0, offset=0.0):
+    """The hit chance 0-1 (slope: the database's melee_hit_chance_normalisation_coefficient, 1): the clamped score less
+    offset, / 100 (the game's rules: (score - 1) / 100 - melee.hit_roll_offset 1)."""
+    return (torch.clamp(base + slope * (attack - defence), lo, hi) - offset) / 100
+
+
+def round_half_away(x):
+    """x rounded to the nearest whole number, halves away from zero (13.5 -> 14, -2.5 -> -3)."""
+    return torch.sign(x) * torch.floor(x.abs() + 0.5)
+
+
+def directional_defence(defence, factor):
+    """The defence a blow meets: defence x factor (the flank's 0.6, the rear's 0.3), rounded half away from zero where
+    the factor cuts it (the game's rules); unchanged where factor is 1."""
+    cut = defence * factor
+    return torch.where(factor < 1.0, round_half_away(cut), cut)
+
+
+def armour_cut(armour):
+    """Mean share of the base damage the armour roll stops: U(0.5, 1) x armour %, each roll at most 100 %
+    (CA Feature Focus #2: Damage; the database's armour_roll_lower_cap 0.5): 0.75 a up to a = 1 (armour 100),
+    2 - 1/a - a/4 up to 2, then 1."""
+    a = (torch.as_tensor(armour) / 100).clamp(min=0)
+    mid = 2 - 1 / a.clamp(min=1e-6) - a / 4
+    return torch.where(a <= 1, 0.75 * a, torch.where(a < 2, mid, torch.ones_like(a)))
+
+
+def per_hit(base, ap, armour, hp_man, resist=0.0, single=None):
+    """HP a hit takes from the struck unit (sim/evidence/damage/spec.md D1-D3). The armour-piercing part whole, the base
+    part less the armour roll (armour_cut), then resistance (the caller sums them, at most 90 %). Damage beyond the
+    struck man's health is lost (overkill, CA): a unit of many men loses hp / E[hits to kill a man], smoothed - the
+    first hit exactly (it kills when the roll leaves at least his health), the rest on average:
+    E[N] = 1 + P(the first hit leaves him alive) x max(1, (hp - E[first hit, at most hp]) / mean + 1/2).
+    single (bool, broadcastable): a lone man (a lord) - his health is one pool, he loses the mean."""
+    keep = 1 - torch.as_tensor(resist)
+    a = (torch.as_tensor(armour) / 100).clamp(min=0)
+    lo = ((ap + base * (1 - a).clamp(min=0)) * keep).clamp(min=1)
+    hi = ((ap + base * (1 - a / 2).clamp(min=0)) * keep).clamp(min=1)
+    mu = ((ap + base * (1 - armour_cut(armour))) * keep).clamp(min=1)
+    w = hi - lo
+    p1 = torch.where(w > 1e-6, ((hp_man - lo) / w.clamp(min=1e-6)).clamp(0, 1), (lo < hp_man).to(lo.dtype))
+    tail = ((hp_man - (lo + torch.minimum(hi, hp_man)) / 2) / mu + 0.5).clamp(min=1)
+    eff = hp_man / (1 + p1 * tail)
+    return eff if single is None else torch.where(single, mu, eff)
+
+
+def fresh_hit(base, ap, armour, hp_man, resist=0.0, single=None):
+    """HP a hit takes from an unwounded man: E[min(X, HP a man)], X the hit's HP before his health caps it - the
+    armour-piercing part whole, the base part less the armour roll U(0.5, 1) x armour % (uniform between per_hit's
+    lo and hi; their mean per_hit's mu). per_hit's HP a hit is the long fight's mean, each man cut down in E[N] blows
+    (the killing blow's surplus lost); this is the first blow on a man, whose surplus nothing loses (kills.wound_hp:
+    the game's memory, tmp/old-build/diag_mem/melee: the HP of a hit = min(X, the struck man's HP) blow by blow). single: a lone
+    man - his health is one pool, the mean (as per_hit)."""
+    keep = 1 - torch.as_tensor(resist)
+    a = (torch.as_tensor(armour) / 100).clamp(min=0)
+    lo = ((ap + base * (1 - a).clamp(min=0)) * keep).clamp(min=1)
+    hi = ((ap + base * (1 - a / 2).clamp(min=0)) * keep).clamp(min=1)
+    mu = ((ap + base * (1 - armour_cut(armour))) * keep).clamp(min=1)
+    h = torch.as_tensor(hp_man, dtype=lo.dtype)
+    w = (hi - lo).clamp(min=1e-6)
+    part = ((h - lo) * (h + lo) / 2 + h * (hi - h)) / w
+    r = torch.where(h >= hi, mu, torch.where(h <= lo, h.expand_as(lo), part))
+    r = torch.minimum(r, mu)
+    return r if single is None else torch.where(single, mu, r)
+
+
+def fresh_kill(base, ap, armour, hp_man, resist=0.0, single=None):
+    """P(a hit kills an unwounded man outright): P(X >= HP a man), X uniform between per_hit's lo and hi (fresh_hit);
+    0 for a lone man (one pool of health)."""
+    keep = 1 - torch.as_tensor(resist)
+    a = (torch.as_tensor(armour) / 100).clamp(min=0)
+    lo = ((ap + base * (1 - a).clamp(min=0)) * keep).clamp(min=1)
+    hi = ((ap + base * (1 - a / 2).clamp(min=0)) * keep).clamp(min=1)
+    h = torch.as_tensor(hp_man, dtype=lo.dtype)
+    w = hi - lo
+    q = torch.where(w > 1e-6, ((hi - h) / w.clamp(min=1e-6)).clamp(0, 1), (lo >= h).to(lo.dtype))
+    return q if single is None else torch.where(single, torch.zeros_like(q), q)
+
+
+def wound_hp(u, hp, hit, fresh, F_men, own_k=None):
+    """kills.wound_hp (with kills.wound_pool; battle.py): the HP the blows take [B, N, N] (striker, struck) and their HP
+    a hit, when the struck unit's wounded are fewer than the pool's steady level. The game takes a hit's HP up to the
+    struck man's health (min(X, his HP): the game's memory, tmp/old-build/diag_mem/melee - 1930 strikes, the rule's HP a hit
+    with the struck man's HP 19.2-22.7 against the game's 19.3-22.4); per_hit's HP a hit hp / E[N] is the steady mean,
+    the killing blow's surplus lost at every man. A unit coming fresh into a fight has no wounded: its men take the whole
+    hit (fresh_hit) until they are cut down. Kept as the wound pool's own bookkeeping (battle.py kills.wound_pool: the
+    pool W of the living's wounds fills to W* = the unit's own men in contact x (HP a man - the hit) before a blow kills):
+    the surplus of the killing blows is lost only at the kills, so the HP taken D and the kills K x HP a man solve
+    D = H x fresh - K x HP a man x (fresh / hit - 1) with K x HP a man = clamp(W + D - W*, 0, D): D = the old
+    H x hit once the pool is full, H x fresh while W + D stays below W*, between them D = H hit + (W* - W)(1 - hit / fresh).
+    H: the hits (hp / hit). A lone man (a lord) is one pool: unchanged. own_k [B, N] (kills.wound_face_cavalry, battle.py):
+    the pool's men x it. Returns (hp, hit) - the hits' count kept."""
+    hm = u["hp_man"].clamp(min=1e-6)
+    ratio = (fresh / hit.clamp(min=1e-6)).clamp(min=1.0)
+    raw = hp * ratio
+    D, R = hp.sum(1), raw.sum(1)
+    hit_m = (hp * hit).sum(1) / D.clamp(min=1e-9)
+    own = F_men.sum(2)
+    own = torch.where(own > 0, own, F_men.sum(1))
+    if own_k is not None:
+        own = own * own_k
+    own = own.clamp(max=u["men"].clamp(min=0))
+    W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
+    gap = (own * (hm - hit_m).clamp(min=0) - W).clamp(min=0)
+    Dn = D + gap * (1 - D / R.clamp(min=1e-9))
+    Dn = torch.minimum(torch.maximum(Dn, D), R)
+    room = R - D
+    extra = torch.where((u["men0"] > 1) & (room > 1e-9), Dn - D, torch.zeros_like(D))
+    hp_new = hp + (raw - hp) / room.clamp(min=1e-9)[:, None, :] * extra[:, None, :]
+    hit_new = torch.where(hp > 0, hit * hp_new / hp.clamp(min=1e-12), hit)
+    return hp_new, hit_new
+
+
+def kill_share(hp_man, hit, exponent):
+    """Men lost per man's worth of HP lost: 1 when a hit kills, less when blows only wound."""
+    n = (hp_man / hit.clamp(min=1e-6)).clamp(min=1)
+    return n.pow(-exponent)
+
+
+def shot_kills(hits, men, hp_man, hp_abs, per_hit):
+    """Men killed by `hits` projectile hits on a unit [B, N] (kills.missile_uniform; tmp/old-build/open2: the thin probe).
+    Every man has his own health and a projectile strikes one man; the hits spread evenly over the living men, so
+    a man's hits are Poisson: with tau hits a man so far and K = HP a man / per_hit hits to kill him (E[N],
+    smoothed as per_hit), the living share is Q(K, tau) (the regularised upper gamma: P(fewer than K hits)) and
+    `hits` more on A living men kill A x (1 - Q(K, tau + hits / A) / Q(K, tau)). tau comes from the unit's own
+    wounded: the living men's mean hits so far E[k | k < K] = tau Q(K - 1, tau) / Q(K, tau) = W / (A x per_hit),
+    W = men x HP a man - the unit's HP (the wounds of any source). A hit that kills (K <= 1) is a man."""
+    A = men.clamp(min=1e-6)
+    K = (hp_man / per_hit.clamp(min=1e-6)).clamp(min=1.0)
+    m_obs = ((men * hp_man - hp_abs).clamp(min=0) / (A * per_hit.clamp(min=1e-6)))
+    Ks = K.clamp(min=1.02)
+    m_obs = torch.minimum(m_obs, 0.95 * (Ks - 1))
+    lo, hi = torch.zeros_like(K), 4 * Ks + 30
+    lg = torch.lgamma(Ks)
+    for _ in range(16):                     # E[k | k < K] grows with tau: bisection (to ~1e-3 of a hit)
+        mid = (lo + hi) / 2
+        q = torch.special.gammaincc(Ks, mid).clamp(min=1e-30)
+        # Q(K - 1, tau) = Q(K, tau) - tau^(K-1) e^-tau / Gamma(K)
+        pk = torch.exp((Ks - 1) * torch.log(mid.clamp(min=1e-30)) - mid - lg)
+        m = mid * (1 - pk / q)
+        up = m < m_obs
+        lo, hi = torch.where(up, mid, lo), torch.where(up, hi, mid)
+    tau = (lo + hi) / 2
+    s0 = torch.special.gammaincc(Ks, tau).clamp(min=1e-30)
+    s1 = torch.special.gammaincc(Ks, tau + hits / A)
+    k = A * (1 - s1 / s0).clamp(0, 1)
+    return torch.where(K < 1.02, hits, k).clamp(min=0) * (men > 0)
+
+
+def _tau_of(m_obs, Ks):
+    """tau with E[k | k < K] = tau Q(K - 1, tau) / Q(K, tau) = m_obs (bisection, as shot_kills)."""
+    m_obs = torch.minimum(m_obs, 0.95 * (Ks - 1))
+    lo, hi = torch.zeros_like(Ks), 4 * Ks + 30
+    lg = torch.lgamma(Ks)
+    for _ in range(16):
+        mid = (lo + hi) / 2
+        q = torch.special.gammaincc(Ks, mid).clamp(min=1e-30)
+        pk = torch.exp((Ks - 1) * torch.log(mid.clamp(min=1e-30)) - mid - lg)
+        m = mid * (1 - pk / q)
+        up = m < m_obs
+        lo, hi = torch.where(up, mid, lo), torch.where(up, hi, mid)
+    return (lo + hi) / 2
+
+
+def _pool(n, tau, x, Ks):
+    """One pool of n living men with Poisson(tau) hits so far (each under K) taking x more hits a man: (men killed,
+    hits beyond the dead men's K - lost, a man's health is all he loses -, the survivors' mean hits)."""
+    s0 = torch.special.gammaincc(Ks, tau).clamp(min=1e-30)
+    t1 = tau + x
+    s1 = torch.special.gammaincc(Ks, t1)
+    kills = n * (1 - s1 / s0).clamp(0, 1)
+
+    def excess(t):                       # E[(S - K)+], S ~ Poisson(t)
+        return t * (1 - torch.special.gammaincc(Ks - 1, t)) - Ks * (1 - torch.special.gammaincc(Ks, t))
+    # E[(S - K)+ ; k0 < K] = E+(tau + x) - E+(tau) - x P(k0 >= K), over the living at the start (/ s0)
+    waste = n * ((excess(t1) - excess(tau) - x * (1 - s0)).clamp(min=0) / s0)
+    waste = torch.minimum(waste, n * x)
+    mean = t1 * torch.special.gammaincc(Ks - 1, t1) / s1.clamp(min=1e-30)
+    return kills, waste, torch.minimum(mean, Ks)
+
+
+def front_kills(h_front, h_rest, men, front, hp_man, hp_abs, per_hit, fw):
+    """Projectile kills with the front rank struck first (kills.missile_front; missile.front_share): the unit's living
+    men are two pools - its front rank (`front` men: its files, at most its men) and the rest - each man with his own
+    health and Poisson hits (shot_kills). h_front hits fall on the front rank only, h_rest spread evenly over all the
+    living. fw: the front rank's wounds (HP it lacks; the rest's are the unit's wounds W less these). A front man who
+    dies is replaced by a man of the rest stepping up (the game's file closing up), his wounds with him. Returns
+    (men killed, hits lost beyond the dead men's health - a man takes at most his health, CA -, the front's new
+    wounds). No fitted number: the front's share is the spread model's, the pools Poisson as shot_kills."""
+    A = men.clamp(min=1e-6)
+    a = torch.minimum(front, men).clamp(min=1e-6)
+    rest = (men - a).clamp(min=0)
+    ph = per_hit.clamp(min=1e-6)
+    K = (hp_man / ph).clamp(min=1.0)
+    Ks = K.clamp(min=1.02)
+    W = (men * hp_man - hp_abs).clamp(min=0)
+    Wa = torch.minimum(fw.clamp(min=0), W)
+    Wr = W - Wa
+    xr = h_rest / A
+    xa = h_front / a + xr
+    ta = _tau_of(Wa / (a * ph), Ks)
+    tr = _tau_of(Wr / (rest.clamp(min=1e-6) * ph), Ks)
+    ka, wa, ma = _pool(a, ta, xa, Ks)
+    kr, wr, mr = _pool(rest, tr, xr, Ks)
+    kr = torch.where(rest > 0, kr, torch.zeros_like(kr))
+    wr = torch.where(rest > 0, wr, torch.zeros_like(wr))
+    up = torch.minimum(ka, (rest - kr).clamp(min=0))          # the men stepping up into the front's gaps
+    fw_new = ph * ((a - ka).clamp(min=0) * ma + up * mr)
+    one = K < 1.02                                            # a hit that kills: a man a hit, nothing lost
+    hits = h_front + h_rest
+    kills = torch.where(one, hits, ka + kr).clamp(min=0) * (men > 0)
+    lost = torch.where(one, torch.zeros_like(hits), wa + wr) * (men > 0)
+    return kills, lost, torch.where(one | (men <= 0), torch.zeros_like(fw_new), fw_new)
+
+
+def spacing_of(u, spacing):
+    """(h, v) [B, N]: a man's place across the front and between ranks, m (the unit's formation template,
+    sim/config/units.json spacing; `spacing` where a unit has none)."""
+    if "sp_h" not in u:
+        return torch.full_like(u["men"], float(spacing)), torch.full_like(u["men"], float(spacing))
+    h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], float(spacing)))
+    v = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], float(spacing)))
+    return h, v
+
+
+def contact_spacing(u, h, v, on):
+    """(h, v) [B, N]: a man's place along a contact, m (melee.body_across; on False: the formation's h, v). In melee the
+    men close up to their neighbours body to body, keeping the template's gap between bodies, and face the enemy: an
+    ellipse body (the database's battle_entities shape 'ellipse', radius long, radius x radii_ratio across - a beast, a
+    weapon team) takes its width, not its length, so its place is h - 2 r (1 - radii_ratio) (v the same); a circle
+    (every man of the infantry: radii_ratio 1) keeps h, v."""
+    if not on or "body_ratio" not in u:
+        return h, v
+    ratio = u["body_ratio"]
+    ratio = torch.where(ratio > 0, ratio, torch.ones_like(ratio)).clamp(max=1)
+    cut = 2 * u["radius"] * (1 - ratio)
+    return (h - cut).clamp(min=0.3), (v - cut).clamp(min=0.3)
+
+
+def front_overlap(u, pw, through_front, face_i):
+    """(overlap, excess_lo, excess_hi) [B, i, j], m: i's side towards j (its front of face_i, or its flank: the depth)
+    against j's box seen along that side (j's front and depth at j's bearing); the overlap, and how far i's side runs
+    past j's box at its low and its high end (0 where it does not)."""
+    b = u["b"] * geometry.DEG
+    sb, cb = torch.sin(b), torch.cos(b)
+    lx = torch.where(through_front, cb[:, :, None], sb[:, :, None])
+    lz = torch.where(through_front, -sb[:, :, None], cb[:, :, None])
+    half = torch.where(through_front, face_i, pw["depth"][:, :, None].expand_as(face_i)) / 2
+    rx = u["x"][:, None, :] - u["x"][:, :, None]
+    rz = u["z"][:, None, :] - u["z"][:, :, None]
+    off = rx * lx + rz * lz                                    # j's centre along i's side
+    ext = (pw["front"][:, None, :] / 2 * (cb[:, None, :] * lx - sb[:, None, :] * lz).abs()
+           + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
+    ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
+    lo = (off - ext + half).clamp(min=0)
+    hi = (half - off - ext).clamp(min=0)
+    return ov, torch.minimum(lo, 2 * half), torch.minimum(hi, 2 * half)
+
+
+def target_face_cap(F, used, side_j, pw, single_i, single_j, w=None):
+    """F [B, N, N] (i strikes j) with melee.target_face_cap: the formations coming at j through the same side of j
+    (side_j: 0 front, 1 / 2 flanks, 3 back - seen from j) share its length - each takes used [B, N, N] metres of it
+    (its men striking x its own spacing / fighting_files), together no more than the side is long or than the longest
+    single attacker takes (a lone attacker keeps what it brings: through a flank by its own front, melee.flank_face).
+    A lone striker or target is not capped. w [B, N, N] (melee.face_cap_wave): F is the waved men, each striker's
+    metres are used x its wave, and the side holds its length x the smallest wave among its strikers (the side's oldest
+    pair; 1 for every striker: the cap without the wave)."""
+    front_j, depth_j = pw["front"][:, None, :], pw["depth"][:, None, :]
+    for g in range(4):
+        in_g = (side_j == g) & ~single_i
+        u_g = torch.where(in_g, used, torch.zeros_like(used))
+        side_len = torch.maximum(front_j if g in (0, 3) else depth_j, u_g.amax(dim=1, keepdim=True))
+        if w is None:
+            tot = u_g.sum(dim=1, keepdim=True)
+            cap = side_len
+        else:
+            tot = torch.where(in_g, used * w, torch.zeros_like(used)).sum(dim=1, keepdim=True)
+            w_side = torch.where(in_g & (used > 0), w, torch.full_like(w, 1e6)).amin(dim=1, keepdim=True)
+            cap = side_len * w_side
+        F = torch.where(in_g & ~single_j & (tot > cap), F * cap / tot.clamp(min=1e-6), F)
+    return F
+
+
+def ring(u, single_j):
+    """[B, i, j] how many men of i strike a lone large body j at once (contact.ring_big; sim/evidence/diag_skv_mon/mechanic.md M2,
+    sim_gap.md 1): the game has no cap on the men striking one - every man whose body touches the target's strikes -, so
+    it is the men that stand round its body: the ring of their centres at their radius r_i off the body's edge, over a
+    man's place 2 r_i. The body (the database's battle_entities): a circle of radius R, or a capsule R long with radius
+    R x radii_ratio across (its straight sides 2 R (1 - ratio) long; an ellipse taken the same way):
+        n = (2 x 2 R (1 - q) + 2 pi (R q + r_i)) / (2 r_i)
+    The lord (R 0.7, q 1) and a spearman (r 0.65): 6.52 - the lord swarm probe's measured 6.5 (contact.lord_max_attackers);
+    the Rat Ogre Mutant (R 2.0): 12.8; the Brood Horror (capsule 3.8 x 0.36: 7.6 x 2.74 m): 17.2 (a circle 7.6 m across
+    would give 21.5)."""
+    R = u["radius"][:, None, :]
+    q = u["body_ratio"][:, None, :].clamp(0.05, 1.0) if "body_ratio" in u else torch.ones_like(R)
+    r = u["radius"][:, :, None].clamp(min=0.2)
+    n = (4 * R * (1 - q) + 2 * torch.pi * (R * q + r)) / (2 * r)
+    return torch.where(single_j, n, torch.zeros_like(n))
+
+
+def ring_face(cc):
+    """The share of a lone large body's ring one formation brings (contact.ring_big face; tmp/old-build/diag_simfix ring.py): a
+    formation standing in its line meets a monster with its face - its men stand round the part of the body on their
+    side of the front line, the body's centre on that line (the monster probe 30.10: the Horror's and the Mutant's
+    centre -2..+1 m off the spearmen's front at 5-12 s, the men within 2.5 m of the body at 0-90 deg from the way in,
+    none behind it) - half the ring of a circle or a capsule end on; absent: the whole ring (1)."""
+    return float((cc.get("ring_big") or {}).get("face", 1.0))
+
+
+def sparse_files(u, h, cc):
+    """[B, N, 1] for a formation of large bodies wider apart than two of them (contact.sparse; the rat ogres): k_fit =
+    floor(h / (2 r + 2 clear_m)), the bodies one man's place along the contact holds side by side (h the place, r the
+    body's radius, clear_m the game's push-apart margin a body: sim/evidence/diag_cav/mechanic.md M3), when k_fit >= 2 and
+    the unit is of size min_size or larger and has more than one man; 0 elsewhere (the fighting_files share as before).
+    None with the switch off."""
+    sp = cc.get("sparse") or {}
+    if not sp.get("on") or "size_k" not in u:
+        return None
+    k = torch.floor(h / (2 * u["radius"] + 2 * float(sp.get("clear_m", 0.25))).clamp(min=1e-3) + 1e-6)
+    ok = (u["men0"] > 1) & (u["size_k"] >= float(sp.get("min_size", 3))) & (k >= 2)
+    return torch.where(ok, k, torch.zeros_like(k))[:, :, None]
+
+
+def big_lone(u):
+    """[B, N] a lone body of size large or above (a monster: the Brood Horror, the Mutant; size_k >= 3), the targets of
+    contact.ring_big and missile.big_single_in_melee; False for the lords and every unit of the pools before them."""
+    if "size_k" not in u:
+        return torch.zeros_like(u["men0"], dtype=torch.bool)
+    return (u["men0"] <= 1) & (u["size_k"] >= 3)
+
+
+def resist_of(u, cal):
+    """[B, i, j] the resistance i's blows meet on j (melee.resist_sum; sim/evidence/diag_skv_mon/mechanic.md M20-M22): the game sums
+    the target's resistances that apply to the blow and caps the sum at ward_save_max_value 90 % (at least
+    ward_save_min_value -100 %) - the fire's (resist_flame: Regeneration's -20 %) for a flaming blow (flaming: the Blazing Sun),
+    the physical unless the blow is magical, the magic one (spell resistance) if it is (mmagic: the Mutant's claws, the
+    censer, the plain Giant Rats). The magic rule for the strikers of melee.magic_scope ("all": every one, the game's rule -
+    the censer bearers' blows on the Knights of the Blazing Sun x0.75; "large": the monsters only). Everywhere else the
+    physical alone, as before (bit for bit)."""
+    rp = u["resist_physical"][:, None, :]
+    if not cal.get("resist_sum") or "resist_flame" not in u:
+        return rp
+    rp = rp.expand(u["men"].shape[0], u["men"].shape[1], u["men"].shape[1])
+    scope = cal.get("magic_scope")
+    if scope == "all":
+        magic = u["mmagic"][:, :, None]
+    elif scope == "large":
+        magic = (u["mmagic"] & (u["size_k"] >= 3))[:, :, None]
+    else:
+        magic = torch.zeros_like(u["mmagic"])[:, :, None]
+    rf = u["resist_flame"][:, None, :]
+    fire = u["flaming"][:, :, None] & (rf != 0)
+    base = torch.where(magic, u["resist_magic"][:, None, :].expand_as(rp), rp)
+    out = torch.where(fire, base + rf, base).clamp(-1.0, 0.9)
+    return torch.where(magic | fire, out, rp)
+
+
+def cycle_on(cal):
+    """melee.cycle on (sim/config/sim.json melee.cycle_why): the blow cycle by the game's program - every swing an interval
+    from its start, a miss costs no time; men striking = cycle.reach_files of the files in contact (the men within reach)."""
+    return bool((cal.get("cycle") or {}).get("on"))
+
+
+def files_share(cal):
+    """The share of the striker's files in contact that strike: melee.cycle.reach_files (the men within reach a file,
+    measured) with the cycle on, else the fitted melee.fighting_files."""
+    return float(cal["cycle"]["reach_files"]) if cycle_on(cal) else float(cal["fighting_files"])
+
+
+def cycle_rate(p, interval, hit, hp_man, single_j, recv, cyc):
+    """Hits a second a fighting man under melee.cycle [B, N, N]: p / interval (a swing every interval from its start, hit
+    or miss: the program) x busy x unbroken.
+      unbroken  exp(-recv x tick_s): the share of swings no hit received cuts before its blow lands (a hit breaks the
+                struck man's swing; recv [B, N, 1] hits a second a man of the striker takes, tick_s the swing's start to
+                its blow, measured)
+      busy      1 / (1 + kills a man a second x search): his target dead, a man waits the next retarget (retarget_s, half
+                the program's 0.8 s) and walks walk_m (measured) at walk_mps to the new one; kills a man a second = the
+                hits x hit / hp_man (the per_hit model's kills a hit) - solved with busy itself in the hits
+                (x (1 + a x) = 1); a lone target (a lord) is one pool: no search."""
+    base = p / interval.clamp(min=1e-6)
+    unbroken = torch.exp(-recv.clamp(min=0) * float(cyc.get("tick_s", 0.0)))
+    search = float(cyc.get("retarget_s", 0.0)) + float(cyc.get("walk_m", 0.0)) / max(float(cyc.get("walk_mps", 1.5)), 0.1)
+    a = base * unbroken * (hit / hp_man.clamp(min=1e-6)).clamp(max=1.0) * search
+    busy = torch.where(a > 1e-9, 2.0 / (1.0 + torch.sqrt(1.0 + 4.0 * a)), torch.ones_like(a))
+    busy = torch.where(single_j, torch.ones_like(busy), busy)
+    return base * busy * unbroken
+
+
+def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None, parts=None):
+    """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
+    the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
+    HP of one blow of every man in contact at once (the first strike, battle.py). charge_now [B, N]: the striker's
+    charge left (0-1, battle.py: its own clock from the charge's first blow). ran [B, N] (with first): the strikers
+    whose charge lands now (battle.py: the first strike of a charge), whose swing is their front rank
+    (contact.first_strike_rank); late [B, N] (with first): large chargers whose front rank's first blow comes later, when
+    the men they knocked down get up (impact.deferred, contact.impact ride_in) - their swing is their front rank too.
+    parts (a dict, contact.impact wave comb): filled with s_front / s_rear [B, N, N], the shares of F of a ride-in
+    charger's front rank and ranks behind (late's swing is then every man's in contact: battle.py weighs the cohorts);
+    and fresh / fresh_kill [B, N, N], the HP a hit on an unwounded man and the chance it kills him outright (fresh_hit,
+    fresh_kill; kills.wound_hp)."""
+    B = params.battle
+    cal = params.sim["melee"]
+    cc = params.sim["contact"]
+    # (contact.impact wave, impact.rise: the getting-up animation after the lying - the men a large charger rode in
+    # among are no target till its end; late's pairs swing every man in contact, below)
+    imp_wave = bool(((cc.get("impact") or {}).get("wave") or {}).get("on")) and bool((cc.get("impact") or {}).get("ride_in"))
+    rise_s = float((cc.get("impact") or {})["wave"].get("rise_s", 0.0)) if imp_wave else 0.0
+    # (contact.impact strike_first, impact.strike_first: the front rank swings at the landing, its intervals from then;
+    # only the ranks behind wait for the men to get up)
+    imp_first = imp_wave and bool((cc.get("impact") or {}).get("strike_first"))
+    imp_comb = imp_first and bool(((cc.get("impact") or {}).get("wave") or {}).get("comb"))
+    s_rear = None
+    ff = files_share(cal)                # (melee.cycle: the men within reach a file; else the fitted fighting_files)
+    h_u, v_u = spacing_of(u, params.sim["formation"]["spacing_m"])
+    # a man's place along a contact (melee.body_across): the formation's h, v for circles, the body's width for an ellipse
+    hc_u, vc_u = contact_spacing(u, h_u, v_u, cal.get("body_across"))
+    men_i = u["men"][:, :, None]
+    single_i = u["men0"][:, :, None] <= 1
+    single_j = u["men0"][:, None, :] <= 1
+    # Which side of i faces j: its front or back (men h apart) or a flank (v apart).
+    front_i, depth_i = pw["front"][:, :, None], pw["depth"][:, :, None]
+    s, c = torch.sin(pw["rel_i"]), torch.cos(pw["rel_i"])
+    through_front = s.abs() * depth_i <= c.abs() * front_i
+    edge = cal.get("frontage_edge_m")
+    sat_j = None
+    if edge is not None:
+        # (melee.frontage_edge_m, below: the side of contact by the rectangles' least overlap, geometry.front_contact,
+        # not by the line between the centres; a lone man's keeps the centres' line)
+        sat = geometry.front_contact(u["x"], u["z"], u["b"], pw["front"], pw["depth"])
+        lone = single_i | single_j
+        through_front = torch.where(lone, through_front, sat)
+        sat_j = torch.where(lone, pw["face_j"] == pw["front"][:, None, :], sat.transpose(1, 2))
+    along = torch.where(through_front, hc_u[:, :, None], vc_u[:, :, None])
+    # The front's fill (melee.front_fill_ranks, lam; 0 / absent: off): a thinned formation does not close up - it keeps
+    # its ordered width (the dmgmelee probe: 25-28 of 30 m) and only part of its men reach the enemy. Its frontal face
+    # is the ordered width (files0 = floor(width / h), not the men's), and its men striking are scaled by the fill of
+    # that front, occ(r) = 1 - exp(-r / lam), r = men / files0 (men a file), against the whole unit's occ(r0): a whole
+    # unit keeps its calibrated F. MEASURED from the soldiers' places (sim/config/sim.json melee.front_fill_why).
+    lam = float(cal.get("front_fill_ranks") or 0.0)
+    if lam > 0:
+        files0 = torch.clamp(torch.floor(u["width"] / h_u + 1e-4), min=1)
+        r_i = (u["men"].clamp(min=0) / files0)[:, :, None]
+        r0_i = (u["men0"].clamp(min=1) / files0)[:, :, None]
+        face_i = torch.where(through_front, (files0 * h_u)[:, :, None],
+                             pw["face_i"] if sat_j is None else depth_i.expand_as(pw["face_i"]))
+        lam = knobs.get(u, "front_fill_ranks", lam, 3)      # (a per-battle draw in training: tools/nn/train/dr.py)
+        fill = (1 - torch.exp(-r_i / lam)) / (1 - torch.exp(-r0_i / lam))
+    else:
+        face_i = pw["face_i"] if sat_j is None else torch.where(through_front, front_i, depth_i)
+        fill = None
+    face_j = pw["face_j"] if sat_j is None else torch.where(sat_j, pw["front"][:, None, :], pw["depth"][:, None, :])
+    length = torch.minimum(face_i, face_j)
+    length_meet = length          # the two sides' common length (the impact's front: contact.first_strike_rank)
+    # Own formations standing in each other (sim/stack.py; melee.stack_block / stack_side / stack_no_wrap,
+    # sim/config/sim.json melee.stack_why): a formation standing on the back of one of ours that fights the same target
+    # belongs to that one's side of the target, and brings only the part of its front the other leaves free.
+    behind = cover = side_k = None
+    if cal.get("stack_block") or cal.get("stack_side") or cal.get("stack_no_wrap"):
+        side_ij = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
+        cover, _, behind, side_k = stack.stacked(u, pw, contact, stack.side_of_target(pw), float(params.dt),
+                                                 side_i=side_ij)
+        behind = behind & ~single_i & ~single_j
+        if cal.get("stack_side"):
+            # (its side of the target is the one ahead's: the length it meets is that side's)
+            g_len = torch.where((side_k == 0) | (side_k == 3), pw["front"][:, None, :], pw["depth"][:, None, :])
+            length = torch.where(behind, torch.minimum(face_i, g_len), length)
+            length_meet = length
+    flank_j = torch.zeros_like(through_front)
+    wrap = flank_j
+    if cal.get("flank_face", "min") == "striker":
+        # Through the target's flank (its side towards i is its depth) the striker brings men by
+        # its own face, not by the target's short flank (measured: a lone flank attacker takes
+        # 1.53x what a frontal one does; melee.flank_face, sim/config/sim.json).
+        s_j, c_j = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
+        flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :] if sat_j is None else ~sat_j
+        if behind is not None and cal.get("stack_side"):
+            flank_j = torch.where(behind, (side_k == 1) | (side_k == 2), flank_j)
+        wrap = flank_j
+        if cal.get("flank_face_busy"):
+            # A target held through its front or back by another unit (melee.flank_face_busy; sim/config/sim.json
+            # melee.flank_face_busy_why): its men face that enemy and do not turn to mesh with the newcomer on their flank,
+            # so the newcomer reaches them only along that flank - the two sides' common length (the busycharge probe:
+            # swordsmen charging the flank of clanrats fighting our spearmen - 15 of their men within 2.5 m of a clanrat
+            # against 26-28 through the back, the clanrats' HP lost 0.5 of a charge into their back after the impact).
+            # Only a newcomer (i in melee for less time than j): a pair that met before j turned its flank (to leave, to
+            # attack a neighbour - the defender probe) stays meshed.
+            held = (contact & ~flank_j).any(dim=1, keepdim=True)       # j fought through its front or back by anyone
+            if "contact_s" in u:
+                held = held & (u["contact_s"][:, :, None] + float(params.dt) < u["contact_s"][:, None, :])
+            wrap = flank_j & ~held
+        if behind is not None and cal.get("stack_no_wrap"):
+            # (melee.stack_no_wrap) a formation on the back of one of ours does not wrap round the target's flank: its
+            # way there is our own men
+            wrap = wrap & ~behind
+        length = torch.where(wrap, face_i, length)
+    wcal = cal.get("wrap") or {}
+    F_ans = q_wrap = None
+    if wcal.get("on") and edge is None:
+        # The wrap of a wider line (melee.wrap; sim/config/sim.json melee.wrap_why): the game has no 'only the overlap
+        # fights' rule - every man with an enemy within reach strikes and the free men seek free enemies, so the ends of
+        # a wider line close on the narrower one's flanks. i's front on j's front or back: the contact's length is the
+        # fronts' overlap O plus, at each end where i's front runs past j, the wrap min(that excess, j's depth,
+        # max_m), grown from 0 to whole over grow_s of the pair's contact; the wrap's blows land on j's flank (its
+        # defence x the flank's coefficient, below); j answers with the men of its flanks the wrap meets (wrap / v).
+        # Replaces frontage_edge_m (the ends' men: a special case - the wrap gives the ends and the flanks).
+        sj, cj = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
+        met_flank = sj * pw["depth"][:, None, :] > cj * pw["front"][:, None, :] if sat_j is None else ~sat_j
+        head = through_front & ~met_flank & ~single_i & ~single_j
+        if behind is not None:
+            head = head & ~behind                        # a formation on the back of one of ours does not wrap
+        ov, e_lo, e_hi = front_overlap(u, pw, through_front, face_i)
+        D = float(wcal["max_m"])
+        depth_j = pw["depth"][:, None, :]
+        W = torch.minimum(torch.minimum(e_lo, depth_j), torch.full_like(e_lo, D)) + \
+            torch.minimum(torch.minimum(e_hi, depth_j), torch.full_like(e_hi, D))
+        clock = u["contact_s"] if "contact_s" in u else torch.zeros_like(u["men"])
+        t_pair = torch.minimum(clock[:, :, None], clock[:, None, :])
+        grow_s = float(wcal.get("grow_s") or 0.0)
+        grow = (t_pair / grow_s).clamp(0, 1) if grow_s > 0 else torch.ones_like(t_pair)
+        Wt = torch.where(head, W * grow, torch.zeros_like(W))         # i's wrap on j's flanks, m
+        length = torch.where(head, ov + Wt, length)
+        q_wrap = torch.where(head, Wt / length.clamp(min=1e-6), torch.zeros_like(Wt))
+        # i's flank men answering j's wrap on i (j's front on i's front: the transposed pair)
+        W_on_i = torch.where(head, Wt.transpose(1, 2), torch.zeros_like(Wt))
+        F_ans = ff * W_on_i / vc_u[:, :, None]
+    if edge is not None:
+        # The contact's frontage (melee.frontage_edge_m; absent: off): a formation's men strike the enemies within their
+        # reach, whichever unit those belong to - so i brings to j the men of the part of its side that j covers, not its
+        # whole side: i's side towards j (its front or back, h apart, or a flank) against j's box seen along that side
+        # (j's front and depth at j's bearing), their overlap, plus frontage_edge_m for the men at the overlap's ends who
+        # reach on past it; at most the length above (a formation square on another: unchanged). Formations only, and not
+        # through the target's flank under melee.flank_face "striker" (its own measured rule: the men wrap round).
+        # MEASURED (the sidecontact probe, tmp/old-build/adjmelee; sim/config/sim.json melee.frontage_edge_why).
+        b = u["b"] * geometry.DEG
+        sb, cb = torch.sin(b), torch.cos(b)
+        # i's side direction: across its front (cos b, -sin b) through the front or back, along its facing on a flank
+        lx = torch.where(through_front, cb[:, :, None], sb[:, :, None])
+        lz = torch.where(through_front, -sb[:, :, None], cb[:, :, None])
+        half = torch.where(through_front, face_i, depth_i.expand_as(face_i)) / 2
+        rx = u["x"][:, None, :] - u["x"][:, :, None]
+        rz = u["z"][:, None, :] - u["z"][:, :, None]
+        off = rx * lx + rz * lz                                    # j's centre along i's side
+        ext = (pw["front"][:, None, :] / 2 * (cb[:, None, :] * lx - sb[:, None, :] * lz).abs()
+               + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
+        ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
+        length = torch.where(single_i | single_j | wrap, length, torch.minimum(length, ov + float(edge)))
+    # A formation of large bodies wider apart than two of them (contact.sparse; the rat ogres: spacing 6.5 m, body 2 m): its
+    # rear ranks step into the gaps of the front one, so a man's place along the contact holds k_fit bodies side by side
+    # and each man whose body is in reach strikes - not the fighting_files share of the files (sparse_files below).
+    sp_k = sparse_files(u, hc_u, cc)
+    F = ff * length / along
+    if sp_k is not None:
+        F = torch.where(sp_k > 0, sp_k * length / along, F)
+    if F_ans is not None:
+        F = F + F_ans                    # (melee.wrap: the flank men answering a wrap, above)
+    F = torch.minimum(F, men_i)
+    if fill is not None:
+        F = torch.where(single_i, F, F * fill)
+    lord_max = knobs.get(u, "lord_max_attackers", float(cc["lord_max_attackers"]), 3)
+    F = torch.where(single_j, torch.minimum(men_i, knobs.full_like(F, lord_max)), F)
+    ring_on = bool((cc.get("ring_big") or {}).get("on"))
+    if ring_on:
+        # (contact.ring_big) a lone large body (a monster) is struck by the men round its body, not the lord's 6.5
+        big_j = big_lone(u)[:, None, :] & ~single_i
+        n_ring = ring(u, single_j)
+        # (contact.ring_big face) a formation meets the body with its face only: its men stand on the ring's share on
+        # their side of the front line the body stands on (ring_face)
+        F = torch.where(big_j, torch.minimum(men_i, n_ring * ring_face(cc)), F)
+    F = torch.where(single_i, torch.ones_like(F), F)
+    # Fewer men left, fewer bring their weapons to bear (and fewer can be reached).
+    share_i = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, :, None]
+    share_j = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, None, :]
+    F = F * torch.where(single_i, torch.ones_like(F), share_i.pow(cal.get("men_exp_striker", 0.0)))
+    F = F * torch.where(single_j, torch.ones_like(F), share_j.pow(cal.get("men_exp_target", 0.0)))
+    F = torch.where(contact, F, torch.zeros_like(F))
+    if cover is not None and cal.get("stack_block"):
+        # (melee.stack_block) own bodies ahead: the men of i's side behind them do not reach the enemy - the share of the
+        # part of i's side that faces j (front, a flank, back) the ones ahead cover; formations only
+        F = torch.where(~single_i & ~single_j, F * (1 - cover), F)
+    # Across several contacts a unit brings to each side of its formation (front, left, right, back)
+    # no more men than that side holds, and no more than it has in all; a single man is split
+    # between his opponents. (Men on a flank turn to fight: measured, a unit already fighting hits a
+    # newcomer on its flank as hard as a free unit does.)
+    side_of = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
+    if ring_on:
+        # (contact.ring_big) the men round a monster leave their formation's side to stand round its body: they do not
+        # count against the side they came from (its ring caps them below)
+        side_of = torch.where(big_j, torch.full_like(side_of, -1), side_of)
+    for g in range(4):
+        in_g = side_of == g
+        hold = ff * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
+        if sp_k is not None:
+            # (contact.sparse) a side of a sparse formation holds k_fit men a place along it
+            hold = torch.where(sp_k > 0, sp_k * (front_i / hc_u[:, :, None] if g in (0, 3)
+                                                  else depth_i / vc_u[:, :, None]), hold)
+        if F_ans is not None:
+            # (melee.wrap: the flank men answering a wrap stand on the flanks, not on this side)
+            hold = hold + torch.where(in_g & contact, F_ans, torch.zeros_like(F_ans)).sum(dim=2, keepdim=True)
+        tot = torch.where(in_g, F, torch.zeros_like(F)).sum(dim=2, keepdim=True)
+        F = torch.where(in_g & ~single_i & (tot > hold), F * hold / tot.clamp(min=1e-6), F)
+    face_cap = None
+    if cal.get("target_face_cap"):
+        # The target's side is only so long (melee.target_face_cap): the units coming at j through the same side of j
+        # (front, left, right, back - seen from j) share its length - each brings fighting_files of the files it
+        # lines up along it (F x its own spacing / fighting_files metres), together no more than the side is long (or
+        # than the longest single attacker brings), a lone target keeps lord_max_attackers.
+        # Measured (tmp/old-build/routgap/overlap_melee.py, all fair recordings): an enemy formation struck by two of ours
+        # standing in each other (centres within 8 m) loses 26.5 HP/s, by one 26.9, by two apart 32.5; three 29.0 /
+        # 39.4.
+        # (melee.stack_side: a formation on the back of one of ours counts on that one's side of the target)
+        side_j = stack.side_of_target(pw)
+        if behind is not None and cal.get("stack_side"):
+            side_j = torch.where(behind, side_k, side_j)
+        used = F * along / ff                # metres of j's side each striker's men take
+        if sp_k is not None:
+            used = torch.where(sp_k > 0, F * along / sp_k.clamp(min=1.0), used)
+        face_cap = (side_j, used, F)                             # (the cap again after the wave: melee.face_cap_wave)
+        F = target_face_cap(F, used, side_j, pw, single_i, single_j)
+    # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
+    F0 = F if (first and cc.get("first_strike_steady")) else None
+    F_rank = None
+    F_pre = F                            # (before the wave: the front rank's share of F, contact.impact ride_in below)
+    if first and ran is not None and cc.get("first_strike_rank"):
+        # The charge's front rank (contact.first_strike_rank; sim/config/sim.json contact.first_strike_rank_why): a
+        # formation whose charge lands meets the enemy with its whole front rank at once - a man of every file in
+        # contact runs into an enemy and swings (his interval is ready: CA Feature Focus #2) - so its first strike is
+        # the files in contact (the steady men without the fighting_files share: F / fighting_files, the same caps), on
+        # the length where the two sides meet: through the target's flank the files that run into that side, not the
+        # striker's whole front (melee.flank_face striker is the men wrapping round later). A unit that comes in without
+        # a charge (a move order, a blocked way, a walk-in under the run-up) and a standing one keep the steady front's
+        # swing (the probes: swordsmen running in under a move order 96 HP/s at 0-1 s, the steady swing 89). Formations
+        # only.
+        F_rank = F / ff
+        if sp_k is not None:
+            F_rank = torch.where(sp_k > 0, F / sp_k.clamp(min=1.0), F_rank)     # (contact.sparse: its files in contact)
+        scope = cc.get("first_strike_rank_template")
+        if scope:
+            # (contact.first_strike_rank_template; sim/config/sim.json contact.first_strike_rank_template_why) the charge's
+            # front rank is the formation's files - a man every h of the template across its front (v along a flank) -,
+            # not the bodies closed up side to side in melee (melee.body_across): a horse's place there is its width
+            # (h - 2 r (1 - radii_ratio) = 1.6 m for the Empire Knights, 3.0 in the template), so the bodies' rule gave a
+            # cavalry charge 1.9x its files. "large": only units of size above small (the cavalry); "all": every
+            # ellipse body too (the wolf rats, the weapon teams - it changes them: off)
+            along_t = torch.where(through_front, h_u[:, :, None], v_u[:, :, None])
+            fix = (along / along_t.clamp(min=1e-6)).clamp(max=1.0)
+            if scope == "large":
+                fix = torch.where(u["large"][:, :, None], fix, torch.ones_like(fix))
+            F_rank = F_rank * fix
+        F_rank = torch.where(flank_j, F_rank * (length_meet / length.clamp(min=1e-6)).clamp(max=1.0), F_rank)
+        F_rank = torch.minimum(F_rank, men_i)
+        rank_on = (ran if late is None or imp_wave else ran | late)[:, :, None] & ~single_i & ~single_j
+        F_rank = torch.where(rank_on, F_rank, torch.zeros_like(F_rank))
+    wave = cal.get("wave")
+    if wave and "contact_s" in u:
+        # The opening wave (melee.wave): two formations' fronts meet closer than they fight later and part over
+        # tau_s, so more men stand within reach early: men striking x (1 + amp exp(-t / tau_s)), t the pair's time in
+        # melee (the younger of the two clocks: a fresh unit meets its enemy's front anew); formations only.
+        # (contact.opening_once: the clock is the unit's seconds in melee over the battle, melee_s - a formation back
+        # in melee after a time out gets no new wave; battle.py. melee_s >= contact_s in a run; the larger of the two
+        # keeps a contact clock set from outside - a recording, a test - in force)
+        clock = (torch.maximum(u["contact_s"], u["melee_s"]) if cc.get("opening_once") and "melee_s" in u
+                 else u["contact_s"])
+        t_pair = torch.minimum(clock[:, :, None], clock[:, None, :])
+        w = 1.0 + knobs.get(u, "wave_amp", float(wave["amp"]), 3) * torch.exp(-t_pair / float(wave["tau_s"]))
+        floor = wave.get("missile_attack_floor")
+        if floor:
+            # A missile unit fighting under an attack order (the wavemiss probes, tmp/old-build/routmorale/wavemiss_report.py):
+            # its loose block does not part from the enemy as formations do - the fronts stay 2.1-2.6 m apart (unordered
+            # shooters and formations: 3.0-3.3 m) and the enemy's men within reach of it stay at 22.6 against 16.4 for the
+            # same shooters unordered, 10-90 s after contact (8 / 4 lanes): the men striking it keep at least
+            # missile_attack_floor (1.38) of the steady level.
+            shot_at = ((u["range"] > 0) & (u["order_kind"] == O.ATTACK))[:, None, :]
+            w = torch.where(shot_at, w.clamp(min=float(floor)), w)
+            if F0 is not None:          # (the floor is the steady level)
+                F0 = torch.where(single_i | single_j | ~shot_at, F0, F0 * float(floor))
+        if face_cap is not None and cal.get("face_cap_wave"):
+            # The wave within the target's side (melee.face_cap_wave; sim/config/sim.json melee.stack_why): the wave is
+            # more men of the two fronts within reach while they are fresh, not more room on the target's side - the
+            # side's cap is laid on the waved men, the side holding its length x the wave of the side's oldest pair
+            # (a fresh unit coming onto a side our other unit has fought for long brings no wave beyond the side; a
+            # lone attacker and units meeting the target together keep theirs: with one wave on the side it is the
+            # cap as before, x that wave)
+            side_j, used, F_free = face_cap
+            w_f = torch.where(single_i | single_j, torch.ones_like(w), w)
+            F = target_face_cap(F_free * w_f, used, side_j, pw, single_i, single_j, w=w_f)
+        else:
+            F = torch.where(single_i | single_j, F, F * w)
+    if cc.get("pursue_envelop"):
+        # A caught router is engulfed (contact.pursue_envelop; sim/config/sim.json contact.pursue_envelop_why): a chaser
+        # with its attack order on a routing formation it touches, whose run is at least the router's free flight
+        # (morale.rout_speed of the router's run), does not fight it front to front - its men pick charge targets among
+        # the routing mob's men (the database: pursue_charge_max_unit_separation 8 m, max_pursue_charges_ratio 1 - every
+        # man of the chaser may) and run into the loose mob, so a router man has a chaser man on him: men striking =
+        # min(the chaser's men, the router's men), past the formation's side caps (the pursuit probe: stormvermin after
+        # Empire spearmen, wolf rats after swordsmen - chaser men within 2.5 m of a router man 26-33, 0.95-1.4 of the
+        # router's men, against 7-9 on a 30 m front standing; a slower chaser, swordsmen after clanrats, does not catch).
+        routing = u["r"][:, None, :] & ~single_i & ~single_j
+        on_j = (u["order_kind"][:, :, None] == O.ATTACK) & \
+            (u["order_target"][:, :, None] == torch.arange(u["men"].shape[1], device=F.device)[None, None, :])
+        flee = u["run"][:, None, :] * float(params.sim["morale"]["rout_speed"])
+        keeps_up = u["run"][:, :, None] >= flee
+        caught = routing & on_j & keeps_up & contact & (u["range"][:, :, None] <= 0)
+        engulf = torch.minimum(men_i, u["men"][:, None, :])
+        if cc.get("pursue_envelop_run") and "rout_s" in u:
+            # The chaser's men run in (contact.pursue_envelop_run): at the rout they stand in their formation's ranks and
+            # each runs from his place to a router man, from a standstill at the unit's acceleration to its run (the
+            # database's battle_entities), so the men it brings grow with the ground covered since the rout s(t) over
+            # its formation's depth: F + (engulf - F) x min(1, s(t) / depth) (a router caught later: long run, whole)
+            t = u["rout_s"][:, None, :]
+            a = u["accel"][:, :, None].clamp(min=0.1)
+            v = u["run"][:, :, None].clamp(min=0.1)
+            ground = torch.where(t < v / a, 0.5 * a * t * t, v * t - v * v / (2 * a))
+            frac = (ground / depth_i.clamp(min=0.5)).clamp(0, 1)
+            engulf = F + (engulf - F).clamp(min=0) * frac
+        F = torch.where(caught, torch.maximum(F, engulf), F)
+    if (cc.get("rout_stuck") or {}).get("on") and "stk_n" in u:
+        # A router's men stuck among a standing formation's (battle.py, contact.rout_stuck) each have a man of it on them,
+        # wherever the rest of the router is: men striking = min(its men, the stuck men).
+        slot = torch.arange(u["men"].shape[1], device=F.device)[None, :, None]
+        among = (u["stk_k"][:, None, :] == slot) & (u["stk_n"] > 0)[:, None, :] & contact
+        F = torch.where(among, torch.maximum(F, torch.minimum(men_i, u["stk_n"][:, None, :])), F)
+    own =torch.where(single_i, torch.ones_like(men_i), men_i)
+    total = F.sum(dim=2, keepdim=True)
+    F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
+    if F0 is not None:
+        total0 = F0.sum(dim=2, keepdim=True)
+        F0 = F0 * torch.where(total0 > own, own / total0.clamp(min=1e-6), torch.ones_like(total0))
+    if F_rank is not None:
+        totr = F_rank.sum(dim=2, keepdim=True)
+        F_rank = F_rank * torch.where(totr > own, own / totr.clamp(min=1e-6), torch.ones_like(totr))
+    # At most lord_max_attackers around a single man, however many units they belong to (the
+    # lord swarm probe); an enemy lord among them keeps his place (one man) and the infantry
+    # share the rest.
+    lone = (single_i & (F > 0)).float().sum(dim=1, keepdim=True)
+    around = torch.where(single_i, torch.zeros_like(F), F).sum(dim=1, keepdim=True)
+    cap = (lord_max - lone).clamp(min=0)
+    small_j = single_j & ~big_lone(u)[:, None, :] if ring_on else single_j
+    F = torch.where(small_j & ~single_i & (around > cap), F * cap / around.clamp(min=1e-6), F)
+    if F0 is not None:
+        around0 = torch.where(single_i, torch.zeros_like(F0), F0).sum(dim=1, keepdim=True)
+        F0 = torch.where(small_j & ~single_i & (around0 > cap), F0 * cap / around0.clamp(min=1e-6), F0)
+    if ring_on:
+        # (contact.ring_big) round a lone large body the men of every unit share its ring: each takes F / n_ring of it
+        # (n_ring by its own men's radius), a lone attacker (an enemy lord) 1 / n_ring; together no more than the ring
+        big = big_lone(u)[:, None, :] & single_j
+        n_r = n_ring.clamp(min=1e-6)
+        lone_occ = torch.where(single_i & (F > 0), 1.0 / n_r, torch.zeros_like(F)).sum(dim=1, keepdim=True)
+        occ = torch.where(single_i, torch.zeros_like(F), F / n_r).sum(dim=1, keepdim=True)
+        room = (1 - lone_occ).clamp(min=0)
+        F = torch.where(big & ~single_i & (occ > room), F * room / occ.clamp(min=1e-6), F)
+        if F0 is not None:
+            occ0 = torch.where(single_i, torch.zeros_like(F0), F0 / n_r).sum(dim=1, keepdim=True)
+            F0 = torch.where(big & ~single_i & (occ0 > room), F0 * room / occ0.clamp(min=1e-6), F0)
+
+    sector = geometry.sector(pw["rel_j"], cc["front_deg"], cc["rear_deg"])
+    routing_j = u["r"][:, None, :]
+    sector = torch.where(routing_j, torch.full_like(sector, 2), sector)
+    coef = torch.where(sector == 0, 1.0, torch.where(sector == 1, B["melee_defence_direction_penalty_coefficient_flank"],
+                                                     B["melee_defence_direction_penalty_coefficient_rear"]))
+    ch = charge_now[:, :, None].expand_as(F)
+    # Pursuit (contact.pursuit_rate; absent: off): a routing enemy is struck with every man the contact holds at
+    # pursuit_rate of the rule, without the striker's charge (measured: a router loses 0.64 of what a standing target
+    # loses to one pursuer, and the first 5 s of a pursuit hit no harder than later; sim/config/sim.json contact.pursuit_why).
+    pursuit = cc.get("pursuit_rate")
+    if pursuit is not None:
+        ch = torch.where(routing_j, torch.zeros_like(ch), ch)
+        k_chase = lone_rout.charge(cc, B)
+        if k_chase is not None:
+            # A lone striker whose attack target routs (the enemy lord chasing our lord) strikes it with his whole
+            # charge bonus x the database's pursuit_charge_bonus_modifier, no decay (the game's rules; lone_rout.charge).
+            # Formations keep the measured pursuit without it (contact.pursuit_why).
+            slot_j = torch.arange(u["men"].shape[1], device=ch.device)[None, None, :]
+            chase = lone_rout.chasing(single_i, u["order_kind"][:, :, None], u["order_target"][:, :, None], slot_j,
+                                      routing_j, O.ATTACK)
+            # (the stat without the fatigue: effects() has laid its multiplier on u["charge_bonus"])
+            full = k_chase / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
+            ch = torch.where(chase, full.expand_as(ch), ch)
+        if cc.get("pursuit_large_charge") and "size_k" in u:
+            # A large striker (size above small: the cavalry) on a smaller router strikes with its whole charge bonus x
+            # the database's pursuit_charge_bonus_modifier, no decay (contact.pursuit_large_charge; the game gives every
+            # chaser man a new charge on a router within max(4 m, 5 s x (its charge speed - the router's run)) - ~35 m
+            # for a horse, so always in contact: reverse/notes/charge_module.md 2.4); at the pursuit's rate as the formations'
+            # (contact.pursuit_rate, measured on infantry chasers - for horses not measured)
+            k_big = float(B.get("pursuit_charge_bonus_modifier", 1.0))
+            full_big = k_big / fatigue.stat_mult(u, params, "stat_charge_bonus")[:, :, None]
+            big_chase = routing_j & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+            ch = torch.where(big_chase, full_big.expand_as(ch), ch)
+    # (contact.impact ride_in, impact.py: a large charger that knocked the first rank down rides in among the men - they
+    # walk off their places, out of the brace: no charge defence, no reflection; held, they strike it in full)
+    ride = unbraced = None
+    if (cc.get("impact") or {}).get("ride_in") and "ride" in u:
+        ride = u["ride"] >= 0.5
+        # (lying, a man keeps the brace he had - a reaction freezes it, M26: out of it from the mean getting-up time;
+        # contact.impact wave: and the getting-up animation, impact.rise)
+        from sim import impact as _impact      # (impact imports this module)
+        up = _impact.up_mean(params) if imp_wave else (
+            (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2)
+        unbraced = ride & (u["kd_t"] >= up)
+        if _impact.brace_kept(params):
+            # (contact.impact brace_kept; the game's memory, tmp/old-build/diag_mem/cav2/brace_why.py) the men a charger rode in
+            # among keep the brace: standing, a man is braced in 15 526 of 15 526 polls within 4 m of a knight (walking
+            # too), out of it only while he gets up (0x11: 3 %) - and then he strikes nobody and is no target
+            unbraced = None
+    cdef = cc.get("charge_defence") or {}
+    q_cd = ch_full = None
+    if cdef.get("on") and "cdl" in u and "cd" in u:
+        # Charge defence (the database's attributes charge_defense_vs_large / charge_defense; sim/evidence/diag_cav/sim_gap.md 1,
+        # reverse/notes/charge_module.md 7): a braced unit (standing: slower than melee.braced_speed - a standing unit is not in
+        # its own charge) cancels the charge bonus - to the attack and to the damage - of a charger within front_deg of
+        # its front: a large one (size above small: the cavalry) with charge_defense_vs_large, any with charge_defense.
+        # Without a large unit in the battle and with no charge_defense (no unit of the pools has it) it changes nothing.
+        speed_j = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)[:, None, :]
+        braced_j = (speed_j < float(cal["braced_speed"])) & ~routing_j
+        if unbraced is not None:
+            braced_j = braced_j & ~unbraced[:, None, :]
+        vs = u["cd"][:, None, :] | (u["cdl"][:, None, :] & u["large"][:, :, None])
+        ahead = pw["rel_j"].abs() <= float(cdef.get("front_deg", 45.0)) * geometry.DEG
+        cancel = braced_j & vs & ahead
+        crowd = cdef.get("crowd")
+        if crowd is not None:
+            # (contact.charge_defence crowd; the game's memory, tmp/old-build/diag_mem/cav2/brace_why.py) the program tests the
+            # 45 deg on each blow against the STRUCK MAN's facing, not the unit's front: once a large charger stands in
+            # melee with the unit (not its blow at the landing - the lances come from the front: 29.7 HP a hit on the
+            # braced clanrat spearmen, 26 without the charge), each man faces his own enemy and the knights round him
+            # strike from beside him too - crowd of the blows (the memory: 0.30 of 115 knights' blows on braced clanrat
+            # spearmen, 0.24 of 89 on braced stormvermin, 0.3-13 s) come from beyond 45 deg and keep the charge (HP a
+            # hit 44.4 / 33.5 against 48.2 / 35.0 with the charge, 30.6 / 17.8 within 45 deg against 26.1 / 15.4
+            # without); the chance and the HP a hit below are the two kinds of blow mixed (q_cd)
+            landing = ran[:, :, None] if ran is not None else torch.zeros_like(u["large"][:, :, None])
+            q_cd = torch.where(cancel & u["large"][:, :, None] & ~landing, torch.full_like(ch, float(crowd)),
+                               torch.zeros_like(ch))
+            ch_full = ch
+        ch = torch.where(cancel, torch.zeros_like(ch), ch)
+    large_j = u["large"][:, None, :]
+    bonus = torch.where(large_j, u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
+    extra = u["charge_bonus"][:, :, None] * ch + bonus
+    attack = u["attack"][:, :, None] + extra
+    # Defence from the flank / rear: x0.6 / x0.3 (the database, weight 1); against a lone man (a lord)
+    # contact.lord_direction of the loss (measured in the lord swarm probe: infantry on his back or flank hurts him
+    # hardly more than on his front).
+    # The game's rules have no separate branch for lone men (the measure above is kept for a standing one); a routing
+    # lone man runs with his back to his chasers and does not turn to them: lone_rout.direction of the rule
+    # (sim/config/sim.json contact.lone_rout; absent: lord_direction). The cut defence is rounded half away from zero.
+    w = torch.where(single_j, lone_rout.direction(cc, routing_j.expand_as(coef), coef.dtype), torch.ones_like(coef))
+    defence = directional_defence(u["defence"][:, None, :].expand_as(coef), 1 - w * (1 - coef))
+    p = hit_chance(attack, defence, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
+                   B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+    dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]
+    share = dmg / (dmg + ap).clamp(min=1e-6)
+    # Charge reflection (database): a braced unit with charge_reflection (standing: slower than melee.braced_speed)
+    # strikes a charger within bracing_attack_angle of its front, while the charger's charge is at least
+    # charge_reflect_min_charge_factor_threshold, at charge_reflect_damage_multiplier of its damage (CA: spearmen
+    # do double damage within 3.9 s of the charge); it gets no charge of its own.
+    speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
+    braced = (u["reflect"] & (speed < cal["braced_speed"]))[:, :, None]
+    if unbraced is not None:
+        braced = braced & ~unbraced[:, :, None]
+    facing = pw["rel_i"].abs() <= B["bracing_attack_angle"] * geometry.DEG
+    if cal.get("reflect_any_angle"):
+        # (melee.reflect_any_angle) the reflection asks only that the striker is braced and the charger's charge is on,
+        # not where the charger came from: the brace probe - spearmen's single blows on clanrats that charged them at
+        # 100 deg (their flank) 41-43 HP in the charge's first seconds (7 of 8), 17-23 later (one blow 21); melee.reflect_why
+        facing = torch.ones_like(facing)
+    charging_j = (charge_now >= B["charge_reflect_min_charge_factor_threshold"])[:, None, :]
+    reflect = torch.where(braced & facing & charging_j & ~routing_j,
+                          torch.full_like(F, float(B["charge_reflect_damage_multiplier"])), torch.ones_like(F))
+    # A splash blow (a lord's) on a formation strikes contact.lord_splash_struck men on average (measured; at most
+    # splash_max_attacks and the men left), each taking 1 / splash_max_attacks of it (CA 5.1.0: divided among the
+    # targets; measured: single blows of 47-57 HP on stormvermin); a lone man takes the whole blow.
+    n_max = u["splash"][:, :, None].expand_as(F)
+    if cal.get("splash_by_size") and "splash_cap" in u and "size_k" in u:
+        # (melee.splash_by_size; sim/evidence/diag_cav/mechanic.md M18) a blow strikes several men only of a target no larger than
+        # its weapon's splash_attack_target_size (the lords' medium, the demigryphs' small: not the cavalry); a larger one
+        # takes a single blow, whole
+        n_max = torch.where(u["size_k"][:, None, :] <= u["splash_cap"][:, :, None], n_max, torch.ones_like(n_max))
+    struck = torch.minimum(n_max, knobs.full_like(n_max, knobs.get(u, "lord_splash_struck",
+                                                                   float(cc.get("lord_splash_struck", 4.0)), 3)))
+    struck = torch.minimum(struck, u["men"][:, None, :].clamp(min=1))
+    struck = torch.where(single_j, torch.ones_like(struck), struck)
+    div = n_max.clamp(min=1) if cal.get("splash_divides") else torch.ones_like(n_max)
+    div = torch.where(single_j, torch.ones_like(div), div)
+    if "dh" in pw:
+        # the height between the fighting men (terrain.melee_factor: the game's x (1 - clamp(0.3 dh / 1 m, +-0.3)) per pair
+        # of men, on the base and the armour-piercing damage before the armour; a battle without a height map: none)
+        from sim import terrain
+        hf = terrain.melee_factor(u, pw, params)
+        dmg, ap, extra = dmg * hf, ap * hf, extra * hf
+    hit = per_hit((dmg + extra * share) * reflect / div, (ap + extra * (1 - share)) * reflect / div,
+                  u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal),
+                  single=single_j)
+    if parts is not None:
+        # (kills.wound_hp, battle.py) the HP a hit on an unwounded man
+        args = ((dmg + extra * share) * reflect / div, (ap + extra * (1 - share)) * reflect / div,
+                u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal))
+        parts["fresh"] = fresh_hit(*args, single=single_j)
+        parts["fresh_kill"] = fresh_kill(*args, single=single_j)
+    if q_cd is not None:
+        # (contact.charge_defence crowd, above) the blows that keep the charge: their chance and HP a hit, mixed in by
+        # their share q_cd - the chance is linear in the bonus, the HP a hit capped at a man's health is not
+        extra1 = u["charge_bonus"][:, :, None] * ch_full + bonus
+        if "dh" in pw:
+            extra1 = extra1 * hf
+        p1 = hit_chance(u["attack"][:, :, None] + extra1, defence, B["melee_hit_chance_normalisation_coefficient"],
+                        B["melee_hit_chance_base"], B["melee_hit_chance_min"], B["melee_hit_chance_max"],
+                        float(cal.get("hit_roll_offset", 0.0)))
+        args1 = ((dmg + extra1 * share) * reflect / div, (ap + extra1 * (1 - share)) * reflect / div,
+                 u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal))
+        hit1 = per_hit(*args1, single=single_j)
+        w0, w1 = (1 - q_cd) * p, q_cd * p1
+        pm = (w0 + w1).clamp(min=1e-9)
+        hit = torch.where(q_cd > 0, (w0 * hit + w1 * hit1) / pm, hit)
+        if parts is not None:
+            parts["fresh"] = torch.where(q_cd > 0, (w0 * parts["fresh"] + w1 * fresh_hit(*args1, single=single_j)) / pm,
+                                         parts["fresh"])
+            parts["fresh_kill"] = torch.where(q_cd > 0, (w0 * parts["fresh_kill"] + w1 * fresh_kill(*args1, single=single_j))
+                                              / pm, parts["fresh_kill"])
+        p = torch.where(q_cd > 0, w0 + w1, p)
+    # Blows a second a fighting man: the interval runs after a hit, a miss costs melee.miss_s (tmp/old-build/hitchance);
+    # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).
+    interval = u["interval"][:, :, None].clamp(min=1e-6)
+    cyc = cal.get("cycle") or {}
+    if cycle_on(cal):
+        # (melee.cycle) a swing every interval from its start, hit or miss; less the swings broken by hits taken and the
+        # time a man spends finding a new target after a kill (cycle_rate). recv: hits a second on a man of each unit in
+        # contact (every striker's p / interval on it, over its men striking)
+        hp_j = u["hp_man"][:, None, :].expand_as(p)
+        on_k = (F * struck * p / interval).sum(dim=1)                       # [B, N]: hits a second on unit k
+        recv = (on_k / F.sum(dim=2).clamp(min=1.0))[:, :, None]
+        recv = torch.where(single_i, torch.zeros_like(recv), recv)
+        per_s = cycle_rate(p, interval, hit, hp_j, single_j, recv, cyc)
+        per_s = torch.where(single_i & single_j, p / interval, per_s)
+    else:
+        recv = hp_j = None
+        per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
+    cav_pair = None
+    cyc_cav = cal.get("cycle_cavalry") or {}
+    if cyc_cav.get("on") and "size_k" in u:
+        # (melee.cycle_cavalry; the game's memory, tmp/old-build/diag_mem/cav2/who.py) a horseman's blows on smaller men by the
+        # program's cycle (sim/evidence/diag_cav/mechanic.md M37: one timer a man from his attack's start, a miss no sooner back):
+        # the knights within reach of a standing man that are ready strike at once - ready and in reach 7.8-16.6 at 2-4 s,
+        # 0.0-0.5 from 7 s on, every lane -, so a knight in reach strikes once an interval (the knights' strikes a second
+        # over those within 3.2 m 0.22 / 0.24 / 0.29 on clanrats / braced spearmen / stormvermin at 4-13 s, 1 / interval
+        # 0.20), not the infantry's "a miss costs miss_s" (0.30 / 0.43 / 0.49 at their chances). face_share: the knights
+        # that strike so, as a share of the knights at the face (within 4.55 m of an enemy man: the twin's F / fighting_files,
+        # 37-45 against the memory's 34-39) - the memory's strikes a second x the interval over the knights at the face,
+        # 4.2-13 s: 0.70 / 0.72 / 0.78 (tmp/old-build/diag_mem/cav2/facerate.py; those within 3.2 m of a standing man are 0.60 of
+        # the face, and new knights keep stepping into reach as others step out: 1.12-1.48 strikes an interval each)
+        cav_pair = (u["large"][:, :, None] & (u["size_k"][:, :, None] == 2) & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+                    & ~single_i & ~single_j)
+        cav_k = float(cyc_cav.get("face_share", ff)) / max(ff, 1e-6)
+        per_c = cycle_rate(p, interval, hit, u["hp_man"][:, None, :].expand_as(p), single_j, torch.zeros_like(p[:, :, :1]),
+                           cal.get("cycle") or {}) * cav_k
+        per_s = torch.where(cav_pair, per_c, per_s)
+    if q_wrap is not None:
+        # (melee.wrap) the wrap's share of i's blows on a target it meets front to front lands on the target's flank:
+        # the man struck faces his own enemy, so the wrapping man strikes him from the side (the game's side of a blow
+        # is the defender's facing, each blow: defence x the flank's coefficient)
+        q = torch.where((sector == 0) & ~routing_j, q_wrap, torch.zeros_like(q_wrap))
+        d_fl = directional_defence(u["defence"][:, None, :].expand_as(coef),
+                                   torch.full_like(coef, float(B["melee_defence_direction_penalty_coefficient_flank"])))
+        p_fl = hit_chance(attack, d_fl, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
+                          B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+        if recv is not None:
+            # (melee.cycle) the wrapping man strikes free: the same cycle with the flank's chance
+            per_fl = cycle_rate(p_fl, interval, hit, hp_j, single_j, recv, cyc)
+        else:
+            per_fl = p_fl / (p_fl * interval + float(cal["miss_s"]))
+        if cav_pair is not None:
+            per_fl = torch.where(cav_pair, cycle_rate(p_fl, interval, hit, u["hp_man"][:, None, :].expand_as(p), single_j,
+                                                      torch.zeros_like(p[:, :, :1]), cal.get("cycle") or {}) * cav_k, per_fl)
+        per_s = per_s * (1 - q) + per_fl * q
+        p = p * (1 - q) + p_fl * q
+    if cal.get("swing_interval") and "ran_in" in u and "contact_s" in u:
+        # The first strike starts the men's intervals (melee.swing_interval; CA Feature Focus #2: a man's attack
+        # interval runs after his blow): a unit that came into its fight moving or charging (ran_in) struck once with
+        # every man in contact at the contact (battle.py, the first strike), so its men who hit wait their interval
+        # before the next blow and those who missed melee.miss_s - the steady rate starts as they come back: x(1 - p)
+        # from miss_s, whole from the interval (t: the striker's seconds since that contact; a formation at its first
+        # fight of the battle only - contact.opening_once gives no later first strike). Formations only: a lone man's
+        # first blow is still ~3x weaker than the game's (OPEN), the pause would only deepen that.
+        # The busycharge probe (sim/config/sim.json melee.swing_why): swordsmen charging free clanrats head-on, the
+        # clanrats' HP a second at 0-1 / 1-2 / 2-3 / 3-5 / 5-10 s after the impact 259 / 40 / 64 / 35 / 50 - a pause after
+        # the impact, not a charge rate.
+        t = (u["contact_s"] - float(params.dt))[:, :, None]
+        swung = u["ran_in"][:, :, None] & ~single_i
+        if "melee_s" in u:
+            swung = swung & (u["melee_s"] - u["contact_s"] < 0.5 * float(params.dt))[:, :, None]
+        if recv is not None:
+            # (melee.cycle) every man who swung, hit or miss, swings again an interval after the swing's start
+            back = (t >= interval).to(p.dtype)
+        else:
+            back = torch.where(t >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
+                                                                                                   torch.zeros_like(p))
+        back = torch.where(swung, back, torch.ones_like(back))
+        if ride is not None and "size_k" in u:
+            # (contact.impact ride_in, impact.deferred) a large charger that rode in swung its front rank's first blow when
+            # the men it knocked down got up - the mean getting-up time after the landing -, its intervals run from then
+            from sim import impact as _impact
+            up = _impact.up_mean(params) if imp_wave else (
+                (float(B["knockdown_getting_up_delay_min"]) + float(B["knockdown_getting_up_delay_max"])) / 2)
+            rp = (ride[:, None, :] & u["large"][:, :, None] & (u["size_k"][:, :, None] > u["size_k"][:, None, :])
+                  & swung)
+            t2 = t - up
+            # only the front rank swung (its files: F before the wave / fighting_files, the template's files - as the first
+            # strike's rank above); the ranks behind ride in through the men down after it (M29: a rank 4.1 m behind,
+            # >= 0.4 s later) and strike at once, their intervals ready
+            h_t, v_t = spacing_of(u, params.sim["formation"]["spacing_m"])
+            along_t = torch.where(through_front, h_t[:, :, None], v_t[:, :, None])
+            front = F_pre / ff * (along / along_t.clamp(min=1e-6)).clamp(max=1.0)
+            if sp_k is not None:
+                front = torch.where(sp_k > 0, F_pre / sp_k.clamp(min=1.0) * (along / along_t.clamp(min=1e-6)).clamp(max=1.0),
+                                    front)
+            s_f = (front / F.clamp(min=1e-6)).clamp(0, 1)
+            if imp_wave:
+                # (contact.impact wave; sim/evidence/diag_cav/mechanic.md M31-M34, the program) the ranks behind have no target
+                # either: the men in reach lie or get up (no target), the men behind are beyond them - a man knocked down
+                # is an enemy's body for collision_disable_delay_knocked_down_vs_enemies 2 s; the ranks behind (in by
+                # 0.3 + 0.4 k s, the recording) reach the men as the men down get up among the horses - every man of
+                # the charger in contact waits as the front rank does, his first blow (impact.deferred, swing of all
+                # F) as the men get up, his intervals from then
+                s_front = s_f
+                s_f = torch.ones_like(s_f)
+            if recv is not None:
+                back2 = (t2 >= interval).to(p.dtype)
+            else:
+                back2 = (torch.where(t2 >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p))
+                         + torch.where(t2 >= interval, p, torch.zeros_like(p)))
+            if imp_comb:
+                # (contact.impact wave comb, impact.comb; sim/evidence/diag_cav/mechanic.md M37, the program, and the game's memory)
+                # one timer a man, set at each attack's start, a miss no sooner back: the front rank that struck at the
+                # landing and the ranks behind that struck as they reached standing men strike again together, an interval
+                # later, comb_blows times (impact.deferred's cohorts, battle.py) - no steady rate for the pair till then
+                lo_r, hi_r = _impact.rear_window(u, params)
+                if _impact.front_reach(params):
+                    # (contact.impact wave front_reach; the game's memory, tmp/old-build/diag_mem/cav2/mix.py) after the lances the
+                    # front rank is no longer the men in reach: the ranks behind ride up beside it and the knights at the
+                    # face (F / fighting_files, the twin's 37-45 against the memory's 34-39 within 4.55 m of a man) stand
+                    # within the strike's reach of a standing man alike - the memory's share 0.55-0.65 of them, the front
+                    # rank's 0.64-0.81 (5.4-6.2 of its 9 knights): the front rank's men in reach are its files x
+                    # fighting_files (the twin's F / (F / fighting_files)), the rest of F the ranks behind
+                    s_front = s_front * ff
+                K = _impact.comb_blows(params)
+                h_front = K * interval
+                h_rear = hi_r[:, :, None] + (_impact.comb_blows_rear(params) - 1) * interval
+                back = torch.where(rp, s_front * (t >= h_front).to(p.dtype) + (1 - s_front) * (t >= h_rear).to(p.dtype),
+                                   back)
+                # the ranks behind that strike: the men of the charger in contact within the strike's reach - F, with the
+                # fighting_files share (the game's memory: a rear knight strikes his target 1.9-3.3 m off, p90 3.2-3.3 m,
+                # and 15-21 knights stand within 3 m of a man fit as a target 2-5 s after the impact, against 25-38
+                # within 4.55 m - F / fighting_files counted those), less the front rank
+                s_rear = ((F - front).clamp(min=0) / F.clamp(min=1e-6))
+                if parts is not None:
+                    parts["s_front"], parts["s_rear"] = s_front, s_rear
+            elif imp_first:
+                # (contact.impact strike_first; sim/evidence/diag_cav/mechanic.md M36-M37, the program) the front rank (s_front of
+                # the men in contact) swung its lances at the landing, on men still standing (the first strike's rank,
+                # battle.py), and its men's one timer runs from that blow - a new target does not reset it: they strike
+                # again an interval after the landing (back by t), and not before the men they rode among get up (no
+                # target till then: t2 >= 0); the ranks behind (1 - s_front) swing their first blow as the men get up
+                # (the deferred swing, below) and wait their interval from it (back2)
+                back = torch.where(rp, s_front * back * (t2 >= 0).to(p.dtype) + (1 - s_front) * back2, back)
+                # the ranks behind that swing as the men get up: every man of the charger within reach of them (the
+                # first strike's count - the men in contact without the fighting_files share, F / fighting_files, the
+                # bodies side by side and the opening wave: 37 knights at 3 s on the clanrats; the recordings 35-38
+                # within 4.55 m, the free fight's reach r1 + 2.5 s + r2 with the rider's record, M38) less the front
+                # rank - as a share of F (the swing below is F's)
+                reach = F / ff
+                if sp_k is not None:
+                    reach = torch.where(sp_k > 0, F, reach)                  # (contact.sparse: every body in reach)
+                s_rear = ((reach - front).clamp(min=0) / F.clamp(min=1e-6))
+            else:
+                back = torch.where(rp, s_f * back2 + (1 - s_f), back)
+    else:
+        back = None
+    rate = F * struck * per_s * hit
+    # Men gather round a lone man (a lord) who ran into their formation over contact.lord_gather_s from the
+    # striker's contact (0: at once); infantry that runs onto a standing lord strikes him in full at once (the lord
+    # swarm probe: his first 15 s 1.11 x his steady loss; sim/evidence/melee2/spec.md L4).
+    gather = float(cc.get("lord_gather_s", 0.0))
+    if gather > 0:
+        grow = (u["contact_s"] / gather).clamp(0, 1)[:, :, None]
+        ran_j = u["ran_in"][:, None, :] if "ran_in" in u else torch.ones_like(single_j)
+        g_big = (cc.get("ring_big") or {}).get("gather_s")
+        if g_big is not None and bool((cc.get("ring_big") or {}).get("on")):
+            # (contact.ring_big gather_s) round a monster the formation's face is there at once: its men reach the
+            # body in seconds, not the lord's 20 s of men walking round a small one
+            grow_big = (u["contact_s"] / max(float(g_big), 1e-6)).clamp(0, 1)[:, :, None]
+            grow = torch.where(big_lone(u)[:, None, :], grow_big, grow)
+        rate = torch.where(single_j & ~single_i & ran_j, rate * grow, rate)
+    if pursuit is not None:
+        share = knobs.full_like(rate, knobs.get(u, "pursuit_rate", float(pursuit), 3))
+        if cc.get("rout_pin_s") and cc.get("rout_pin_rate") is not None and "rpin_s" in u:
+            # a router in its rout's exit (battle.py, contact.rout_pin_s), still among the men it fought, is struck at
+            # contact.rout_pin_rate of the rule (the recordings: 0.77 of a standing unit's loss in melee)
+            share = torch.where((u["rpin_s"] > 0)[:, None, :], float(cc["rout_pin_rate"]), share)
+        # a lone man striking a lone router (the enemy lord chasing our lord): lone_rout's share (sim/config/sim.json
+        # contact.lone_rout; absent: the formations' pursuit_rate)
+        share = lone_rout.share(cc, share, single_i)
+        rate = torch.where(routing_j, rate * share, rate)
+    # A lone man (a lord) fought by infantry takes the sum of what the men around him strike (no
+    # more than lord_max_attackers of them, however many units: the lord swarm probe). Fought by
+    # the enemy lord too, the infantry's share counts only lord_rival_others (the probe's lord
+    # against lord and units; the whole battles: 12.2 HP/s from the enemy lord, 13.5 with a unit).
+    rival = (single_i & (rate > 0)).any(dim=1, keepdim=True)
+    k = float(cc.get("lord_rival_others", 1.0))
+    rate = torch.where(single_j & rival & ~single_i, rate * k, rate)
+    # A unit told to attack another enemy fights that one: a lone man it only touches takes
+    # lord_incidental of its rate (whole battles: a lord in contact with one enemy unit loses
+    # 1.7 HP/s when the unit's current target is another, 4.1 when it is him).
+    slot = torch.arange(u["men"].shape[1], device=rate.device)[None, None, :]
+    order_t = u["order_target"][:, :, None]
+    busy = (u["order_kind"][:, :, None] == O.ATTACK) & (order_t >= 0) & (order_t != slot)
+    rate = torch.where(single_j & ~single_i & busy, rate * float(cc.get("lord_incidental", 1.0)), rate)
+    # The same for an enemy unit it only touches: unit_incidental of its rate (gate battles, 02.10.2026:
+    # a unit fought by one enemy unit took 19.6 HP/s in the game, 33.9 in the open-loop replay, when
+    # other enemy units stood within 35 m of it; 16.5 against 20.7 when none did).
+    inc = torch.full_like(rate, float(cc.get("unit_incidental", 1.0)))
+    if cc.get("fresh_incidental") is not None and "order_s" in u:
+        # Within the database's melee_breakoff_secs (24 s) of an attack order given in melee on another enemy, it
+        # strikes the units it only touches at contact.fresh_incidental (the fresh-order probe,
+        # tmp/old-build/charge-probe/runs/20261008-145559 / -145641: swordsmen told to attack clanrats 4 m beside the clanrats
+        # they fought dealt those 0 HP for 25 s in 2 lanes of 2, still touching them, then fought them again).
+        fresh = (u["order_s"] < float(B.get("melee_breakoff_secs", 0.0)))[:, :, None]
+        inc = torch.where(fresh, float(cc["fresh_incidental"]), inc)
+    rate = torch.where(~single_j & ~single_i & busy, rate * inc, rate)
+    # A formation without a missile weapon standing under HOLD in melee (no attack order) strikes at hold_rate of
+    # the rule (measured: the melee probe's held units - braced spearmen, spearmen facing away, swordsmen - strike
+    # clanrats at 0.49-0.52 of it from 5 s on, 6 lanes; the network's held units in the gates 0.80 of the kills of
+    # the same units attacking); missile units 0.99-1.01 and a lone man (a lord held by script strikes at 0.77-1.19
+    # of the rule, the damage plan): in full. The database's melee_attack_threshold_modifier_* (vanilla idle 0.14,
+    # ordered 0.22; all 1.0 with the required mod True Sight, sim/config/game_rules.json "_mods") are when a unit joins
+    # a fight, not its rate (sim/evidence/melee2/spec.md 3): no rule for the rate found.
+    # A formation under a MOVE order still in contact (not leaving it: a far point is a leaving unit, which strikes
+    # nobody) strikes like a held one (contact.hold_move; sim/evidence/open_melee/spec.md R3: blocked by the enemy its men do
+    # not step into the gaps - the probe's move lanes struck 0.70 of the same units attacking, men within 2.5 m 0.73).
+    held_kind = u["order_kind"] == O.HOLD
+    if cc.get("hold_move"):
+        move = u["order_kind"] == O.MOVE
+        if cc.get("move_far_full") and cc.get("leave_m"):
+            # a MOVE to a far point through the enemy (contact.leave_away_only: not a leave) keeps pushing and strikes
+            # in full (contact.move_far_full; tmp/old-build/probes7 P3: spearmen walking to a point 60 m beyond their attacker
+            # struck 29 HP/s, answering with an attack order 21); a point within leave_m (R3's 5 m) - held
+            far = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= float(cc["leave_m"])
+            move = move & ~far
+        held_kind = held_kind | move
+    # contact.hold_missile: a missile unit under HOLD is held too (the wavemiss probes: unordered shooters struck clanrats
+    # at 0.45 HP/s a man within reach, the same shooters under an attack order 0.80 - 0.56 of it; the twin's held
+    # shooters dealt 3.4x the game's); absent: missile units strike in full (the old note: 0.99-1.01, source not kept)
+    missile_held = bool(cc.get("hold_missile"))
+    held = held_kind & ((u["range"] <= 0) | missile_held) & (u["men0"] > 1)
+    # A braced unit's blows while it reflects a charge are not cut (contact.hold_reflect_full; R2: braced spearmen
+    # struck 52 HP/s in 1-5 s after a charge = the full rule x2, held swordsmen 12 HP/s = hold_rate).
+    cut = held[:, :, None]
+    if ride is not None and (cc.get("impact") or {}).get("ride_full") and "size_k" in u:
+        # (contact.impact ride_full, impact.py) a held unit a larger charger rode into strikes it in full
+        cut = cut & ~(ride[:, :, None] & u["large"][:, None, :] & (u["size_k"][:, None, :] > u["size_k"][:, :, None]))
+    if cc.get("hold_reflect_full"):
+        cut = cut & (reflect <= 1.0)
+    full = rate
+    rate = torch.where(cut, rate * knobs.get(u, "hold_rate", float(cc.get("hold_rate", 1.0)), 3), rate)
+    swing_from = rate
+    if back is not None:
+        rate = rate * back
+    if not first:
+        return rate, hit, sector, F
+    # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each; every man in
+    # reach swings, hold_rate is about the men who step in later (contact.first_strike_full; R1).
+    swing_rate = full if cc.get("first_strike_full") else swing_from
+    swing_all = swing_rate
+    if F0 is not None:
+        # The first strike swings the men of the steady front, not the opening wave's (contact.first_strike_steady;
+        # sim/config/sim.json contact.first_strike_steady_why): the swing was checked against the game before the wave
+        # came in (the melee probe: 0-1 s 189 HP against the game's 220, swordsmen charging clanrats); multiplied by the
+        # wave (x2.48 at the contact) it gave 441 against 184-219, the recontact probe's 18 first contacts 211.
+        swing_rate_steady = torch.where(F > 0, swing_rate * F0 / F.clamp(min=1e-9), torch.zeros_like(swing_rate))
+    else:
+        swing_rate_steady = swing_rate
+    if F_rank is not None:
+        # (contact.first_strike_rank, above: the front rank of a unit that ran in; the rest keep the steady swing)
+        swing_rate = torch.where(rank_on, torch.where(F > 0, swing_rate * F_rank / F.clamp(min=1e-9),
+                                                      torch.zeros_like(swing_rate)), swing_rate_steady)
+    else:
+        swing_rate = swing_rate_steady
+    if imp_wave and late is not None:
+        # (contact.impact wave) a large charger that rode in: every man of it in contact now (F, the men within reach -
+        # the recordings: 20-23 knights within 3 m of a clanrat from 1.5 to 5 s after the impact) swings his first blow
+        # as the men it knocked down get up (impact.deferred): none of them struck since the impact, their intervals
+        # are ready (CA Feature Focus #2), not the steady front's swing
+        late_pair = (late[:, :, None] & (u["ride"] >= 0.5)[:, None, :] & u["large"][:, :, None]
+                     & (u["size_k"][:, :, None] > u["size_k"][:, None, :]) & ~single_i & ~single_j)
+        # (contact.impact strike_first: the front rank swung at the landing - the ranks behind alone, s_rear of the men)
+        if imp_comb:
+            # (comb) every man's blow: battle.py weighs the front rank and the ranks behind by their cohorts' shares
+            swing_rate = torch.where(late_pair, swing_all, swing_rate)
+        else:
+            swing_rate = torch.where(late_pair, swing_all if s_rear is None else swing_all * s_rear, swing_rate)
+    return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))

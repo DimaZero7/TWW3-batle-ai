@@ -1,0 +1,289 @@
+{
+ "_why": "the levels' networks (09.11, copied by tmp/clean_net.py from the old project's build/): the files are out of git (weights/ in .gitignore), this list is in git. sha256 of the .pt; exam: the numbers of the exam files beside it (the network's passport, as they were run then)",
+ "weights": [
+  {
+   "name": "unit",
+   "kind": "unit_v1",
+   "path": "weights/unit/mixmap_run2/latest.pt",
+   "sha256": "3871b3c2401596aca280eb64eb22c4c7929c4950d073a415d05b5b93af7dbe8e",
+   "bytes": 7375451,
+   "from": "build/diag_g49/mixmap/run2/latest.pt (old project; U1-U10 mix on the maps (29.10))",
+   "used_by": "net/config/tactic.json train.unit_ckpt: every level above, the bridge",
+   "exam": {
+    "exam_go.json": {
+     "out_pushed": 0.0,
+     "duration_s": 309.5,
+     "bans_broken": 0,
+     "all": {
+      "reached": 0.856,
+      "reach_s": 159.416,
+      "before_enemy": 0.5,
+      "area_ours_old": 0.5,
+      "area_ours": 0.565,
+      "area_theirs": 0.152,
+      "contact": 1.0,
+      "front_at_contact": 0.792,
+      "out_free": 0.0,
+      "trade": -0.039
+     }
+    },
+    "exam_hold.json": {
+     "skirmishes": 360,
+     "contact": 0.956,
+     "melee_dmg_front": 0.962,
+     "out_of_area_free": 0.0,
+     "out_of_area_pushed": 0.0,
+     "trade_mean": -0.04,
+     "trade_emp": -0.053,
+     "trade_skv": -0.026,
+     "duration_s": 168.3,
+     "contact_t_s": 30.6,
+     "bans_broken": 0,
+     "leash_s": 0.0
+    },
+    "exam_hold2.json": {
+     "out_pushed": 0.0079,
+     "duration_s": 178.7,
+     "bans_broken": 0,
+     "all": {
+      "jostle": 0.0,
+      "dmg_front": 0.879,
+      "dmg_flank_rear": 0.121,
+      "head_on": 0.856,
+      "out_free": 0.0078,
+      "trade": -0.026
+     }
+    },
+    "exam_multi.json": {
+     "out_of_area_free": 0.0,
+     "out_of_area_pushed": 0.0,
+     "duration_s": 138.6,
+     "bans_broken": 0,
+     "stand_branch_braced": 1.0,
+     "all": {
+      "chose_best": 0.438,
+      "best_attack": 0.951,
+      "best_on_A": 0.794,
+      "always_first_best": 0.605,
+      "always_first_loss": 0.028,
+      "margin": 0.053,
+      "head_on_first": 0.857,
+      "dmg_front": 0.552,
+      "dmg_flank_rear": 0.448,
+      "trade": -0.078
+     }
+    },
+    "exam_prio.json": {
+     "duration_s": 111.9,
+     "bans_broken": 0,
+     "order_changes_per_skirmish": 17.4
+    },
+    "exam_rout.json": {
+     "leash_s_per_skirmish": 0.0,
+     "out_pushed": 0.0002,
+     "bans_broken": 0,
+     "order_changes_per_skirmish": 26.0,
+     "all": {
+      "routed": 0.946,
+      "routers_cut_in_area": 0.064,
+      "routers_cut_all": 0.078,
+      "in_area_share": 0.822,
+      "trade": 0.112,
+      "out_free": 0.0003
+     }
+    },
+    "exam_shoot1.json": {
+     "out_pushed": 0.0,
+     "leash_s": 33.5,
+     "duration_s": 164.3,
+     "bans_broken": 0,
+     "all": {
+      "fire_time": 0.509,
+      "enemy_in_sector": 1.0,
+      "fire_damage": 0.383,
+      "fire_damage_before_contact": 0.372,
+      "contact": 0.488,
+      "melee_lost": 0.263,
+      "trade": 0.086,
+      "out_free": 0.0
+     }
+    },
+    "exam_shoot2.json": {
+     "bans_broken": 0,
+     "order_changes_per_skirmish": 132.9,
+     "all": {
+      "fire_time": 0.552,
+      "fire_lost_to_friends": 0.202,
+      "fire_damage": 0.474,
+      "own_lost_out_of_melee_while_firing": 0.007,
+      "trade": 0.186,
+      "out_free": 0.0135,
+      "out_walking_back": 0.0127
+     }
+    },
+    "exam_shootw.json": {
+     "duration_s": 146.6,
+     "bans_broken": 0,
+     "order_changes_per_skirmish": 48.4,
+     "all": {
+      "men_firing": 0.755,
+      "fire_lost_to_friends": 0.245,
+      "fire_time": 0.56,
+      "fire_damage": 0.373,
+      "trade": -0.101,
+      "width_orders": 24.742,
+      "front_at_fire_m": 30.863,
+      "front_at_fire_v_gap": 1.232,
+      "out_free": 0.001
+     }
+    },
+    "exam_width.json": {
+     "duration_s": 169.2,
+     "bans_broken": 0,
+     "order_changes_per_skirmish": 44.0,
+     "all": {
+      "dmg_flank_rear": 0.096,
+      "ours_striking": 0.111,
+      "theirs_v_ours_striking": 0.959,
+      "trade": -0.045,
+      "we_routed": 0.2,
+      "out_free": 0.0,
+      "beyond_area": 0.07,
+      "width_orders": 18.283,
+      "front_at_contact_v_line": 0.531,
+      "front_at_contact_v_area": 0.532,
+      "front_at_contact_m": 24.327
+     }
+    },
+    "exam_withdraw.json": {
+     "out_pushed": 0.0,
+     "bans_broken": 0,
+     "all": {
+      "reached": 0.696,
+      "reach_s": 56.772,
+      "lost_on_way": 0.337,
+      "routed": 0.488,
+      "back_damage": 0.136,
+      "back_share": 0.255,
+      "trade": -0.429,
+      "out_free": 0.0
+     }
+    }
+   }
+  },
+  {
+   "name": "card",
+   "kind": "card (state_dict)",
+   "path": "weights/tactic/card8/card8.pt",
+   "sha256": "8d707ff2a8ae8c346cb4d3d81f63bc15eeaa09c27d92906f911730603b2c5c5d",
+   "bytes": 329277,
+   "from": "build/diag_tactic/card_pretrain/card8.pt (old project; tactic/pretrain_card (31.10))",
+   "used_by": "net/tactic/decide.CARD_CKPT: the unit analysis of the tactician, operative, strategist (frozen)",
+   "exam": {
+    "result.json": {
+     "rows_train": 121130,
+     "rows_test": 69462,
+     "collect_s": 138.2,
+     "train_s": 16.4,
+     "card8": {
+      "class": 0.9998704195022583,
+      "size": 1.0,
+      "enough": true
+     }
+    }
+   }
+  },
+  {
+   "name": "tactic",
+   "kind": "tactic_v1",
+   "path": "weights/tactic/run4/latest.pt",
+   "sha256": "b2d3266ee2fc5bbe8656ef6918948883b69c575a823e1b9d637384b4ff1f0ebd",
+   "bytes": 10978565,
+   "from": "build/diag_tactic/first/run4/latest.pt (old project; tactic drill1 'hold' (01.11))",
+   "used_by": "net/config/{operative,strategist}.json tactic_ckpt (the default under the operative: the formula)",
+   "exam": {
+    "exam.json": {
+     "changes_per_battle": 0.37,
+     "fell": 35.0,
+     "keep_share": 0.942,
+     "forced": 0.0,
+     "small_moves_per_battle": 2.17,
+     "frames_overlap": 0,
+     "frames_out": 0,
+     "all": {
+      "between": 0.984,
+      "contact": 1.0,
+      "hit": 0.0,
+      "shooters_in_melee": 0.004,
+      "shooters_fired_s": 74.801,
+      "ammo_used": 0.114,
+      "trade": -0.005,
+      "contact_t": 146.402,
+      "fill": 0.414
+     }
+    }
+   }
+  },
+  {
+   "name": "operative",
+   "kind": "operative_v1",
+   "path": "weights/operative/run8/latest.pt",
+   "sha256": "9289d9b98a45db9aa74b0033667cd768147866c3176c12a38fe375e743dbbfc4",
+   "bytes": 12669417,
+   "from": "build/diag_operative/run8/latest.pt (old project; operative cases (07.11))",
+   "used_by": "net/config/strategist.json operative_ckpt (--op net), the bridge --op net",
+   "note": "6 groups: config operative.json groups 40 since 07.11 - restore() refuses it (build anew)",
+   "exam": {
+    "exam.json": {
+     "reforms_per_battle": 0.01,
+     "moves_per_battle": 3.46,
+     "groups_mean": 1.29,
+     "parcels": 1844,
+     "parcel_errors": 0,
+     "tactic_fell_share": 0.0031,
+     "trade": -0.0164,
+     "keeps_per_decision": 1.004,
+     "gather": 1.0,
+     "split": 0.977,
+     "go": 0.93
+    },
+    "exam_army.json": {
+     "reforms_per_battle": 2.8,
+     "moves_per_battle": 12.57,
+     "groups_mean": 2.24,
+     "parcels": 6782,
+     "parcel_errors": 0,
+     "tactic_fell_share": 0.0258,
+     "trade": -0.0886,
+     "keeps_per_decision": 1.145,
+     "split_a": 0.849,
+     "go_a": 0.964
+    }
+   }
+  },
+  {
+   "name": "strategist",
+   "kind": "strategist_v1",
+   "path": "weights/strategist/run5/latest.pt",
+   "sha256": "1f3900e7844f12b9d530797be870abb518423f8f659a1781308acb7d13e8767e",
+   "bytes": 10759065,
+   "from": "build/diag_strategist/run5/latest.pt (old project; strategist cases (07.11))",
+   "used_by": "the bridge --strategist <path>, strategist.exam --ckpt",
+   "note": "6 groups: config strategist.json groups 40 since 08.11 - restore() refuses it (build anew)",
+   "exam": {
+    "exam.json": {
+     "deploy_errors": 0,
+     "deploy_error_battles": 0,
+     "parcels": 1267,
+     "parcel_errors": 0,
+     "op_reforms_per_battle": 1.878,
+     "trade": -0.0042,
+     "tactic_fell": 10285.0,
+     "own_units": 5.45,
+     "attack": 1.0,
+     "hold": 1.0
+    }
+   }
+  }
+ ]
+}

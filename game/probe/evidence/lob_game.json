@@ -1,0 +1,80 @@
+{
+ "arch_c20": {
+  "launched": 561,
+  "hit_target": 153,
+  "lying_near_t": 534,
+  "kind": "arch_c20",
+  "lob_share": 0.0,
+  "angle_med": 17.1,
+  "shots": 561.0,
+  "hp_per_shot": 10.171551891212836,
+  "cover_hp_lost": 0.0,
+  "first_shot_s": 3.0,
+  "fwd_max_m": 2.100006103520002
+ },
+ "arch_c5": {
+  "launched": 536,
+  "hit_target": 143,
+  "lying_near_t": 515,
+  "kind": "arch_c5",
+  "lob_share": 0.0,
+  "angle_med": 17.0,
+  "shots": 536.0,
+  "hp_per_shot": 9.838984103173203,
+  "cover_hp_lost": 0.0,
+  "first_shot_s": 3.0,
+  "fwd_max_m": 0.5
+ },
+ "arch_alone": {
+  "launched": 538,
+  "lying_near_t": 486,
+  "hit_target": 120,
+  "kind": "arch_alone",
+  "lob_share": 0.0,
+  "angle_med": 17.0,
+  "shots": 539.0,
+  "hp_per_shot": 9.853658536585366,
+  "cover_hp_lost": null,
+  "first_shot_s": 4.0,
+  "fwd_max_m": 1.399993896479998
+ },
+ "xbow_c20": {
+  "launched": 395,
+  "lying_near_t": 393,
+  "hit_target": 85,
+  "kind": "xbow_c20",
+  "lob_share": 0.0,
+  "angle_med": 17.9,
+  "shots": 396.0,
+  "hp_per_shot": 12.857506361323155,
+  "cover_hp_lost": 0.0,
+  "first_shot_s": 5.0,
+  "fwd_max_m": 0.5999755859400011
+ },
+ "sling_c20": {
+  "launched": 840,
+  "lying_near_t": 836,
+  "hit_target": 245,
+  "kind": "sling_c20",
+  "lob_share": 0.0,
+  "angle_med": 11.6,
+  "shots": 840.0,
+  "hp_per_shot": 3.579761904761905,
+  "cover_hp_lost": 0.0,
+  "first_shot_s": 5.0,
+  "fwd_max_m": 2.6999969482419885
+ },
+ "sling_alone": {
+  "launched": 839,
+  "lying_near_t": 831,
+  "hit_target": 222,
+  "kind": "sling_alone",
+  "lob_share": 0.0,
+  "angle_med": 11.5,
+  "shots": 839.0,
+  "hp_per_shot": 3.4052443384982123,
+  "cover_hp_lost": null,
+  "first_shot_s": 5.0,
+  "fwd_max_m": 4.399997711181001
+ }
+}

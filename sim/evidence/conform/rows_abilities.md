@@ -1,0 +1,118 @@
+# Сверка: способности, пассивные атрибуты и врождённые эффекты (A1…A33)
+
+Охват: все `abilities` и `attributes` наших 17 отрядов из `config/nn/units.json` — 11 способностей
+(5 активных у лордов, 6 пассивных/автоматических) и 8 атрибутов. Плюс общие правила: как складываются
+эффекты, радиус ауры, начальная перезарядка, поведение ИИ.
+
+Что сделано с базой (только чтение, скрипты и выгрузки в `build/conform/abilities/`):
+- `usa_scan.py` — строки `unit_special_abilities` (3175 шт.). Поле `f09` (сразу после `f08`) —
+  это **начальная перезарядка** (initial_recharge). Проверка: у Gate of Khorne там 60, и fandom пишет
+  «начинает бой на перезарядке 60 с». У всех 5 активных способностей наших лордов там 0. У Single
+  Entity — 5, у Strength of the Penitent — 3, у остальных пассивных −1.
+- `phases_probe.py`, `phases_before.py`, `phases_scan.py` — таблица `special_ability_phases`.
+  Длительность фазы равна `active_time`. Тип эффекта: Single Entity — `negative`, остальные —
+  `positive`. Флаги фазы (`unbreakable`, `cant_move`, лечение, imbue, …) у всех наших фаз нулевые,
+  **кроме Foe-Seeker**: у него в поле бодрости стоит −0.01. В этом же поле −0.01 у Vigour Mortis и у
+  `supplies_fatigue`, а это восстановление бодрости.
+- `ai_templates.py`, `kv_ai.py` — у каждой активной способности в строке записан шаблон ИИ игры
+  (`battle_ai_abilities_usage_templates_to_params`, порог `min_score_for_activation` 0.5).
+- `vv_vortex.py` — взрыв Verminous Valour: радиус 25 м, длится 1 с (`battle_vortexs`).
+- Числа стат-эффектов и условий (`special_ability_phase_stat_effects`, `_to_recharge_contexts`,
+  `_to_auto_deactivate_flags`) совпадают с `config/nn/abilities.json` один в один. Других фаз и
+  атрибутов у этих способностей нет. Варианты фаз (dlc03, mimic, tacticians) относятся к другим
+  владельцам.
+
+## Таблица
+
+| ID | Механика / параметр | Правило игры (формула + числа) | Источник (URL / ключ базы) | У нас (файл:строка, ключ sim.json = значение) | Статус | Влияние на бои | Что сделать (и какие подогнанные параметры убрать вместе) |
+|---|---|---|---|---|---|---|---|
+| A1 | Сколько весят прибавки атаки и защиты (Stand Your Ground +24 защиты, Hold the Line +5, Strength in Numbers +8, Penitent +14, Frenzy +10 атаки) | Попадание = 35 + атака − защита (8–90 %). +24 защиты = −24 процентных пункта попаданий по отряду. | Числа: `special_ability_phase_stat_effects`; формула: CA (sim.json melee.why «CA confirmed the formula»), build/prespec/batch2.md п. 13 | Числа эффектов верные (`sim/abilities.py:194-195`, `sim/effects.py`), но у отрядов `melee.hit_slope` = 0.1 (`sim/melee.py:134`): прибавка весит в 10 раз меньше. Лорд против лорда — `contact.lord_hit_slope` = 1 | FITTED (наклон 0.1 прикрывает правило: «Стоять насмерть» даёт −2,4 п.п. вместо −24) | высокое: Stand Your Ground в игре может втрое снизить потери пехоты рядом с лордом за 18 с; у нас почти ничего | Опыт в игре «Stand Your Ground вкл/выкл» (тест T1). Решать вместе с аналитиком шанса попадания (`build/hitchance`). Если наклон станет 1, в способностях ничего менять не нужно |
+| A2 | Foe-Seeker: восстановление бодрости | Пока действует (25 с), лорд восстанавливает 1 % бодрости в секунду (фаза: поле бодрости −0.01). Если это 1 % от 30000, то 300 очков/с; в рукопашной (+190/с) лорд за это время не устаёт | `special_ability_phases` wh_main_character_abilities_foe_seeker (поле после ключа = −0.01; то же поле у `wh_dlc04_unit_passive_vigour_mortis`); [fandom Foe-Seeker](https://totalwarwarhammer.fandom.com/wiki/Foe-Seeker) (сниппет: «Vigour per second: -1%, 25s, 60s») | Нет: `SIM_STATS` не знает про бодрость (`sim/abilities.py:40`), поля фаз не прочитаны (`effects.json _missing «phase flags»`) | MISSING | высокое для генерала: ИИ включает Foe-Seeker в рукопашной каждые ~85 с. Это объясняет «генерал ИИ в игре остаётся свежим» (sim.json contact.why, остаток General ×0.8) | Прочитать поле бодрости фазы в `abilities.json`; в `fatigue.py` добавить −ratio × 30000 очков/с, пока способность действует. Потом снова подогнать `fatigue.single_combat` 15 → 19 из базы и проверить остаток генерала ×0.8 (contact.why). Масштаб сначала подтвердить тестом T4 |
+| A3 | Single Entity («Раны» лорда) | Здоровье < 25 % → скорость ×0.9, урон и бронебойный урон ×0.8; эффект остаётся до конца боя (с патча 2.0). В базе: условие перезарядки `health_below_25%`, начальная перезарядка 5 с — значит, вероятно, включается через 5 с ниже 25 % | `special_ability_phase_stat_effects`, `_to_recharge_contexts` (wh3_main_unit_passive_single_entity), `unit_special_abilities` поле f09 = 5; [fandom Wounds](https://totalwarwarhammer.fandom.com/wiki/Wounds), [Update 2.0](https://totalwarwarhammer.fandom.com/wiki/Update_2.0), [Steam: Wounds](https://steamcommunity.com/app/1142710/discussions/0/3378285310307201048/), [GameWatcher](https://www.gamewatcher.com/total-war-warhammer-3-lords-monsters-debuff-small-unit-size-scaling) | Выключено: `sim.json effects.off` = [single_entity] (строка 145); в `effects.json` условие «пока < 25 %», а не «включился — до конца» | FITTED (выключено по записям: скорость не падала; это прикрывает правило игры) | среднее: лорд ниже 25 % наносит на 20 % меньше урона и медленнее бежит; у нас лорды падают ниже 25 % чаще, чем в игре | Записать лорда ниже 25 % с ActiveEffectList (тест T11). Если эффект есть: включить с задержкой 5 с и «до конца боя», убрать из `effects.off`, пересчитать судьбу лорда (lord_why, batch 3) |
+| A4 | Rally!: действие на бегущих | +16 к лидерству своим в 35 м, в том числе бегущим; так их можно вернуть в бой | `special_ability_phase_stat_effects` (rally: stat_morale add 16, self+friends, 35 м); [fandom Rally!](https://totalwarwarhammer.fandom.com/wiki/Rally!), [fandom Leadership](https://totalwarwarhammer.fandom.com/wiki/Leadership) (сниппет: «raise the leadership of routing units close-by, so that they may return») | У бегущего мораль не идёт к цели: только +2/с, пока свободен, и сбор при 0.23 × лидерство без прибавки (`sim/morale.py:204,222`; `morale.rally_rate` = 2, `rally_mp` = 0.23). +16 в `morale_bonus` бегущему ничего не даёт | DIFFERS | среднее: сеть отдаёт приказ Rally сама и учится, что бегущим он бесполезен; ИИ варлорда включает его в рукопашной | Тест T3 в игре (сбор с Rally и без). Если ускоряет — ввести `morale_bonus` в правило сбора (порог или скорость), вместе с подогнанными `rally_rate` / `rally_mp` |
+| A5 | Когда ИИ игры включает способности (`abilities.triggers`; это поведение ИИ, не правило игры) | В базе у каждой способности свой шаблон ИИ: VV `aoe_centred_on_self` (в рукопашной 6, врагов рядом 1.5); Foe-Seeker `augment_melee_self` (в рукопашной 1); Deadly Onslaught `augment_charge_self` (только «в натиске» 1); Rally `augment_morale_area` (в рукопашной 0.5, своих рядом 1, низкая мораль 2); Stand Your Ground `augment_melee_area` (в рукопашной 1, своих рядом 2, атака 1, сила 1). Включает, если счёт ≥ 0.5 | `unit_special_abilities` (поле шаблона), `battle_ai_abilities_usage_templates_to_params`, `_kv_battle_ai_ability_usage_variables.min_score_for_activation` = 0.5 | `sim.json abilities.triggers` (строка 158): FS/VV/Rally/SYG «melee», DO «never»; `friends_min` SYG 1, Rally 2; `near_m` 60 — по 926 замеренным включениям | FITTED (по замеру; совпадает с шаблонами базы: везде «в рукопашной», у Rally и SYG ещё «свои рядом») | среднее: так ведёт себя противник-ИИ | Оставить. Для DO вместо «never» можно «в натиске» (шаблон базы), если в записях ИИ-лорды бегут в натиск; формула счёта закрыта — не подгонять сверх замера |
+| A6 | Начальная перезарядка | У 5 активных способностей лордов 0 — готовы с начала боя. У Single Entity 5 с, у Penitent 3 с | `unit_special_abilities` f09 (проверено: Gate of Khorne = 60, как в fandom); [Steam-руководство](https://steamcommunity.com/sharedfiles/filedetails/?id=1698960734) (сниппет: «Initial Recharge starts the spell on that amount of cooldown… most abilities start at 0») | Готовы с начала (`sim.json abilities.why`: «no initial recharge found»); `abilities.json _missing «initial recharge»` | MATCHES (для лордов) | низкое | Вписать поле в `dbtables.PREFIXES` (`f09` → `initial_recharge`) и в паспорта; убрать пометку `_missing` |
+| A7 | Перезарядка начинается после окончания действия | Перезарядка идёт после действия: Rally готов снова через 14 + 60 с | [Steam-руководство](https://steamcommunity.com/sharedfiles/filedetails/?id=1698960734) (сниппет: «staves off recharge until the spell is done») | `cd = active + recharge` (`sim/abilities.py:165`, `sim/effects.py:209`); замер: FS/VV снова через 85–86 / 77–78 с (= 25 + 60 / 17 + 60) | MATCHES | среднее (ритм всех способностей) | — |
+| A8 | Stand Your Ground: числа | +24 защиты, +16 лидерства; сам лорд и все свои в 35 м; 18 с; перезарядка 90 с | `unit_special_abilities`, `special_ability_phase_stat_effects` (stand_your_ground); [fandom](https://totalwarwarhammer.fandom.com/wiki/Stand_Your_Ground!) (сниппет: те же числа) | `abilities.json` = база | MATCHES (числа; вес — A1) | высокое через A1 | — |
+| A9 | Hold the Line! (пассивка генерала) | +5 защиты, +4 лидерства; сам лорд и свои в 35 м; всегда | база (wh_main_lord_passive_hold_the_line); [fandom](https://totalwarwarhammer.fandom.com/wiki/Hold_the_Line!) (сниппет: «+5, +4, 35m, all allies») | `effects.json`; замер: спокойный генерал 1.129 = (70 + 4 HtL + 5) / 70, поединок лордов 41 % = база с +5 HtL | MATCHES | среднее | — |
+| A10 | Rally!: числа | +16 лидерства себе и своим в 35 м; 14 с; перезарядка 60 с | база (wh_main_character_abilities_rally); [fandom Rally!](https://totalwarwarhammer.fandom.com/wiki/Rally!) | `abilities.json` = база | MATCHES (кроме A4) | среднее | — |
+| A11 | Foe-Seeker: скорость | Скорость ×1.25, скорость натиска ×1.25; 25 с; перезарядка 60 с; только на себя | база (foe_seeker: scalar_speed, scalar_charge_speed mult 1.25) | Ходьба и бег ×1.25. `charge_speed` ×1.25 вместо скорости, но это поле в движении не используется (`sim/abilities.py:187`; читает только `fatigue.py`) | DIFFERS (скорость натиска ни на что не влияет) | низкое | Вместе с аналитиком натиска: если натиск станет отдельной скоростью — умножать скорость натиска на оба множителя (как сочетает игра, не найдено) |
+| A12 | Verminous Valour | Себе: скорость ×1.25, +8 лидерства; 17 с; перезарядка 60 с. Плюс взрыв 25 м на 1 с (урон 0 по ручной расшифровке; fandom: «allows chance to escape melee») | база (verminous_valour; `battle_vortexs`: радиус 25, 1 с); [fandom](https://totalwarwarhammer.fandom.com/wiki/Verminous_Valour) | Статы как в базе; взрыва нет (`abilities.json _missing «area damage»`) | MATCHES (статы) | низкое (взрыв без урона; возможный отброс не найден) | — |
+| A13 | Deadly Onslaught | Себе: натиск ×1.6, урон и бронебойный урон ×1.25; 31 с; перезарядка 90 с (fandom пишет +40 % натиска — старые данные) | база (deadly_onslaught); [fandom](https://totalwarwarhammer.fandom.com/wiki/Deadly_Onslaught) | `abilities.json` = база; ИИ не включает (`triggers` never) | MATCHES | низкое (ИИ не включает; сеть может) | — |
+| A14 | Strength in Numbers (скавены, кроме варлорда) | +8 защиты, +6 лидерства, скорость ×0.9, пока здоровья ≥ 50 % от начала | база (выкл. при `health_below_50%_base`); [fandom](https://totalwarwarhammer.fandom.com/wiki/Strength_in_Numbers) (сниппет: те же числа) | `effects.json`; замер: скавены до контакта на 6 очков выше, бег 0.88 против 0.97 у Империи (×0.91) | MATCHES | высокое (+8 защиты у всей пехоты скавенов; вес — A1) | — |
+| A15 | Scurry Away! (скавены) | Скорость ×1.1, когда отряд колеблется или хуже | база (выкл. при `morale_is_higher_than_wavering`); [fandom](https://totalwarwarhammer.fandom.com/wiki/Scurry_Away!) | `effects.json`; замер: бег при бегстве 0.945 против 0.866 | MATCHES | среднее (бегство и преследование) | — |
+| A16 | Frenzy (флагелланты) | +10 атаки, урон и бронебойный урон ×1.1, натиск ×1.1, невосприимчивость к психологии; выключается при морали < 50 % от основы | база (frenzy + attribute immune_to_psychology); [fandom](https://totalwarwarhammer.fandom.com/wiki/Frenzy) (сниппет: те же числа) | `effects.json`; флагелланты несокрушимы → мораль ≥ лидерства → всегда вкл. | MATCHES (вес +10 — A1) | низкое | — |
+| A17 | Strength of the Penitent (флагелланты) | +14 защиты, +15 % сопротивления физическому урону; 20 с; перезарядка 3 с; начальная 3 с. Перезарядка идёт только пока отряд проигрывает рукопашную; выкл. вне рукопашной | база (`_to_recharge_contexts` losing_melee_combat, `_auto_deactivate` out_of_melee, f09 = 3); [fandom](https://totalwarwarhammer.fandom.com/wiki/Strength_of_the_Penitent) (сниппет: «enabled when in melee, recharges if losing»; там 15 с — старые данные); смысл «recharges if»: [fandom Overload](https://totalwarwarhammer.fandom.com/wiki/Overload) | Срабатывает сразу, как отряд проигрывает и способность готова; начальной 3 с нет; 3 с отсчитываются всегда (`sim/effects.py:206-209`); «проигрывает» = правило морали по урону (`combat_ratio.slightly`) | DIFFERS (мелочь: первое срабатывание до 3 с раньше) | низкое | Добавить начальную перезарядку и отсчёт только при «проигрывает» (тот же механизм: recharge context = условие отсчёта) |
+| A18 | Unbreakable (флагелланты) | Никогда не бежит, даже когда бой выигран | база `unit_attributes` unbreakable; [fandom Attributes](https://totalwarwarhammer.fandom.com/wiki/Attributes) | мораль ≥ лидерства (`sim/morale.py:210`), не раскалывается при обвале | MATCHES | среднее | — |
+| A19 | Expendable (рабы скавенов) | Его бегство и гибель пугают только других расходных | база unit_attributes expendable; [fandom Attributes](https://totalwarwarhammer.fandom.com/wiki/Attributes) | `battle.py:294`, `morale.expendable_scares_expendable` = true; замер −3.0 у расходного, 0 у обычного | MATCHES | среднее | — |
+| A20 | Encourage (лорды): аура лидерства | +4 своим рядом (у персонажей и отрядов одинаково с 5.3); с аурой лорда не складывается — действует большая; себе — нет | `_kv_morale` general_inspire 4, unit_inspire_effect_amount 4, radius 70, ×1.5; [патч 5.3.0](https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/34-total-war-warhammer-iii-patch-5-3-0), [fandom Encourage](https://totalwarwarhammer.fandom.com/wiki/Encourage) | `battle.py:279`: +4 до 70 м, к 105 м до 0, максимум (не сумма), не себе (`morale.lord_own_aura` = false, замерено) | MATCHES | среднее | — |
+| A21 | Charge Reflection (копья, алебарды, копья кланкрыс, штормкрысы) | Отряд стоит в упоре: по врагу в натиске (доля натиска ≥ 0.7) урон ×2 в первые ~3.9 с | `_kv_rules` charge_reflect_damage_multiplier 2, _min_charge_factor_threshold 0.7; [fandom Charge Reflection](https://totalwarwarhammer.fandom.com/wiki/Charge_Reflection) | `battle.py:116`: стоящий в упоре встречает натиск пехоты в лоб как свой натиск; порог 0.7 не применён; `melee.braced_speed` | FITTED (подстановка вместо ×2 урона, по замеру 87 встреч) | среднее | Отдать аналитику натиска; здесь только флаг |
+| A22 | Fire Whilst Moving (ополчение) | Стреляет на ходу | база unit_attributes mounted_fire_move; [fandom](https://totalwarwarhammer.fandom.com/wiki/Fire_Whilst_Moving) | `battle.py:145,150` | MATCHES (флаг; точность на ходу — аналитик точности) | низкое | — |
+| A23 | Charge Defence vs Large | В упоре гасит натиск больших | база unit_attributes | нет (`effects.json` modelled false) | MISSING | нет в наших боях (крупных нет; лорды «small», `units.json size`) | — |
+| A24 | Hide (forest) — у всех 17 | Скрыт в лесу, пока враг не подойдёт | база; [fandom Hide (forest)](https://totalwarwarhammer.fandom.com/wiki/Hide_(forest)) | нет (нет леса) | MISSING | нет в наших боях | — |
+| A25 | Vanguard Deployment (ополчение, ночные бегуны) | Развёртывание вне своей зоны, но не в зоне врага | база guerrilla_deploy; [fandom](https://totalwarwarhammer.fandom.com/wiki/Vanguard_Deployment) | нет (расстановка — генератор армий) | MISSING | нет в наших боях (расставляет сценарий) | — |
+| A26 | Immune to Psychology (из Frenzy); страх, ужас, Perfect Vigour, Stalk | Невосприимчив к страху и ужасу. Остальных атрибутов у наших 17 отрядов нет (Night Runners в WH3 без Stalk) | база (`unit_attributes_to_groups_junctions`, `special_ability_phase_attribute_effects`) | флаг есть, действовать не на что; `fatigue_immune` поддержан | MATCHES | нет в наших боях | — |
+| A27 | Одна и та же способность из двух источников | Не складывается: действует один экземпляр. Разные способности с похожим эффектом складываются | [Steam: Do hero abilities stack?](https://steamcommunity.com/app/594570/discussions/0/3101264555060127928/), [Steam: Do Ancillary buffs stack?](https://steamcommunity.com/app/1142710/discussions/0/6324828960571646286/) (сниппеты); KB abilities.md «не складываются» | Ауры суммируются по владельцам (`sim/effects.py:237-239`, `give.sum(1)`), активные тоже (`sim/abilities.py:180`) | DIFFERS | нет в наших боях (по одному лорду на сторону); станет важно с героями | При двух владельцах: max вместо суммы для одного ключа |
+| A28 | Как складываются разные эффекты на одном стате | `add` — прибавка к основе, суммируются. `mult` — множитель (>1 лучше). Как сочетаются два `mult` (произведение или сумма процентов) — не найдено | [Steam-руководство](https://steamcommunity.com/sharedfiles/filedetails/?id=1698960734) (сниппет: «add the value… or mult (above 1 is good)») | `add` суммируются, `mult` перемножаются (`sim/abilities.py:177-182`, `sim/effects.py:225-239`); сопротивления до предела 90 % (`sim/effects.py:255`) | MATCHES (add, предел 90 %); для mult правило не найдено | низкое: на наших сочетаниях разница ≤ 3 % (FS 1.25 × Wounds 0.9 = 1.125 против 1.15) | — |
+| A29 | Порядок: прибавки, множители способностей, множители усталости | не найдено | — | врождённые → способности → усталость (`battle.py:108,128,130`): (основа + прибавка) × множитель | MATCHES (правило не найдено; разница ~1.5 атаки у Frenzy при усталости) | низкое | — |
+| A30 | Радиус ауры способности: до чего меряется | 35 м — обычный радиус ауры; «можно завести в ауру полотряда — и он получит бонус»; ауры не масштабируются с размером отрядов | [форум CA: Aura size, unit size and scaling](https://community.creative-assembly.com/total-war/total-war-warhammer/forums/8-general-discussion/threads/10343-aura-size-unit-size-and-scaling-and-you) | расстояние между центрами (`geometry.py:62`, `sim/abilities.py:151`) | MATCHES (уверенность низкая: «полотряда» согласуется с центром) | низкое–среднее (широкий строй ~40 м) | Тест T15 |
+| A31 | Обновление целей ауры во время действия | Поле f08 (по порядку колонок, видимо, `update_targets_every_frame`): Rally 1, Hold the Line 1, Penitent 1, Stand Your Ground 0, VV/FS/DO 0. Смысл в сети не описан (есть только упоминание поля) | `unit_special_abilities` f08; [SFO: обсуждение](https://steamcommunity.com/workshop/filedetails/discussion/2792731173/3272436686697272638/) (поле существует) | цели пересчитываются каждый шаг у всех | MATCHES (если f08 = 0 значит «цели при включении», SYG у нас шире) | низкое | Проверить: отряд входит в 35 м через 5 с после SYG — получает ли он +24 |
+| A32 | Эффект, пока владелец бежит | не найдено | — | действие и аура — только от стоящего владельца (`sim/abilities.py:172`, `sim/effects.py` give & standing) | MATCHES (правило не найдено) | низкое | — |
+| A33 | Ветра магии, заклинания, сопротивление магии | У наших отрядов нет магов | KB magic.md; база (нет заклинаний у 17 отрядов) | нет | MISSING | нет в наших боях | — |
+
+Итого 33 строки: MATCHES 20 (A6–A10, A12–A16, A18–A20, A22, A26, A28–A32), FITTED 4 (A1, A3, A5,
+A21), DIFFERS 4 (A4, A11, A17, A27), MISSING 5 (A2, A23, A24, A25, A33). У пяти строк MATCHES
+(A28–A32) правило игры найдено лишь частично: это «так сделано у нас, игра не опровергает».
+
+## Тесты на уровне формулы (один отряд или пара, без сверки боёв)
+
+- **T1 Stand Your Ground.** Генерал и наши копейщики в 20 м, против них в лоб кланкрысы. Включить SYG
+  при контакте. Ожидаем: у копейщиков защита +24 и цель морали +16 ровно 18.0 с, способность снова
+  готова через 108 с. Вес: в игре доля попаданий кланкрыс по копейщикам падает на 24 п.п. (у нас при
+  `hit_slope` 0.1 — на 2.4). Сравнить потери копейщиков за 18 с с SYG и без (в игре и в симуляторе).
+- **T2 Hold the Line.** Отряд стоит в 34 м от генерала (между центрами) — у него +5 защиты и +4 к морали;
+  в 36 м — 0; у самого генерала +5 / +4 (уже подтверждено: 1.129 и 41 % попаданий).
+- **T3 Rally на бегущих.** Отряд скавенов бежит в 20 м от варлорда, ближайший враг дальше 90 м.
+  Без Rally сбор у нас наступает через (0.23·L − M0) / 2 с. Записать сбор в игре с Rally и без
+  (по 2 повтора). Если с Rally он быстрее — правило A4 нужно.
+- **T4 Foe-Seeker и бодрость.** Генерал устал (бодрость 12600), стоит вне боя. Без способности
+  за 25 с: 12600 − 25·180 = 8100. С Foe-Seeker при 1 % от 30000 в секунду: 12600 − 25·(180 + 300) ≈ 600
+  (свежий). В рукопашной: +190 − 300 = −110/с, то есть за 25 с усталость не растёт. Узнать
+  настоящий масштаб по `FatigueState` до и после.
+- **T5 Verminous Valour.** Бег варлорда 4.0 → 5.0 м/с ровно 17 с, цель морали +8; снова готов через 77 с.
+- **T6 Deadly Onslaught.** Натиск варлорда ×1.6, урон и бронебойный ×1.25 на 31 с; снова готов через 121 с.
+- **T7 Strength in Numbers.** Кланкрысы при 100 % здоровья: бег ×0.9, защита +8, мораль +6. При 49 %
+  от начального здоровья — ничего.
+- **T8 Scurry Away.** Кланкрысы колеблются при здоровье выше половины: скорость ×0.9 × 1.1 = 0.99;
+  ниже половины: ×1.1.
+- **T9 Frenzy.** У флагеллантов всегда: атака +10, урон ×1.1, натиск ×1.1 (мораль не падает ниже лидерства).
+- **T10 Penitent.** Флагелланты проигрывают рукопашную: через 3 с — защита +14 и сопротивление
+  физическому урону +15 % (сумма не выше 90 %) на 20 с или до выхода из рукопашной; снова через
+  3 с проигрыша.
+- **T11 Раны.** Генерал падает до 24 % здоровья: через ~5 с (по базе) скорость ×0.9, урон ×0.8;
+  эффект держится до конца боя. Проверить ActiveEffectList моста.
+- **T12 Начальная перезарядка.** В момент 0 все активные способности лордов готовы (cd = 0); у
+  флагеллантов Penitent — через 3 с проигрыша.
+- **T13 Две одинаковые ауры.** Два генерала рядом с одним отрядом: в игре защита +5, а не +10
+  (у нас +10).
+- **T14 Expendable.** Рабы бегут в 100 м: соседние рабы −3, кланкрысы 0.
+- **T15 Радиус ауры.** Широкий строй кланкрыс (фронт ~40 м) с краем в 25 м от генерала, центр в 40 м:
+  получает ли он Hold the Line (+5 защиты в карточке)? У нас — нет.
+
+## Что не нашлось в сети
+
+- Как сочетаются два множителя (`mult`) на одном стате: произведение или сумма процентов.
+- Порядок применения: прибавки, множители способностей, множители усталости.
+- Масштаб поля бодрости фазы (−0.01): 1 % от 30000 в секунду, за тик или от текущей бодрости.
+  Есть только сниппет fandom «Vigour per second: -1%» и догадка из `build/web_mech/formulas.md`.
+- Смысл поля f08 (`update_targets_every_frame`?): видно только, что поле есть (обсуждение SFO).
+- Считается ли начальная перезарядка тоже только при выполненном условии перезарядки (для Penitent и
+  Ран). Косвенно да: KB пишет про Gate of Khorne «считается только в рукопашной».
+- Ускоряет ли +16 от Rally сбор бегущих количественно: в fandom есть только общая фраза.
+- От чего меряется радиус ауры (центр, край или любая модель). Есть только «полотряда в ауре — бонус есть».
+- Остаётся ли эффект способности, когда её владелец бежит.
+- Формула счёта ИИ (как веса шаблона складываются в счёт). Найдены только веса и порог 0.5.
+- Почему в записях нет падения скорости у раненых лордов (A3): в сети нет сведений о сбоях Ран,
+  кроме спора о лечении.
+- Сайты honga.net (проверка на ботов), twwstats (страницы строятся скриптом), fandom (402) и Steam
+  (429) напрямую не открылись — использованы сниппеты поиска и база игры.

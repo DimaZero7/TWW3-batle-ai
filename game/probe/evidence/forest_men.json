@@ -1,0 +1,58 @@
+{
+ "forest1_walk": {
+  "speed_field_med": 1.5,
+  "man_speed_med": 1.526,
+  "man_speed_p10": 1.397,
+  "man_speed_p90": 1.619,
+  "polls": 264
+ },
+ "forest2_walk": {
+  "speed_field_med": 1.5,
+  "man_speed_med": 1.523,
+  "man_speed_p10": 1.281,
+  "man_speed_p90": 1.72,
+  "polls": 260
+ },
+ "forest3_run": {
+  "speed_field_med": 3.1,
+  "man_speed_med": 3.053,
+  "man_speed_p10": 2.148,
+  "man_speed_p90": 3.535,
+  "polls": 228
+ },
+ "forest4_run": {
+  "speed_field_med": 3.0,
+  "man_speed_med": 3.0,
+  "man_speed_p10": 2.088,
+  "man_speed_p90": 3.435,
+  "polls": 230
+ },
+ "grass1_walk": {
+  "speed_field_med": 1.5,
+  "man_speed_med": 1.507,
+  "man_speed_p10": 1.4,
+  "man_speed_p90": 1.6,
+  "polls": 256
+ },
+ "grass2_walk": {
+  "speed_field_med": 1.5,
+  "man_speed_med": 1.442,
+  "man_speed_p10": 1.342,
+  "man_speed_p90": 1.612,
+  "polls": 256
+ },
+ "grass3_run": {
+  "speed_field_med": 3.0,
+  "man_speed_med": 3.053,
+  "man_speed_p10": 2.778,
+  "man_speed_p90": 3.225,
+  "polls": 226
+ },
+ "grass4_run": {
+  "speed_field_med": 3.0,
+  "man_speed_med": 3.0,
+  "man_speed_p10": 2.8,
+  "man_speed_p90": 3.2,
+  "polls": 225
+ }
+}

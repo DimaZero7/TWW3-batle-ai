@@ -1,33 +1,17 @@
-# Python
-.venv/
+# Out of git (the root's folders; anchored, so sim/data/ and the like stay in):
+/tmp/
+/state/
+/data/
+/weights/
+/build/
+/.venv/
+# this machine's settings (bridge/config/local.example.json is the template)
+/bridge/config/local.json
+# reverse/: its own reverse/.gitignore (Ghidra, JDK, the project, exe and venv in reverse/ghidra/; the topics' raw
+# .c / dumps in reverse/notes/<topic>/ - only the notes' .md and .py are in git)
 __pycache__/
-*.py[cod]
+*.pyc
 .pytest_cache/
-
-# Build output and local runs
-build/
-
-# Machine-specific settings (see config/default.json)
-config/local.json
-# Local Claude Code settings of this machine
-.claude/settings.local.json
-
-# IDE
-.idea/
-.vscode/
-
-# Raw research data (grids, logs, arrays, summaries): kept on the local disk,
-# not in Git. Images and descriptions stay in the repository.
-research/evidence/**
-!research/evidence/**/
-!research/evidence/**/*.png
-!research/evidence/**/*.svg
-!research/evidence/**/*.md
-# Analysis output is the same: data stays local, only pictures and write-ups
-# are committed (user, 27.09.2026: analysis data is never committed).
-research/analysis/**
-!research/analysis/**/
-!research/analysis/**/*.png
-!research/analysis/**/*.svg
-!research/analysis/**/*.md
-
+# Windows leftovers of bash and redirects
+nul
+*.stackdump

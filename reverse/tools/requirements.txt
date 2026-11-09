@@ -1,0 +1,4 @@
+capstone==5.0.9
+pefile==2024.8.26
+numpy==2.2.6
+zstandard==0.25.0

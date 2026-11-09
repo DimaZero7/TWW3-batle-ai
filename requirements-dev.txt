@@ -1,8 +1,7 @@
-# Tests: Lua 5.1 inside Python
+# The host's tests (no torch: the *_torch tests skip; all of them in the container, ops/dock.sh)
 lupa==2.8
 pytest==9.1.1
-
-# tools/analysis (height maps, slopes, passages) and tools/nn/gamedata
 numpy==2.2.6
+# game/probe/move_probe.py (scipy, matplotlib), game/label (matplotlib, Pillow for the pictures)
 scipy==1.15.3
 matplotlib==3.10.9

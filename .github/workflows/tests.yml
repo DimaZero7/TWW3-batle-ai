@@ -1,6 +1,5 @@
-# All tests on every push (docs/ru/testing/tests.md): modules, entry points,
-# the architecture and docs rules, the build. Lua 5.1 runs inside Python
-# (lupa), no game needed.
+# The host's tests on every push (no game, no torch: the *_torch tests skip): the smoke tests of the areas, Lua 5.1
+# inside Python (lupa). All of them, torch too: bash ops/dock.sh pytest -q (the image snake-ai-trainer, ops/README.md).
 name: tests
 on:
   push:
@@ -12,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt

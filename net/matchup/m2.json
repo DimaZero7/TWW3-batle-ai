@@ -1,0 +1,50 @@
+{
+  "_why": "М2: Империя с конницей и артиллерией против скавенов: frozen 09.11 by tmp/clean_net.py from tools/nn/matchup/armies.base of the old project ({\"run\": \"build/human/runs/20261107-171600\", \"places\": \"build/human/runs/20261107-212533\"}; the runs: tmp/old-build/human/runs)",
+  "factions": {"1": "wh_main_emp_empire", "2": "wh2_main_skv_skaven"},
+  "units": {
+    "1": [
+      {"key": "wh_main_emp_cha_general_0", "slot": "lord", "name": "own_lord", "x": -203.10000610352, "z": -64.599998474121, "b": 40.0, "general": true, "width": 5.0, "men": 1},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_1", "name": "own_greatsword_1", "x": -178.19999694824, "z": -88.400001525879, "b": 42.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_2", "name": "own_greatsword_2", "x": -146.30000305176, "z": -116.40000152588, "b": 42.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_3", "name": "own_greatsword_3", "x": -129.89999389648, "z": -153.80000305176, "b": 76.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_cav_demigryph_knights_1", "slot": "demigryph_halberd_1", "name": "own_demigryph_halberd_1", "x": -231.10000610352, "z": -180.30000305176, "b": 59.0, "general": false, "width": 51.2, "men": 32},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_4", "name": "own_greatsword_4", "x": -123.5, "z": -183.60000610352, "b": 76.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_5", "name": "own_greatsword_5", "x": -205.80000305176, "z": -27.299999237061, "b": 48.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_cav_empire_knights", "slot": "knights_1", "name": "own_knights_1", "x": -247.10000610352, "z": -161.19999694824, "b": 59.0, "general": false, "width": 45.0, "men": 60},
+      {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear_1", "name": "own_spear_1", "x": -185.19999694824, "z": -47.5, "b": 48.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear_2", "name": "own_spear_2", "x": -247.69999694824, "z": -51.400001525879, "b": 82.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_1", "name": "own_halberd_1", "x": -152.80000305176, "z": -73.300003051758, "b": 42.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_2", "name": "own_halberd_2", "x": -131.5, "z": -94.300003051758, "b": 42.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear_3", "name": "own_spear_3", "x": -172.60000610352, "z": -165.30000305176, "b": 98.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear_4", "name": "own_spear_4", "x": -176.80000305176, "z": -186.0, "b": 98.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear_5", "name": "own_spear_5", "x": -248.10000610352, "z": -31.799999237061, "b": 82.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_art_mortar", "slot": "mortar_1", "name": "own_mortar_1", "x": -210.60000610352, "z": -143.69999694824, "b": 48.0, "general": false, "width": 24.0, "men": 44},
+      {"key": "wh3_dlc25_emp_inf_hochland_long_rifles", "slot": "long_rifles_1", "name": "own_long_rifles_1", "x": -211.30000305176, "z": -116.80000305176, "b": 42.0, "general": false, "width": 30.0, "men": 32},
+      {"key": "wh3_dlc25_emp_inf_hochland_long_rifles", "slot": "long_rifles_2", "name": "own_long_rifles_2", "x": -191.69999694824, "z": -135.89999389648, "b": 42.0, "general": false, "width": 30.0, "men": 32},
+      {"key": "wh2_dlc13_emp_inf_huntsmen_0", "slot": "huntsmen_1", "name": "own_huntsmen_1", "x": -228.60000610352, "z": -88.0, "b": 53.0, "general": false, "width": 40.0, "men": 90},
+      {"key": "wh_main_emp_art_mortar", "slot": "mortar_2", "name": "own_mortar_2", "x": -222.39999389648, "z": -131.19999694824, "b": 48.0, "general": false, "width": 24.0, "men": 44}
+    ],
+    "2": [
+      {"key": "wh2_main_skv_cha_warlord_0", "slot": "lord", "name": "enemy_lord", "x": 98.699996948242, "z": -88.400001525879, "b": 331.0, "general": true, "width": 5.0, "men": 1},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_1", "name": "enemy_giant_rat_poison_1", "x": 181.39999389648, "z": 193.5, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_dlc14_skv_inf_warp_grinder_0", "slot": "warp_grinder_1", "name": "enemy_warp_grinder_1", "x": 99.199996948242, "z": 69.300003051758, "b": 273.0, "general": false, "width": 60.0, "men": 24},
+      {"key": "wh2_main_skv_inf_stormvermin_0", "slot": "stormvermin_1", "name": "enemy_stormvermin_1", "x": 110.30000305176, "z": -16.10000038147, "b": 273.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_dlc16_skv_mon_rat_ogre_mutant", "slot": "rat_ogre_mutant_1", "name": "enemy_rat_ogre_mutant_1", "x": 100.5, "z": 37.0, "b": 270.0, "general": false, "width": 5.0, "men": 1},
+      {"key": "wh2_dlc14_skv_inf_warp_grinder_0", "slot": "warp_grinder_2", "name": "enemy_warp_grinder_2", "x": 124.59999847412, "z": 3.9000000953674, "b": 273.0, "general": false, "width": 60.0, "men": 24},
+      {"key": "wh2_dlc14_skv_inf_warp_grinder_0", "slot": "warp_grinder_3", "name": "enemy_warp_grinder_3", "x": 111.40000152588, "z": -64.699996948242, "b": 273.0, "general": false, "width": 60.0, "men": 24},
+      {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword_1", "name": "enemy_slave_sword_1", "x": 105.19999694824, "z": 17.700000762939, "b": 351.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_2", "name": "enemy_giant_rat_poison_2", "x": 147.5, "z": -155.10000610352, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_3", "name": "enemy_giant_rat_poison_3", "x": 161.5, "z": 194.0, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_dlc16_skv_mon_wolf_rats_1", "slot": "giant_rat_poison_4", "name": "enemy_giant_rat_poison_4", "x": 123.69999694824, "z": -176.10000610352, "b": 273.0, "general": false, "width": 30.0, "men": 80},
+      {"key": "wh2_main_skv_inf_gutter_runner_slingers_0", "slot": "gutter_runner_slings_1", "name": "enemy_gutter_runner_slings_1", "x": 158.60000610352, "z": 32.400001525879, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_death_globe_bombardiers", "slot": "bombardiers_1", "name": "enemy_bombardiers_1", "x": 103.0, "z": -110.90000152588, "b": 273.0, "general": false, "width": 35.0, "men": 48},
+      {"key": "wh2_main_skv_art_warp_lightning_cannon", "slot": "warp_lightning_cannon_1", "name": "enemy_warp_lightning_cannon_1", "x": 121.90000152588, "z": -68.5, "b": 273.0, "general": false, "width": 40.0, "men": 56},
+      {"key": "wh2_dlc12_skv_inf_warplock_jezzails_0", "slot": "jezzails_1", "name": "enemy_jezzails_1", "x": 124.19999694824, "z": 135.30000305176, "b": 273.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_main_skv_inf_death_globe_bombardiers", "slot": "bombardiers_2", "name": "enemy_bombardiers_2", "x": 100.90000152588, "z": -147.19999694824, "b": 273.0, "general": false, "width": 35.0, "men": 48},
+      {"key": "wh2_dlc12_skv_inf_ratling_gun_0", "slot": "ratling_1", "name": "enemy_ratling_1", "x": 103.09999847412, "z": 121.09999847412, "b": 273.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_main_skv_inf_gutter_runners_0", "slot": "gutter_runner_stars_1", "name": "enemy_gutter_runner_stars_1", "x": 142.10000610352, "z": 28.10000038147, "b": 349.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh2_main_skv_inf_warpfire_thrower", "slot": "warpfire_1", "name": "enemy_warpfire_1", "x": 103.59999847412, "z": -180.80000305176, "b": 273.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_main_skv_inf_gutter_runners_0", "slot": "gutter_runner_stars_2", "name": "enemy_gutter_runner_stars_2", "x": 170.39999389648, "z": -27.89999961853, "b": 351.0, "general": false, "width": 30.0, "men": 120}
+    ]
+  }
+}

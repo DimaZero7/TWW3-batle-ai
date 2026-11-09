@@ -1,0 +1,403 @@
+"""Policies without a network: hold, attack the nearest enemy, and replaying the orders of recorded
+battles with contact-phase synchronisation (docs/en/training/simulator.md).
+
+Replay: for every recorded second and unit, the order that recording implies -
+    a recorded target (fought or shot)   -> ATTACK it (a missile unit closes to its range)
+    in melee without a target            -> ATTACK the nearest enemy (CA's planner leaves the
+                                            target empty in ~70 % of its melee seconds, the
+                                            game's AI in ~6 %: HOLD made the two sides differ)
+    otherwise                            -> MOVE to the recorded order point (ox, oz),
+                                            running if the unit was running.
+Each unit's replay clock waits for actual contact/separation at recorded approaches/break-offs (a formation's; a
+lord's orders keep the recorded time, LORD_PHASES).
+The approach's running flag and target survive a late contact; melee keeps that phase's target.
+Phases continue until the wall-clock recording end plus `grace_s` (120 s), then every unit attacks the nearest enemy
+(check.py stops a whole battle when its recording ends, and keeps a pair on its last orders).
+A formation without a missile weapon that does not touch its recorded attack target in the simulation while it touches
+another standing enemy fights that enemy, unless the recording shows it moving then (Replay's params; REDIRECT).
+"""
+import numpy as np
+import torch
+
+from sim import geometry, orders as O
+
+MELEE_GAP = 20       # recorded seconds: a non-leaver's melee flag off this long or less between two fights is melee ...
+STAY_M = 10.0        # ... when the unit stayed within this of where the flag went off (it never left the fight)
+LORD_PHASES = False  # a lone man's (a lord's) clock waits for contact / separation too (False: his orders keep the
+                     # recorded time - the game's lords break off melee 1.3 times a minute and switch targets; a lord
+                     # whose clock waited for a contact or a separation went on with an old order on another unit in
+                     # 0.28 of the seconds the game's enemy lord fought ours, sim/evidence/open_battle/spec.md 1)
+WALK_IN_MELEE = True  # a formation that is not a leaver (CA's planner's, the game AI's, ai_like's melee units), in melee
+                     # (its flag) without a recorded target, its recorded point leave_m or more away, which the game
+                     # shows moving (is_moving this second and the next), replays its MOVE instead of attacking the
+                     # nearest enemy (or holding): the exam v2 games (20, the game AI's and ai_like's such seconds) - 73 %
+                     # of those seconds are is_moving ones, at a median 1.6 m/s with the point through the nearest enemy
+                     # and 2.2 m/s with it away (2 s way); replayed as an attack they stood and fought. The simulator's
+                     # contact rules then decide: a point through the enemy pushes on fighting (contact.move_push,
+                     # move_far_full), one away leaves (leave_away_only). Off: the old attack on the nearest enemy.
+REDIRECT = True      # Replay with params: a formation without a missile weapon that does not touch its recorded attack
+                     # target but touches another standing enemy attacks that enemy (the nearest by edge gap; the same
+                     # one while it still touches it), unless the recording shows it moving at that second and the next
+                     # (the game's is_moving flag: it really left or walked off). The recording's target is where the
+                     # game's units stood: in the replay they stand elsewhere, the target is often far while another
+                     # enemy touches the unit, and contact.attack_leave / retarget_walk walked it out of a fight it
+                     # stayed in (the 72 gate battles, tmp/old-build/latebattle/z3_target.txt: our infantry in melee with a far
+                     # recorded target and another enemy near 38 % of its seconds in the replay, 25 % in the game; the
+                     # enemy's 30 % against 7 %). In the game such seconds are moving ones for our infantry 0.78 of the
+                     # time (it left: kept), for the AI's 0.20; with the target near in the game 0.04-0.07.
+
+
+def hold(st):
+    return O.hold(st.B, st.N, st.device)
+
+
+def nearest_attack(st, run=True):
+    """Every standing unit attacks the nearest standing enemy (missile units close to their range)."""
+    u = st.u
+    alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    standing = alive & ~u["r"]
+    dx = u["x"][:, None, :] - u["x"][:, :, None]
+    dz = u["z"][:, None, :] - u["z"][:, :, None]
+    d = torch.sqrt(dx * dx + dz * dz)
+    # (a hidden enemy is not seen: stealth.py)
+    seen = ~u["hid"] if "hid" in u else torch.ones_like(standing)
+    enemy = (u["side"][:, :, None] != u["side"][:, None, :]) & (standing & seen)[:, None, :]
+    d = torch.where(enemy, d, torch.full_like(d, 1e9))
+    near = d.argmin(2)
+    has = d.min(2).values < 1e9
+    o = O.hold(st.B, st.N, st.device)
+    o.kind = torch.where(has & standing, O.ATTACK, O.HOLD)
+    o.target = torch.where(has & standing, near, torch.full_like(near, -1))
+    o.run = torch.full_like(o.run, run)
+    return o
+
+
+def half_depth(men, width, spacing=1.5):
+    """Half the depth of a formation of `men` with a `width` front (numpy); 0 for a single man. spacing: one number
+    (h = v) or (h, v), m - as sim/geometry.dims: files = floor(width / h), ranks v apart."""
+    h, v = (spacing, spacing) if np.isscalar(spacing) else spacing
+    files = np.maximum(1, np.floor(np.asarray(width, float) / h + 1e-4))
+    files = np.minimum(files, np.maximum(men, 1))
+    return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * v / 2, 0.0)
+
+
+def fill_gaps(flag, gap, x=None, z=None, stay_m=None):
+    """flag [T] with runs of False of at most `gap` rows between two True rows set True (numpy); with x, z
+    and stay_m only where the unit stayed within stay_m of its place when the flag went off."""
+    out = np.asarray(flag, dtype=bool).copy()
+    if gap <= 0:
+        return out
+    on = np.flatnonzero(out)
+    for a, b in zip(on[:-1], on[1:]):
+        if 1 < b - a <= gap + 1:
+            if stay_m is not None and np.hypot(x[a + 1:b] - x[a], z[a + 1:b] - z[a]).max() > stay_m:
+                continue
+            out[a + 1:b] = True
+    return out
+
+
+def engine_far_rows(battle, i, far_m):
+    """[T] index of the row whose order a unit's row stands for: itself, or - in the seconds the game records the
+    engine's own far ordered point (far_m or more from the unit, not routing: the skirmish mode's run, which is not
+    the controller's order) - the last row before them without one (-1: none yet)."""
+    f = battle.f
+    far = (np.hypot(np.nan_to_num(f["ox"][:, i]) - np.nan_to_num(f["x"][:, i]),
+                    np.nan_to_num(f["oz"][:, i]) - np.nan_to_num(f["z"][:, i])) >= far_m) & ~np.asarray(f["r"][:, i], bool)
+    src = np.where(far, -1, np.arange(len(far)))
+    return np.maximum.accumulate(src)
+
+
+def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, leave_m=10.0, leavers=None,
+                    melee_gap=MELEE_GAP, stay_m=STAY_M, holds=None, engine_far_m=None):
+    """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
+    dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
+    -> slot). The game records the order's point at the formation's front (measured: half a depth
+    ahead of the centre); widths [recorded index] (m) turn it into the centre the simulator goes to.
+    phase (0: ordinary, 1: approach, 2: separation), end (exclusive row), and phase_target
+    describe the contact clock; Replay consumes them, not the combat engine. moving: the game's is_moving flag this
+    second and the next (Replay's redirect, REDIRECT).
+    leavers [recorded index] (None: all): units whose recorded point in melee is a move order in force;
+    such a unit in melee without a recorded target whose point is leave_m or more away moves there (it
+    walks out of the fight, as in the game; leave_m 0: never) instead of attacking the nearest enemy.
+    fight_nearest: a bool, or one per recorded index: a unit in melee without a recorded target (and not
+    leaving) attacks the nearest enemy; where false it holds (HOLD). The network's units hold: the game
+    records the engine target of its attack orders in melee 97 % of the time (all fair network runs: 75 %
+    of their melee unit-seconds with one, 2.7 % without), so in melee without one they are under its HOLD
+    (12 %) or moving (4 %).
+    The network's units and every missile unit are leavers; the melee units of CA's planner and the
+    game's AI are not: in melee their recorded point lies anywhere (the planner's: often the enemy's
+    start beyond it) while they fight on at the attack rate (tmp/old-build/simbatch/leave_dir.py: the planner's
+    melee units with a point 10 m or more away kill 0.17-0.29 a second in every direction, the
+    network's under such a move 0.003-0.04 against 0.19 attacking).
+    melee_gap / stay_m: for a formation (more than one man) that is not a leaver, a gap of at most melee_gap
+    recorded seconds in its melee flag during which it stays within stay_m of where the flag went off counts as
+    melee: it never left the fight (CA's planner's spearmen against clanrats: the flag off 18 s and 1 s while the
+    unit stood in place, its order point 23-26 m away, the point it had through the whole fight; read as
+    seconds out of melee they gave a far MOVE and a break-off phase, so the replayed unit walked off and charged
+    back in, or, held by contact.pin_melee_s, stood 20 s without striking). A lord's gaps stay: lords break off.
+    holds [T, len(slot_of)] (None: none): the seconds a unit is under its controller's HOLD (the network's, from
+    companion.jsonl: network_holds); in melee such a unit holds (HOLD), whatever the recording's target or order
+    point: the game records the engine's target and the last move's point for a halted unit, which the replay read
+    as an attack or a leave (the network's 'hold' in contact over the gate sets it1-it9, 20,749 unit-s: replayed as
+    MOVE 53 %, HOLD 26 %, ATTACK 21 %; tmp/old-build/shotgap/replay_vs_net.py).
+    engine_far_m (None: off): the seconds a unit's recorded point is the engine's own far point (engine_far_rows: the
+    game's skirmish mode runs the unit to a point >= 1000 m away, over its order) keep the order of the second before
+    them (point, target, running, bearing; with none before: its own place, no target) - the simulator's skirmish mode
+    (sim/skirmish.py) makes such runs itself, from the simulated enemy (the gate sets it1-it9: 12,535 such
+    seconds of the game AI's shooters, 6 with a recorded target, in 1,269 runs of 4 s median)."""
+    f = battle.f
+    T = len(battle.t)
+    kind = np.full((T, N), O.HOLD, dtype=np.int64)
+    x = np.zeros((T, N), dtype=np.float32)
+    z = np.zeros((T, N), dtype=np.float32)
+    target = np.full((T, N), -1, dtype=np.int64)
+    run = np.zeros((T, N), dtype=bool)
+    phase = np.zeros((T, N), dtype=np.int64)
+    end = np.broadcast_to(np.arange(1, T + 1)[:, None], (T, N)).copy()
+    phase_target = np.full((T, N), -1, dtype=np.int64)
+    target_r = np.zeros((T, N), dtype=bool)
+    moving = np.zeros((T, N), dtype=bool)
+    # The nearest living enemy of each unit each second (for fights without a recorded target).
+    xs, zs = np.nan_to_num(f["x"], nan=1e6), np.nan_to_num(f["z"], nan=1e6)
+    dist = np.hypot(xs[:, :, None] - xs[:, None, :], zs[:, :, None] - zs[:, None, :])
+    foe = (battle.side[:, None] != battle.side[None, :])[None] & (np.nan_to_num(f["men"]) > 0)[:, None, :]
+    nearest = np.where(foe, dist, np.inf).argmin(axis=2)
+    nearest_of = list(fight_nearest) if isinstance(fight_nearest, (list, tuple, np.ndarray)) else [fight_nearest] * len(slot_of)
+    for i, s in enumerate(slot_of):
+        tg = battle.target[:, i]
+        ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
+        running = f["f"][:, i]
+        b_i = np.nan_to_num(f["b"][:, i])
+        if engine_far_m:
+            src = engine_far_rows(battle, i, engine_far_m)
+            if (src != np.arange(T)).any():
+                k = np.maximum(src, 0)
+                none = src < 0
+                tg = np.where(none, -1, tg[k])
+                ox = np.where(none, np.nan_to_num(f["x"][:, i]), ox[k])
+                oz = np.where(none, np.nan_to_num(f["z"][:, i]), oz[k])
+                running = np.where(none, False, np.asarray(running, bool)[k])
+                b_i = b_i[k]
+        leaver = leave_m > 0 and (leavers is None or leavers[i])
+        formation = np.nanmax(np.nan_to_num(f["men"][:, i])) > 1
+        m_i = (f["m"][:, i] if leaver or not formation else
+               fill_gaps(f["m"][:, i], melee_gap, np.nan_to_num(f["x"][:, i]), np.nan_to_num(f["z"][:, i]), stay_m))
+        # In melee without a recorded target (CA's planner leaves it empty most of the time):
+        # the nearest enemy, as the game's own AI records it - unless the unit is told to go
+        # somewhere else (it leaves the fight).
+        leaving = np.zeros(T, dtype=bool)
+        if leaver:
+            leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
+        held = np.zeros(T, dtype=bool) if holds is None else (np.asarray(holds[:T, i], bool) & m_i)
+        leaving = leaving & ~held
+        # A formation in melee without a recorded target that the game shows walking under its far move (WALK_IN_MELEE)
+        # keeps that move: the simulator's contact rules decide what it does (push through, leave, fight on).
+        mv_i = np.asarray(f["mv"][:, i], bool) if "mv" in f else np.zeros(T, dtype=bool)
+        walking = np.zeros(T, dtype=bool)
+        if WALK_IN_MELEE and leave_m > 0 and formation:
+            far = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
+            walking = m_i & (tg < 0) & ~leaving & ~held & far & mv_i & np.r_[mv_i[1:], False]
+        if nearest_of[i]:
+            tg = np.where((tg < 0) & m_i & ~leaving & ~held & ~walking, nearest[:, i], tg)
+        ok_t = tg >= 0
+        mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
+        attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i]) & ~held
+        if widths is not None and widths[i]:
+            back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i],
+                              spacing if np.isscalar(spacing) else spacing[i])
+            br = np.radians(b_i)
+            ox, oz = ox - back * np.sin(br), oz - back * np.cos(br)
+        fighting = m_i & ~attack & ~leaving & ~walking
+        kind[:, s] = np.where(attack, O.ATTACK, np.where(fighting, O.HOLD, O.MOVE))
+        target[:, s] = np.where(attack, mapped, -1)
+        target_r[:, s] = attack & np.asarray(f["r"], bool)[np.arange(T), np.clip(tg, 0, None)]
+        x[:, s], z[:, s] = ox, oz
+        # moving in the game this second and the next (is_moving; the redirect keeps such a unit's recorded order)
+        moving[:, s] = mv_i & np.r_[mv_i[1:], False]
+        # Look ahead without wrapping the recording's first flags into its last seconds.
+        run[:, s] = running
+        for ahead in (1, 2):
+            run[:-ahead, s] |= running[ahead:]
+        active = (f["men"][:, i] > 0) & ~f["r"][:, i] & ~f["s"][:, i]
+        contact = m_i & active
+        edges = np.diff(np.r_[False, contact, False].astype(int))
+        for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)):
+            attacks = np.flatnonzero(attack[a:b]) + a
+            t = int(target[attacks[0], s]) if len(attacks) else -1
+            phase_target[a:b, s] = t
+            # Only a recorded approach to a recorded melee contact is latched: shooting
+            # ATTACKs and unrelated moves must not wait for a contact that never existed.
+            start = a
+            while (start > 0 and active[start - 1] and not contact[start - 1]
+                   and not f["fire"][start - 1, i]
+                   and (run[start - 1, s] or attack[start - 1])):
+                start -= 1
+            latch = formation or LORD_PHASES
+            if start < a and t >= 0 and latch:
+                phase[start:a, s] = 1
+                end[start:a, s] = a
+                phase_target[start:a, s] = t
+                # Keep the recorded route and walk/run timing before contact is due.
+                # Once a run begins it stays running until contact, rather than stopping
+                # because the recording (but not this simulation) has reached the enemy.
+                run[start:a, s] = np.maximum.accumulate(run[start:a, s])
+            # Preserve leave_m's inference: only authorised leavers with no attack target
+            # get a break-off. A far planner/AI melee point is still an attack, never a move.
+            leaves = np.flatnonzero((kind[a:b, s] == O.MOVE) & leaving[a:b]) + a
+            if len(leaves) and latch:
+                first = int(leaves[0])
+                # Do not turn a cancelled move (a later attack/hold) into a break-off.
+                if np.all(kind[first:b, s] == O.MOVE):
+                    phase[first:b, s] = 2
+                    end[first:b, s] = b
+        # A MOVE first observed after recorded separation is a break-off too. In
+        # particular this does not reinterpret an AI melee unit's far point *in*
+        # recorded melee: it only starts once that unit actually left in the game.
+        # Assign after approaches: the first separated sample is a barrier even if
+        # the next running approach begins there. Never skip separation for a new charge.
+        for b in np.flatnonzero(edges == -1):
+            if leave_m > 0 and b < T and active[b] and kind[b, s] == O.MOVE and (formation or LORD_PHASES):
+                phase[b, s] = 2
+                end[b, s] = b + 1
+    return {"kind": kind, "x": x, "z": z, "target": target, "run": run,
+            "phase": phase, "end": end, "phase_target": phase_target, "target_r": target_r,
+            "moving": moving}
+
+
+class Replay:
+    """Recorded orders with an independent contact clock per unit and batch copy.
+
+    Approach and break-off phases finish on simulated contact/separation, respectively.
+    Other orders retain their recorded duration. Routing/dead units and unavailable targets
+    release a latch. Legacy rows without phase metadata remain clock-indexed. The wall-clock
+    recording end plus grace_s still invokes `after`, even if a phase could not finish.
+    One instance belongs to one simulation; decreasing battle time resets its clocks.
+    params (sim/params.Params; None: off): the redirect (REDIRECT) - its contact test is battle.step's
+    (formation.spacing_m, contact.reach_m / lord_reach_m / hold_m), from the units' places before the step.
+    """
+
+    def __init__(self, rows, device="cpu", after=nearest_attack, grace_s=120.0, router_release=False, params=None):
+        T = max(r["kind"].shape[0] for r in rows)
+        N = rows[0]["kind"].shape[1]
+        B = len(rows)
+        self.length = torch.tensor([r["kind"].shape[0] for r in rows], device=device)
+        stack = {}
+        self.phased = all("phase" in r for r in rows)
+        keys = ("kind", "x", "z", "target", "run")
+        if self.phased:
+            keys += ("phase", "end", "phase_target")
+        # router_release (missile.replay_router_release): a shooter's recorded ATTACK on a unit that routs in the
+        # simulation but stood in the recording at that second is released to fire at will (HOLD: the nearest
+        # standing enemy in range first) - in the game a shooter whose target starts routing takes another target
+        # within 1-3 s (tmp/old-build/midfight/router_fire.py: 170 network battles, 2430 routs of a shot target: +1 s 42 %,
+        # +3 s 60 % on another target, 17-21 % stay on it); the game's AI fires at a router with a standing enemy in
+        # range in 11 % of its router-firing seconds (621 of 5799). The recorded order stays where the recording's
+        # target was routing too (the controller chose to shoot a router).
+        self.router_release = bool(router_release) and all("target_r" in r for r in rows)
+        if self.router_release:
+            keys += ("target_r",)
+        self.redirect = REDIRECT and params is not None and all("moving" in r for r in rows)
+        if self.redirect:
+            keys += ("moving",)
+            c = params.sim["contact"]
+            self.spacing = float(params.sim["formation"]["spacing_m"])
+            self.ccal = c
+            self.rules = params.battle
+            self.rect = bool(c.get("rect_gap"))
+            self.mdepth = geometry.melee_depth(params.sim)
+        self.chosen = None
+        for k in keys:
+            fill = {"kind": O.HOLD, "target": -1, "target_r": False, "moving": False}.get(k, 0)
+            arr = np.full((B, T, N), fill, dtype=rows[0][k].dtype)
+            for b, r in enumerate(rows):
+                arr[b, :r[k].shape[0]] = r[k]
+            stack[k] = torch.as_tensor(arr, device=device)
+        self.stack = stack
+        self.after = after
+        self.grace = grace_s
+        self.clock = None
+        self.last_t = None
+
+    def __call__(self, st):
+        sec = st.t.floor().long()
+        if self.clock is None:
+            self.clock = st.t[:, None].expand(-1, st.N).clone()
+            self.last_t = st.t.clone()
+        elapsed = st.t - self.last_t
+        self.clock = torch.where((elapsed < 0)[:, None], st.t[:, None],
+                                 self.clock + elapsed.clamp(min=0)[:, None])
+        self.last_t = st.t.clone()
+        batch = torch.arange(st.B, device=st.device)[:, None]
+        unit = torch.arange(st.N, device=st.device)[None, :]
+
+        def index():
+            return torch.minimum(self.clock.floor().long(), (self.length - 1)[:, None]).clamp(min=0)
+
+        idx = index()
+        gather = lambda a: a[batch, idx, unit]
+        if self.phased:
+            # A step crossing a boundary must first resolve the phase it was already in.
+            prev = torch.minimum((self.clock - elapsed.clamp(min=0)[:, None]).floor().long(),
+                                 (self.length - 1)[:, None]).clamp(min=0)
+            p = self.stack["phase"][batch, prev, unit]
+            stop = self.stack["end"][batch, prev, unit]
+            tg = self.stack["phase_target"][batch, prev, unit]
+            u = st.u
+            standing = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & ~u["s"]
+            target_ok = (tg >= 0) & standing.gather(1, tg.clamp(min=0))
+            complete = ((p == 1) & (u["m"] | ~target_ok)) | ((p == 2) & ~u["m"]) | ~standing
+            latched = p > 0
+            self.clock = torch.where(latched & complete, stop.float(), self.clock)
+            self.clock = torch.where(latched & ~complete,
+                                     torch.minimum(self.clock, stop.float() - 0.001), self.clock)
+            idx = index()
+        o = O.Orders(kind=gather(self.stack["kind"]), x=gather(self.stack["x"]), z=gather(self.stack["z"]),
+                     target=gather(self.stack["target"]), run=gather(self.stack["run"]))
+        if self.phased:
+            tg = gather(self.stack["phase_target"])
+            valid = (tg >= 0) & standing.gather(1, tg.clamp(min=0))
+            # A delayed running MOVE has reached the recorded opponent's old point.
+            # Follow that opponent until actual contact instead of standing at that point.
+            waiting = (gather(self.stack["phase"]) == 1) & (self.clock >= gather(self.stack["end"]) - 0.0011)
+            o.kind = torch.where(waiting & valid, O.ATTACK, o.kind)
+            o.target = torch.where((o.kind == O.ATTACK) & valid, tg, o.target)
+        if self.redirect:
+            o = self._redirect(st, o, gather(self.stack["moving"]))
+        if self.router_release:
+            u = st.u
+            routs = (o.target >= 0) & u["r"].gather(1, o.target.clamp(min=0))
+            free = ((o.kind == O.ATTACK) & routs & ~gather(self.stack["target_r"]) & (u["range"] > 0) & ~u["m"])
+            o.kind = torch.where(free, O.HOLD, o.kind)
+            o.target = torch.where(free, torch.full_like(o.target, -1), o.target)
+        over = (sec >= self.length + self.grace)[:, None].expand(-1, st.N)
+        if bool(over.any()):
+            o = O.merge(o, self.after(st), over)
+        return o
+
+    def touching(self, st):
+        """([B, N, N] i touches standing enemy j, edge gaps, [B, N] standing): battle.step's contact test
+        (geometry.contact_limit) from the places before the step."""
+        u = st.u
+        pw = geometry.pairwise(u, self.spacing, rect=self.rect, melee_depth=self.mdepth)
+        alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+        standing = alive & ~u["r"]
+        lim = geometry.contact_limit(u, pw, self.ccal, self.rules, self.spacing)
+        touch = pw["enemy"] & alive[:, :, None] & standing[:, None, :] & (pw["gap"] <= lim)
+        return touch, pw["gap"], standing
+
+    def _redirect(self, st, o, moving):
+        """REDIRECT: an ATTACK of a standing formation without a missile weapon on a target it does not touch, while
+        it touches another standing enemy and the recording does not show it moving, goes to that enemy."""
+        u = st.u
+        touch, gap, standing = self.touching(st)
+        if self.chosen is None or self.chosen.shape != o.target.shape:
+            self.chosen = torch.full_like(o.target, -1)
+        on_target = touch.gather(2, o.target.clamp(min=0)[:, :, None]).squeeze(2)
+        want = ((o.kind == O.ATTACK) & (o.target >= 0) & ~on_target & touch.any(2) & standing & ~u["s"]
+                & (u["men0"] > 1) & (u["range"] <= 0) & ~moving)
+        keep = (self.chosen >= 0) & touch.gather(2, self.chosen.clamp(min=0)[:, :, None]).squeeze(2)
+        nearest = torch.where(touch, gap, torch.full_like(gap, 1e9)).argmin(2)
+        pick = torch.where(keep, self.chosen, nearest)
+        self.chosen = torch.where(want, pick, torch.full_like(pick, -1))
+        o.target = torch.where(want, pick, o.target)
+        return o

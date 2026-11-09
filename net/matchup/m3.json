@@ -1,0 +1,50 @@
+{
+  "_why": "М3: скавены против Империи (tools/label/live_matches.json № 1): frozen 09.11 by tmp/clean_net.py from tools/nn/matchup/armies.base of the old project ({\"places\": \"build/human/runs/20261107-214531\", \"seed\": 1000702112, \"armies\": \"v3\", \"swap\": false}; the runs: tmp/old-build/human/runs)",
+  "factions": {"1": "wh2_main_skv_skaven", "2": "wh_main_emp_empire"},
+  "units": {
+    "1": [
+      {"key": "wh2_main_skv_cha_warlord_0", "slot": "lord", "name": "own_lord", "x": -171.39999389648, "z": -122.19999694824, "b": 68.0, "general": true, "width": 5.0, "men": 1},
+      {"key": "wh2_main_skv_inf_clanrat_spearmen_0", "slot": "clanrat_1", "name": "own_clanrat_1", "x": -236.60000610352, "z": -153.10000610352, "b": 51.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_main_skv_inf_stormvermin_1", "slot": "stormvermin_shield_1", "name": "own_stormvermin_shield_1", "x": -242.39999389648, "z": 2.4000000953674, "b": 52.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_main_skv_inf_stormvermin_1", "slot": "stormvermin_shield_2", "name": "own_stormvermin_shield_2", "x": -215.0, "z": -31.299999237061, "b": 51.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_main_skv_inf_stormvermin_1", "slot": "stormvermin_shield_3", "name": "own_stormvermin_shield_3", "x": -187.80000305176, "z": -64.300003051758, "b": 52.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_dlc16_skv_mon_rat_ogre_mutant", "slot": "rat_ogre_mutant_1", "name": "own_rat_ogre_mutant_1", "x": -138.19999694824, "z": -148.60000610352, "b": 42.0, "general": false, "width": 5.0, "men": 1},
+      {"key": "wh2_dlc16_skv_mon_rat_ogre_mutant", "slot": "rat_ogre_mutant_2", "name": "own_rat_ogre_mutant_2", "x": -220.89999389648, "z": -43.900001525879, "b": 52.0, "general": false, "width": 5.0, "men": 1},
+      {"key": "wh2_dlc16_skv_mon_rat_ogre_mutant", "slot": "rat_ogre_mutant_3", "name": "own_rat_ogre_mutant_3", "x": -236.30000305176, "z": -24.0, "b": 58.0, "general": false, "width": 5.0, "men": 1},
+      {"key": "wh2_main_skv_inf_stormvermin_1", "slot": "stormvermin_shield_4", "name": "own_stormvermin_shield_4", "x": -160.30000305176, "z": -97.800003051758, "b": 52.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_main_skv_inf_stormvermin_1", "slot": "stormvermin_shield_5", "name": "own_stormvermin_shield_5", "x": -132.5, "z": -130.19999694824, "b": 52.0, "general": false, "width": 30.0, "men": 160},
+      {"key": "wh2_main_skv_mon_rat_ogres", "slot": "rat_ogres_1", "name": "own_rat_ogres_1", "x": -247.80000305176, "z": -122.5, "b": 59.0, "general": false, "width": 39.0, "men": 16},
+      {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword_1", "name": "own_slave_sword_1", "x": -218.30000305176, "z": -175.69999694824, "b": 51.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_main_skv_inf_skavenslave_spearmen_0", "slot": "slave_1", "name": "own_slave_1", "x": -229.80000305176, "z": -164.60000610352, "b": 51.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh3_dlc29_skv_inf_pusbags", "slot": "pusbags_1", "name": "own_pusbags_1", "x": -193.30000305176, "z": -83.699996948242, "b": 53.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_main_skv_inf_skavenslave_spearmen_0", "slot": "slave_2", "name": "own_slave_2", "x": -211.0, "z": -185.19999694824, "b": 51.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword_2", "name": "own_slave_sword_2", "x": -245.5, "z": -142.80000305176, "b": 52.0, "general": false, "width": 30.0, "men": 180},
+      {"key": "wh2_dlc12_skv_inf_ratling_gun_0", "slot": "ratling_1", "name": "own_ratling_1", "x": -177.69999694824, "z": -150.5, "b": 42.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_main_skv_art_warp_lightning_cannon", "slot": "warp_lightning_cannon_1", "name": "own_warp_lightning_cannon_1", "x": -205.10000610352, "z": -106.40000152588, "b": 53.0, "general": false, "width": 40.0, "men": 56},
+      {"key": "wh2_dlc12_skv_inf_warplock_jezzails_0", "slot": "jezzails_1", "name": "own_jezzails_1", "x": -244.10000610352, "z": -61.400001525879, "b": 37.0, "general": false, "width": 35.0, "men": 32},
+      {"key": "wh2_main_skv_art_plagueclaw_catapult", "slot": "plagueclaw_1", "name": "own_plagueclaw_1", "x": -220.69999694824, "z": -114.69999694824, "b": 53.0, "general": false, "width": 40.0, "men": 56}
+    ],
+    "2": [
+      {"key": "wh_main_emp_cha_general_0", "slot": "lord", "name": "enemy_lord", "x": 212.30000305176, "z": 16.0, "b": 270.0, "general": true, "width": 5.0, "men": 1},
+      {"key": "wh_dlc04_emp_inf_flagellants_0", "slot": "flagellant_1", "name": "enemy_flagellant_1", "x": 184.19999694824, "z": 124.80000305176, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_1", "name": "enemy_greatsword_1", "x": 183.89999389648, "z": 93.599998474121, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_cav_reiksguard", "slot": "reiksguard_1", "name": "enemy_reiksguard_1", "x": 220.80000305176, "z": 160.89999389648, "b": 273.0, "general": false, "width": 45.0, "men": 60},
+      {"key": "wh_dlc04_emp_cav_knights_blazing_sun_0", "slot": "blazing_sun_1", "name": "enemy_blazing_sun_1", "x": 221.0, "z": -161.10000610352, "b": 273.0, "general": false, "width": 45.0, "men": 60},
+      {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword_2", "name": "enemy_greatsword_2", "x": 217.5, "z": 95.0, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_dlc04_emp_inf_flagellants_0", "slot": "flagellant_2", "name": "enemy_flagellant_2", "x": 183.80000305176, "z": 62.400001525879, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_dlc04_emp_inf_flagellants_0", "slot": "flagellant_3", "name": "enemy_flagellant_3", "x": 184.10000610352, "z": 32.200000762939, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_spearmen_1", "slot": "shield_spear_1", "name": "enemy_shield_spear_1", "x": 217.0, "z": -93.800003051758, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_swordsmen", "slot": "sword_1", "name": "enemy_sword_1", "x": 183.39999389648, "z": 2.4000000953674, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_halberdiers", "slot": "halberd_1", "name": "enemy_halberd_1", "x": 182.0, "z": 157.5, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_dlc04_emp_inf_flagellants_0", "slot": "flagellant_4", "name": "enemy_flagellant_4", "x": 184.10000610352, "z": -30.0, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_swordsmen", "slot": "sword_2", "name": "enemy_sword_2", "x": 183.39999389648, "z": -61.0, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_swordsmen", "slot": "sword_3", "name": "enemy_sword_3", "x": 183.39999389648, "z": -90.900001525879, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_spearmen_1", "slot": "shield_spear_2", "name": "enemy_shield_spear_2", "x": 183.39999389648, "z": -126.80000305176, "b": 273.0, "general": false, "width": 30.0, "men": 120},
+      {"key": "wh_main_emp_inf_handgunners", "slot": "handgun_1", "name": "enemy_handgun_1", "x": 214.10000610352, "z": -9.8000001907349, "b": 273.0, "general": false, "width": 40.0, "men": 90},
+      {"key": "wh_main_emp_art_helstorm_rocket_battery", "slot": "rockets_1", "name": "enemy_rockets_1", "x": 247.10000610352, "z": 14.0, "b": 273.0, "general": false, "width": 24.0, "men": 44},
+      {"key": "wh_main_emp_art_helstorm_rocket_battery", "slot": "rockets_2", "name": "enemy_rockets_2", "x": 247.10000610352, "z": -8.0, "b": 273.0, "general": false, "width": 24.0, "men": 44},
+      {"key": "wh_main_emp_inf_handgunners", "slot": "handgun_2", "name": "enemy_handgun_2", "x": 213.80000305176, "z": 40.799999237061, "b": 273.0, "general": false, "width": 40.0, "men": 90},
+      {"key": "wh_main_emp_inf_crossbowmen", "slot": "crossbow_1", "name": "enemy_crossbow_1", "x": 215.5, "z": -45.299999237061, "b": 273.0, "general": false, "width": 30.0, "men": 90}
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+{
+ "_why": "The person's live labelling battles (game/label/live.ps1 -Match N; user 07.11): the v3 generator's armies, both with artillery, cavalry (Empire) or a monster (Skaven) and missile infantry, 20 units, 12.9-13.8k gold; found by build/diag_chain/find_matchups.py. The Kislev plains with the game's own deployment zones (416 x 176 m, fronts 192 m apart); the river map is not used: its zones are 33 % / 90 % (east) and 40 % / 14 % (north) water or banks a unit cannot stand on (sim/maps/ksl_river_01/passable.npz).",
+ "1": {"name": "Скавены (игрок) против Империи", "seed": 1000702112, "swap": false, "map": "ksl_plains_01"},
+ "2": {"name": "Скавены против скавенов", "seed": 1000700786, "swap": false, "map": "ksl_plains_01"}
+}

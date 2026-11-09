@@ -1,0 +1,1596 @@
+-- Entry: the melee probe (game/probe/charge_probe.py). One indicator, one scenario, the game and the
+-- simulator alike: lanes far apart, in each an attacker and a target placed gap_m apart (front to
+-- front), the target facing the attacker (or away: target_mode 'rear'); everyone is held by script
+-- and fearless, so the fight is the formula's alone (no routs, no AI choices).
+-- The attacker's order (lane.mode):
+--   'attack_run'   attack the target at a run (the charge: an attack order with a run-up);
+--   'attack_walk'  attack it at a walk (no charge);
+--   'move_run'     a move order at a run to a point move_beyond_m behind the target's front;
+--   'recharge'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
+--                  then (arrived, or recharge_max_s later) attack_run again; with lane.pause_s (the recontact plan)
+--                  probe_phase 'clear' (first out of melee) and 'arrived' (there), the attack pause_s after arriving;
+--   'hold'         no order;
+--   'withdraw'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
+--                  never changed again (the melee exit: is the order kept, dropped after melee_breakoff_secs?);
+--                  lane.t_at_leave 'halt' (the leave plan's 'stand'): the target halts at that moment (no chase);
+--   'shoot'        a ranged attack on the target at a walk (fire at will on), never changed;
+--   'script'       lane.steps {{at_s, kind = 'face' | 'move', bearing, width, dx, dz, run}}: at at_s after the
+--                  go a 'face' (goto_location_angle_width at its place: turn in place to the world bearing) or a
+--                  'move' (goto_location to its start + (dx, dz)); the turning tests;
+--   'reengage'     attack_run (the target with target_mode 'both' too); part_after_s after the first contact both
+--                  get a move part_m straight back at a run (probe_phase 'out'; 'clear' the first tick neither is in
+--                  melee), part_s later both attack each other at a run ('back'); the first melee flag after 'clear'
+--                  is contact 2; the lane ends after2_s after it (fight_s does not end it);
+--   'tire'         no fight first: both units shuttle at a run straight back tire_leg_m and to their places
+--                  until both are at least tire_until (a fatigue_state key) or tire_max_s after the go ('tire_end'),
+--                  go back to their places facing each other, and once both are there (or ready_max_s later,
+--                  'tired') both attack each other at a run; contacts count only from then.
+--   'retarget'     the shooter (the attacker, placed a_dx m right of the lane's x: between its two targets) gets a ranged
+--                  attack on the target at the go (fire at will on, as the bridge gives it); with lane.switch_s every
+--                  switch_s seconds after the go a ranged attack on the other one (target2), back and forth; each
+--                  order is probe_phase 'aim' {target = 1 | 2, n}. No contact: the lane ends after max_s. The shooter's
+--                  sample row carries ammo (ammo_left: its drop is the shots of that half second, one a man), fire
+--                  (CCO IsFiringMissiles) and dd (CCO DamageDealt).
+--   'pass'         a move at a run (lane.pass_walk: at a walk) straight ahead (its own x, placed a_dx m beside the target)
+--                  to pass_beyond_m behind the target's front: it goes past the target, never attacks it (the skirmish2
+--                  and walkpass plans); lane.t_attack_extra: at the go the target attacks the first extra at a walk;
+--   'attack_t2'    attack the second target (lane.target2) at a run (the skirmish2 plan: the target's neighbour).
+--   'laps'         (the fatrun plan: fatigue of running, walking and standing) no fight: the attacker goes round an
+--                  octagon of radius laps_r m about its place (at a run, lane.laps_walk: at a walk), each next corner
+--                  ordered once within 10 m of the current one (or once stopped 5 s into the leg), for run_s seconds; then
+--                  it halts where it is (probe_phase 'stop', its fatigue state) and stands to the lane's end (max_s);
+--                  with lane.t_near_m its target (parked gap_m away, never ordered) is teleported then t_near_m (front
+--                  to front) ahead of it, facing it, halted (probe_phase 'near'): standing near a standing enemy.
+--   'cast'         (the magic plan) the attacker is a spellcaster and gets no order; lane.casts {{at_s, key, tg}}: at
+--                  at_s after the go perform_special_ability(key, the target unit: tg 't' (default), 't2', or 'a' the
+--                  caster himself), as the game's benchmarks cast their spells; each try is probe_ability {who 'a',
+--                  key, tg (the unit's name), n (its index in casts), at_s, can (can_perform_special_ability before),
+--                  w (the caster's side's winds before), status given / failed}. No contact: the lane ends after max_s.
+-- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
+-- lane.a_casts (optional, the grinder plan) {{key, at_s | at_m}}: the attacker uses each on himself once - at_s after
+-- the go, or once the two units' centres are within at_m before the contact (an ability without a target: the Warp
+-- Grinders' Warp-Quake and Seismic Snare); perform_special_ability(key, the unit), and if that call fails
+-- perform_special_ability(key); each try is probe_ability {who 'a', key, t, d (the centres' distance), n, status used /
+-- not_ready / used_no_target / failed}. lane.t_casts (the triads plan) the same for the target (who 't').
+-- lane.a_on_sight (optional, the triads plan: a hidden target; an attack_run / attack_walk lane): at the go the attack order on
+-- the hidden target all the same (probe_phase 'a_try'); a_try_s later, still moving: the order stands (probe_phase 'a_try_end'
+-- kept true); standing: a move at a run to move_beyond_m behind the target's front (kept false, probe_phase 'a_move'), and the
+-- attack order once the target is visible to the attacker's alliance (probe_phase 'a_seen' with d, the centres' distance, in
+-- either case). lane.stealth_rows: the target's sample row carries hid (unit:is_hidden()) and v (is_visible_to_alliance);
+-- stealth_rows 'both' (the snipe plan) the attacker's row too (its v: visible to the target's alliance).
+-- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
+-- to men_all_s, wherever the enemy is (how a formation turns); with lane.men_all_tg the target's and the extras' too
+-- (the artillery plan: who dies where in a block 150 m off the guns).
+-- The target (lane.target_mode): 'stand' halts and, with lane.answer, is ordered to attack the
+-- attacker at its first contact (both then fight under an attack order); 'hold' halts and is never
+-- ordered (braced spears); 'both' attacks the attacker at a run from the start ('both_walk': at a walk); 'rear' halts facing
+-- away; 'skirmish' (the skirmish plan) is a shooter: at the start, placed, its fire at will on and the game's skirmish
+-- mode (it steps back from an approaching enemy by itself, over its order) set by lane.t_skirmish (on / off; event
+-- probe_skirmish {can, before, after}); at the go a ranged attack on the attacker at a walk (as the bridge aims a held
+-- shooter; with lane.t_move {back_m, run} instead a move back_m straight away from the attacker (-z) at a walk / a run,
+-- never changed: the shootcontact plan, probe_phase 't_move'); its sample row is the shooter's (ammo, fire, dd) with sk
+-- (the mode on now). lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
+-- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
+-- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
+-- lane.target2 (optional; its front lane.t2_width, else t_width): a second target unit placed t2_dx m beside the target (+x) and t2_dz m along z (the
+-- retarget3 plan's targets one behind the other on the line of fire: t2_dz < 0, away from the shooter), facing the same way, halted
+-- and never ordered (it fights only what touches it); sampled as 't2'. lane.after (optional) {at_s, kind, dx, dz,
+-- walk}: at_s after the first contact the attacker gets one more order (the fresh-order probe): 'attack_t2' (attack
+-- the second target), 'attack_same' (the same attack again), 'halt' (the bridge's hold), 'move_near' (a move to its
+-- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>' (n = 1). lane.after2 (optional,
+-- the same fields): a second order at its own at_s after the first contact (n = 2; the holdmelee plan: a halt 3 or
+-- 10 s after a move or an attack given in melee).
+-- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one).
+-- lane.damage (optional) {t = {method, share}, t2 = ..., a = ...}: once placed (settle_ms before the go) the unit is
+-- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
+-- (the engine's own calls); event probe_damage with the men and health before and after.
+-- target_mode 'push': at the go the target gets a move order at a walk to a point push_m ahead of its front
+-- (through the attacker: the game's own planner's far move point), never changed; lane.push_to {x, z} (the snipe plan's
+-- map lanes) a move to that world point instead.
+-- lane.t_morale (optional): the target keeps its morale (not fearless) - it can rout; its first rout is emitted as
+-- probe_phase 'rout' and lane.at_rout says what the attacker does then: 'halt' (halts where it is) or 'none' (goes
+-- on attacking: the chase); the lane ends lane.after_rout_s after the rout. With config.men_after_rout_s the
+-- soldiers' places of both units are sampled every men_ms for that long after the rout wherever the enemy is (the
+-- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too. lane.rout_at_s (optional): a
+-- t_morale target not routed that long after the first contact is routed by script (morale_behavior_rout; emitted as
+-- probe_phase 'rout_forced'); lane.rout_at_go_s (optional, the cavcheck plan's chase): routed by script that long after
+-- the go, before any contact (the same call and phase). lane.extras (optional) {{name, dx, dz, fire}}: units of the
+-- attacker's side (or of the target's: game/probe/charge_probe.py e.side 't', the ratcover plan; the entry places either alike) placed
+-- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will;
+-- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
+-- The busycharge plan: lane.a_side (degrees, 0 front / 90 right flank / 180 rear) places the attacker gap_m off the
+-- target's front / right edge / back (M.layout), facing it; an extra with e.b is placed at that world bearing and with
+-- e.attack attacks the target at a walk at the go (the anvil: with lane.t_attack_extra both fight); lane.a_go_s holds the
+-- attacker's order (its mode's) until that long after the go (probe_phase 'a_go'); lane.contact_a_only: the lane's
+-- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
+-- attacker's row carries dd (CCO DamageDealt); lane.dd_rows 'both' (the pusbags plan): the target's row too.
+-- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
+-- (MoraleGreatestEffect, the strongest effect's text), fx (CCO ActiveEffectList keys) and w (wavering).
+-- lane.morale_rows (optional): both units' sample rows carry those morale fields (fearless or not; the dmgmelee plan).
+-- lane.card_rows (optional): both units' sample rows carry cs, the unit card's current values of M.CARD_STATS (leadership,
+-- speed, melee attack and defence, weapon and missile damage: what contact effects and frenzy change; the new units' plans
+-- of game/probe/unit_probe.py). A 'shoot' lane's attacker row is a shooter's (ammo, fire, dd), as a 'retarget' one's.
+-- lane.t_stop_fire_s (optional, a 'skirmish' target): that long after the go the shooter's fire at will goes off and it
+-- halts (probe_phase 'stop_fire'): the suppressing fire's life after the last shot.
+-- at_rout 'away' (the rallysecure plan): at the rout the attacker is teleported to (x, z + away_dz) facing back and
+-- halted (no chase, no enemy near; probe_phase 'away'). The target's first stop of routing after the rout (not
+-- shattered) is its rally: probe_phase 'rally' (place, bearing, morale), the target halts and lane.rally_friends
+-- {{name, dx, dz, width, px, pz}} - units of the target's side parked at (px, pz) from the start - are teleported to
+-- dx m to its right and dz m ahead of its centre (its facing at the rally), facing its way (probe_phase 'friends');
+-- sampled as the list 'f'. The lane ends after_rally_s after the rally (then after_rout_s no longer applies).
+-- The magic plan: with config.winds_ms every winds_ms after the go 'probe_winds' {t, s1, s2}: each side's Winds of Magic
+-- (apps.battle.winds: the readers that answered at the start, probe_winds_api {side, found, values}), and m = {lane =
+-- {field = value}}: the caster's CCO fields of M.MAGE_CCO that answered at the start. config.winds_set {{side, current,
+-- reserve}}: added to that side's winds at the start, before the go (probe_winds_set {side, before, after, status}).
+-- Each 'cast' lane's caster is described at the start: probe_mage {lane, u, active, passive (owned special abilities),
+-- magic (can_use_magic), can {key = can_perform_special_ability} of its cast keys, cco {field = value}}.
+-- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
+-- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
+-- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
+-- other and up to men_after_s after a contact: both units' soldier places ('probe_men', decimetres;
+-- CCO ManList, full view: research telemetry). A lane ends fight_s after its first contact, after
+-- max_s, or when a unit is dead; then both halt. The battle ends when every lane is done.
+-- config.mem (a probe built with --mem only; bridge/docs/apps/memreader.md): the men of every lane's attacker and target from
+-- the game's memory (apps.mem.entities) - 'mem_attach' once (the checks, each unit bound or why not); from the go every
+-- MEM_POLL_MS of battle 'mem_men' {c, tick, cost, units = {name = {n, rows, sn, sx, sz}}, new}: the men of the lanes
+-- near their contact (within men_near_m before it, up to men_after_s after it) every poll, the others' every
+-- MEM_SPARSE-th poll; sn / sx, sz: the script's men alive and unit place read in the same callback (the check). At the
+-- lane's contact + MEM_DISCOVER_S 'mem_men_discover' {lane, s, hits}: the pointers from 12 men of one unit to the other's
+-- (apps.mem.entities discover: where a man keeps his target).
+-- config.mem_proj (with config.mem; the memshot plan): the projectiles too (apps.mem.projectiles' scanner on the
+-- manager found through a bound unit, with its last place kept - S.track - and apps.mem.hits naming the body a
+-- projectile 'in a man' is in): scanned every mem poll before the men (its poll number = the men's c); every
+-- MEM_PROJ_EVERY polls 'mem_proj' {c, tick, spawn, state, gone, errors, records, other, other_hp, offsets}.
+-- config.mem_form (with config.mem; the memform plan): after each men's poll 'mem_form' {t, tick, units, new, jobs}: the
+-- units' top behaviours and machines, their groups' marks, the way's job and nodes (apps.mem.order).
+-- config.mem_morale (with config.mem; the globes2 plan): every MEM_SPARSE polls 'mem_morale' {t, tick, units = {name = morale row of apps.mem.morale}} of the lanes' targets
+-- (game/probe/mem_probe.py load_morale): the effects a unit's morale holds, the morale probe's reading on a charge probe's lanes.
+-- config.mem_extras (with config.mem; the tacwalk plan): the lanes' extras are bound and polled like the attacker and the target.
+local battle = require('apps.battle.adapter')
+local clock = require('apps.core.clock')
+local errors = require('apps.core.errors')
+local telemetry = require('apps.telemetry.adapter')
+local orders = require('apps.orders.adapter')
+local facing = require('apps.orders.facing')
+local map = require('apps.map.adapter')
+local services = require('apps.bridge.services')
+local winds = require('apps.battle.winds')
+local memmen = require('apps.mem.entities')
+local memmorale = require('apps.mem.morale')
+local memproj = require('apps.mem.projectiles')
+local memhits = require('apps.mem.hits')
+local memorder = require('apps.mem.order')
+
+local M = {}
+
+local LOG = 'tww3_bai_events.jsonl'
+local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
+local WINDS_TIMER = 'tww3_bai_charge_probe_winds'
+local MEM_TIMER = 'tww3_bai_charge_probe_mem'
+local MEM_POLL_MS, MEM_SPARSE, MEM_PROJ_EVERY, MEM_OTHER_EVERY = 100, 5, 5, 10
+M.MEM_DISCOVER_S = {1, 3, 5}
+M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
+    script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true,
+    cast = true, laps = true, shuttle = true}
+-- A unit's CCO fields tried for its fatigue as a number (the fatrun plan; none is documented: the ones that answer are
+-- logged once, probe_fat_cco, and carried in the laps lanes' rows as fc).
+M.FAT_CCO = {'Fatigue', 'FatigueValue', 'FatiguePercent', 'FatigueLevel', 'FatigueState', 'Vigour', 'VigourPercent',
+    'VigourValue', 'VigourState', 'FatigueStateContext.Key', 'FatigueContext.Value'}
+-- A caster's CCO fields tried at the start (the magic plan): the unit card's ability list and magic fields. Their names
+-- are not documented anywhere we found: the ones that answer are logged (probe_mage cco) and read again every winds_ms.
+M.MAGE_CCO = {'BattleAbilityList.Size', 'CanUseMagic', 'IsCasting', 'IsSpellcaster', 'NumAbilities',
+    'WindsOfMagicPoolContext.CurrentWinds', 'WindsOfMagicPoolContext.Current', 'WindsOfMagicPoolContext.Reserve',
+    'WindsOfMagicPoolContext.Max', 'WindsOfMagicPoolContext.RechargeRate'}
+M.ABILITY_CCO = {'Key', 'Name', 'IsActive', 'IsEnabled', 'CanUse', 'IsUsable', 'State', 'ManaCost', 'Cost',
+    'RechargeTime', 'RechargeTimeRemaining', 'CooldownTimeRemaining', 'RechargePercent', 'RemainingRecharge',
+    'NumUses', 'UsesRemaining', 'TimeRemaining', 'AbilityRecordContext.Key', 'UnitAbilityContext.Key'}
+M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true,
+    skirmish = true}
+M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true, face = true}
+M.AT_ROUT = {halt = true, none = true, away = true}
+-- The card values a lane with card_rows samples (its row's cs): leadership, speed, melee attack / defence, weapon damage,
+-- missile damage (the contact effects' stats: poison, the censer's contagion, suppressing fire; frenzy).
+M.CARD_STATS = {stat_morale = true, scalar_speed = true, stat_melee_attack = true, stat_melee_defence = true,
+    stat_weapon_damage = true, stat_missile_damage_over_time = true}
+-- The engine's fatigue states, fresh to exhausted (unit:fatigue_state()).
+M.FATIGUE = {'threshold_fresh', 'threshold_active', 'threshold_winded', 'threshold_tired', 'threshold_very_tired',
+    'threshold_exhausted'}
+
+local function round(v, k)
+    if type(v) ~= 'number' or v ~= v then return nil end
+    local m = 10 ^ (k or 1)
+    return math.floor(v * m + 0.5) / m
+end
+
+-- Where a lane puts its two units: {ax, az, ab, tx, tz, tb} (centres and bearings). The target's
+-- front line is at z = lane.z; the target faces +z (bearing 0; 'rear': 180), the attacker stands
+-- gap_m beyond that front (a_dx m to the side, +x), facing back. Depths are the blocks' (0 for a lone man). Pure.
+function M.layout(lane)
+    if lane.a_at and lane.t_at then
+        -- (the terrain plan) both units' places given in world coordinates
+        return {ax = lane.a_at.x, az = lane.a_at.z, ab = lane.a_at.b, tx = lane.t_at.x, tz = lane.t_at.z, tb = lane.t_at.b}
+    end
+    local td, ad = lane.t_depth or 0, lane.a_depth or 0
+    local tb = lane.target_mode == 'rear' and 180 or 0
+    if lane.a_side == 90 then
+        -- (the busycharge plan) off the target's right edge (+x), facing it (-x)
+        return {ax = lane.x + (lane.t_width or 0) / 2 + lane.gap_m + ad / 2, az = lane.z - td / 2, ab = 270,
+            tx = lane.x, tz = lane.z - td / 2, tb = tb}
+    elseif lane.a_side == 180 then
+        -- (the busycharge plan) behind the target's back (-z), facing it (+z)
+        return {ax = lane.x + (lane.a_dx or 0), az = lane.z - td - lane.gap_m - ad / 2, ab = 0,
+            tx = lane.x, tz = lane.z - td / 2, tb = tb}
+    elseif lane.a_side and lane.a_side ~= 0 then
+        -- (the brace plan) at a_side degrees from the target's facing (clockwise, +x side), on the ray from its centre:
+        -- gap_m beyond the block's edge on that ray, facing its centre
+        local th = math.rad(lane.a_side)
+        local s, c = math.abs(math.sin(th)), math.abs(math.cos(th))
+        local r = math.min(s > 1e-6 and (lane.t_width or 0) / 2 / s or math.huge, c > 1e-6 and td / 2 / c or math.huge)
+        local d = r + lane.gap_m + ad / 2
+        local tx, tz = lane.x, lane.z - td / 2
+        return {ax = tx + d * math.sin(th), az = tz + d * math.cos(th), ab = (lane.a_side + 180) % 360,
+            tx = tx, tz = tz, tb = tb}
+    end
+    return {ax = lane.x + (lane.a_dx or 0), az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
+end
+
+-- The indices of a 'cast' lane's casts due at elapsed_ms after the go and not yet tried (done[i]), in order. Pure.
+function M.due_casts(casts, done, elapsed_ms)
+    local out = {}
+    for i, c in ipairs(casts or {}) do
+        if not (done and done[i]) and elapsed_ms >= (c.at_s or 0) * 1000 then out[#out + 1] = i end
+    end
+    return out
+end
+
+-- The second target's centre (x, z) for a lane's layout L: t2_dx beside the target, t2_dz along z. Pure.
+function M.t2_place(L, lane)
+    return L.tx + (lane.t2_dx or 0), L.tz + (lane.t2_dz or 0)
+end
+
+-- A point dx m to the right and dz m ahead of (x, z) for a unit facing the world bearing (degrees; 0 = +z, 90 = +x).
+-- Pure. Returns x, z.
+function M.beside(x, z, bearing, dx, dz)
+    local r = math.rad(bearing or 0)
+    return x + (dz or 0) * math.sin(r) + (dx or 0) * math.cos(r), z + (dz or 0) * math.cos(r) - (dx or 0) * math.sin(r)
+end
+
+-- A fatigue state's index (0 fresh .. 5 exhausted), nil for anything else. Pure.
+function M.fatigue_level(state)
+    for i, k in ipairs(M.FATIGUE) do
+        if k == state then return i - 1 end
+    end
+    return nil
+end
+
+-- The laps lane's corner k (1-based, cyclic) of the octagon of radius r about (x, z): corner 1 straight ahead
+-- (bearing), then clockwise. Pure. Returns x, z.
+function M.lap_point(x, z, bearing, k, r)
+    local a = math.rad((bearing or 0) + 45 * ((k - 1) % 8))
+    return x + r * math.sin(a), z + r * math.cos(a)
+end
+
+-- The terrain plan's shuttle: odd legs to lane.p2, even legs back to the attacker's place. Pure. Returns x, z.
+function M.shuttle_end(L, lane, leg)
+    if leg % 2 == 1 then return lane.p2.x, lane.p2.z end
+    return L.ax, L.az
+end
+
+-- The tire shuttle's point for a unit placed at (x, z) facing bearing: odd legs tire_leg_m straight back, even legs
+-- its place. Pure. Returns x, z.
+function M.shuttle_point(x, z, bearing, leg, leg_m)
+    if leg % 2 == 1 then return M.beside(x, z, bearing, 0, -leg_m) end
+    return x, z
+end
+
+-- The reengage lane's phase after one tick (pure): 'in' -> 'out' part_after_s after the first contact -> 'back'
+-- part_s after 'out'. Returns the new phase.
+function M.reengage_step(phase, now_ms, contact_ms, out_ms, lane)
+    if phase == 'in' and contact_ms and now_ms - contact_ms >= lane.part_after_s * 1000 then return 'out' end
+    if phase == 'out' and out_ms and now_ms - out_ms >= lane.part_s * 1000 then return 'back' end
+    return phase
+end
+
+-- The retarget lane's target elapsed_ms after the go (pure): 1 (the target) without switch_s, else 1 and 2 (target2)
+-- in turns of switch_s seconds.
+function M.retarget_aim(elapsed_ms, switch_s)
+    if not switch_s or switch_s <= 0 then return 1 end
+    return math.floor(elapsed_ms / (switch_s * 1000)) % 2 == 0 and 1 or 2
+end
+
+-- The recharge's phase after one tick (pure): 'in' (attacking) -> 'out' recharge_after_s after the
+-- first contact -> 'back' (attacking again) once out of melee and back_m away, or recharge_max_s
+-- after leaving. Returns the new phase.
+-- With lane.pause_s (the recontact plan) 'back' comes pause_s after arrive_ms (when it got there, out of melee: the
+-- caller's 'arrived') instead of on getting there; recharge_max_s after 'out' either way.
+function M.recharge_step(phase, now_ms, contact_ms, out_ms, moved_m, in_melee, lane, arrive_ms)
+    if phase == 'in' and contact_ms and now_ms - contact_ms >= lane.recharge_after_s * 1000 then
+        return 'out'
+    end
+    if phase == 'out' and lane.mode ~= 'withdraw' then
+        local there
+        if lane.pause_s then
+            there = arrive_ms ~= nil and now_ms - arrive_ms >= lane.pause_s * 1000
+        else
+            there = not in_melee and moved_m >= lane.back_m - 5
+        end
+        if there or now_ms - out_ms >= lane.recharge_max_s * 1000 then return 'back' end
+    end
+    return phase
+end
+
+-- config: build, speed, tick_ms, men_ms, men_near_m, men_after_s, deadline_s, settle_ms,
+-- lanes = {{name, attacker, target, x, z, gap_m, a_depth, t_depth, a_width, t_width, mode,
+-- target_mode, answer, fight_s, max_s, move_beyond_m, recharge_after_s, back_m, recharge_max_s,
+-- lord = {name, ability, dz}}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
+function M.main(bm, config, globals)
+    if _G.tww3_bai_charge_probe then return end
+    local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', units = {}, lanes = {}}
+    _G.tww3_bai_charge_probe = state
+    local common = globals and globals.common
+    local vector_type = globals and globals.battle_vector
+
+    local emit, flush = telemetry.buffered_sink(LOG, function(row)
+        row.schema, row.build, row.scenario = 1, config.build, 'charge_probe'
+        row.policy = 'charge_probe'
+        row.batch, row.run_id, row.run = state.batch, state.run_id, 1
+        row.model_ms = bm:time_elapsed_ms()
+    end)
+
+    local function stop_timers()
+        pcall(function() bm:remove_process(TIMER) end)
+        pcall(function() bm:remove_process(MEN_TIMER) end)
+        pcall(function() bm:remove_process(WINDS_TIMER) end)
+        pcall(function() bm:remove_process(MEM_TIMER) end)
+        if state.mem then pcall(state.mem.unhook) end
+    end
+    local function fail(err)
+        state.active = false
+        state.finished = true
+        stop_timers()
+        pcall(emit, 'error', {message = tostring(err)})
+        pcall(flush)
+    end
+    local function guarded(fn)
+        return errors.guard(fn, fail, function() return state.finished end)
+    end
+    local function cco(u, key)
+        return common.get_context_value('CcoBattleUnit', tostring(u:unique_ui_id()), key)
+    end
+    local function read(fn, ...)
+        local ok, v = pcall(fn, ...)
+        if ok then return v end
+        return nil
+    end
+    local function vec(x, z)
+        return map.vector(vector_type, x, bm:get_terrain_height(x, z), z)
+    end
+    local function now_ms() return bm:time_elapsed_ms() end
+
+    local function statuses(u)
+        local n = read(cco, u, 'StatusList.Size')
+        if type(n) ~= 'number' or n < 0 or n > 32 then return nil end
+        local keys = {}
+        for i = 0, n - 1 do
+            local k = read(cco, u, 'StatusList.At(' .. i .. ').Key')
+            if type(k) == 'string' then keys[#keys + 1] = k end
+        end
+        return table.concat(keys, ',')
+    end
+
+    -- The unit's engine target now (unit:current_target()): its script name, '' none, '?' not one of ours, nil unread.
+    local function target_name(u)
+        local ok, t = pcall(function() return u:current_target() end)
+        if not ok then return nil end
+        if not t then return '' end
+        local uid = read(function() return tostring(t:unique_ui_id()) end)
+        if not uid then return nil end
+        for name, it in pairs(state.units) do
+            if it.unit and read(function() return tostring(it.unit:unique_ui_id()) end) == uid then return name end
+        end
+        return '?'
+    end
+
+    local function unit_row(u)
+        local p = read(function() return u:position() end)
+        return {men = read(function() return u:number_of_men_alive() end),
+            hp = round(read(cco, u, 'HealthValue'), 0), hpu = round(read(function() return u:unary_hitpoints() end), 4),
+            m = read(function() return u:is_in_melee() end), x = p and round(p:get_x()), z = p and round(p:get_z()),
+            y = p and round(p:get_y(), 2),
+            b = round(read(function() return u:bearing() end), 0),
+            ow = round(read(function() return u:ordered_width() end), 1),
+            mv = read(function() return u:is_moving() end), fast = read(function() return u:is_moving_fast() end),
+            k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u),
+            uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack'),
+            r = read(function() return u:is_routing() end), sh = read(function() return u:is_shattered() end),
+            ct = target_name(u)}
+    end
+
+    -- (lane.a_on_sight, lane.stealth_rows) does the attacker's alliance see the target now?
+    local function visible_to_attacker(lane)
+        local other = state.alliances and state.alliances[lane.a.side]
+        if not other then return nil end
+        return read(function() return lane.t.unit:is_visible_to_alliance(other) end)
+    end
+
+    -- (stealth_rows 'both', the snipe plan) does the target's alliance see the attacker now?
+    local function visible_to_target(lane)
+        local other = state.alliances and state.alliances[lane.t.side]
+        if not other then return nil end
+        return read(function() return lane.a.unit:is_visible_to_alliance(other) end)
+    end
+
+    -- A unit row's morale fields, added to it (t_morale targets, morale_rows): MoralePercent, MoraleState, the strongest
+    -- effect's text, the active effects' keys, wavering.
+    local function add_morale(row, u)
+        row.mp, row.ms = round(read(cco, u, 'MoralePercent'), 3), read(cco, u, 'MoraleState')
+        row.w = read(function() return u:is_wavering() end)
+        local effect = read(cco, u, 'MoraleGreatestEffect')
+        if type(effect) == 'string' and effect ~= '' then row.mge = effect end
+        local fx = services.active_effects(function(field) return read(cco, u, field) end)
+        if fx and #fx > 0 then row.fx = table.concat(fx, ',') end
+        return row
+    end
+
+    -- A shooter's unit row with its projectiles left, the fire flag and the damage it has dealt (the retarget plan),
+    -- and sk: its skirmish mode on now (nil without the mode).
+    local function shooter_row(u)
+        local row = unit_row(u)
+        row.ammo = read(function() return u:ammo_left() end)
+        row.fire = read(cco, u, 'IsFiringMissiles')
+        row.dd = round(read(cco, u, 'DamageDealt'), 0)
+        row.sk = orders.skirmish_active(u)
+        return row
+    end
+
+    -- The unit card's current values of M.CARD_STATS ({stat key = Value}; CCO UnitDetailsContext.StatList, as the player
+    -- sees them: buffs and contact effects included). The key -> row index map is kept per unit and checked on each read.
+    local card_index = {}
+    local function card_stats(u)
+        local uid = read(function() return tostring(u:unique_ui_id()) end)
+        if not uid then return nil end
+        local idx = card_index[uid]
+        local function at(i, field) return read(cco, u, 'UnitDetailsContext.StatList.At(' .. i .. ').' .. field) end
+        local stale = idx == nil
+        for key, i in pairs(idx or {}) do
+            if at(i, 'Key') ~= key then stale = true end
+        end
+        if stale then
+            idx = {}
+            local n = read(cco, u, 'UnitDetailsContext.StatList.Size')
+            if type(n) ~= 'number' or n < 0 or n > 100 then return nil end
+            for i = 0, n - 1 do
+                local key = at(i, 'Key')
+                if type(key) == 'string' and M.CARD_STATS[key] then idx[key] = i end
+            end
+            card_index[uid] = idx
+        end
+        local out = {}
+        for key, i in pairs(idx) do out[key] = round(at(i, 'Value'), 2) end
+        return out
+    end
+
+    -- A lane unit's sample row: the shooter's fields for a shooter (the attacker of a 'retarget' / 'shoot' lane, a
+    -- 'skirmish' target), the morale fields with lane.morale_rows (both) or lane.t_morale (the target), the card's
+    -- values (cs) with lane.card_rows.
+    local function lane_row(lane, who, u)
+        local shooter = who == 'a' and (lane.mode == 'retarget' or lane.mode == 'shoot' or lane.a_free == true)
+            or who == 'tg' and lane.target_mode == 'skirmish'
+        local row = shooter and shooter_row(u) or unit_row(u)
+        if lane.morale_rows or (who == 'tg' and lane.t_morale) then add_morale(row, u) end
+        if lane.stealth_rows and who == 'tg' then
+            row.hid = read(function() return u:is_hidden() end)
+            row.v = visible_to_attacker(lane)
+        elseif lane.stealth_rows == 'both' and who == 'a' then
+            row.hid = read(function() return u:is_hidden() end)
+            row.v = visible_to_target(lane)
+        end
+        if lane.card_rows then row.cs = card_stats(u) end
+        if lane.flank_rows and who == 'tg' then
+            -- (the flankslot plan) the script's flank threats (the bridge's lf / rf / bf)
+            row.lf = read(function() return u:is_left_flank_threatened() end)
+            row.rf = read(function() return u:is_right_flank_threatened() end)
+            row.bf = read(function() return u:is_rear_flank_threatened() end)
+        end
+        if lane.dd_rows and (who == 'a' or lane.dd_rows == 'both') then
+            row.dd = round(read(cco, u, 'DamageDealt'), 0)
+        end
+        return row
+    end
+
+    -- Soldier places of a unit in decimetres (flat x1, z1, x2, z2 ...), or nil.
+    local function soldiers(u)
+        local size = read(cco, u, 'ManList.Size')
+        if type(size) ~= 'number' or size < 0 or size > 256 then return nil end
+        local xz = {}
+        for i = 0, size - 1 do
+            local ok, x, _, z = pcall(cco, u, 'ManList.At(' .. i .. ').Position')
+            if ok and type(x) == 'number' and type(z) == 'number' then
+                xz[#xz + 1] = math.floor(x * 10 + 0.5)
+                xz[#xz + 1] = math.floor(z * 10 + 0.5)
+            end
+        end
+        return xz
+    end
+
+    local function place(it, x, z, bearing, width)
+        orders.teleport(it.uc, vec(x, z), facing.snap(bearing), width)
+        orders.halt(it.uc)
+    end
+
+    local function finish(status)
+        if state.finished then return end
+        state.active = false
+        state.finished = true
+        stop_timers()
+        if state.cancel_deadline then state.cancel_deadline() end
+        emit('result', {status = status or 'completed', winner = 0})
+        flush()
+        bm:end_battle()
+    end
+
+    local function dist(a, b)
+        local p, q = read(function() return a:position() end), read(function() return b:position() end)
+        if not (p and q) then return nil end
+        return math.sqrt((p:get_x() - q:get_x()) ^ 2 + (p:get_z() - q:get_z()) ^ 2)
+    end
+
+    local function beaten(u)
+        return (read(function() return u:number_of_men_alive() end) or 0) == 0
+    end
+
+    local function end_lane(lane, why)
+        if not lane.running then return end
+        lane.running = false
+        orders.halt(lane.a.uc)
+        orders.halt(lane.t.uc)
+        if lane.t2 then orders.halt(lane.t2.uc) end
+        emit('probe_lane_end', {lane = lane.name, why = why, t = now_ms() - lane.t0,
+            contact_ms = lane.contact and lane.contact - lane.t0,
+            contact2_ms = lane.contact2 and lane.contact2 - lane.t0})
+    end
+
+    local function attack(lane, it, enemy, walk)
+        orders.attack_melee(it.uc, enemy.unit, walk)
+    end
+
+    -- (the magic plan) one try of a 'cast' lane's cast i (module comment).
+    local function cast(lane, i, now)
+        lane.cast_done[i] = true
+        local c = lane.casts[i]
+        local target = (c.tg == 'a' and lane.a) or (c.tg == 't2' and lane.t2) or lane.t
+        local w = winds.read(state.armies[lane.a.side], {'cur'})
+        local can = read(function() return lane.a.unit:can_perform_special_ability(c.key) end)
+        local ok, e = pcall(function() lane.a.uc:perform_special_ability(c.key, target.unit) end)
+        emit('probe_ability', {lane = lane.name, who = 'a', key = c.key, tg = target.name, n = i, at_s = c.at_s,
+            t = now - lane.t0, can = can, w = w and w.cur, status = ok and 'given' or 'failed',
+            error = (not ok) and tostring(e) or nil})
+    end
+
+    -- (the magic plan) the caster's CCO fields that answered at the start ({field = value}).
+    local function mage_cco(lane)
+        local out = {}
+        for _, f in ipairs(lane.cco_found or {}) do out[f] = read(cco, lane.a.unit, f) end
+        return out
+    end
+
+    local function tick()
+        if not state.active then return end
+        local rows, busy, now = {}, false, now_ms()
+        for _, lane in ipairs(state.lanes) do
+            if lane.running then
+                local a_m = read(function() return lane.a.unit:is_in_melee() end)
+                local t_m = read(function() return lane.t.unit:is_in_melee() end)
+                local fighting = lane.mode ~= 'tire' or lane.phase == 'fight'
+                if not lane.contact and fighting and (a_m or (t_m and not lane.contact_a_only)) then
+                    lane.contact = now
+                    emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 1})
+                    if lane.answer and lane.target_mode ~= 'hold' and lane.target_mode ~= 'both'
+                            and lane.target_mode ~= 'both_walk' then
+                        attack(lane, lane.t, lane.a, false)
+                    end
+                    if lane.lord and lane.lord.ability and lane.lord.ability ~= '' and not lane.lord.at_m then
+                        local it = state.units[lane.lord.name]
+                        local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, lane.lord.ability)
+                        emit('probe_ability', {lane = lane.name, key = lane.lord.ability, t = now - lane.t0,
+                            status = ok and (used and 'used' or 'not_ready') or 'failed'})
+                    end
+                end
+                if lane.lord and lane.lord.at_m and not lane.lord_cast and not lane.contact then
+                    local d = dist(lane.a.unit, lane.t.unit)
+                    if d and d <= lane.lord.at_m then
+                        lane.lord_cast = true
+                        local it = state.units[lane.lord.name]
+                        local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, lane.lord.ability)
+                        emit('probe_ability', {lane = lane.name, key = lane.lord.ability, t = now - lane.t0,
+                            d = round(d), status = ok and (used and 'used' or 'not_ready') or 'failed'})
+                    end
+                end
+                if lane.mode == 'recharge' or lane.mode == 'withdraw' then
+                    local p = read(function() return lane.a.unit:position() end)
+                    local moved = (p and lane.out_from) and
+                        math.sqrt((p:get_x() - lane.out_from[1]) ^ 2 + (p:get_z() - lane.out_from[2]) ^ 2) or 0
+                    if lane.phase == 'out' and lane.pause_s then
+                        -- the recontact plan: out of melee ('clear'), there ('arrived'), pause_s, then 'back'
+                        if not lane.clear_ms and not a_m then
+                            lane.clear_ms = now
+                            emit('probe_phase', {lane = lane.name, phase = 'clear', t = now - lane.t0,
+                                after_out_s = round((now - lane.out_ms) / 1000), moved_m = round(moved)})
+                        end
+                        if not lane.arrive_ms and not a_m and moved >= lane.back_m - 5 then
+                            lane.arrive_ms = now
+                            emit('probe_phase', {lane = lane.name, phase = 'arrived', t = now - lane.t0,
+                                moved_m = round(moved)})
+                        end
+                    end
+                    local phase = M.recharge_step(lane.phase, now, lane.contact, lane.out_ms or now, moved, a_m, lane,
+                        lane.arrive_ms)
+                    if phase ~= lane.phase then
+                        lane.phase = phase
+                        if phase == 'out' and p then
+                            lane.out_ms, lane.out_from = now, {p:get_x(), p:get_z()}
+                            local away = lane.layout.ab + 180   -- back the way it came
+                            local r = math.rad(away)
+                            orders.move(lane.a.uc, vec(p:get_x() + lane.back_m * math.sin(r),
+                                p:get_z() + lane.back_m * math.cos(r)), true)
+                            if lane.t_at_leave == 'halt' then orders.halt(lane.t.uc) end
+                        elseif phase == 'back' then
+                            attack(lane, lane.a, lane.t, false)
+                        end
+                        emit('probe_phase', {lane = lane.name, phase = phase, t = now - lane.t0, moved_m = round(moved)})
+                    end
+                    if lane.phase == 'back' and not lane.contact2 and a_m then
+                        lane.contact2 = now
+                        emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 2})
+                    end
+                end
+                if lane.mode == 'reengage' then
+                    local phase = M.reengage_step(lane.phase, now, lane.contact, lane.out_ms, lane)
+                    if phase ~= lane.phase then
+                        lane.phase = phase
+                        if phase == 'out' then
+                            lane.out_ms = now
+                            local moved = {}
+                            for _, it in ipairs({{lane.a, lane.layout.ab}, {lane.t, lane.layout.tb}}) do
+                                local p = read(function() return it[1].unit:position() end)
+                                if p then
+                                    local x, z = M.beside(p:get_x(), p:get_z(), it[2], 0, -lane.part_m)
+                                    orders.move(it[1].uc, vec(x, z), true)
+                                    moved[#moved + 1] = {round(x), round(z)}
+                                end
+                            end
+                            emit('probe_phase', {lane = lane.name, phase = 'out', t = now - lane.t0, to = moved})
+                        elseif phase == 'back' then
+                            attack(lane, lane.a, lane.t, false)
+                            attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
+                            emit('probe_phase', {lane = lane.name, phase = 'back', t = now - lane.t0,
+                                cleared = lane.clear_ms ~= nil,
+                                a_fat = read(function() return lane.a.unit:fatigue_state() end),
+                                t_fat = read(function() return lane.t.unit:fatigue_state() end)})
+                        end
+                    end
+                    if lane.phase == 'out' and not lane.clear_ms and not a_m and not t_m then
+                        lane.clear_ms = now
+                        emit('probe_phase', {lane = lane.name, phase = 'clear', t = now - lane.t0,
+                            after_out_s = round((now - lane.out_ms) / 1000)})
+                    end
+                    if lane.phase == 'back' and lane.clear_ms and not lane.contact2 and (a_m or t_m) then
+                        lane.contact2 = now
+                        emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 2})
+                    end
+                end
+                if lane.mode == 'tire' then
+                    local L = lane.layout
+                    local homes = {a = {L.ax, L.az, L.ab, lane.a_width}, t = {L.tx, L.tz, L.tb, lane.t_width}}
+                    local fat = {a = read(function() return lane.a.unit:fatigue_state() end),
+                        t = read(function() return lane.t.unit:fatigue_state() end)}
+                    local function off(who, x, z)
+                        local p = read(function() return lane[who].unit:position() end)
+                        if not p then return math.huge end
+                        return math.sqrt((p:get_x() - x) ^ 2 + (p:get_z() - z) ^ 2)
+                    end
+                    local function moving(who) return read(function() return lane[who].unit:is_moving() end) end
+                    if lane.phase == 'tire' then
+                        for _, who in ipairs({'a', 't'}) do
+                            local h = homes[who]
+                            local x, z = M.shuttle_point(h[1], h[2], h[3], lane.legs[who], lane.tire_leg_m)
+                            -- the next leg once there, or once stopped 5 s into the leg (a formation may stop a few
+                            -- metres off its point; standing would rest it)
+                            if off(who, x, z) <= 8 or (not moving(who) and now - lane.leg_ms[who] >= 5000) then
+                                lane.legs[who], lane.leg_ms[who] = lane.legs[who] + 1, now
+                                x, z = M.shuttle_point(h[1], h[2], h[3], lane.legs[who], lane.tire_leg_m)
+                                orders.move(lane[who].uc, vec(x, z), true)
+                            end
+                        end
+                        local goal = M.fatigue_level(lane.tire_until)
+                        local tired = (M.fatigue_level(fat.a) or -1) >= goal and (M.fatigue_level(fat.t) or -1) >= goal
+                        if tired or now - lane.t0 >= lane.tire_max_s * 1000 then
+                            lane.phase, lane.return_ms = 'return', now
+                            for _, who in ipairs({'a', 't'}) do
+                                local h = homes[who]
+                                orders.move_formation(lane[who].uc, vec(h[1], h[2]), h[3], h[4], true)
+                            end
+                            emit('probe_phase', {lane = lane.name, phase = 'tire_end', t = now - lane.t0,
+                                why = tired and 'tired' or 'tire_max_s', a_fat = fat.a, t_fat = fat.t,
+                                legs = {lane.legs.a, lane.legs.t}})
+                        end
+                    elseif lane.phase == 'return' then
+                        -- home: both stopped, at their places or 5 s after the order
+                        local home = true
+                        for _, who in ipairs({'a', 't'}) do
+                            local h = homes[who]
+                            if moving(who) or (off(who, h[1], h[2]) > 8 and now - lane.return_ms < 5000) then
+                                home = false
+                            end
+                        end
+                        if home or now - lane.return_ms >= lane.ready_max_s * 1000 then
+                            lane.phase = 'fight'
+                            attack(lane, lane.a, lane.t, false)
+                            attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
+                            emit('probe_phase', {lane = lane.name, phase = 'tired', t = now - lane.t0,
+                                why = home and 'home' or 'ready_max_s', a_fat = fat.a, t_fat = fat.t})
+                        end
+                    end
+                end
+                if lane.mode == 'shuttle' and lane.main and not lane.main_done and now - lane.t0 >= lane.main.at_s * 1000 then
+                    -- (the terrain2 plan) after the flat pre-run: teleported to the slope (main {at_s, x, z, b, p2}), the
+                    -- shuttle goes on from there, its first leg to main.p2
+                    lane.main_done = true
+                    local fat = read(function() return lane.a.unit:fatigue_state() end)
+                    place(lane.a, lane.main.x, lane.main.z, lane.main.b, lane.a_width)
+                    lane.layout.ax, lane.layout.az, lane.layout.ab = lane.main.x, lane.main.z, lane.main.b
+                    lane.p2 = lane.main.p2
+                    lane.leg, lane.leg_ms = 1, now
+                    orders.move(lane.a.uc, vec(lane.p2.x, lane.p2.z), lane.shuttle_walk ~= true)
+                    emit('probe_phase', {lane = lane.name, phase = 'main', t = now - lane.t0, fat = fat,
+                        fat_after = read(function() return lane.a.unit:fatigue_state() end)})
+                end
+                if lane.mode == 'shuttle' then
+                    -- (the terrain plan) at a run between its place and lane.p2 {x, z} until the lane ends: the next leg
+                    -- once within 6 m of its point, or once stopped 4 s into the leg
+                    local L = lane.layout
+                    local p = read(function() return lane.a.unit:position() end)
+                    local tx, tz = M.shuttle_end(L, lane, lane.leg)
+                    local off = p and math.sqrt((p:get_x() - tx) ^ 2 + (p:get_z() - tz) ^ 2) or math.huge
+                    local moving = read(function() return lane.a.unit:is_moving() end)
+                    if off <= 6 or (not moving and now - lane.leg_ms >= 4000) then
+                        lane.leg, lane.leg_ms = lane.leg + 1, now
+                        tx, tz = M.shuttle_end(L, lane, lane.leg)
+                        orders.move(lane.a.uc, vec(tx, tz), lane.shuttle_walk ~= true)
+                        emit('probe_phase', {lane = lane.name, phase = 'leg', n = lane.leg, t = now - lane.t0,
+                            off = round(off, 1)})
+                    end
+                end
+                if lane.mode == 'laps' then
+                    local L = lane.layout
+                    local p = read(function() return lane.a.unit:position() end)
+                    if lane.phase == 'laps' then
+                        local x, z = M.lap_point(L.ax, L.az, L.ab, lane.wp, lane.laps_r)
+                        local off = p and math.sqrt((p:get_x() - x) ^ 2 + (p:get_z() - z) ^ 2) or math.huge
+                        local moving = read(function() return lane.a.unit:is_moving() end)
+                        if off <= 10 or (not moving and now - lane.wp_ms >= 5000) then
+                            lane.wp, lane.wp_ms = lane.wp + 1, now
+                            x, z = M.lap_point(L.ax, L.az, L.ab, lane.wp, lane.laps_r)
+                            orders.move(lane.a.uc, vec(x, z), lane.laps_walk ~= true)
+                        end
+                        if now - lane.t0 >= lane.run_s * 1000 then
+                            lane.phase = 'stop'
+                            orders.halt(lane.a.uc)
+                            local fat = read(function() return lane.a.unit:fatigue_state() end)
+                            emit('probe_phase', {lane = lane.name, phase = 'stop', t = now - lane.t0, fat = fat,
+                                corners = lane.wp, x = p and round(p:get_x()), z = p and round(p:get_z())})
+                            if lane.t_near_m and p then
+                                local b = read(function() return lane.a.unit:bearing() end) or L.ab
+                                local d = lane.t_near_m + ((lane.a_depth or 0) + (lane.t_depth or 0)) / 2
+                                local nx, nz = M.beside(p:get_x(), p:get_z(), b, 0, d)
+                                local ok, e = pcall(place, lane.t, nx, nz, (b + 180) % 360, lane.t_width)
+                                emit('probe_phase', {lane = lane.name, phase = 'near', t = now - lane.t0, x = round(nx),
+                                    z = round(nz), b = round(b, 0), status = ok and 'done' or 'failed',
+                                    error = (not ok) and tostring(e) or nil})
+                            end
+                        end
+                    end
+                end
+                if lane.mode == 'script' then
+                    for i, step in ipairs(lane.steps or {}) do
+                        if not step.done and now - lane.t0 >= step.at_s * 1000 then
+                            step.done = true
+                            local p = read(function() return lane.a.unit:position() end)
+                            if step.kind == 'face' and p then
+                                orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), step.bearing,
+                                    step.width or lane.a_width, step.run == true)
+                            elseif step.kind == 'move' and step.width then
+                                -- (the meleewidth plan) a move with a width, arriving facing step.bearing (or as now)
+                                local L = lane.layout
+                                local b = step.bearing or read(function() return lane.a.unit:bearing() end) or L.ab
+                                orders.move_formation(lane.a.uc, vec(L.ax + (step.dx or 0), L.az + (step.dz or 0)), b,
+                                    step.width, step.run == true)
+                            elseif step.kind == 'move' then
+                                local L = lane.layout
+                                orders.move(lane.a.uc, vec(L.ax + (step.dx or 0), L.az + (step.dz or 0)), step.run == true)
+                            elseif step.kind == 'rout' then
+                                -- (the memform plan) the attacker routed by script (lane.morale_both keeps its morale)
+                                pcall(function() lane.a.uc:morale_behavior_rout() end)
+                            end
+                            emit('probe_phase', {lane = lane.name, phase = 'step' .. i .. ':' .. tostring(step.kind),
+                                t = now - lane.t0})
+                        end
+                    end
+                end
+                if lane.mode == 'cast' then
+                    for _, i in ipairs(M.due_casts(lane.casts, lane.cast_done, now - lane.t0)) do cast(lane, i, now) end
+                end
+                if lane.a_pending and now - lane.t0 >= lane.a_go_s * 1000 then
+                    -- (the busycharge plan) the attacker's order, held until a_go_s after the go
+                    lane.a_pending = false
+                    if lane.mode == 'shoot' then
+                        -- (the snipe plan) the ranged attack held until a_go_s: the shooter hides first
+                        orders.set_fire_at_will(lane.a.uc, true)
+                        orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+                    else
+                        attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                    end
+                    emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0})
+                end
+                if lane.mode == 'shoot' and lane.reorder_s and now - (lane.reorder_ms or lane.t0) >= lane.reorder_s * 1000 then
+                    -- (the cover plan) a shooter not firing gets its ranged attack again every reorder_s: a target hidden
+                    -- in forest at the go drops the order until it is spotted
+                    lane.reorder_ms = now
+                    if read(cco, lane.a.unit, 'IsFiringMissiles') ~= true then
+                        orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+                        emit('probe_phase', {lane = lane.name, phase = 'reorder', t = now - lane.t0})
+                    end
+                end
+                if lane.mode == 'retarget' then
+                    local want = M.retarget_aim(now - lane.t0, lane.switch_s)
+                    if want ~= lane.aim then
+                        lane.aim, lane.orders = want, (lane.orders or 0) + 1
+                        orders.attack_ranged(lane.a.uc, (want == 1 and lane.t or lane.t2).unit, false, true)
+                        emit('probe_phase', {lane = lane.name, phase = 'aim', target = want, n = lane.orders,
+                            t = now - lane.t0})
+                    end
+                end
+                -- lane.entity_fields (the manfields plan): entity_at_s after the first contact, once, what the game's CCO
+                -- answers for the first men of both units under each name of lane.entity_fields (up to 4 values each)
+                if lane.entity_fields and lane.contact and not lane.entity_done
+                    and now - lane.contact >= (lane.entity_at_s or 3) * 1000 then
+                    lane.entity_done = true
+                    local found = {}
+                    for _, who in ipairs({'a', 't'}) do
+                        local u = lane[who].unit
+                        for i = 0, 2 do
+                            for _, f in ipairs(lane.entity_fields) do
+                                local res = {pcall(cco, u, 'ManList.At(' .. i .. ').' .. f)}
+                                if res[1] and res[2] ~= nil then
+                                    local vals = {}
+                                    for k = 2, math.min(#res, 5) do
+                                        local v = res[k]
+                                        vals[#vals + 1] = type(v) == 'number' and round(v, 4) or tostring(v)
+                                    end
+                                    found[#found + 1] = {who = who, i = i, field = f, values = vals}
+                                end
+                            end
+                        end
+                    end
+                    emit('probe_entity_fields', {lane = lane.name, t = now - lane.t0, found = found})
+                end
+                -- lane.after, then lane.after2 (a second order later: the holdmelee plan's halt after a move or an
+                -- attack given in melee); each at its at_s after the first contact
+                for n, key in ipairs({'after', 'after2'}) do
+                    local af = lane[key]
+                    if af and lane.contact and not lane[key .. '_done'] and now - lane.contact >= af.at_s * 1000 then
+                        lane[key .. '_done'] = true
+                        local walk = af.walk == true
+                        if af.kind == 'attack_t2' then
+                            attack(lane, lane.a, lane.t2, walk)
+                        elseif af.kind == 'attack_same' then
+                            attack(lane, lane.a, lane.t, walk)
+                        elseif af.kind == 'halt' then
+                            orders.halt(lane.a.uc)
+                        elseif af.kind == 'move_near' then
+                            local p = read(function() return lane.a.unit:position() end)
+                            if p then orders.move(lane.a.uc, vec(p:get_x() + (af.dx or 0), p:get_z() + (af.dz or 0)), not walk) end
+                        elseif af.kind == 'face' then
+                            -- (the meleeturn plan) a facing order where the unit stands: its bearing + af.turn_deg
+                            local p = read(function() return lane.a.unit:position() end)
+                            local b = read(function() return lane.a.unit:bearing() end)
+                            if p and b then
+                                af.goal = (b + (af.turn_deg or 90)) % 360
+                                orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), af.goal,
+                                    af.width or lane.a_width, af.run == true)
+                            end
+                        end
+                        emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, n = n, t = now - lane.t0,
+                            goal = af.goal and round(af.goal, 0) or nil})
+                    end
+                end
+                -- lane.t_stop_fire_s (a 'skirmish' target, the suppress2 plan): the shooter falls silent that long after
+                -- the go - fire at will off and a halt (its ranged attack dropped)
+                if lane.t_stop_fire_s and not lane.stop_fire_done and now - lane.t0 >= lane.t_stop_fire_s * 1000 then
+                    lane.stop_fire_done = true
+                    orders.set_fire_at_will(lane.t.uc, false)
+                    orders.halt(lane.t.uc)
+                    emit('probe_phase', {lane = lane.name, phase = 'stop_fire', t = now - lane.t0})
+                end
+                -- lane.a_on_sight (the triads plan; module comment): a hidden target
+                if lane.sight then
+                    local v = visible_to_attacker(lane)
+                    if v and not lane.sight_seen then
+                        lane.sight_seen = true
+                        local d = dist(lane.a.unit, lane.t.unit)
+                        emit('probe_phase', {lane = lane.name, phase = 'a_seen', t = now - lane.t0, d = d and round(d, 1) or nil,
+                            hid = read(function() return lane.t.unit:is_hidden() end)})
+                    end
+                    if lane.sight == 'try' and now - lane.t0 >= (lane.a_try_s or 3) * 1000 then
+                        local moving = read(function() return lane.a.unit:is_moving() end)
+                        emit('probe_phase', {lane = lane.name, phase = 'a_try_end', t = now - lane.t0, kept = moving == true,
+                            tg = target_name(lane.a.unit), v = v})
+                        if moving then
+                            lane.sight = 'kept'
+                        else
+                            lane.sight = 'wait'
+                            orders.move(lane.a.uc, vec(lane.layout.tx, lane.z - lane.move_beyond_m), lane.mode ~= 'attack_walk')
+                            emit('probe_phase', {lane = lane.name, phase = 'a_move', t = now - lane.t0})
+                        end
+                    end
+                    if lane.sight == 'wait' and v then
+                        lane.sight = 'kept'
+                        attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                        emit('probe_phase', {lane = lane.name, phase = 'a_attack', t = now - lane.t0})
+                    end
+                end
+                -- lane.a_casts (the grinder plan; module comment), lane.t_casts (the triads plan): a unit's own abilities by
+                -- time or distance
+                for _, w in ipairs({{'a', lane.a_casts, lane.a}, {'t', lane.t_casts, lane.t}}) do
+                    for i, c in ipairs(w[2] or {}) do
+                        lane.cast_done_self = lane.cast_done_self or {}
+                        local mark = w[1] .. i
+                        if not lane.cast_done_self[mark] then
+                            local d = dist(lane.a.unit, lane.t.unit)
+                            local due = (c.at_s and now - lane.t0 >= c.at_s * 1000)
+                                or (c.at_m and not lane.contact and d and d <= c.at_m)
+                            if due then
+                                lane.cast_done_self[mark] = true
+                                local it = w[3]
+                                local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, c.key)
+                                local status = ok and (used and 'used' or 'not_ready') or nil
+                                if not ok then
+                                    local ok2 = pcall(function() it.uc:perform_special_ability(c.key) end)
+                                    status = ok2 and 'used_no_target' or 'failed'
+                                end
+                                emit('probe_ability', {lane = lane.name, who = w[1], key = c.key, n = i, t = now - lane.t0,
+                                    d = d and round(d) or nil, status = status})
+                            end
+                        end
+                    end
+                end
+                if lane.a_ability and lane.contact and not lane.a_ability_done
+                        and now - lane.contact >= (lane.a_ability_after_s or 0) * 1000 then
+                    lane.a_ability_done = true
+                    local ok, used = pcall(orders.use_ability_on_self, lane.a.uc, lane.a.unit, lane.a_ability)
+                    emit('probe_ability', {lane = lane.name, who = 'a', key = lane.a_ability, t = now - lane.t0,
+                        status = ok and (used and 'used' or 'not_ready') or 'failed'})
+                end
+                if lane.t_morale and not lane.rout_ms and not lane.rout_forced and ((lane.rout_at_s and lane.contact
+                        and now - lane.contact >= lane.rout_at_s * 1000)
+                        or (lane.rout_at_go_s and now - lane.t0 >= lane.rout_at_go_s * 1000)) then
+                    lane.rout_forced = true
+                    local ok = pcall(function() lane.t.uc:morale_behavior_rout() end)
+                    emit('probe_phase', {lane = lane.name, phase = 'rout_forced', t = now - lane.t0,
+                        status = ok and 'done' or 'failed'})
+                end
+                if lane.t_morale and not lane.rout_ms then
+                    local t_r = read(function() return lane.t.unit:is_routing() end)
+                    if t_r then
+                        lane.rout_ms = now
+                        if lane.at_rout == 'halt' then orders.halt(lane.a.uc) end
+                        emit('probe_phase', {lane = lane.name, phase = 'rout', t = now - lane.t0,
+                            at_rout = lane.at_rout or 'none'})
+                        if lane.at_rout == 'away' then
+                            local ax, az = lane.x, lane.z + (lane.away_dz or 400)
+                            local ok, e = pcall(place, lane.a, ax, az, 180, lane.a_width)
+                            emit('probe_phase', {lane = lane.name, phase = 'away', t = now - lane.t0, x = round(ax),
+                                z = round(az), status = ok and 'done' or 'failed', error = (not ok) and tostring(e) or nil})
+                        end
+                    end
+                end
+                if lane.after_rally_s and lane.rout_ms and not lane.rally_ms
+                        and read(function() return lane.t.unit:is_routing() end) == false
+                        and not read(function() return lane.t.unit:is_shattered() end) then
+                    lane.rally_ms = now
+                    orders.halt(lane.t.uc)
+                    local p = read(function() return lane.t.unit:position() end)
+                    local b = read(function() return lane.t.unit:bearing() end) or 0
+                    emit('probe_phase', {lane = lane.name, phase = 'rally', t = now - lane.t0,
+                        rout_s = round((now - lane.rout_ms) / 1000), x = p and round(p:get_x()), z = p and round(p:get_z()),
+                        b = round(b, 0), mp = round(read(cco, lane.t.unit, 'MoralePercent'), 3)})
+                    if p and lane.rally_friends and #lane.rally_friends > 0 then
+                        local placed = {}
+                        for _, f in ipairs(lane.rally_friends) do
+                            local fx, fz = M.beside(p:get_x(), p:get_z(), b, f.dx, f.dz)
+                            local ok = pcall(place, state.units[f.name], fx, fz, b, f.width or lane.t_width)
+                            placed[#placed + 1] = {name = f.name, x = round(fx), z = round(fz), status = ok and 'done' or 'failed'}
+                        end
+                        emit('probe_phase', {lane = lane.name, phase = 'friends', t = now - lane.t0, units = placed})
+                    end
+                end
+                local r = {lane = lane.name, t = now - lane.t0, a = lane_row(lane, 'a', lane.a.unit),
+                    tg = lane_row(lane, 'tg', lane.t.unit)}
+                if lane.mode == 'laps' and lane.fat_found and #lane.fat_found > 0 then
+                    r.a.fc = {}
+                    for _, f in ipairs(lane.fat_found) do r.a.fc[f] = read(cco, lane.a.unit, f) end
+                end
+                if lane.rally_friends and #lane.rally_friends > 0 then
+                    r.f = {}
+                    for _, f in ipairs(lane.rally_friends) do r.f[#r.f + 1] = unit_row(state.units[f.name].unit) end
+                end
+                if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
+                if lane.extras and #lane.extras > 0 then
+                    r.e = {}
+                    for _, e in ipairs(lane.extras) do
+                        local ex = unit_row(state.units[e.name].unit)
+                        -- (the globes plan: the poison's key on the friends under the shells)
+                        if lane.morale_rows then add_morale(ex, state.units[e.name].unit) end
+                        r.e[#r.e + 1] = ex
+                    end
+                end
+                if lane.t2 then r.t2 = unit_row(lane.t2.unit) end
+                rows[#rows + 1] = r
+                if beaten(lane.a.unit) or beaten(lane.t.unit) then
+                    end_lane(lane, 'dead')
+                elseif lane.rally_ms and lane.after_rally_s and now - lane.rally_ms >= lane.after_rally_s * 1000 then
+                    end_lane(lane, 'after_rally')
+                elseif lane.rout_ms and not (lane.rally_ms and lane.after_rally_s)
+                        and now - lane.rout_ms >= (lane.after_rout_s or 45) * 1000 then
+                    end_lane(lane, 'after_rout')
+                elseif lane.after2_s and lane.contact2 and now - lane.contact2 >= lane.after2_s * 1000 then
+                    end_lane(lane, 'after_contact2')
+                elseif lane.contact and not lane.after2_s and now - lane.contact >= lane.fight_s * 1000 then
+                    end_lane(lane, 'fight_s')
+                elseif now - lane.t0 >= lane.max_s * 1000 then
+                    end_lane(lane, 'max_s')
+                end
+                busy = busy or lane.running
+            end
+        end
+        if #rows > 0 then emit('probe_sample', {lanes = rows}) end
+        flush()
+        if not busy then finish('completed') end
+    end
+
+    -- (config.mem) the men from memory every MEM_POLL_MS (module comment).
+    -- (config.mem_proj) the projectiles, before the men (module comment)
+    local function proj_poll()
+        local P = state.proj
+        if not P then return end
+        if not P.mgr then
+            local ok, m = pcall(memproj.manager, _G.memreader_plus, config.mem, P.unit, config.mem.layout.u_battle)
+            if ok and m then P.mgr = m else return end
+        end
+        local ok, err = pcall(P.S.scan, P.mgr)
+        if not ok and #P.S.errors < 20 then P.S.errors[#P.S.errors + 1] = tostring(err) end
+        if state.mem_c % MEM_PROJ_EVERY == 0 then
+            local d = P.S.drain()
+            d.fly = nil
+            d.c = state.mem_c
+            d.other = P.H.drain_other()
+            if state.mem_c % MEM_OTHER_EVERY == 0 then d.other_hp = P.H.poll_other() end
+            if not P.told and P.H.offsets() then d.offsets, P.told = P.H.offsets(), true end
+            emit('mem_proj', d)
+        end
+    end
+
+    local function mem_poll()
+        if not (state.active and state.mem) then return end
+        state.mem_c = (state.mem_c or 0) + 1
+        proj_poll()
+        local now = now_ms()
+        local names = {}
+        for _, lane in ipairs(state.lanes) do
+            if lane.running then
+                local last = lane.contact2 or lane.contact
+                local dense = false
+                if last then
+                    dense = now - last <= config.men_after_s * 1000
+                else
+                    local d = dist(lane.a.unit, lane.t.unit)
+                    dense = d ~= nil and d <= config.men_near_m
+                end
+                if dense or state.mem_c % MEM_SPARSE == 1 then
+                    names[#names + 1] = lane.a.name
+                    names[#names + 1] = lane.t.name
+                    for _, e in ipairs(config.mem_extras and lane.extras or {}) do names[#names + 1] = e.name end
+                end
+                if lane.contact then
+                    lane.mem_disc = lane.mem_disc or 1
+                    local at = M.MEM_DISCOVER_S[lane.mem_disc]
+                    if at and now - lane.contact >= at * 1000 then
+                        lane.mem_disc = lane.mem_disc + 1
+                        local hits = {a = state.mem.discover(lane.a.name, lane.t.name, 12),
+                            t = state.mem.discover(lane.t.name, lane.a.name, 12)}
+                        emit('mem_men_discover', {lane = lane.name, s = at, hits = hits})
+                    end
+                end
+            end
+        end
+        if #names == 0 then return end
+        local d = state.mem.poll(names)
+        d.t = now
+        for name, row in pairs(d.units) do
+            local u = state.units[name] and state.units[name].unit
+            if u then
+                row.sn = read(function() return u:number_of_men_alive() end)
+                local p = read(function() return u:position() end)
+                if p then row.sx, row.sz = round(p:get_x(), 1), round(p:get_z(), 1) end
+            end
+        end
+        local e = state.mem.errors()
+        if #e > 0 then d.errors = e end
+        emit('mem_men', d)
+        -- (config.mem_form, the memform plan) the units' behaviours and groups, the way's job: apps.mem.order
+        if state.mem_form then
+            local f = state.mem_form.poll(names)
+            f.t, f.tick = now, d.tick
+            emit('mem_form', f)
+        end
+        -- (config.mem_morale, the globes2 plan) the targets' morale effects
+        if state.mem_mor and state.mem_c % MEM_SPARSE == 0 then
+            local f = state.mem_mor.R.poll(state.mem_mor.names)
+            f.t, f.tick = now, d.tick
+            emit('mem_morale', f)
+        end
+    end
+
+    local function men_sample()
+        if not state.active then return end
+        local rows, now = {}, now_ms()
+        for _, lane in ipairs(state.lanes) do
+            local last = lane.contact2 or lane.contact
+            if lane.running and lane.rout_ms and config.men_after_rout_s then
+                -- the routing mob: both units' men for men_after_rout_s after the rout, wherever the enemy is
+                if now - lane.rout_ms <= config.men_after_rout_s * 1000 then
+                    local row = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit), tg = soldiers(lane.t.unit)}
+                    if lane.extras and #lane.extras > 0 then
+                        row.e = {}
+                        for _, e in ipairs(lane.extras) do row.e[#row.e + 1] = soldiers(state.units[e.name].unit) end
+                    end
+                    rows[#rows + 1] = row
+                end
+            elseif lane.running and lane.men_all_s then
+                if now - lane.t0 <= lane.men_all_s * 1000 then
+                    local row = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit)}
+                    if lane.men_all_tg then
+                        row.tg = soldiers(lane.t.unit)
+                        if lane.extras and #lane.extras > 0 then
+                            row.e = {}
+                            for _, e in ipairs(lane.extras) do row.e[#row.e + 1] = soldiers(state.units[e.name].unit) end
+                        end
+                    end
+                    rows[#rows + 1] = row
+                end
+            elseif lane.running and lane.mode == 'tire' and lane.phase ~= 'fight' then
+                -- no soldier places while the pair shuttles (only the fight after it)
+            elseif lane.running and (not last or now - last <= config.men_after_s * 1000) then
+                local d = dist(lane.a.unit, lane.t.unit)
+                if d and d <= config.men_near_m then
+                    rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit),
+                        tg = soldiers(lane.t.unit), t2 = lane.t2 and soldiers(lane.t2.unit) or nil}
+                end
+            end
+        end
+        if #rows > 0 then emit('probe_men', {lanes = rows}) end
+    end
+
+    -- (the magic plan) each side's winds and the casters' CCO fields every winds_ms (module comment).
+    local function winds_sample()
+        if not state.active then return end
+        local row, m = {t = now_ms() - state.t0}, {}
+        for side = 1, 2 do row['s' .. side] = winds.read(state.armies[side], state.winds_found[side]) end
+        for _, lane in ipairs(state.lanes) do
+            if lane.mode == 'cast' and lane.running and lane.cco_found and #lane.cco_found > 0 then
+                m[lane.name] = mage_cco(lane)
+            end
+        end
+        if next(m) then row.m = m end
+        emit('probe_winds', row)
+    end
+
+    local function go()
+        state.t0 = now_ms()
+        for _, lane in ipairs(state.lanes) do
+            lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
+            lane.cast_done = {}
+            if lane.mode == 'tire' then
+                -- the shuttle's first leg: straight back, both at a run
+                lane.phase, lane.legs, lane.leg_ms = 'tire', {a = 1, t = 1}, {a = lane.t0, t = lane.t0}
+                local L = lane.layout
+                for who, h in pairs({a = {L.ax, L.az, L.ab}, t = {L.tx, L.tz, L.tb}}) do
+                    local x, z = M.shuttle_point(h[1], h[2], h[3], 1, lane.tire_leg_m)
+                    orders.move(lane[who].uc, vec(x, z), true)
+                end
+            elseif lane.target_mode == 'both' or lane.target_mode == 'both_walk' then
+                attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
+            end
+            if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
+            for _, e in ipairs(lane.extras or {}) do
+                -- (the busycharge plan's anvil) the extra attacks the target at a walk
+                if e.attack then attack(lane, state.units[e.name], lane.t, true) end
+            end
+            if lane.t_attack_extra and lane.extras and lane.extras[1] then
+                -- (the walkpass plan's 'busy' lanes) the target attacks the first extra at a walk: it is busy fighting
+                attack(lane, lane.t, state.units[lane.extras[1].name], true)
+            end
+            if lane.target_mode == 'push' then
+                -- (lane.push_run: at a run - the losmove plan's running target)
+                if lane.push_to then
+                    orders.move(lane.t.uc, vec(lane.push_to.x, lane.push_to.z), lane.push_run == true)
+                else
+                    orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), lane.push_run == true)
+                end
+            elseif lane.target_mode == 'skirmish' and lane.t_move then
+                -- (the shootcontact plan) a move t_move.back_m straight away from the attacker (-z), never changed
+                local L = lane.layout
+                orders.move(lane.t.uc, vec(L.tx, L.tz - (lane.t_move.back_m or 300)), lane.t_move.run == true)
+                emit('probe_phase', {lane = lane.name, phase = 't_move', t = 0, at_run = lane.t_move.run == true})
+            elseif lane.target_mode == 'skirmish' then
+                orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
+            end
+            local m = lane.mode
+            if lane.a_go_s and (m == 'attack_run' or m == 'attack_walk' or m == 'shoot') then
+                lane.a_pending, m = true, nil
+            end
+            if lane.a_on_sight and (m == 'attack_run' or m == 'attack_walk') then
+                lane.sight = 'try'
+                emit('probe_phase', {lane = lane.name, phase = 'a_try', t = 0, v = visible_to_attacker(lane),
+                    hid = read(function() return lane.t.unit:is_hidden() end)})
+            end
+            if m == 'attack_run' or m == 'recharge' or m == 'withdraw' or m == 'reengage' then
+                attack(lane, lane.a, lane.t, false)
+            elseif m == 'attack_walk' then
+                attack(lane, lane.a, lane.t, true)
+            elseif m == 'hold' and lane.a_free then
+                -- (the losmove plan) no order, fire at will on: the shooter picks its own target
+                orders.set_fire_at_will(lane.a.uc, true)
+            elseif m == 'shoot' then
+                orders.set_fire_at_will(lane.a.uc, true)
+                orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+            elseif m == 'retarget' then
+                lane.aim, lane.orders = 1, 0
+                orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+                emit('probe_phase', {lane = lane.name, phase = 'aim', target = 1, n = 0, t = 0})
+            elseif m == 'move_run' then
+                local L = lane.layout
+                orders.move(lane.a.uc, vec(L.tx, lane.z - lane.move_beyond_m), true)
+            elseif m == 'pass' then
+                local L = lane.layout
+                orders.move(lane.a.uc, vec(L.ax, lane.z - (lane.pass_beyond_m or 100)), lane.pass_walk ~= true)
+            elseif m == 'attack_t2' then
+                attack(lane, lane.a, lane.t2, false)
+            elseif m == 'shuttle' then
+                lane.leg, lane.leg_ms = 1, lane.t0
+                local x, z = M.shuttle_end(lane.layout, lane, 1)
+                orders.move(lane.a.uc, vec(x, z), lane.shuttle_walk ~= true)
+            elseif m == 'laps' then
+                lane.phase, lane.wp, lane.wp_ms = 'laps', 1, lane.t0
+                local L = lane.layout
+                local x, z = M.lap_point(L.ax, L.az, L.ab, 1, lane.laps_r)
+                orders.move(lane.a.uc, vec(x, z), lane.laps_walk ~= true)
+            end
+        end
+        emit('probe_go', {lanes = #state.lanes})
+        state.active = true
+        bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
+        bm:repeat_callback(guarded(men_sample), config.men_ms, MEN_TIMER)
+        if state.mem then
+            mem_poll()
+            bm:repeat_callback(guarded(mem_poll), MEM_POLL_MS, MEM_TIMER)
+        end
+        if config.winds_ms then
+            winds_sample()
+            bm:repeat_callback(guarded(winds_sample), config.winds_ms, WINDS_TIMER)
+        end
+        flush()
+    end
+
+    -- (the magic plan) the winds readers of each side, the scripted winds, the casters (module comment).
+    local function magic_start()
+        state.winds_found = {}
+        for side = 1, 2 do
+            state.winds_found[side] = winds.discover(state.armies[side])
+            emit('probe_winds_api', {side = side, found = state.winds_found[side],
+                values = winds.read(state.armies[side], state.winds_found[side])})
+        end
+        for _, set in ipairs(config.winds_set or {}) do
+            local army = state.armies[set.side]
+            local before = winds.read(army, state.winds_found[set.side])
+            local ok, e = winds.modify(army, set.current, set.reserve)
+            emit('probe_winds_set', {side = set.side, current = set.current, reserve = set.reserve, before = before,
+                after = winds.read(army, state.winds_found[set.side]), status = ok and 'done' or 'failed', error = e})
+        end
+        for _, lane in ipairs(state.lanes) do
+            if lane.mode == 'cast' then
+                local u = lane.a.unit
+                local found, values = {}, {}
+                for _, f in ipairs(M.MAGE_CCO) do
+                    local v = read(cco, u, f)
+                    if v ~= nil then found[#found + 1], values[f] = f, v end
+                end
+                local n = values['BattleAbilityList.Size']
+                if type(n) == 'number' and n > 0 and n < 32 then
+                    for i = 0, n - 1 do
+                        for _, f in ipairs(M.ABILITY_CCO) do
+                            local path = 'BattleAbilityList.At(' .. i .. ').' .. f
+                            local v = read(cco, u, path)
+                            if v ~= nil then found[#found + 1], values[path] = path, v end
+                        end
+                    end
+                end
+                lane.cco_found = found
+                local can = {}
+                for _, c in ipairs(lane.casts or {}) do
+                    can[c.key] = read(function() return u:can_perform_special_ability(c.key) end)
+                end
+                emit('probe_mage', {lane = lane.name, u = lane.a.name,
+                    active = read(function() return u:owned_non_passive_special_abilities() end),
+                    passive = read(function() return u:owned_passive_special_abilities() end),
+                    magic = read(function() return u:can_use_magic() end), can = can, cco = values})
+            end
+        end
+    end
+
+    local function start()
+        if state.active or state.finished or state.started then return end
+        state.started = true
+        bm:modify_battle_speed(config.speed)
+        battle.speed_guard(bm, config.speed, function(from)
+            emit('speed_restored', {from_speed = from, to_speed = config.speed})
+        end, 'tww3_bai_charge_probe_speed')
+        pcall(function() bm:change_victory_countdown_limit(-1) end)
+        for _, p in ipairs(config.park or {}) do
+            local it = state.units[p.name]
+            if it then place(it, p.x, p.z, p.bearing, p.width or 5) end
+        end
+        for _, lane in ipairs(state.lanes) do
+            local L = lane.layout
+            place(lane.a, L.ax, L.az, L.ab, lane.a_width)
+            place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
+            if lane.t2 then
+                local x2, z2 = M.t2_place(L, lane)
+                place(lane.t2, x2, z2, L.tb, lane.t2_width or lane.t_width)
+            end
+            for who, d in pairs(lane.damage or {}) do
+                local it = ({a = lane.a, t = lane.t, t2 = lane.t2})[who]
+                if it then
+                    local u = it.unit
+                    local men0 = read(function() return u:number_of_men_alive() end)
+                    local hp0 = read(function() return u:unary_hitpoints() end)
+                    local ok, e = pcall(function()
+                        if d.method == 'kill' then
+                            u:kill_number_of_men(math.floor((men0 or 0) * d.share), false)
+                        else
+                            u:reduce_hitpoints_unary(d.share, false)
+                        end
+                    end)
+                    emit('probe_damage', {lane = lane.name, who = who, method = d.method, share = d.share,
+                        status = ok and 'done' or 'failed', error = (not ok) and tostring(e) or nil, men0 = men0,
+                        hp0 = round(hp0, 4), men1 = read(function() return u:number_of_men_alive() end),
+                        hp1 = round(read(function() return u:unary_hitpoints() end), 4)})
+                end
+            end
+            if lane.lord then
+                place(state.units[lane.lord.name], L.tx, lane.z - (lane.t_depth or 0) - lane.lord.dz, 0, 5)
+            end
+            for _, e in ipairs(lane.extras or {}) do
+                local it = state.units[e.name]
+                place(it, L.tx + (e.dx or 0), L.tz + (e.dz or 0), e.b or L.ab, e.width or lane.a_width)
+                if e.fire then orders.set_fire_at_will(it.uc, true) end
+            end
+            for _, f in ipairs(lane.rally_friends or {}) do
+                place(state.units[f.name], f.px, f.pz, 0, f.width or lane.t_width)
+            end
+            if lane.target_mode == 'skirmish' then
+                local u = lane.t.unit
+                local before = orders.skirmish_active(u)
+                orders.set_fire_at_will(lane.t.uc, true)
+                local ok, can = pcall(orders.set_skirmish, lane.t.uc, u, lane.t_skirmish == true)
+                emit('probe_skirmish', {lane = lane.name, want = lane.t_skirmish == true, can = ok and can or false,
+                    before = before, after = orders.skirmish_active(u), error = (not ok) and tostring(can) or nil})
+            end
+        end
+        if config.winds_ms then magic_start() end
+        for _, lane in ipairs(state.lanes) do
+            if lane.mode == 'laps' then
+                local found, values = {}, {}
+                for _, f in ipairs(M.FAT_CCO) do
+                    local v = read(cco, lane.a.unit, f)
+                    if v ~= nil then found[#found + 1], values[f] = f, v end
+                end
+                lane.fat_found = found
+                emit('probe_fat_cco', {lane = lane.name, values = values})
+            end
+        end
+        if config.heights then
+            -- (the terrain plan) the bridge's height grid: the time of a full grid of get_terrain_height calls (step m over
+            -- the square half m), and fine lines (0.25 m steps) to find the engine's own grid (its kinks)
+            local hc = config.heights
+            local n, t0c, sum = 0, os.clock(), 0
+            local x = -hc.half
+            while x <= hc.half do
+                local z = -hc.half
+                while z <= hc.half do
+                    sum = sum + (bm:get_terrain_height(x, z) or 0)
+                    n = n + 1
+                    z = z + hc.step
+                end
+                x = x + hc.step
+            end
+            local el = os.clock() - t0c
+            local lines = {}
+            for _, ln in ipairs(hc.lines or {}) do
+                local vals = {}
+                for k = 0, ln.n - 1 do
+                    local px, pz = ln.x + k * (ln.dx or 0), ln.z + k * (ln.dz or 0)
+                    vals[#vals + 1] = round(bm:get_terrain_height(px, pz), 4)
+                end
+                lines[#lines + 1] = {x = ln.x, z = ln.z, dx = ln.dx, dz = ln.dz, h = vals}
+            end
+            emit('probe_heights', {n = n, s = round(el, 3), step = hc.step, half = hc.half, mean = round(sum / math.max(1, n), 2),
+                lines = lines})
+        end
+        emit('start', {speed = config.speed, lanes = config.lanes})
+        state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
+            finish('deadline')
+        end), 'tww3_bai_charge_probe_deadline')
+        bm:add_infotext('BAI: MELEE PROBE')
+        bm:callback(guarded(go), config.settle_ms, 'tww3_bai_charge_probe_go')
+        flush()
+    end
+
+    local function initialise()
+        emit('loaded')
+        local reason = battle.unsupported_reason(bm)
+        if reason then
+            emit('skipped', {reason = reason})
+            state.finished = true
+            flush()
+            return
+        end
+        assert(common and vector_type, 'common and battle_vector globals required')
+        local sides = battle.read_sides(bm)
+        state.armies = {sides[1].army, sides[2].army}
+        state.alliances = {sides[1].alliance, sides[2].alliance}
+        local keep_morale = {}
+        for _, l in ipairs(config.lanes) do
+            if l.t_morale then keep_morale[l.target] = true end
+            if l.morale_both then keep_morale[l.target], keep_morale[l.attacker] = true, true end
+        end
+        for side = 1, 2 do
+            for _, u in ipairs(sides[side].units) do
+                local name = u:name()
+                local uc = orders.take_control(sides[side].army, u)
+                orders.set_fire_at_will(uc, false)
+                orders.halt(uc)
+                if not keep_morale[name] then pcall(function() uc:morale_behavior_fearless() end) end
+                state.units[name] = {name = name, unit = u, uc = uc, side = side}
+            end
+        end
+        for i, l in ipairs(config.lanes) do
+            assert(M.MODES[l.mode], 'unknown mode ' .. tostring(l.mode))
+            assert(M.TARGET_MODES[l.target_mode], 'unknown target mode ' .. tostring(l.target_mode))
+            local lane = {}
+            for k, v in pairs(l) do lane[k] = v end
+            lane.a, lane.t = state.units[l.attacker], state.units[l.target]
+            assert(lane.a, 'scenario unit missing: ' .. tostring(l.attacker))
+            assert(lane.t, 'scenario unit missing: ' .. tostring(l.target))
+            if l.lord then assert(state.units[l.lord.name], 'scenario unit missing: ' .. tostring(l.lord.name)) end
+            if l.target2 then
+                lane.t2 = state.units[l.target2]
+                assert(lane.t2, 'scenario unit missing: ' .. tostring(l.target2))
+            end
+            if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
+            if l.after2 then assert(M.AFTER_KINDS[l.after2.kind], 'unknown after2 kind ' .. tostring(l.after2.kind)) end
+            if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
+            if l.mode == 'retarget' or l.mode == 'attack_t2' then
+                assert(l.target2, 'a ' .. l.mode .. ' lane needs target2')
+            end
+            if l.mode == 'tire' then
+                assert(M.fatigue_level(l.tire_until), 'unknown tire_until ' .. tostring(l.tire_until))
+            end
+            if l.mode == 'laps' then
+                assert(type(l.run_s) == 'number' and type(l.laps_r) == 'number', 'a laps lane needs run_s and laps_r')
+            end
+            for _, c in ipairs(l.a_casts or {}) do
+                assert(type(c.key) == 'string' and (type(c.at_s) == 'number' or type(c.at_m) == 'number'),
+                    'an a_casts entry needs key and at_s or at_m')
+            end
+            if l.mode == 'cast' then
+                assert(type(l.casts) == 'table', 'a cast lane needs casts')
+                for _, c in ipairs(l.casts) do
+                    assert(type(c.key) == 'string' and type(c.at_s) == 'number', 'a cast needs key and at_s')
+                    assert(c.tg ~= 't2' or l.target2, 'a cast on t2 needs target2')
+                end
+            end
+            for _, e in ipairs(l.extras or {}) do
+                assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))
+            end
+            for _, f in ipairs(l.rally_friends or {}) do
+                assert(state.units[f.name], 'scenario unit missing: ' .. tostring(f.name))
+            end
+            lane.layout = M.layout(l)
+            state.lanes[i] = lane
+        end
+        state.batch = clock.batch_stamp() .. '-probe-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
+        state.run_id = state.batch .. '-r1'
+        if config.mem then
+            local handle, status = memmen.attach(_G.memreader_plus, config.mem)
+            local bound = {}
+            if handle then
+                for _, lane in ipairs(state.lanes) do
+                    for _, it in ipairs({lane.a, lane.t}) do
+                        if bound[it.name] == nil then
+                            local ok, info = handle.bind(it.name, it.unit)
+                            bound[it.name] = ok and info or {why = info}
+                        end
+                    end
+                    -- (config.mem_extras, the tacwalk plan) the lane's extras too: whose man an arrow is in
+                    for _, e in ipairs(config.mem_extras and lane.extras or {}) do
+                        local ok, info = handle.bind(e.name, state.units[e.name].unit)
+                        bound[e.name] = ok and info or {why = info}
+                    end
+                end
+                handle.unhook()
+            end
+            state.mem = handle
+            if handle and config.mem_morale then
+                local R, names = memmorale.reader(_G.memreader_plus, config.mem.layout), {}
+                for _, lane in ipairs(state.lanes) do
+                    local U = handle.reader.units[lane.t.name]
+                    if U then
+                        R.add(lane.t.name, U.ptr)
+                        names[#names + 1] = lane.t.name
+                    end
+                end
+                state.mem_mor = {R = R, names = names}
+            end
+            if handle and config.mem_form and config.mem.layout.form then
+                local F = memorder.reader(_G.memreader_plus, config.mem.layout, handle.reader.ids)
+                for _, name in ipairs(handle.reader.order) do F.add(name, handle.reader.units[name].ptr) end
+                state.mem_form = F
+            end
+            local proj = nil
+            if handle and config.mem_proj then
+                -- the projectile scanner on the manager of the battle of a bound unit (no hook of its own)
+                local mr, L = _G.memreader_plus, config.mem.layout
+                local units, first = {}, nil
+                for _, name in ipairs(handle.reader.order) do
+                    local U = handle.reader.units[name]
+                    units[name] = mr.tostring(U.ptr)
+                    first = first or U.ptr
+                end
+                local S = memproj.scanner(mr, L, 0)
+                S.track = true
+                local H = memhits.new(mr, L, handle.reader.ids, {units = units})
+                S.on_spawn = function(p, st)
+                    if st == 2 or st == 3 then return H.who(p) end
+                end
+                state.proj = {S = S, H = H, unit = first}
+                proj = {units = units, ok = first ~= nil}
+            end
+            emit('mem_attach', {status = status, bound = bound, proj = proj})
+        end
+        emit('ready', {lanes = #state.lanes})
+        flush()
+        bm:register_phase_change_callback('Deployed', guarded(start))
+        local function deployment()
+            bm:callback(guarded(function() bm:end_current_battle_phase() end), 1000, 'tww3_bai_charge_probe_start')
+        end
+        bm:register_phase_change_callback('Deployment', guarded(deployment))
+        if bm:get_current_phase_name() == 'Deployment' then deployment() end
+        if bm:get_current_phase_name() == 'Deployed' then guarded(start)() end
+    end
+
+    guarded(initialise)()
+    return state
+end
+
+return M

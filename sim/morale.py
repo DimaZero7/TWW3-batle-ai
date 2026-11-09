@@ -1,0 +1,549 @@
+"""Morale (docs/en/training/simulator.md, docs/en/game/units/morale.md).
+
+Morale is points: leadership + a start bonus + the effects of the moment (the game's database,
+_kv_morale_tables). MoralePercent = points / leadership. Each 0.5 s tick the points move towards
+that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent_update_per_tick).
+
+Effects (points; morale.terms): lord within 70 m +4 (fading to 0 at 105 m; not to himself: morale.lord_own_aura); the
+lord killed -16 for 45 s, then -10; routed off the map -16 for 120 s (routed on the field: his aura only; battle.py,
+sim.json morale.lord_fall); flanks secure +5 (no standing enemy within morale.secure.enemy_m, or friends - not lords -
+at both sides within morale.secure.side_m; never with a threatened flank); casualties over the battle (share of HP)
+-2 ... -74; recent casualties -6 ... -80 (HP lost in the last 4 s); extended casualties -4 ... -60 (the last 60 s);
+winning / losing the fight +3/+6/+8, -3/-8 by HP dealt / taken in melee and by missiles, while in melee, shooting or
+shot at by an enemy shooting at it (a single entity in melee always -3: morale.single_combat); attacked in the
+flank / rear -6 / -14 while struck from that side; flanks exposed (an enemy threatens the left, right or rear:
+lf / rf / bf) -3, several -6; routing friends within 100 m -3 each (at most 4; a routing expendable unit scares only
+expendable units); routing enemies within 100 m +2.5 each (at most 5); under fire -5 until 15 s after the last
+projectile hit; very tired -2, exhausted -6; an enemy worth 3x as much within 70 m -3; the charge +15 in blocks
+of 6 s from the charge sprint (morale.charge); fear -8 (an enemy causing fear within 20 m, morale.fear); the army beaten as a whole -120 (army destruction).
+Switches measured on the step replay's recordings (sim/config/sim.json, off by default; battle.py): attacked_first (the side
+a pair's contact began on, held while in contact), combat_shooter (a shooter's balance only against the enemy it shoots),
+routing_enemies_reach (routing enemies counted to 200 m), charge.moving (another 6 s block while the unit still moves
+under an attack order, no cap; in melee a move under an attack order starts one).
+
+States: wavering below 16 points (morale.waver_band: from below 12 to above 16, shaken from below 30 to above 32);
+routing at 0 or below (not within 10 s of a rally; with morale.waver_timer on: below 0 and only after waver_base_timeout
+tenths of a second - 2.5 s - of unbroken wavering, the points held at 0 or above until then with its floor); the third
+rout shatters, as does falling below the database's broken band (-50 points) during army destruction (shatter_rules: a
+1st / 2nd router below 5 % / 10 % of its health or, morale.shatter_by "men", of its men). Routing friends and enemies
+cancel with morale.routing_net; an enemy weaker than a third of a router does not hold its rally with morale.rally_weak
+(battle.py); 'losing' needs a share balance below combat_even.share with morale.combat_even (off). A routing
+unit's morale follows its target like any other's (without the fight terms) and it rallies once the morale is above
+0, it has routed morale.rally_after_s and no standing enemy is within morale.rally_free_m (its army not collapsing);
+with morale.rally_hazard on, past rally_after_s and above 0 it rallies with a chance a second by the nearest enemy's
+distance (measured on such routers) instead of that gate; a rallied unit whose target is below 0 routs again when the database's 10 s end.
+"""
+import math
+
+import torch
+
+from sim import knobs
+
+
+def ammo_share(u, slope, midpoint):
+    """The missile part of the combat potential left [B, N]: 1 / (1 + exp(-slope (ammo share - midpoint))) - the
+    curve of the game's recorded strategic value (tmp/old-build/movelords: 298k samples of shooters, error 0.04 %; slope 14,
+    midpoint 0.25)."""
+    ammo = (u["a"] / u["ammo0"].clamp(min=1)).clamp(0, 1)
+    return torch.sigmoid(slope * (ammo - midpoint))
+
+
+def army_collapse(u, params):
+    """Army destruction [B, N], from current combat strength and the database thresholds.
+
+    strength "cp" (the game's rule, tmp/old-build/movelords: 89 recorded battles): a unit's strategic value = (the database's
+    combat potential: main_units melee_cp + its abilities' cp + missile_cp x ammo_share) x health - exactly the
+    recorded unit:strategic_value() (lords 950 / 900 x health); the side's strength (the balance of power) counts a
+    routing unit at routing_weight (0.5, the recorded balance-of-power bar), shattered, dead and departed units
+    nothing. "strategic": the old fit (cost, the lord x lord_value_scale, empty-quiver floors).
+    No recording clock or winner is consulted.
+    """
+    cal = params.sim["morale"].get("collapse") or {}
+    present = u["side"] > 0
+    if not cal.get("on"):
+        return torch.zeros_like(present)
+    alive = present & (u["men"] > 0) & ~u["gone"] & ~u["s"]
+    count = alive & ~u["r"] if cal.get("count") == "standing" else alive
+    value = u["cost"]
+    weight = torch.ones_like(value)
+    initial_value = value
+    if cal.get("strength") == "cp":
+        slope, midpoint = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
+        value = u["cp_fixed"] + u["cp_missile"] * ammo_share(u, slope, midpoint)
+        initial_value = u["cp_fixed"] + u["cp_missile"] * (1 / (1 + math.exp(-slope * (1 - midpoint))))
+        # routers in the rule: rule_routing_weight (the community: 'broken units are counted as active with whatever CP
+        # remains'; the recordings: the 'army losses' label starts with routers at full weight, not at the bar's 0.5 -
+        # sim.json collapse.rule_why); absent: routing_weight, the balance-of-power bar's
+        rw = cal.get("rule_routing_weight", cal["routing_weight"])
+        weight = torch.where(u["r"], float(rw), 1.0) * torch.ones_like(value)
+    elif cal.get("strength") == "strategic":
+        value = value * torch.where(u["lord"], float(cal["lord_value_scale"]), 1.0)
+        ammo = (u["a"] / u["ammo0"].clamp(min=1)).clamp(0, 1)
+        slope, midpoint = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
+        lo = 1 / (1 + math.exp(slope * midpoint))
+        hi = 1 / (1 + math.exp(-slope * (1 - midpoint)))
+        available = (torch.sigmoid(slope * (ammo - midpoint)) - lo) / (hi - lo)
+        floor = torch.where(u["direct"], float(cal["ammo_empty_direct"]), float(cal["ammo_empty"]))
+        weight = torch.where(u["ammo0"] > 0, floor + (1 - floor) * available, weight)
+        weight = weight * torch.where(u["r"], float(cal["routing_weight"]), 1.0)
+        initial_value = value
+    power = value * u["hp"].clamp(0, 1).pow(float(cal.get("hp_power", 1.0))) * weight * count
+    strength = torch.stack([(power * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+    initial = torch.stack([(initial_value * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+    rules = params.morale
+    beaten = ((initial > 0) & (strength.flip(1) > 0)
+              & (strength.flip(1) >= rules["army_destruction_enemy_strength_ratio"] * strength)
+              & (strength <= rules["army_destruction_alliance_strength_ratio"] * initial))
+    return beaten.gather(1, (u["side"] - 1).clamp(min=0)) & present
+
+
+def battle_ids(u):
+    """[B, 1] each battle's id for the hash draws: state `row` (fixed when the batch is built, carried through every
+    narrowing), else the row now."""
+    if "row" in u:
+        return u["row"][:, :1].long()
+    return torch.arange(u["side"].shape[0], device=u["side"].device)[:, None]
+
+
+def hash_uniform(B, N, k, device, salt=86413, ids=None):
+    """[B, N] a uniform (0, 1) draw per (battle id, unit, period k [B], an integer): an integer hash, the same every
+    call for the same inputs (opponents.tick_uniform's; here so the simulator stays free of torch's generators).
+    ids [B, 1]: the battles' ids (battle_ids; missing: the rows)."""
+    b = torch.arange(B, device=device)[:, None] if ids is None else ids
+    i = torch.arange(N, device=device)[None, :]
+    h = (b * 1000003 + i * 7919 + k.long()[:, None] * 104729 + salt) & 0x7FFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
+    h = ((h ^ (h >> 16)) * 668265263) & 0x7FFFFFFF
+    h = h ^ (h >> 15)
+    return ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
+
+
+def window_steps(seconds, dt):
+    """Steps in a sliding window of `seconds` (at least one)."""
+    return max(1, int(round(float(seconds) / dt)))
+
+
+def history_steps(params, dt):
+    """Steps of HP lost the state keeps (u["lost_hist"]) for the sliding casualty windows: the longer of
+    morale.casualties_s and extended_s; 0 when morale.casualties_window is not "sliding" (decaying sums)."""
+    cm = params.sim["morale"]
+    if cm.get("casualties_window") != "sliding":
+        return 0
+    return max(window_steps(cm["casualties_s"], dt), window_steps(cm.get("extended_s") or 0.0, dt))
+
+
+def casualty_windows(u, taken, params, dt):
+    """HP lost recently (u["recent"]: recent casualties, morale.casualties_s) and over the extended window
+    (u["extended"]: extended casualties, morale.extended_s; 0: off), with this step's losses `taken` [B, N]
+    (in place). casualties_window "sliding": exactly the HP lost in the last casualties_s / extended_s seconds
+    (u["lost_hist"]: the HP lost each step, newest first; the database's 'last 4 s' / 'last 60 s', measured: a
+    volley holds the game's PercentHpLostRecently 3 one-second samples, then 0); otherwise decaying sums with
+    those time constants (the old fit)."""
+    cm = params.sim["morale"]
+    ext_s = float(cm.get("extended_s") or 0.0)
+    K = history_steps(params, dt)
+    if K:
+        B, N = taken.shape
+        hist = torch.cat([taken[:, None, :], u["lost_hist"].reshape(B, K, N)[:, :K - 1]], 1)
+        u["lost_hist"] = hist.reshape(B, K * N)
+        u["recent"] = hist[:, :window_steps(cm["casualties_s"], dt)].sum(1)
+        if ext_s > 0:
+            u["extended"] = hist[:, :window_steps(ext_s, dt)].sum(1)
+        return
+    u["recent"] = u["recent"] * math.exp(-dt / float(cm.get("casualties_s", cm["recent_s"]))) + taken
+    if ext_s > 0:
+        u["extended"] = u["extended"] * math.exp(-dt / ext_s) + taken
+
+
+def table(rules, prefix, shares):
+    """[(share, points)] from _kv_morale_tables keys like total_casualties_penalty_10."""
+    return ((0.0, 0.0),) + tuple((s / 100, rules[f"{prefix}{s}"]) for s in shares)
+
+
+def steps(x, points):
+    """The penalty of the highest threshold reached: (share, points) pairs, 0 below the first."""
+    out = torch.zeros_like(x)
+    for share, pts in points[1:]:
+        out = torch.where(x >= share, torch.full_like(x, pts), out)
+    return out
+
+
+def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=None, win_scale=None):
+    """Winning or losing the fight, by HP dealt / taken recently (melee and missiles), while the unit is in a
+    fight (in melee, shooting, or shot at by an enemy shooting at it now: battle.py ctx in_combat); losing only
+    once the unit has lost morale.combat_lost of its health, winning only once an enemy it fights has (own_lost,
+    foe_lost: shares of health lost; None: no such gate). win_scale ([B, 1]; None: 1): the battle's factor on the
+    winning thresholds (fitted, combat_ratio slightly / yes / significantly: a per-battle draw in training,
+    sim/knobs.py)."""
+    ratio = (dealt + 1.0) / (taken + 1.0)
+    c = cal["combat_ratio"]
+    s = 1.0 if win_scale is None else win_scale         # (x 1.0: the same float)
+    pts = torch.zeros_like(ratio)
+    pts = torch.where(ratio >= c["slightly"] * s, rules["winning_combat_slightly"], pts)
+    pts = torch.where(ratio >= c["yes"] * s, rules["winning_combat"], pts)
+    pts = torch.where(ratio >= c["significantly"] * s, rules["winning_combat_significantly"], pts)
+    if c.get("losing") is not None:
+        # the losing side's own thresholds (combat_ratio losing / losing_significantly: the enemy's advantage, taken /
+        # dealt): losing (-3) once it takes more than it deals x losing (1: Goumin's WH3 guide - 'a unit is losing if
+        # engaged with an enemy taking less damage than it', no even band), losing significantly (-8) from
+        # losing_significantly (the morale probe T-D: an HP balance of 0.32 showed -8, 0.58-0.63 showed -3)
+        pts = torch.where(ratio < 1 / float(c["losing"]), rules["losing_combat"], pts)
+        pts = torch.where(ratio <= 1 / float(c["losing_significantly"]), rules["losing_combat_significantly"], pts)
+    else:
+        pts = torch.where(ratio <= 1 / c["slightly"], rules["losing_combat"], pts)
+        pts = torch.where(ratio <= 1 / c["significantly"], rules["losing_combat_significantly"], pts)
+    even = cal.get("combat_even") or {}
+    if even.get("on") and own_lost is not None and foe_lost is not None:
+        # morale.combat_even: 'losing' (-3) only once the enemies it fights have lost less than combat_even.share of the
+        # share of health it has lost itself (an even or slightly lost fight gives nothing); 'losing significantly' as
+        # before. The probe hyp (even fights): clanrats behind spearmen at a share balance of 0.62-0.71 for 35 s - no -3
+        # (an HP balance of 0.53-0.61), -3 from 0.58; spearmen behind clanrats at 0.59 - -3 (HP balance 0.68)
+        lag = foe_lost < float(even["share"]) * own_lost
+        pts = torch.where((pts == rules["losing_combat"]) & ~lag, torch.zeros_like(pts), pts)
+    gate = cal.get("combat_lost")
+    if gate is not None and own_lost is not None:
+        pts = torch.where((pts < 0) & (own_lost < float(gate)), torch.zeros_like(pts), pts)
+    if gate is not None and foe_lost is not None:
+        pts = torch.where((pts > 0) & (foe_lost < float(gate)), torch.zeros_like(pts), pts)
+    return torch.where(in_combat, pts, torch.zeros_like(pts))
+
+
+def strategic_value(u, params):
+    """[B, N] a unit's strength as the game records it (unit:strategic_value(), army_collapse's "cp" rule):
+    (combat potential that does not run out + missile combat potential x ammo_share) x health."""
+    cal = params.sim["morale"].get("collapse") or {}
+    share = ammo_share(u, float(cal.get("ammo_slope", 14.0)), float(cal.get("ammo_midpoint", 0.25)))
+    return (u["cp_fixed"] + u["cp_missile"] * share) * u["hp"].clamp(0, 1)
+
+
+def round_away(x):
+    """The game's rounding of a morale effect's points (the program's float -> int: x + 0.5 truncated above 0, x - 0.5
+    below - half away from zero; torch.round would take 2.5 to 2)."""
+    return torch.where(x >= 0, torch.floor(x + 0.5), torch.ceil(x - 0.5))
+
+
+def strong_power(u, d, foes, friends, params, gap=None):
+    """[B, N] the 'combat power' of the enemies around a unit (morale.strong_enemy):
+    rule "balance" - k x E / F, E = the standing enemies' strategic values, F = its own + its standing friends', each
+    weighted by max(0, 1 - distance / reach_m) (centre to centre; the unit itself at full weight; measured: sim/config/
+    sim.json morale.strong_enemy.why);
+    rule "code" (the game's program, reverse/notes/mem/morale.md; gap [B, N, N] the formations' rectangle distance, m) -
+    E / F with each unit's strength truncated to a whole number, every enemy and friend within neighbour_effect_range
+    (120 m) of the unit's rectangle weighted 2 - 1.6 x clamp(gap, 0.3 R, R) / R (R = 120 m: 1.52 up to 36 m, 0.4 at
+    120 m), the unit itself at 1; an enemy counts only if its run speed is above speed_ratio (0.75) of the unit's.
+    foes / friends [B, N, N]: the pairs to count (standing, alive; friends without the unit itself)."""
+    se = params.sim["morale"]["strong_enemy"]
+    v = strategic_value(u, params)
+    if se.get("rule") == "code":
+        R = float(params.morale["neighbour_effect_range"])
+        g = gap.clamp(min=0)
+        near = g <= R
+        w = 2.0 - 1.6 * g.clamp(0.3 * R, R) / R
+        vj = torch.floor(v)[:, None, :] * w
+        foes = foes & near & (u["run"][:, None, :] > float(se["speed_ratio"]) * u["run"][:, :, None])
+        enemy = torch.where(foes, vj, torch.zeros_like(vj)).sum(2)
+        own = torch.floor(v) + torch.where(friends & near, vj, torch.zeros_like(vj)).sum(2)
+        return torch.where(own >= 1, enemy / own.clamp(min=1), torch.zeros_like(own))
+    fall = (1 - d / float(se["reach_m"])).clamp(min=0)
+    vj = v[:, None, :] * fall
+    if se.get("speed_ratio") is not None:
+        # an enemy slower than speed_ratio x the unit's run speed (effects counted) is not counted (the probe strong2:
+        # greatswords 2.8 m/s against skavenslaves 4.2 x 0.9 'Strength in Numbers' = 3.78 gave nothing, swordsmen 3.0,
+        # flagellants 3.6 and the General 3.4 their points)
+        foes = foes & (u["run"][:, None, :] >= float(se["speed_ratio"]) * u["run"][:, :, None])
+    enemy = torch.where(foes, vj, torch.zeros_like(vj)).sum(2)
+    own = v + torch.where(friends, vj, torch.zeros_like(vj)).sum(2)
+    return float(se["k"]) * enemy / own.clamp(min=1e-6)
+
+
+def strong_points(power, R, whole=False):
+    """[B, N] the database's strong-enemy penalty: enemy_morale_penalty_value_min (-3) at combat power
+    enemy_morale_penalty_combat_power_min (4), linear to value_max (-24) at combat_power_max (32), held beyond;
+    0 below the minimum. whole (rule "code"): rounded as the game rounds it (round_away)."""
+    lo, hi = R["enemy_morale_penalty_combat_power_min"], R["enemy_morale_penalty_combat_power_max"]
+    vlo, vhi = R["enemy_morale_penalty_value_min"], R["enemy_morale_penalty_value_max"]
+    pts = vlo + (power.clamp(lo, hi) - lo) * ((vhi - vlo) / (hi - lo))
+    if whole:
+        pts = torch.where(power < hi, round_away(pts), torch.full_like(pts, float(vhi)))
+    return torch.where(power >= lo, pts, torch.zeros_like(pts))
+
+
+# The terms a routing unit does not get: they need a fight (spec sim/evidence/morale_spec 2.5; the probe's routers
+# show casualties, routing units, the lord, under fire and fatigue).
+FIGHT_TERMS = ("secure", "combat", "attacked", "exposed", "charge")
+# A list to append each step's terms to ({name: [B, N]}), or None (training: off). The morale probe's
+# simulator twin (game/probe/morale_probe.py) reads which term is the largest, as the game's MoraleGreatestEffect.
+TRACE = None
+
+
+def terms(u, ctx, params):
+    """Each morale effect's points [B, N] besides leadership and the start bonus (the game's database,
+    _kv_morale_tables; when each holds: docs/en/game/units/morale.md)."""
+    R = params.morale
+    cal = params.sim["morale"]
+    zero = torch.zeros_like(u["morale"])
+    no = torch.zeros_like(u["r"])
+    out = {}
+    # The lord's aura: full within general_aura_radius, fading to 0 at x inspiration_radius_max_effect_range_modifier
+    # (battle.py gives the share 0-1).
+    out["aura"] = ctx["aura"].float() * R["general_inspire_effect_amount_max"]
+    out["lord"] = ctx["lord_dead_points"] + zero
+    # Flanks secure (+5): battle.py ctx secure (no enemy near, or friends at both sides; morale.secure).
+    out["secure"] = torch.where(ctx.get("secure", no), R["ume_encouraged_flanks_secure"], 0.0)
+    if ctx.get("hill") is not None:
+        # On the hill (+10, the database's ume_encouraged_on_the_hill): battle.py ctx hill (terrain.hill; a battle with a
+        # height map only - flat battles have no such term)
+        out["hill"] = torch.where(ctx["hill"], R["ume_encouraged_on_the_hill"], 0.0)
+    lost = 1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6)
+    out["casualties"] = steps(lost, table(R, "total_casualties_penalty_", (10, 20, 30, 40, 50, 60, 70, 80, 90)))
+    base = (u["hp_abs"] + u["recent"]) if cal["recent_of_current"] else u["hp0"]
+    recent = u["recent"] / base.clamp(min=1e-6)
+    out["recent"] = steps(recent, table(R, "recent_casualties_penalty_", (6, 10, 15, 33, 50)))
+    if cal.get("extended_s"):
+        ext = u["extended"] / u["hp0"].clamp(min=1e-6)
+        out["extended"] = steps(ext, table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
+    in_combat = ctx.get("in_combat", ctx["in_melee"])
+    # the HP the fight's balance weighs: the unit's dealt / taken (melee and missiles), or ctx fight_dealt / fight_taken
+    # (morale.combat_shooter: a shooter out of melee only against the enemy it shoots at; battle.py)
+    dealt = ctx["fight_dealt"] if ctx.get("fight_dealt") is not None else u["dealt"] + u["shot_dealt"]
+    taken = ctx["fight_taken"] if ctx.get("fight_taken") is not None else u["taken"] + u["shot_taken"]
+    combat = combat_points(dealt, taken, in_combat, cal, R,
+                           own_lost=lost, foe_lost=ctx.get("foe_lost"),
+                           win_scale=knobs.get(u, "combat_ratio_scale", None))
+    if cal.get("single_combat") == "losing":
+        # A single entity (a lord) in melee always gets the database's losing_combat (-3), whatever the HP balance
+        # (measured: sim/config/sim.json morale.lord_why).
+        combat = torch.where(ctx["in_melee"] & (u["men0"] <= 1), torch.full_like(combat, R["losing_combat"]), combat)
+    out["combat"] = combat
+    # Attacked in the flank / rear: the database's was_attacked_in_flank / _rear (-6 / -14) while an enemy strikes
+    # it from that side (u flank_hit, this step's blows; the rear instead of the flank, not both).
+    out["attacked"] = torch.where(u["flank_hit"] >= 2, R["was_attacked_in_rear"],
+                                  torch.where(u["flank_hit"] >= 1, R["was_attacked_in_flank"], 0.0))
+    # Flanks exposed: the same lf/rf/bf observed by the network, one (-3) or several (-6).
+    exposed = u["lf"].float() + u["rf"].float() + u["bf"].float()
+    out["exposed"] = torch.where(exposed >= 2, R["ume_concerned_flanks_exposed_multiple"],
+                                 torch.where(exposed >= 1, R["ume_concerned_flanks_exposed_single"], 0.0))
+    out["routing_friends"] = -R["routing_friends_effect_weighting"] * ctx["routing_friends"].clamp(
+        max=R["max_routing_friends_to_consider"])
+    out["routing_enemies"] = R["routing_enemies_effect_weighting"] * ctx["routing_enemies"].clamp(
+        max=R["max_routing_enemies_to_consider"])
+    if (cal.get("routing_net") or {}).get("on"):
+        # morale.routing_net: routing friends and enemies cancel - only the surplus counts, x3 a friend, x2.5 an enemy
+        # (the caps on the surplus)
+        net = (ctx["routing_enemies"] - ctx["routing_friends"]).clamp(-R["max_routing_friends_to_consider"],
+                                                                      R["max_routing_enemies_to_consider"])
+        out["routing_friends"] = R["routing_friends_effect_weighting"] * net.clamp(max=0)
+        out["routing_enemies"] = R["routing_enemies_effect_weighting"] * net.clamp(min=0)
+        if cal["routing_net"].get("whole"):
+            # (morale.routing_net.whole) the points rounded as the game rounds them (round_away): one routing enemy
+            # +3, two +5, three +8 (the game's memory, tmp/old-build/diag_mem/morale: +3 for one), not 2.5 / 5 / 7.5
+            out["routing_friends"] = round_away(out["routing_friends"])
+            out["routing_enemies"] = round_away(out["routing_enemies"])
+    out["under_fire"] = torch.where(ctx["under_fire"], R["ume_concerned_attacked_by_projectile"], 0.0)
+    out["fatigue"] = torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
+                                 torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
+    # Stronger enemies near: with morale.strong_enemy rule "balance" (battle.py ctx strong_power) the database's
+    # scale -3 ... -24 by the combat power around the unit (strong_power / strong_points); else (ctx strong_enemy,
+    # an enemy worth morale.strong_ratio times as much within 70 m) the database's enemy_morale_penalty_value_min.
+    if ctx.get("strong_power") is not None:
+        out["strong_enemy"] = strong_points(ctx["strong_power"], R,
+                                            whole=(cal.get("strong_enemy") or {}).get("rule") == "code")
+    else:
+        out["strong_enemy"] = torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
+    # The charge (+15, the database's charge_bonus) in blocks of morale.charge.block_s (battle.py u chm_s).
+    out["charge"] = torch.where(u["chm_s"] > 0, R["charge_bonus"], 0.0)
+    if ctx.get("fear") is not None:
+        # Fear (-8, the database's ume_concerned_unit_frightened): battle.py ctx fear (an enemy causing fear within
+        # fear_effect_range 20 m; morale.fear)
+        out["fear"] = torch.where(ctx["fear"], R["ume_concerned_unit_frightened"], 0.0)
+    # Artillery (artillery.morale_points: -8 attacked by artillery, -10 damaged by it, 30 s; reverse/notes/artillery_rules.md 3)
+    from sim import artillery
+    art = artillery.morale_points(u, params)
+    if art is not None:
+        out["artillery"] = art
+    # The army is beaten as a whole (army_collapse: the database's 2.6x / 0.22 thresholds).
+    out["collapse"] = torch.where(ctx.get("collapse", no), R["ume_concerned_army_destruction"], 0.0)
+    for k in FIGHT_TERMS:
+        out[k] = torch.where(u["r"], zero, out[k])
+    return out
+
+
+def target_points(u, ctx, params, parts=None):
+    """The morale points the unit is heading to [B, N] (leadership + bonus + effects)."""
+    parts = terms(u, ctx, params) if parts is None else parts
+    pts = u["leadership"] + u["morale_bonus"]
+    for v in parts.values():
+        pts = pts + v
+    return pts
+
+
+def wavering(M, was, can, R, band):
+    """[B, N] wavering after this step's points M: below the wavering band's upper edge (16); with morale.waver_band on,
+    the game's margin - a unit starts to waver only below the shaken band's lower edge (12) and stays wavering while its
+    points are at the wavering band's upper edge (16) or below (was: wavering the step before; can: may waver - alive,
+    not routing). The recordings (92 battles, 1 s): of the seconds at 12-16 points, 5.3 % waver when the unit came from
+    above 16, 98.2 % when it came from below 12; probe lanes: 32 starts at 12 -> 11 points, 9 ends at 16 -> 17."""
+    if not band:
+        return can & (M < R["ums_wavering_threshold_upper"])
+    return can & ((M < R["ums_shaken_threshold_lower"]) | (was & (M <= R["ums_wavering_threshold_upper"])))
+
+
+def step(u, ctx, params, dt):
+    """Move morale points, set wavering / routing / shattered and rally. Changes u in place.
+    Returns the units that began to rout this step."""
+    R = params.morale
+    cal = params.sim["morale"]
+    L = u["leadership"].clamp(min=1)
+    alive = (u["men"] > 0) & ~u["gone"] & (u["side"] > 0)
+    parts = terms(u, ctx, params)
+    if TRACE is not None:
+        TRACE.append(parts)
+    # the fight balance (winning > 0, losing < 0) for the effects that need it (effects.py losing_melee: Strength
+    # of the Penitent recharges only while losing) - one rule of 'losing', the morale's
+    if "cmb" in u:
+        u["cmb"] = parts["combat"].float()
+    target = target_points(u, ctx, params, parts)
+    M = u["morale"]
+    ticks = dt / 0.5
+    gap = target - M
+    move = torch.maximum(torch.full_like(gap, R["minimium_increment_update_per_tick"]),
+                         R["percent_update_per_tick"] * gap.abs()) * ticks
+    # A routing unit's morale follows its target like any other's (the probe: -1 -> +9 within 12 s of the rout,
+    # enemies near or not); its target has no fight terms (FIGHT_TERMS).
+    M = M + torch.clamp(gap, -move, move)
+    routing = u["r"]
+    u["rout_s"] = torch.where(routing, u["rout_s"] + dt, torch.zeros_like(u["rout_s"]))
+    u["rally_s"] = u["rally_s"] + dt
+    # Unbreakable units (attribute unbreakable: flagellants) never lose leadership: their points stay
+    # at leadership or above, so they never waver or rout (docs/en/game/mechanics/abilities.md).
+    M = torch.where(u["unbreakable"], torch.maximum(M, L), M)
+
+    # Rally (the morale probe, sim/evidence/morale): a routing unit rallies once its morale is above 0, it has routed at
+    # least morale.rally_after_s, no standing enemy is within morale.rally_free_m (battle.py ctx enemy_near) and its
+    # army is not beaten as a whole.
+    free = ~ctx["enemy_near"] & ~ctx.get("collapse", torch.zeros_like(alive))
+    ready = (M > 0) & (u["rout_s"] >= float(cal["rally_after_s"]))
+    rally = routing & ~u["s"] & free & ready & alive
+    hz = cal.get("rally_hazard") or {}
+    if hz.get("on") and "foe_d" in ctx:
+        # The rally as the game's measured process (morale.rally_hazard, sim/config/sim.json rally_hazard_why): a
+        # router past rally_after_s with morale above 0 rallies in a second with a chance set by the nearest standing
+        # enemy's centre distance (bins edges_m, chances p_per_s), instead of the 95 m gate: a fixed hash draw per
+        # (battle id, unit, step) - nothing random to replay, as opponents.tick_uniform. The first bin is any living
+        # enemy (routing too: rally_any_enemy) within rally_free_m - the game's rare rally there (p_per_s[0]) - the
+        # rest by the nearest standing enemy beyond it; the table is measured on routers with morale above 0, the
+        # condition it is applied on.
+        edges, probs = hz["edges_m"], hz["p_per_s"]
+        fd = ctx["foe_d"]
+        p_s = torch.full_like(fd, float(probs[0]))
+        for k, edge in enumerate(edges):
+            p_s = torch.where(fd >= float(edge), torch.full_like(fd, float(probs[k + 1])), p_s)
+        p_s = torch.where(ctx["enemy_near"], torch.full_like(fd, float(probs[0])), p_s)
+        scale = knobs.get(u, "rally_hazard_scale", None)          # (a per-battle draw in training: knobs.py)
+        if scale is not None:
+            p_s = (p_s * scale).clamp(max=1.0)
+        p_step = 1.0 - (1.0 - p_s) ** dt
+        draw = hash_uniform(fd.shape[0], fd.shape[1], torch.round(ctx["t"] / dt).long(), fd.device,
+                             ids=battle_ids(u))
+        not_beaten = ~ctx.get("collapse", torch.zeros_like(alive))
+        rally = routing & ~u["s"] & ready & alive & not_beaten & (draw < p_step)
+    wait_s = float(cal.get("rally_wait_s", 0.0))
+    if wait_s > 0 and "rally_ok_s" in u:
+        # The rally is not at once (morale.rally_wait_s; sim/evidence/open_battle/spec.md 4): the conditions above must hold
+        # this long without a break (the recordings: from the first second they hold to the rally, median 7 s).
+        u["rally_ok_s"] = torch.where(rally, u["rally_ok_s"] + dt, torch.zeros_like(u["rally_ok_s"]))
+        rally = rally & (u["rally_ok_s"] >= wait_s - 1e-6)
+        u["rally_ok_s"] = torch.where(rally, torch.zeros_like(u["rally_ok_s"]), u["rally_ok_s"])
+    ter = cal.get("terror") or {}
+    terror_on = bool(ter.get("on")) and "ter_s" in u and ctx.get("terror") is not None
+    if terror_on:
+        # (morale.terror) a flight from terror is no rout: no rally ends it, its own clock does (below)
+        fleeing = u["ter_s"] > 0
+        rally = rally & ~fleeing
+        u["ter_s"] = (u["ter_s"] - dt).clamp(min=0)
+        u["ter_imm"] = (u["ter_imm"] - dt).clamp(min=0)
+        # its 14 s over: it stops running, in the morale state it had (the game's program changes neither the state nor
+        # the rout count); routing for its own morale it can start right after (below)
+        u["r"] = u["r"] & ~(fleeing & (u["ter_s"] <= 0))
+    u["r"] = u["r"] & ~rally
+    u["rally_s"] = torch.where(rally, torch.zeros_like(u["rally_s"]), u["rally_s"])
+
+    # Rout.
+    no_rout = u["rally_s"] < R["post_rally_no_rout_timer"]
+    timer = cal.get("waver_timer") or {}
+    band = bool((cal.get("waver_band") or {}).get("on"))
+    wav = wavering(M, u["w"], alive & ~u["r"], R, band)
+    if timer.get("on") and "waver_s" in u:
+        # The waver timer (morale.waver_timer; the probe timer, tmp/old-build/morale-probe/timer.json): a unit routs only once
+        # its morale is below 0 (at exactly 0 it still wavers) AND it has wavered without a break the database's
+        # waver_base_timeout in tenths of a second (25 -> 2.5 s; the probe with it x10 routed 25.5 s after the wavering,
+        # x0 at once). waver_s: seconds since the first step of the current wavering (0 on that step).
+        u["waver_s"] = torch.where(wav & u["w"], u["waver_s"] + dt, torch.zeros_like(u["waver_s"]))
+        ripe = u["waver_s"] >= R["waver_base_timeout"] * float(timer["tick_s"]) - 1e-6
+        if (timer.get("floor") or {}).get("on"):
+            # The floor (morale.waver_timer.floor; sim/config/sim.json waver_timer_why): until its waver timer is up a
+            # unit that does not rout keeps its points at 0 or above - the game holds them at 0 (one step below at most)
+            # while the timer runs, deep losses or not; the step the timer is up they move on below 0 and it routs.
+            M = torch.where(alive & ~u["r"] & ~ripe, M.clamp(min=0.0), M)
+        start = alive & ~u["r"] & (M < 0) & ripe & ~(no_rout & (u["rout_count"] > 0))
+    else:
+        start = alive & ~u["r"] & (M <= 0) & ~(no_rout & (u["rout_count"] > 0))
+    u["r"] = u["r"] | start
+    u["rout_count"] = u["rout_count"] + start.float()
+    u["s"] = u["s"] | (start & (u["rout_count"] >= R["shatter_after_rout_count"]))
+    if terror_on:
+        # Terror (morale.terror; the database's causes_terror, sim/evidence/diag_skv_mon/mechanic.md M17): a unit with an enemy that
+        # causes terror within terror_effect_range 5 m of its edge (battle.py ctx terror), below
+        # morale_shock_terror_morale_threshold 13 points, standing, not immune (immune to psychology - frenzy -,
+        # unbreakable, causing terror itself, or within morale_shock_rout_immunity_timer 85 s of its last flight from it),
+        # runs morale_shock_rout_timer 14 s as a router - no rout counted, no shatter by it
+        scared = (alive & ~u["r"] & ctx["terror"] & ~u["itp"] & ~u["unbreakable"] & ~u["terror"]
+                  & (u["ter_imm"] <= 0) & (M < float(R["morale_shock_terror_morale_threshold_short"])))
+        t_run = float(R["morale_shock_rout_timer_short"])
+        u["ter_s"] = torch.where(scared, torch.full_like(u["ter_s"], t_run), u["ter_s"])
+        u["ter_imm"] = torch.where(scared, torch.full_like(u["ter_imm"], t_run + float(R["morale_shock_rout_immunity_timer"])),
+                                   u["ter_imm"])
+        u["r"] = u["r"] | scared
+        start = start | scared
+    if (cal.get("collapse") or {}).get("shatter_below_broken"):
+        # The lower edge of the DB's broken band is -50 points. In the CCO recordings,
+        # all 274 army-loss shatters before a third rout have crossed this edge.
+        shattered = (alive & ctx.get("collapse", torch.zeros_like(alive))
+                     & ~u["unbreakable"] & (M < R["ums_broken_threshold_lower"]))
+        u["s"] = u["s"] | shattered
+        u["r"] = u["r"] | shattered
+    if cal.get("shatter_rules"):
+        # Shattering by the game's kv_rules (morale.shatter_rules; sim/evidence/open_battle/spec.md 1a, Goumin's WH3 kv_rules
+        # guide): a unit whose morale reaches the floor of the broken band (ums_broken_threshold_lower, -50) shatters,
+        # army collapse or not; a routing unit shatters when its health (share of the start; the database's
+        # use_hitpoints_instead_of_casualties 1) falls below shatter_after_first_rout_if_casulties_higher_than (0.05) on
+        # its first rout, below shatter_after_second_rout_if_casulties_higher_than (0.1) on its second (the third rout
+        # shatters, above). The recordings (221 battles): all 153 shatters on the run of a 1st / 2nd rout explained,
+        # 0.1-0.3 % of the rallied units ever met one of them.
+        floor = alive & ~u["unbreakable"] & (M <= R["ums_broken_threshold_lower"] + 1e-6)
+        # the share left: of health, or (morale.shatter_by "men") of the men alive - the recordings (92 battles): every
+        # shatter of a 1st / 2nd rout above the floor came the second its men fell below 5 % / 10 % of the start (41 / 46
+        # of 41 / 46), while routers below 5 % of their health with more men ran on (1.9 % shattered within 2 s)
+        left = (u["men"] / u["men0"].clamp(min=1)) if cal.get("shatter_by") == "men" else u["hp"]
+        low = alive & u["r"] & (((u["rout_count"] == 1) & (left < R["shatter_after_first_rout_if_casulties_higher_than"]))
+                                | ((u["rout_count"] == 2) & (left < R["shatter_after_second_rout_if_casulties_higher_than"])))
+        shattered = floor | low
+        u["s"] = u["s"] | shattered
+        u["r"] = u["r"] | shattered
+    u["morale"] = torch.where(alive, M, u["morale"])
+    u["w"] = wavering(M, u["w"], alive & ~u["r"], R, band)
+    mp = M / L
+    u["mp"] = mp
+    ms = torch.where(mp >= 1.0, 1, torch.where(mp >= R["ums_confident_threshold_lower"], 2, 3))
+    shaken = M < R["ums_steady_threshold_lower"]
+    if band:
+        # shaken below the steady band's lower edge (30), back to steady only above the shaken band's upper edge (32)
+        shaken = shaken | (((u["ms"] == 4) | (u["ms"] == 5)) & (M <= R["ums_shaken_threshold_upper"]))
+    ms = torch.where(shaken, 4, ms)
+    ms = torch.where(u["w"], 5, ms)
+    ms = torch.where(u["r"], 6, ms)
+    ms = torch.where(u["s"], 7, ms)
+    present = u["side"] > 0
+    u["mp"] = torch.where(present, mp, torch.zeros_like(mp))
+    u["ms"] = torch.where(present, ms.float(), torch.zeros_like(mp))
+    return start

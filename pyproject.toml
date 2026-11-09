@@ -1,0 +1,7 @@
+# The project's root: pytest imports the packages sim, net, bridge, game, contract (and ops) from here.
+# Host (no torch: the *_torch tests skip): ../TWW3-batle-ai/.venv/Scripts/python -m pytest -q
+# Container (all): bash ops/dock.sh pytest -q        (image snake-ai-trainer; ops/README.md)
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["sim/tests", "net/tests", "bridge/tests", "game/tests", "contract"]
+addopts = "-q"

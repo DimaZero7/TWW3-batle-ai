@@ -1,0 +1,523 @@
+-- The bridge's rules without the engine: the orders file format, when an order
+-- is new enough to be given again, and the state document. Pure.
+-- Format and timings: bridge/docs/apps/bridge.md.
+local value = require('apps.core.value')
+
+local M = {}
+
+M.FORMAT = 'tww3_bai_nn_orders 1'
+-- keep: no new order, the one in force goes on (the game gives nothing).
+M.KINDS = {hold = true, move = true, attack = true, withdraw = true, keep = true}
+-- A move point closer than this to the one in force is the same order: giving
+-- it again would restart the unit's path for nothing.
+M.REPEAT_M = 5
+
+local function words(line)
+    local out = {}
+    for w in line:gmatch('%S+') do out[#out + 1] = w end
+    return out
+end
+
+-- One unit line: unit <name> hold | move <x> <z> <run> | withdraw <x> <z> <run>
+-- | attack <target name> <run> | keep. run is 1 or 0. A hold, a move or a withdraw may end with
+-- 'face <deg>' (the world's bearing to stand at, 0..360) and / or 'width <m>' (the frontage to
+-- re-form to): the network's formation (net/unit/decode.py: face, width); given as one
+-- goto_location_angle_width (apps.orders.adapter move_formation). Files without them are as before.
+-- An ability line: ability <unit name> <ability key> [<target unit name>]: use it now (once;
+-- independent of the unit's order); with a target (a spell: a bombardment or a hex on an enemy,
+-- an augment on a friend) on that unit, without one on the unit itself. Files without ability
+-- lines are as before.
+local function unit_order(w)
+    local name, kind = w[2], w[3]
+    if not name or not M.KINDS[kind] then return nil, 'bad kind: ' .. tostring(kind) end
+    local order = {kind = kind, run = false}
+    local rest
+    if kind == 'move' or kind == 'withdraw' then
+        order.x, order.z = tonumber(w[4]), tonumber(w[5])
+        if not (value.finite(order.x) and value.finite(order.z)) then return nil, 'bad point for ' .. name end
+        order.run = w[6] == '1'
+        rest = 7
+    elseif kind == 'hold' then
+        rest = 4
+    elseif kind == 'attack' then
+        order.target = w[4]
+        if not order.target then return nil, 'attack without a target for ' .. name end
+        order.run = w[5] == '1'
+    end
+    while rest and w[rest] do
+        local field, v = w[rest], tonumber(w[rest + 1])
+        if (field == 'face' or field == 'width') and value.finite(v) and v >= 0 then
+            order[field] = v
+        else
+            return nil, 'bad formation for ' .. name
+        end
+        rest = rest + 2
+    end
+    return name, order
+end
+
+-- The companion's answer -> {move, batch, think_ms, orders = {name -> order},
+-- abilities = {{unit, key, target}...}} (target nil: the unit itself), or nil and the reason. A file without its last line 'end'
+-- is not complete.
+function M.parse_orders(text)
+    if type(text) ~= 'string' or text == '' then return nil, 'empty' end
+    local doc = {orders = {}, count = 0, abilities = {}}
+    local header, complete = false, false
+    for line in text:gmatch('[^\r\n]+') do
+        local w = words(line)
+        if not header then
+            if line ~= M.FORMAT then return nil, 'unknown format' end
+            header = true
+        elseif w[1] == 'move' then
+            doc.move = tonumber(w[2])
+        elseif w[1] == 'batch' then
+            doc.batch = w[2]
+        elseif w[1] == 'think_ms' then
+            doc.think_ms = tonumber(w[2])
+        elseif w[1] == 'mode' then
+            doc.mode = w[2]
+        elseif w[1] == 'unit' then
+            local name, order = unit_order(w)
+            if not name then return nil, order end
+            doc.orders[name] = order
+            doc.count = doc.count + 1
+        elseif w[1] == 'ability' then
+            if not w[2] or not w[3] then return nil, 'ability without a unit or a key' end
+            doc.abilities[#doc.abilities + 1] = {unit = w[2], key = w[3], target = w[4]}
+        elseif w[1] == 'end' then
+            complete = true
+        end
+    end
+    if not complete then return nil, 'incomplete' end
+    if not value.integer(doc.move) or not doc.batch then return nil, 'no move or batch' end
+    return doc
+end
+
+-- Is `new` a different order from `old` (the one in force)? The facing: given or taken away, or
+-- another one (more than FACE_SAME_DEG off: the engine's 64 sectors are 5.6 deg); the width: a new one
+-- given more than WIDTH_SAME_M off (none given: the width in force stays - no change), as the simulator;
+-- a point within REPEAT_M. shooter: an attack of a shooter on the same target with only its run flag changed is
+-- the same order - any order restarts a shooter's aim in the game (3-8.5 s to the first shot: the losrange probe,
+-- 08.11), and a shooter's ranged attack within range does not walk (sim/evidence/diag_mem/plan.md Н-прямой-огонь).
+M.FACE_SAME_DEG = 1
+M.WIDTH_SAME_M = 1
+function M.changed(old, new, shooter)
+    if not old then return true end
+    if shooter and old.kind == 'attack' and new.kind == 'attack' and old.target == new.target then return false end
+    if old.kind ~= new.kind or old.run ~= new.run or old.target ~= new.target then return true end
+    if (old.face == nil) ~= (new.face == nil) then return true end
+    if new.face and math.abs((new.face - old.face + 180) % 360 - 180) > M.FACE_SAME_DEG then return true end
+    if new.width and (old.width == nil or math.abs(new.width - old.width) > M.WIDTH_SAME_M) then return true end
+    if new.x and old.x then
+        return math.sqrt((new.x - old.x) ^ 2 + (new.z - old.z) ^ 2) > M.REPEAT_M
+    end
+    return false
+end
+
+-- A shooter's duty under an ATTACK order (the rows of the state, one per decision).
+-- In the game a shooter holding an explicit target it cannot hit (the target in
+-- melee, out of sight) stands without shooting and picks no other: 722 unit-seconds
+-- in one gate battle (01.10.2026). So:
+--   * an attack order on a target in melee within the shooter's range is not given
+--     as an explicit target: the shooter fires at will (fire_freely);
+--   * after RELEASE_AFTER decisions standing idle (not moving, not firing, not in
+--     melee, with ammunition) under an explicit target the order is released to fire
+--     at will. The count goes on across the network's new attack orders: it changes
+--     a shooter's target every ~5 s, a count that restarted with each would never end;
+--   * fire at will: the game chooses the target, as its own AI's shooters do. The
+--     ordered target is taken again once it is out of melee, after at least FREE_MIN
+--     decisions.
+-- (10, was 4 until 08.11: a fresh order needs 3-8.5 s to its first shot - the losrange probe; 4 released the
+-- jezzails before they could fire, 4 times in 30 s of the M3 chain battle). The chain (the answer's 'mode chain')
+-- releases never: the simulator has no such rule (missile_duty's release_after nil).
+M.RELEASE_AFTER = 10
+M.FREE_MIN = 10
+
+local function up(row)
+    return row ~= nil and (row.men or 0) > 0 and row.r ~= true and row.s ~= true
+end
+
+-- A row of a unit that takes no orders: routing, shattered or dead (men read as 0). A reading
+-- that failed (nil) is not taken as down.
+function M.down(row)
+    return row ~= nil and (row.r == true or row.s == true or (type(row.men) == 'number' and row.men <= 0))
+end
+
+-- Present and not shattered (a routing unit can still be shot).
+local function present(row)
+    return row ~= nil and (row.men or 0) > 0 and row.s ~= true
+end
+
+-- Standing, not moving, not in melee, not shooting, with ammunition.
+function M.shooter_idle(row)
+    return up(row) and row.m ~= true and row.mv ~= true and row.fire ~= true and (row.a or 0) > 0
+end
+
+-- Give this attack order as fire at will: the target stands in melee within range
+-- (centre to centre, metres: never further than the engine's edge-to-edge range).
+function M.fire_freely(me, target, range)
+    if not (up(me) and up(target) and target.m == true) then return false end
+    if not (value.finite(me.x) and value.finite(me.z) and value.finite(target.x) and value.finite(target.z)) then
+        return false
+    end
+    return math.sqrt((me.x - target.x) ^ 2 + (me.z - target.z) ^ 2) <= (range or 0)
+end
+
+-- duty = {idle, free, free_for} (kept per unit between calls; {} to start).
+-- Returns 'release', 'resume' or nil.
+function M.missile_duty(duty, me, target, release_after)
+    if release_after == nil then release_after = M.RELEASE_AFTER end
+    duty.idle, duty.free_for = duty.idle or 0, duty.free_for or 0
+    if duty.free then
+        duty.free_for = duty.free_for + 1
+        if duty.free_for >= M.FREE_MIN and up(me) and up(target) and target.m ~= true then
+            duty.free, duty.free_for, duty.idle = false, 0, 0
+            return 'resume'
+        end
+        return nil
+    end
+    duty.idle = M.shooter_idle(me) and duty.idle + 1 or 0
+    if release_after ~= false and duty.idle >= release_after then
+        duty.free, duty.free_for, duty.idle = true, 0, 0
+        return 'release'
+    end
+    return nil
+end
+
+-- A shooter already on its target is not given it again. In the game any order restarts a shooter's
+-- aim: a unit that shot in the 3 s before, standing with an enemy in range, given an attack order
+-- shoots in 0.35 / 0.26 of its next 10 s (arrows / slings) against 0.47 / 0.42 given none (sim task 2,
+-- 04.10.2026). Gate 20261004-071805: the bridge gave our shooters 2.6 orders a shooter-minute while they
+-- were firing, a tenth of them on the very unit they were firing at. On target: standing (not moving,
+-- not in melee), the engine's target (row t) is that unit, and it fires now or fired within FIRE_RECENT
+-- decisions (the fire flag is off 1-3 s between volleys: 104 of 116 gaps, gate 20261004-071805).
+M.FIRE_RECENT = 3
+
+-- Shooting standing: up, not moving, not in melee, firing now or within FIRE_RECENT decisions
+-- (recent). Such a shooter is already doing what fire at will asks: it is not halted for it.
+function M.firing(me, recent)
+    return up(me) and me.m ~= true and me.mv ~= true and (me.fire == true or recent == true)
+end
+
+-- me: the shooter's row; target: the target's row; recent: it fired within FIRE_RECENT decisions.
+function M.on_target(me, target, recent)
+    if not (M.firing(me, recent) and present(target)) then return false end
+    return type(target.n) == 'string' and me.t == target.n
+end
+
+-- A shooter under a HOLD order shoots as the simulator's holding shooter does
+-- (sim/missile.py choose_target): the nearest standing enemy in range, else the nearest
+-- routing one. The game's own fire at will does not: a halted shooter picks a target itself, often
+-- one just out of range (in melee), keeps it and stands. Gate 02.10.2026 (it4, 8 battles): standing
+-- shooters with an enemy in range by the simulator's measure fired within 10 s in 40 % of the
+-- seconds under hold against 98 % under an attack order and 90-97 % for the game's AI (at 0-15 m
+-- beyond range between centres: 9 % against 100 %); one slinger unit stood 155 s with full ammunition.
+-- So the bridge aims a held shooter itself: hold_target picks the target (centre distance within
+-- range + HOLD_REACH_M), and the adapter gives it as an attack order would be given (fire_freely,
+-- missile_duty). A held shooter that starts walking under it for HOLD_WALK decisions is halted to
+-- fire at will for FREE_MIN decisions: hold never walks. HOLD_REACH_M 0: only a target within range
+-- by the centres - an explicit target beyond it makes the engine walk the shooter forward, which the
+-- simulator's holding shooter never does (the order audit, sim/evidence/audit_orders: with 10 m ai_like's
+-- held shooters moved over 4 m in 3 s 17 % of their time, 15.8 halts a battle).
+M.HOLD_REACH_M = 0
+M.HOLD_WALK = 2
+
+local function in_reach(me, row, range, margin)
+    if not (present(row) and row.side ~= me.side and row.v ~= false) then return nil end
+    if not (value.finite(row.x) and value.finite(row.z)) then return nil end
+    local d = math.sqrt((me.x - row.x) ^ 2 + (me.z - row.z) ^ 2)
+    if d > range + (margin or M.HOLD_REACH_M) then return nil end
+    return d
+end
+
+-- me: the shooter's row; rows: every unit's row (the state's); range: its missile range, m;
+-- current: the name of the target picked last time (kept while it still qualifies, unless it routs
+-- and a standing enemy is in reach). -> the target's name or nil. A unit in melee keeps current.
+function M.hold_target(me, rows, range, current)
+    if not (up(me) and (me.a or 0) > 0 and (range or 0) > 0 and value.finite(me.x) and value.finite(me.z)) then
+        return nil
+    end
+    if me.m == true then return current end
+    local best, best_d, routing, routing_d, keep
+    for _, row in ipairs(rows or {}) do
+        local d = in_reach(me, row, range)
+        if d then
+            if row.n == current then keep = row end
+            if row.r ~= true then
+                if not best_d or d < best_d then best, best_d = row, d end
+            elseif not routing_d or d < routing_d then
+                routing, routing_d = row, d
+            end
+        end
+    end
+    if keep and (keep.r ~= true or not best) then return current end
+    local pick = best or routing
+    return pick and pick.n or nil
+end
+
+-- Missing/invalid engine target under ATTACK/HOLD: explicit aim after three decisions (3 s
+-- at the default cadence). Unlike ordinary duty, this may target an enemy still in melee.
+-- Strict centre range avoids pulling a held shooter forward during its walk cooldown.
+-- The pick is the simulator's (sim/missile.py choose_target): the ordered target while in
+-- range, routing or not; else the nearest STANDING enemy in range; a routing one only when no
+-- standing enemy is in range. The engine's current target is kept as there: unless it routs while a
+-- standing enemy is in range (and it is not the ordered one). Before, the nearest enemy was taken
+-- even when routing: our shooters (the network's and ai_like's alike) were turned onto a fleeing mob
+-- while a standing enemy stood in range (the rout-mob analysis, tmp/old-build/fable/routmob2).
+-- A shooter walking to its ordered target (preferred: an attack's) while that target stands beyond its
+-- range is left alone, as the simulator's shooter walks under an attack until its target's centre is in
+-- range (battle.py close_in). Before, after 3 decisions the bridge stopped it and aimed it at the nearest
+-- enemy in range: the network's attack orders were overridden 6.9 times a battle (sim/evidence/audit_orders).
+M.REAIM_AFTER = 3
+-- (under the chain - the answer's 'mode chain' - 10: a re-given order restarts a shooter's aim and a fresh one needs up
+-- to 8.5 s to its first shot, the losrange probe 08.11; as RELEASE_AFTER)
+M.REAIM_AFTER_CHAIN = 10
+-- Under the chain a held shooter's recovery takes only an enemy within REAIM_ARC_DEG of its facing (the simulator's
+-- shooter firing at will never turns - sim.json missile.stand_fire_why; its attack turns only beyond 45 deg), and an
+-- attack's recovery only the ordered target (the companion's): the bridge adds no target of its own (08.11).
+M.REAIM_ARC_DEG = 45
+
+local function approaching(me, rows, range, preferred)
+    if preferred == nil or me.mv ~= true then return false end
+    for _, row in ipairs(rows or {}) do
+        if row.n == preferred then
+            return present(row) and row.side ~= me.side and row.r ~= true and row.v ~= false
+                and in_reach(me, row, range, 0) == nil
+        end
+    end
+    return false
+end
+
+-- limit (optional, the chain): {arc = deg} the candidates within arc of the shooter's facing; {only = true} the
+-- preferred (the ordered) target only.
+local function within_arc(me, row, arc)
+    if not (value.finite(me.b) and value.finite(row.x) and value.finite(row.z)) then return false end
+    local brg = math.deg((math.atan2 or math.atan)(row.x - me.x, row.z - me.z)) % 360
+    return math.abs((brg - me.b + 180) % 360 - 180) <= arc
+end
+
+function M.reaim_target(watch, me, rows, range, preferred, recent, after, limit)
+    after = after or M.REAIM_AFTER
+    limit = limit or {}
+    if not (up(me) and me.m ~= true and me.fire ~= true and (me.a or 0) > 0 and (range or 0) > 0
+        and value.finite(me.x) and value.finite(me.z)) or approaching(me, rows, range, preferred) then
+        watch.n = 0
+        return nil
+    end
+    local keep, best, best_d, routing, routing_d, wanted
+    for _, row in ipairs(rows or {}) do
+        local d = in_reach(me, row, range, 0)
+        -- Keep a real target between volleys, including the engine's edge-to-edge range.
+        if row.n == me.t and (d or M.on_target(me, row, recent)) then keep = row end
+        if d and limit.only and row.n ~= preferred then d = nil end
+        if d and limit.arc and not within_arc(me, row, limit.arc) then d = nil end
+        if d then
+            if row.n == preferred then wanted = row.n end
+            if row.r ~= true then
+                if not best_d or d < best_d then best, best_d = row.n, d end
+            elseif not routing_d or d < routing_d then
+                routing, routing_d = row.n, d
+            end
+        end
+    end
+    if keep and (keep.r ~= true or not best or keep.n == preferred) then
+        watch.n = 0
+        return nil
+    end
+    local pick = wanted or best or routing
+    watch.n = pick and (watch.n or 0) + 1 or 0
+    if watch.n >= after then
+        watch.n = 0
+        return pick
+    end
+    return nil
+end
+
+-- guard = {walk, block} (kept per held shooter; {} to start), me: its row, aiming: a target is
+-- given. -> 'halt' when it walks under the target for HOLD_WALK decisions (then nothing is picked
+-- for FREE_MIN decisions), 'wait' while blocked, nil otherwise.
+function M.hold_guard(guard, me, aiming)
+    guard.walk, guard.block = guard.walk or 0, guard.block or 0
+    if guard.block > 0 then
+        guard.block = guard.block - 1
+        return 'wait'
+    end
+    guard.walk = (aiming and me ~= nil and me.mv == true and me.m ~= true) and guard.walk + 1 or 0
+    if guard.walk >= M.HOLD_WALK then
+        guard.walk, guard.block = 0, M.FREE_MIN
+        return 'halt'
+    end
+    return nil
+end
+
+-- An order the engine dropped. The engine forgets a unit's attack (or move) order after a fight it
+-- was drawn into (the unit stands where the fight ended), while the bridge still holds the order as
+-- in force and gives nothing new for the same order: gate 02.10.2026 (it5), our lord under an attack
+-- on enemy slingers 80-170 m away stood 92 s after beating off the enemy lord, another 14 s. So a
+-- unit under a melee attack whose target is present and further than STALL_M (centre to centre),
+-- or under a move whose point is further than STALL_POINT_M, that stands - not moving, not in melee,
+-- not shooting, not losing health - for STALL_AFTER decisions in a row is given its order again.
+M.STALL_AFTER = 3
+M.STALL_M = 20
+M.STALL_POINT_M = 15
+
+-- stall = {n, hp} (kept per unit; {} to start), me: the unit's row, order: the order in force,
+-- target: the attack target's row (nil for a move). -> 'regive' or nil.
+function M.order_stalled(stall, me, order, target)
+    local last_hp = stall.hp
+    stall.n, stall.hp = stall.n or 0, me and me.hp
+    if not (order and up(me) and value.finite(me.x) and value.finite(me.z)) then
+        stall.n = 0
+        return nil
+    end
+    local far = false
+    if order.kind == 'attack' and present(target) and value.finite(target.x) and value.finite(target.z) then
+        far = math.sqrt((me.x - target.x) ^ 2 + (me.z - target.z) ^ 2) > M.STALL_M
+    elseif (order.kind == 'move' or order.kind == 'withdraw') and value.finite(order.x) and value.finite(order.z) then
+        far = math.sqrt((me.x - order.x) ^ 2 + (me.z - order.z) ^ 2) > M.STALL_POINT_M
+    end
+    local hurt = value.finite(last_hp) and value.finite(me.hp) and me.hp < last_hp - 1e-4
+    if far and me.mv ~= true and me.m ~= true and me.fire ~= true and not hurt then
+        stall.n = stall.n + 1
+    else
+        stall.n = 0
+    end
+    if stall.n >= M.STALL_AFTER then
+        stall.n = 0
+        return 'regive'
+    end
+    return nil
+end
+
+-- What the companion reads: meta (batch, factions, attacker...), the move
+-- number, the battle time and every unit's row; used = {unit name -> {ability key ->
+-- battle ms of its last use by the bridge}} (the companion counts the timers from it); counted = the same with how many
+-- times the bridge used it (an ability of limited uses: Concealment Bombs, the passport's uses; companion.exchange); winds =
+-- the own army's Winds of Magic {cur, rate} (apps.battle.winds; the player sees his own pool only),
+-- absent when the engine gives none.
+function M.state_document(meta, move, t_ms, units, done, used, counted, winds)
+    local doc = {move = move, t = t_ms, units = units, done = done == true, abilities_used = used or {},
+        abilities_count = counted or {}, winds = winds}
+    for k, v in pairs(meta) do doc[k] = v end
+    return doc
+end
+
+-- The phases active on a unit now, as its card shows them (CCO ActiveEffectList: verified in
+-- battle). read(field) -> the unit's CcoBattleUnit value or nil.
+-- Returns a list of phase keys ({} when none), or nil when the list cannot be read.
+M.MAX_EFFECTS = 16
+function M.active_effects(read)
+    local n = read('ActiveEffectList.Size')
+    if type(n) ~= 'number' then return nil end
+    local out = {}
+    for i = 0, math.min(n, M.MAX_EFFECTS) - 1 do
+        local key = read('ActiveEffectList.At(' .. i .. ').PhaseRecordContext.Key')
+        if type(key) == 'string' and key ~= '' then out[#out + 1] = key end
+    end
+    return out
+end
+
+-- The deployment by the companion's strategist (apps.bridge.deploy_adapter; bridge/docs/apps/bridge.md "Расстановка
+-- стратегом"). The game writes the deployment document once (deploy_document): our units' full rows, the enemy's by its
+-- composition only (name, key, men, health - the pre-battle screen; no place, it is not seen), both deployment zones
+-- {x, z, b, front, depth} as the battle file declares them. The companion answers with the plan:
+--   tww3_bai_nn_plan 1
+--   batch <batch>
+--   think_ms <ms>
+--   place <unit> <x> <z> <bearing deg> <width m> [<cx> <cz>]   (one per own unit: teleport_to_location's arguments;
+--                                     cx, cz the formation's centre wanted - the game stands it half a depth behind x, z)
+--   end
+M.PLAN_FORMAT = 'tww3_bai_nn_plan 1'
+M.COMPOSITION = {'n', 'side', 'key', 'men', 'hp'}
+
+function M.deploy_document(meta, zones, own_rows, enemy_rows)
+    local units = {}
+    for _, r in ipairs(own_rows) do units[#units + 1] = r end
+    for _, r in ipairs(enemy_rows) do
+        local row = {v = true}      -- the composition is known: the pre-battle screen shows it
+        for _, k in ipairs(M.COMPOSITION) do row[k] = r[k] end
+        units[#units + 1] = row
+    end
+    local doc = {move = 0, t = 0, deploy = true, zones = zones, units = units, abilities_used = {},
+        abilities_count = {}}
+    for k, v in pairs(meta) do doc[k] = v end
+    return doc
+end
+
+-- The plan's text -> {batch, think_ms, places = {{unit, x, z, b, w}...}}, or nil and the reason (no 'end': not
+-- complete; a bad line: refused whole).
+function M.parse_plan(text)
+    if type(text) ~= 'string' or text == '' then return nil, 'empty' end
+    local doc = {places = {}}
+    local header, complete = false, false
+    for line in text:gmatch('[^\r\n]+') do
+        local w = words(line)
+        if not header then
+            if line ~= M.PLAN_FORMAT then return nil, 'unknown format' end
+            header = true
+        elseif w[1] == 'batch' then
+            doc.batch = w[2]
+        elseif w[1] == 'think_ms' then
+            doc.think_ms = tonumber(w[2])
+        elseif w[1] == 'place' then
+            local p = {unit = w[2], x = tonumber(w[3]), z = tonumber(w[4]), b = tonumber(w[5]), w = tonumber(w[6]),
+                cx = tonumber(w[7]), cz = tonumber(w[8])}
+            if not (p.unit and value.finite(p.x) and value.finite(p.z) and value.finite(p.b) and value.finite(p.w)
+                and p.w > 0) or (w[7] and not (value.finite(p.cx) and value.finite(p.cz))) then
+                return nil, 'bad place: ' .. line
+            end
+            -- the formation's centre the plan wants (the point sent lies half a depth ahead of it); none: the point
+            p.cx, p.cz = p.cx or p.x, p.cz or p.z
+            doc.places[#doc.places + 1] = p
+        elseif w[1] == 'end' then
+            complete = true
+        end
+    end
+    if not complete then return nil, 'incomplete' end
+    if not doc.batch then return nil, 'no batch' end
+    return doc
+end
+
+-- A point (x, z) in a zone's axes: (across, along its forward) from its centre.
+function M.zone_local(zone, x, z)
+    local a = math.rad(zone.b)
+    local dx, dz = x - zone.x, z - zone.z
+    return dx * math.cos(a) - dz * math.sin(a), dx * math.sin(a) + dz * math.cos(a)
+end
+
+-- One unit's placement read after the teleport (pure): plan p {x, z, b, w}, read m {x, z, b, w} (position, bearing(),
+-- ordered_width()), its own zone, engine_b - the facing the engine stands at for p.b (apps.orders.facing). ->
+-- {d_m: the read centre from the planned centre (cx, cz; else the point sent), db: the read bearing from engine_b (deg),
+-- edge_m: how far inside the zone
+-- the ends of its front are (< 0: out), inside, far (d_m > FAR_M), turned (db > TURN_DEG)}. Logged, never fatal.
+M.DEPLOY_FAR_M = 10          -- 26.09.2026: up to 9.4 m between the point sent and the unit's native place
+M.DEPLOY_TURN_DEG = 360 / 128  -- half a sector of the engine's 64: the bearing read is not in the sector sent
+function M.deploy_check(p, m, zone, engine_b)
+    local out = {}
+    if not (value.finite(m.x) and value.finite(m.z)) then return {missing = true} end
+    out.d_m = math.sqrt((m.x - (p.cx or p.x)) ^ 2 + (m.z - (p.cz or p.z)) ^ 2)
+    if value.finite(m.b) then out.db = math.abs((m.b - engine_b + 180) % 360 - 180) end
+    local half = (value.finite(m.w) and m.w or p.w) / 2
+    local a = math.rad(value.finite(m.b) and m.b or p.b)
+    local edge
+    for _, sgn in ipairs({-1, 1}) do
+        -- an end of the unit's front: half its ordered width to the right (bearing + 90) or the left
+        local ex, ez = m.x + sgn * half * math.cos(a), m.z - sgn * half * math.sin(a)
+        local s, f = M.zone_local(zone, ex, ez)
+        local e = math.min(zone.front / 2 - math.abs(s), zone.depth / 2 - math.abs(f))
+        edge = edge and math.min(edge, e) or e
+    end
+    out.edge_m = edge
+    out.inside = edge >= 0
+    out.far = out.d_m > M.DEPLOY_FAR_M
+    out.turned = out.db ~= nil and out.db > M.DEPLOY_TURN_DEG
+    return out
+end
+
+-- Real milliseconds between two os.clock() readings (nil when unknown).
+function M.real_ms(from, to)
+    if not (value.finite(from) and value.finite(to)) then return nil end
+    return math.floor((to - from) * 1000 + 0.5)
+end
+
+return M
