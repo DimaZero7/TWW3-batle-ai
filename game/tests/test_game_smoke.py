@@ -156,5 +156,20 @@ def test_chain_battle_table():
     assert (row["winner"], row["t"], row["inside"], row["strat_err"]) == (2, 361, 0.72, 0)
 
 
+@pytest.mark.skipif(not (game.DATA / "nn-arena" / "runs" / "20261107-220829").is_dir(), reason="data/ is not here")
+def test_vision(tmp_path):
+    """game.vision on the base M1 chain battle (07.11 22:08): the strip and the text, within ~5 k tokens; the
+    long rifles 2 that never fired routed first at 108 s; the operative's 7 groups."""
+    from game import vision
+    from game.vision import record
+    res = vision.render(record.load("20261107-220829"), tmp_path)
+    text = (tmp_path / "20261107-220829.txt").read_text(encoding="utf-8")
+    assert (tmp_path / "20261107-220829.png").stat().st_size > 0
+    assert 1000 < res["tokens"]["image"] + res["tokens"]["text"] < 5000
+    row = next(line for line in text.splitlines() if line.startswith("long_rifles_2 S | +55,-78 f0"))
+    assert "| 0/0/0 | 97 | 108 |" in row and "our routs: 108 long_rifles_2" in text
+    assert text.count("\n g") == 7
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

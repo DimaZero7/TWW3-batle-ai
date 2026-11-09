@@ -6,6 +6,7 @@
     label/    the live labelling: the person plays, the recorder writes the levels' samples; digest*, bridge_infer
     maps/     a new map captured from the game once (map_grid.py) -> sim/maps/<name>/
     arena/    a battle of the game from a kept run (army_from_run.py; bridge.build --army-from-run)
+    vision/   a battle for the orchestrator's eyes: a strip of frames (PNG) + events and measures (text), ~3 k tokens
 
 The game is started only through the bridge's launcher (bridge/launcher/launch.ps1: Normal difficulty, the user's
 settings restored); the marks of state/ (HUMAN_PLAYING, probe_game.lock) are checked by ops/guard.*.

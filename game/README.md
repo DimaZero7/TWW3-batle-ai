@@ -10,6 +10,9 @@
     python -m game.battle.analyze <прогон> [--json f]   # и compare, units, churn, snip
 М1, М2 — прогоны человека (`data/human/runs`, железнобокие → длинноствольные), М3 — seed 1000702112 v3; карта ksl_plains_01.
 
+## Бой глазами оркестратора
+    python -m game.vision <прогон>...              # лента 6 кадров PNG + текст событий и мер, ~2,7 тыс. токенов (vision/README.md)
+
 ## Проба механики
     bash game/probe/run.sh <план> [<план>...]       # по бою на план, --mem (memreader), BAI_GRAPHICS=low
     python -m game.probe.charge_probe report <прогоны> [--sim]   # игра против двойника симулятора
