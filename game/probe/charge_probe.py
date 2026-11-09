@@ -572,7 +572,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
-              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk")
+              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -811,6 +811,7 @@ TERRAIN2 = {
               "level_1": (-140, -240, -211, -311, 1.5), "level_2": (50, 330, 76, 427, 1.4),
               "level_3": (440, 240, 353, 290, 1.5)},
 }
+WIDTH_MEN_S = 70       # the width plan (game/probe/unit_probe.py): the men all the fight
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 # the cavalry plans (build/diag_cav): the Empire Knights' straight run (leg_m ahead at a run / a walk; the target parked
 # gap_m off, never ordered) and their charge from gap_m on three held Skaven infantry units (the probe's sides are the
@@ -2083,6 +2084,10 @@ def run_config(plan, index):
     if plan == "forestwalk":
         # (build/diag_stage0_probe) the walkers' men from memory every 0.5 s (no enemy near: the sparse polls)
         config.update(men_ms=1000, men_after_s=0, men_near_m=0)
+    if plan == "width":
+        # the men of the pair and of the neighbours from memory every 0.1 s from 80 m on to the lane's end (their swings:
+        # the strike mark, the target, the facing - tmp/width/swings.py); health every 0.25 s
+        config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=WIDTH_MEN_S, men_near_m=80, mem_extras=True)
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 

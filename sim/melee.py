@@ -910,6 +910,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     defence = directional_defence(u["defence"][:, None, :].expand_as(coef), 1 - w * (1 - coef))
     p = hit_chance(attack, defence, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
                    B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+    # (melee.side_cadence) the chance of the same blow from the front: a man's swings come at the same cadence whichever
+    # side he strikes from, hit or miss (below)
+    side_cad = bool(cal.get("side_cadence"))
+    p_front = hit_chance(attack, u["defence"][:, None, :].expand_as(coef), B["melee_hit_chance_normalisation_coefficient"],
+                         B["melee_hit_chance_base"], B["melee_hit_chance_min"], B["melee_hit_chance_max"],
+                         float(cal.get("hit_roll_offset", 0.0))) if side_cad else None
     dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]
     share = dmg / (dmg + ap).clamp(min=1e-6)
     # Charge reflection (database): a braced unit with charge_reflection (standing: slower than melee.braced_speed)
@@ -971,6 +977,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         args1 = ((dmg + extra1 * share) * reflect / div, (ap + extra1 * (1 - share)) * reflect / div,
                  u["armour"][:, None, :], u["hp_man"][:, None, :], resist_of(u, cal))
         hit1 = per_hit(*args1, single=single_j)
+        if p_front is not None:
+            # (melee.side_cadence) the charge-defence blows' front chance, mixed in alike
+            p1f = hit_chance(u["attack"][:, :, None] + extra1, u["defence"][:, None, :].expand_as(coef),
+                             B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
+                             B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+            p_front = torch.where(q_cd > 0, (1 - q_cd) * p_front + q_cd * p1f, p_front)
         w0, w1 = (1 - q_cd) * p, q_cd * p1
         pm = (w0 + w1).clamp(min=1e-9)
         hit = torch.where(q_cd > 0, (w0 * hit + w1 * hit1) / pm, hit)
@@ -997,6 +1009,14 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     else:
         recv = hp_j = None
         per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
+        if p_front is not None:
+            # (melee.side_cadence; sim/evidence/width/README.md) a formation's man on another formation, standing: his next
+            # swing comes as long after a miss as after a hit (the memory: 5.3 / 5.3 s clanrats, 6.8 / 7.0 spearmen, 6.0 /
+            # 5.9 swordsmen) and his hits a swing follow the chance of the side he strikes (front 0.17-0.26, flank
+            # 0.21-0.35 at chances 25-37 / 39 %) - so the side's blows land in proportion to their chance at the
+            # cadence of the front's: p / (p_front x interval + miss_s) (the head-on pace as fitted: p = p_front)
+            side = ~single_i & ~single_j & ~routing_j
+            per_s = torch.where(side, p / (p_front * interval + float(cal["miss_s"])), per_s)
     cav_pair = None
     cyc_cav = cal.get("cycle_cavalry") or {}
     if cyc_cav.get("on") and "size_k" in u:
@@ -1028,6 +1048,9 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         if recv is not None:
             # (melee.cycle) the wrapping man strikes free: the same cycle with the flank's chance
             per_fl = cycle_rate(p_fl, interval, hit, hp_j, single_j, recv, cyc)
+        elif p_front is not None:
+            # (melee.side_cadence) the wrap's flank blows at the front's cadence (their target pair meets front to front)
+            per_fl = p_fl / (p_front * interval + float(cal["miss_s"]))
         else:
             per_fl = p_fl / (p_fl * interval + float(cal["miss_s"]))
         if cav_pair is not None:

@@ -228,6 +228,29 @@ FOREST_SITES = {"forest1_walk": (-48.0, -360.0, 0.0, False), "forest2_walk": (-8
 FOREST_S = 150
 
 
+# the width plan (09.11; the stage 0 unit exam: in the simulator a line filling its area loses the trade -0.156 against
+# the network's narrow units -0.033; the wrap probe: the wide side's trade 1.20-1.66 in the game, 1.00-1.03 in the twin):
+# fearless clanrats (no shields, 30 m) charge from WIDTH_GAP m at our spearmen of WIDTH_T m front, who hold (braced,
+# never ordered) or charge them back ('both': the counter-charge); two neighbours of ours of the same front stand on its
+# line, the centres 40 m apart (a line of three: the narrow line's gaps, the wide one edge to edge); kind -> (front m,
+# the neighbours' gap m, target mode); WIDTH_S of fight; WIDTH_ROT: the battles, the places rotated by k
+WIDTH_A, WIDTH_T = "wh2_main_skv_inf_clanrats_0", "spear"
+WIDTH_LANES = (("w38_hold", 38, 2, "hold"), ("w30_hold", 30, 10, "hold"), ("w20_hold", 20, 20, "hold"),
+               ("w38_both", 38, 2, "both"), ("w30_both", 30, 10, "both"), ("w20_both", 20, 20, "both"))
+WIDTH_GAP, WIDTH_S, WIDTH_ROT = 60, 60, (0, 3, 1, 4)
+
+
+def width_battles():
+    """The width plan's battles (WIDTH_LANES on the grid, rotated by WIDTH_ROT)."""
+    base = []
+    for kind, w, gap, tmode in WIDTH_LANES:
+        nb = [{"short": WIDTH_T, "dx": sgn * (w + gap), "dz": 0.0, "b": 0.0, "width": float(w), "side": "t"}
+              for sgn in (-1, 1)]
+        base.append(cp.lane(WIDTH_A, WIDTH_T, "attack_run", tmode, gap_m=WIDTH_GAP, fight_s=WIDTH_S,
+                            max_s=WIDTH_GAP // 2 + WIDTH_S + 10, answer=False, kind=kind, t_w=float(w), extras=nb, **FX))
+    return [_placed(base, k) for k in WIDTH_ROT]
+
+
 def _fwd(b):
     r = math.radians(b)
     return math.sin(r), math.cos(r)
@@ -382,6 +405,8 @@ def battles(plan):
         return lobfriend_battles()
     if plan == "forestwalk":
         return forestwalk_battles()
+    if plan == "width":
+        return width_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -1013,7 +1038,37 @@ def forestwalk_measure(lane):
             "leg_s": float(np.mean(legs)) if legs else None}
 
 
-MEASURE = {"lobfriend": losfriend_measure, "forestwalk": forestwalk_measure, "snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+WIDTH_WIN = ((0, 5), (5, 15), (15, 30), (30, 60))
+
+
+def width_measure(lane):
+    """The width plan: the first contact (either unit's melee flag), each side's share of its starting health lost in
+    WIDTH_WIN windows after it and over 0-60 s, the trade (the clanrats' share lost less ours, 0-60 s), and the
+    neighbours' share lost (are they drawn in). No contact (a battle whose orders never started): no numbers."""
+    t = _t(lane)
+    s = lane["samples"]
+    m = np.nan_to_num(cp.series(s, "a", "m")) + np.nan_to_num(cp.series(s, "tg", "m"))
+    out = {"kind": lane["spec"]["kind"], "run": lane.get("run")}
+    if not (m > 0).any():
+        return out
+    c = float(t[m > 0][0])
+    out["contact_s"] = c
+    for who in ("a", "tg"):
+        hp = cp.series(s, who, "hp")
+        h0 = float(hp[np.isfinite(hp)][0])
+        for lo, hi in WIDTH_WIN:
+            out[f"{who}_{lo}_{hi}"] = (cp.at(t, hp, c + lo) - cp.at(t, hp, c + hi)) / h0
+        out[f"{who}_lost"] = (h0 - cp.at(t, hp, c + 60)) / h0
+    out["trade"] = out["a_lost"] - out["tg_lost"]
+    ex = lane.get("extras") or []
+    if ex:
+        te = np.array([x for x, _ in ex])
+        hs = np.array([sum(float(r.get("hp") or 0) for r in rows) for _, rows in ex])
+        out["nb_lost"] = (hs[0] - cp.at(te, hs, c + 60)) / hs[0] if hs[0] else None
+    return out
+
+
+MEASURE = {"width": width_measure, "lobfriend": losfriend_measure, "forestwalk": forestwalk_measure, "snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -1049,7 +1104,9 @@ def _fmt(v):
 
 
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
-KEY = {"lobfriend": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "cover_hp_lost", "fwd_max_m"),
+KEY = {"width": ("contact_s", "tg_0_5", "tg_5_15", "tg_15_30", "tg_30_60", "a_0_5", "a_5_15", "a_15_30", "a_30_60",
+                 "tg_lost", "a_lost", "trade", "nb_lost"),
+       "lobfriend": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "cover_hp_lost", "fwd_max_m"),
        "forestwalk": ("cruise", "cruise_first", "legs", "leg_s"),
        "snipe": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "hid_go", "hid_order", "hid_firing_share",
                  "seen_firing_share", "revealed_s", "hid_share", "gap_seen_m", "gap_unhid_m", "hid_100", "hid_60",
