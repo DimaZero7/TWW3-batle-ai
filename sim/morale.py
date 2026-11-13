@@ -320,6 +320,17 @@ def terms(u, ctx, params):
     # it from that side (u flank_hit, this step's blows; the rear instead of the flank, not both).
     out["attacked"] = torch.where(u["flank_hit"] >= 2, R["was_attacked_in_rear"],
                                   torch.where(u["flank_hit"] >= 1, R["was_attacked_in_flank"], 0.0))
+    af = cal.get("attacked_first") or {}
+    if af.get("both") and "hit_sec" in u:
+        # (morale.attacked_first both; reverse/notes/morale_module.md 2.6) an enemy held 'from the flank' gives -6 once
+        # and one held 'from the rear' -14 once - both at once -20 (the held sides, hit_sec: 2 flank, 3 rear)
+        Bn, Nn = u["men"].shape
+        hs = u["hit_sec"].reshape(Bn, Nn, Nn)
+        out["attacked"] = (torch.where((hs == 2).any(1), R["was_attacked_in_flank"], 0.0)
+                           + torch.where((hs == 3).any(1), R["was_attacked_in_rear"], 0.0))
+    if ctx.get("attack_push") is not None:
+        # (morale.attacked_first push, battle.py) the one-off push of the recount an enemy came into contact in
+        out["attack_push"] = ctx["attack_push"]
     # Flanks exposed: the same lf/rf/bf observed by the network, one (-3) or several (-6).
     exposed = u["lf"].float() + u["rf"].float() + u["bf"].float()
     out["exposed"] = torch.where(exposed >= 2, R["ume_concerned_flanks_exposed_multiple"],

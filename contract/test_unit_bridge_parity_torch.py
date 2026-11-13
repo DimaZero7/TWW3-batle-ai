@@ -27,7 +27,7 @@ EMP = ["wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh_dlc04_emp_
        "wh3_dlc25_emp_inf_nuln_ironsides", "wh_main_emp_cav_demigryph_knights_0"]
 SKV = ["wh2_main_skv_cha_warlord_0", "wh2_main_skv_inf_clanrat_spearmen_0", "wh2_dlc12_skv_inf_ratling_gun_0",
        "wh2_main_skv_inf_plague_monk_censer_bearer", "wh2_main_skv_art_warp_lightning_cannon"]
-NOT_YET = ("vx", "vz", "f")          # view.py reads them from the simulator's state (bridge_parity.md: waits for the user)
+NOT_YET = ()                          # (vx, vz, f: view.shift_velocity - the centre's shift, as the bridge)
 
 
 def skirmish(gap=120.0):
@@ -71,7 +71,7 @@ def play(st, seconds, seer, place=None, terrain_path="flat"):
     return torch.stack(sim), torch.stack(game)
 
 
-def test_the_bridges_raw_state_is_the_simulators_but_the_velocity_on_a_flat_field():
+def test_the_bridges_raw_state_is_the_simulators_on_a_flat_field():
     torch.manual_seed(3)
     st = scenario.build([skirmish()], P)
     sim, game = play(st, 30, UI.UnitSeer(allow_flat=True, params=P))
@@ -124,7 +124,7 @@ def test_the_same_views_on_a_map_in_the_games_coordinates(tmp_path):
     di, bi = torch.full((R,), 19, dtype=torch.long), torch.zeros(R, dtype=torch.long)
     vs = T.views(sim, di, bi, own, card, ar, cfg)
     vg = T.views(game, di, bi, own, card, ag, cfg)
-    keep = [i for i, k in enumerate(V.ROW) if k not in ("v_right", "v_forward", "f")]
+    keep = list(range(len(V.ROW)))
     assert torch.allclose(vs["rows"][..., keep], vg["rows"][..., keep], atol=2e-3)
     assert torch.allclose(vs["mem"][..., keep], vg["mem"][..., keep], atol=2e-3)
     assert torch.allclose(vs["map"], vg["map"], atol=2e-3)

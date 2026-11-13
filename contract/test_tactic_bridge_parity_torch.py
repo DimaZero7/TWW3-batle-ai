@@ -33,8 +33,8 @@ EMP = ["wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh_dlc04_emp_
        "wh3_dlc25_emp_inf_nuln_ironsides", "wh_main_emp_cav_demigryph_knights_0"]
 SKV = ["wh2_main_skv_cha_warlord_0", "wh2_main_skv_inf_clanrat_spearmen_0", "wh2_dlc12_skv_inf_ratling_gun_0",
        "wh2_main_skv_inf_plague_monk_censer_bearer", "wh2_main_skv_art_warp_lightning_cannon"]
-NOT_YET = ("vx", "vz", "f")               # the unit level's view.raw reads them from the simulator (bridge_parity.md)
-ROW_NOT_YET = ("v_right", "v_forward", "f")
+NOT_YET = ()                               # (vx, vz, f: view.shift_velocity, as the bridge)
+ROW_NOT_YET = ()
 
 
 def skirmish(gap=120.0):
@@ -119,7 +119,7 @@ def run_both(st, seconds, seers, place=None, terrain_path="flat"):
     return torch.stack(sim), {k: torch.stack(v) for k, v in game.items()}
 
 
-FRAME = ("x", "z", "b", "terr", "tpx", "tpz", "tpr")    # the battle's frame / the map's: compared through the input
+FRAME = ("x", "z", "b", "vx", "vz", "terr", "tpx", "tpz", "tpr")    # the battle's frame / the map's: compared through the input
 
 
 def raw_parity(sim, game, st, frame=True):

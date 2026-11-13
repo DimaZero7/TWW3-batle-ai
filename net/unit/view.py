@@ -62,6 +62,39 @@ def cell_size(me, base=8.0):
     return torch.maximum(torch.full_like(me[:, I["range"]], float(base)), me[:, I["range"]] / RANGE_CELLS)
 
 
+def shift_velocity(st, alive):
+    """(vx, vz, f) [B, N]: the velocity as the game's bridge gives it (bridge/companion/unit_input.game_raw): the centre's
+    shift since the previous call on this state over the time between, 0 for a unit not moving in both snapshots
+    (mv), locked in melee in both (m) or not alive; f: moving and the shift faster than its walk + RUN_MARGIN. The
+    previous snapshot is kept on the state (st._vref); a second call at the same time returns the same numbers, the
+    first call (and one after the battle's clock went back) gives 0 - as the companion's first document. Not the
+    simulator's own u["vx"] (its physics: the movement, the leash)."""
+    from bridge.companion.exchange import RUN_MARGIN
+    u = st.u
+    x, z, mv, m = u["x"].float(), u["z"].float(), u["mv"].bool(), u["m"].bool()
+    t = st.t.float()[:, None]
+    ref = getattr(st, "_vref", None)
+    if ref is not None and (ref["x"].shape != x.shape or ref["x"].device != x.device):
+        ref = None
+    zero = torch.zeros_like(x)
+    if ref is None:
+        vx, vz = zero, zero.clone()
+        st._vref = {"t": t.clone(), "x": x.clone(), "z": z.clone(), "mv": mv.clone(), "m": m.clone(), "vx": vx, "vz": vz}
+    else:
+        later = (t > ref["t"] + 1e-6).expand_as(x)
+        same = ((t - ref["t"]).abs() <= 1e-6).expand_as(x)
+        dt = (t - ref["t"]).clamp(min=1e-6)
+        still = (~mv & ~ref["mv"]) | (m & ref["m"]) | ~alive
+        vx = torch.where(later, torch.where(still, zero, (x - ref["x"]) / dt), torch.where(same, ref["vx"], zero))
+        vz = torch.where(later, torch.where(still, zero, (z - ref["z"]) / dt), torch.where(same, ref["vz"], zero))
+        new = ~same                                  # a later snapshot (or the clock went back): it is the reference now
+        st._vref = {"t": torch.where(new[:, :1], t, ref["t"]), "x": torch.where(new, x, ref["x"]),
+                    "z": torch.where(new, z, ref["z"]), "mv": torch.where(new, mv, ref["mv"]),
+                    "m": torch.where(new, m, ref["m"]), "vx": vx.clone(), "vz": vz.clone()}
+    run_f = mv & (torch.sqrt(vx * vx + vz * vz) > u["walk"] + RUN_MARGIN)
+    return vx, vz, run_f
+
+
 def raw(st, spacing, melee_depth=0.0, leash=None, missile=None):
     """[B, N, len(RAW)] the slots' raw state now (world frame; sim/state.py names). alive: present, men left,
     not gone; vis: visible to the other side; fill: the share of the formation's places filled (zmap.rects_of);
@@ -75,9 +108,10 @@ def raw(st, spacing, melee_depth=0.0, leash=None, missile=None):
     men0 = u["men0"].clamp(min=1)
     ammo = torch.where(u["ammo0"] > 0, u["a"] / u["ammo0"].clamp(min=1), torch.zeros_like(u["a"]))
     alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
-    cols = {"x": u["x"], "z": u["z"], "b": u["b"], "vx": u["vx"], "vz": u["vz"], "front": r["front"],
+    vx, vz, run_f = shift_velocity(st, alive)
+    cols = {"x": u["x"], "z": u["z"], "b": u["b"], "vx": vx, "vz": vz, "front": r["front"],
             "depth": r["depth"], "fill": r["fill"], "men": u["men"] / men0, "hp": u["hp"], "mp": u["mp"], "ms": u["ms"],
-            "r": u["r"], "s": u["s"], "w": u["w"], "m": u["m"], "mv": u["mv"], "f": u["f"], "fire": u["fire"],
+            "r": u["r"], "s": u["s"], "w": u["w"], "m": u["m"], "mv": u["mv"], "f": run_f, "fire": u["fire"],
             "fat": u["fat"], "ammo": ammo, "alive": alive, "vis": u["vis"], "side": u["side"], "range": u["range"],
             "run": u["run"], "leash": leash if leash is not None else torch.zeros_like(alive),
             "arc": fire_arc(u, missile)}

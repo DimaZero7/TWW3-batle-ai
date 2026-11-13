@@ -302,6 +302,80 @@ def contact_spacing(u, h, v, on):
     return (h - cut).clamp(min=0.3), (v - cut).clamp(min=0.3)
 
 
+def newcomers(u, contact, pw, dt):
+    """(older, newer) [B, i, j]: j an enemy in contact with i that has been in melee at least as long as i (one i was
+    fighting when j came), and j a newer enemy of an i that has an older one (melee.answer_struck, melee.turn_struck)."""
+    clock = u["contact_s"]
+    enemy_c = contact & pw["enemy"]
+    older = enemy_c & (clock[:, None, :] + dt >= clock[:, :, None])
+    newer = enemy_c & (clock[:, None, :] + dt < clock[:, :, None]) & older.any(dim=2, keepdim=True)
+    return older, newer
+
+
+def reach_length(u, pw, through_front, R):
+    """[B, i, j] m: the length of i's side towards j (its front or back line - face_i's side through the front - or the
+    flank line on j's side, on the box's edge) whose points lie within R [B, i, j] of j's rectangle (front x depth at its
+    bearing): the side's segment against j's box grown by R (the union of the box widened by R across, lengthened by R
+    along and the four corner disks - a convex set, so the points within R make one interval). Square sides meet over
+    their whole overlap (+ R past each end); a side at an angle to j's only near the corner it meets (melee.reach_cap)."""
+    b = u["b"] * geometry.DEG
+    sb, cb = torch.sin(b), torch.cos(b)                   # facing (sin b, cos b); across (cos b, -sin b)
+    front, depth = pw["front"], pw["depth"]
+    dx = u["x"][:, None, :] - u["x"][:, :, None]
+    dz = u["z"][:, None, :] - u["z"][:, :, None]
+    fi = dx * sb[:, :, None] + dz * cb[:, :, None]           # j's centre along i's facing
+    ai = dx * cb[:, :, None] - dz * sb[:, :, None]           # ... across i's front
+    one = torch.ones_like(fi)
+    sg_f = torch.where(fi >= 0, one, -one)
+    sg_a = torch.where(ai >= 0, one, -one)
+    fr_i, dp_i = front[:, :, None].expand_as(fi), depth[:, :, None].expand_as(fi)
+    # the side's centre (from i's centre) and direction, world axes
+    cf = torch.where(through_front, sg_f * dp_i / 2, torch.zeros_like(fi))     # along i's facing
+    ca = torch.where(through_front, torch.zeros_like(fi), sg_a * fr_i / 2)     # across
+    half = torch.where(through_front, fr_i, dp_i) / 2
+    px = u["x"][:, :, None] + cf * sb[:, :, None] + ca * cb[:, :, None]
+    pz = u["z"][:, :, None] + cf * cb[:, :, None] - ca * sb[:, :, None]
+    ddx = torch.where(through_front, cb[:, :, None].expand_as(fi), sb[:, :, None].expand_as(fi))
+    ddz = torch.where(through_front, -sb[:, :, None].expand_as(fi), cb[:, :, None].expand_as(fi))
+    # into j's frame (x across its front, z along its facing)
+    sj, cj = sb[:, None, :], cb[:, None, :]
+    qx, qz = px - u["x"][:, None, :], pz - u["z"][:, None, :]
+    p_x, p_z = qx * cj - qz * sj, qx * sj + qz * cj
+    d_x, d_z = ddx * cj - ddz * sj, ddx * sj + ddz * cj
+    a, c = front[:, None, :] / 2, depth[:, None, :] / 2
+    big = 1e6
+    lo_all = torch.full_like(fi, big)
+    hi_all = torch.full_like(fi, -big)
+
+    def slab(p, d, e):
+        safe = torch.where(d.abs() < 1e-6, torch.full_like(d, 1e-6), d)
+        t1, t2 = (-e - p) / safe, (e - p) / safe
+        lo, hi = torch.minimum(t1, t2), torch.maximum(t1, t2)
+        flat = d.abs() < 1e-6
+        inside = p.abs() <= e
+        lo = torch.where(flat, torch.where(inside, -big, big) * one, lo)
+        hi = torch.where(flat, torch.where(inside, big, -big) * one, hi)
+        return lo, hi
+
+    for ex, ez in ((a + R, c), (a, c + R)):
+        l1, h1 = slab(p_x, d_x, ex)
+        l2, h2 = slab(p_z, d_z, ez)
+        lo, hi = torch.maximum(l1, l2), torch.minimum(h1, h2)
+        ok = hi >= lo
+        lo_all = torch.where(ok, torch.minimum(lo_all, lo), lo_all)
+        hi_all = torch.where(ok, torch.maximum(hi_all, hi), hi_all)
+    for kx in (-1.0, 1.0):
+        for kz in (-1.0, 1.0):
+            ox, oz = p_x - kx * a, p_z - kz * c
+            bq = d_x * ox + d_z * oz
+            disc = bq * bq - (ox * ox + oz * oz - R * R)
+            ok = disc >= 0
+            r = torch.sqrt(disc.clamp(min=0))
+            lo_all = torch.where(ok, torch.minimum(lo_all, -bq - r), lo_all)
+            hi_all = torch.where(ok, torch.maximum(hi_all, -bq + r), hi_all)
+    return (torch.minimum(hi_all, half) - torch.maximum(lo_all, -half)).clamp(min=0)
+
+
 def front_overlap(u, pw, through_front, face_i):
     """(overlap, excess_lo, excess_hi) [B, i, j], m: i's side towards j (its front of face_i, or its flank: the depth)
     against j's box seen along that side (j's front and depth at j's bearing); the overlap, and how far i's side runs
@@ -558,6 +632,26 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             # way there is our own men
             wrap = wrap & ~behind
         length = torch.where(wrap, face_i, length)
+    L_reach = cut_ok = None
+    if (cal.get("reach_cap") or {}).get("on") and edge is None:
+        # The side in reach (melee.reach_cap; sim/config/sim.json melee.reach_cap_why): a man strikes the enemies within the
+        # free fight's reach of him (reverse/notes/melee_wrap.md 3, melee_module.md 2.4), so a side that meets j's at an
+        # angle brings only its part within reach of j's box (reach_length) - the outer men's reach as the contact's
+        # (geometry.engage_gap: the database's formed combat distance + the radius - the half places). A square side
+        # loses nothing (its overlap + the reach past each end); the striker's whole front through a free target's flank
+        # (melee.flank_face striker: its men step round) is not cut.
+        combat_m = float(params.battle.get("entity_action_attack_formed_combat_distance", 2.5))
+        R = geometry.engage_gap(u, pw, combat_m, float(params.sim["formation"]["spacing_m"])).clamp(min=0)
+        L_reach = reach_length(u, pw, through_front, R)
+        cut_ok = ~wrap & ~single_i & ~single_j
+        if cal["reach_cap"].get("held_only", True) and "contact_s" in u:
+            # only between a held unit and a newcomer to it (either way): a free target's men turn and mesh with the
+            # enemy coming at them (melee.flank_face striker, the defender probe), a held one's face the enemy holding
+            # them (melee.flank_face_busy) - the brace probe's chargers at 30 / 60 deg on free spearmen
+            _, nw = newcomers(u, contact, pw, float(params.dt))
+            cut_ok = cut_ok & (nw | nw.transpose(1, 2))
+        length = torch.where(cut_ok, torch.minimum(length, L_reach), length)
+        length_meet = torch.where(cut_ok, torch.minimum(length_meet, L_reach), length_meet)
     wcal = cal.get("wrap") or {}
     F_ans = q_wrap = None
     if wcal.get("on") and edge is None:
@@ -583,6 +677,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         grow_s = float(wcal.get("grow_s") or 0.0)
         grow = (t_pair / grow_s).clamp(0, 1) if grow_s > 0 else torch.ones_like(t_pair)
         Wt = torch.where(head, W * grow, torch.zeros_like(W))         # i's wrap on j's flanks, m
+        if L_reach is not None:
+            # (melee.reach_cap) the overlap counts its part within reach, and the wrap comes from that part: a front at an
+            # angle to j's has its 'excess' far from j, not beside it (square: no change)
+            ov_r = torch.where(cut_ok, torch.minimum(ov, L_reach), ov)
+            Wt = Wt * (ov_r / ov.clamp(min=1e-6)).clamp(0, 1)
+            ov = ov_r
         length = torch.where(head, ov + Wt, length)
         q_wrap = torch.where(head, Wt / length.clamp(min=1e-6), torch.zeros_like(Wt))
         # i's flank men answering j's wrap on i (j's front on i's front: the transposed pair)
@@ -784,6 +884,20 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         slot = torch.arange(u["men"].shape[1], device=F.device)[None, :, None]
         among = (u["stk_k"][:, None, :] == slot) & (u["stk_n"] > 0)[:, None, :] & contact
         F = torch.where(among, torch.maximum(F, torch.minimum(men_i, u["stk_n"][:, None, :])), F)
+    acal = cal.get("answer_struck") or {}
+    if acal.get("on") and "contact_s" in u:
+        # Who answers a newcomer (melee.answer_struck; sim/config/sim.json melee.answer_struck_why): a unit i in melee with
+        # an older enemy that a newer enemy j joins gives j no targets - its attack order feeds its front to the enemy it
+        # fights (reverse/notes/hold_rate.md 2.2) -, and each of its free men touched by j's swing is ordered to attack
+        # the swinger (melee_wrap.md 5: 0x143080ca0 -> 0x143074dcc), a man busy with his own attack is not. So i strikes
+        # j with at most the men j strikes (j's steady men, F before the opening wave: one answer a man struck), and
+        # with none where j comes onto the side of i its older enemy holds (those men are busy). Formations only.
+        older, newer = newcomers(u, contact, pw, float(params.dt))
+        newer = newer & ~single_i & ~single_j
+        held_g = torch.stack([(older & (side_of == g)).any(dim=2) for g in range(4)], dim=2)     # [B, i, side]
+        on_held = held_g.gather(2, side_of.clamp(min=0)) & (side_of >= 0)
+        cap_ans = torch.where(on_held, torch.zeros_like(F), F_pre.transpose(1, 2))
+        F = torch.where(newer, torch.minimum(F, cap_ans), F)
     own =torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
@@ -818,6 +932,15 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             F0 = torch.where(big & ~single_i & (occ0 > room), F0 * room / occ0.clamp(min=1e-6), F0)
 
     sector = geometry.sector(pw["rel_j"], cc["front_deg"], cc["rear_deg"])
+    tcal = cal.get("turn_struck") or {}
+    if tcal.get("on") and "contact_s" in u:
+        # (melee.turn_struck; tested, off: sim/evidence/flank2v1/spec.md) the free men of a held target that a newcomer's
+        # swing touched turn to it (melee_wrap.md 5): after the newcomer's first interval its blows on them come from
+        # their front
+        _, newer_t = newcomers(u, contact, pw, float(params.dt))
+        round_done = (u["contact_s"][:, :, None] >= u["interval"][:, :, None])
+        turned = newer_t.transpose(1, 2) & round_done & ~single_i & ~single_j
+        sector = torch.where(turned, torch.zeros_like(sector), sector)
     routing_j = u["r"][:, None, :]
     sector = torch.where(routing_j, torch.full_like(sector, 2), sector)
     coef = torch.where(sector == 0, 1.0, torch.where(sector == 1, B["melee_defence_direction_penalty_coefficient_flank"],
@@ -1087,6 +1210,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         # the impact, not a charge rate.
         t = (u["contact_s"] - float(params.dt))[:, :, None]
         swung = u["ran_in"][:, :, None] & ~single_i
+        if cal.get("stand_interval") and "stood_in" in u:
+            # (melee.stand_interval; reverse/notes/hold_rate.md 2.3: a standing unit's men who struck the arrival swing
+            # again only an interval after it - the same timer, 0x14305ecc8) the standing first strike's men too
+            swung = swung | (u["stood_in"][:, :, None] & ~single_i)
         if "melee_s" in u:
             swung = swung & (u["melee_s"] - u["contact_s"] < 0.5 * float(params.dt))[:, :, None]
         if recv is not None:

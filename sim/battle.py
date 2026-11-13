@@ -627,6 +627,11 @@ def step(st, orders, params=None, dt=None):
             deg = float(params.battle["bracing_attack_angle"])
         facing = pw["rel_i"].abs() <= deg * geometry.DEG
         first_pair = first_pair | (stand[:, :, None] & facing)
+        if cal["melee"].get("stand_interval") and "stood_in" in u:
+            # (melee.stand_interval; reverse/notes/hold_rate.md 2.3) the men who struck the standing first strike wait
+            # their interval as a charger's do (melee.swing_interval reads it)
+            swung_now = stand & (strike & facing).any(2)
+            u["stood_in"] = (u["stood_in"] | swung_now) & (u["contact_s"] > 0)
     swung = torch.where(first_pair, swing, torch.zeros_like(swing))
     if d_pair is not None:
         # (contact.impact strike_first, impact.strike_first: the front rank's swing lands at the landing too - its lances
@@ -1178,6 +1183,7 @@ def step(st, orders, params=None, dt=None):
     attackers = strike & standing[:, :, None]
     # the worst side it is struck from this step (morale: attacked in the flank / rear while it lasts)
     u["flank_hit"] = torch.where(attackers, sector, torch.zeros_like(sector)).amax(1).float()
+    u_push = None
     if (cal["morale"].get("attacked_first") or {}).get("on") and "hit_sec" in u:
         # morale.attacked_first: the side is the one each attacker's contact BEGAN on (the database's was_attacked_in_flank
         # / _rear: 'first contact from the flank / rear'), held while that pair stays in contact (the recordings: the
@@ -1185,10 +1191,36 @@ def step(st, orders, params=None, dt=None):
         # T-A: from the first blow to the attacker's leaving); u hit_sec [B, N * N] (state.PAIRS), side + 1, 0 none
         Bn, Nn = touch.shape[0], touch.shape[1]
         prev = u["hit_sec"].reshape(Bn, Nn, Nn)
-        held = torch.where(prev > 0, prev, torch.where(attackers, sector.float() + 1, torch.zeros_like(prev)))
+        af = cal["morale"]["attacked_first"]
+        side_m = sector.float()
+        if af.get("side") == "diagonal":
+            # (morale.attacked_first side 'diagonal'; reverse/notes/morale_module.md 2.6, 0x14302682c) the morale's side
+            # is the centre-to-centre vector against the diagonals of the struck unit's formation rectangle (front /
+            # flank / rear; closer than 2 m: front) - not the blows' +-45 / 135 deg sector, which stays the combat's
+            rel = pw["rel_j"]                                         # [B, striker, struck]: the striker seen from j
+            sn, cs = torch.sin(rel).abs(), torch.cos(rel)
+            fj, dj = pw["front"][:, None, :], pw["depth"][:, None, :]
+            in_end = sn * dj <= cs.abs() * fj                         # through its front or back (the diagonals)
+            side_m = torch.where(in_end, torch.where(cs >= 0, 0.0, 2.0), 1.0) * torch.ones_like(prev)
+            lone = (u["men0"] <= 1)[:, None, :]
+            side_m = torch.where(lone, sector.float(), side_m)       # (a lone man: a circle, the blows' sector)
+            side_m = torch.where(pw["dist"] < 2.0, torch.zeros_like(side_m), side_m)
+        new_pair = (prev <= 0) & attackers
+        held = torch.where(prev > 0, prev, torch.where(attackers, side_m + 1, torch.zeros_like(prev)))
         held = torch.where(touch & standing[:, :, None] & (held > 0), held, torch.zeros_like(held))
         u["hit_sec"] = held.reshape(Bn, Nn * Nn)
         u["flank_hit"] = (held.amax(1) - 1).clamp(min=0)
+        if af.get("push"):
+            # (morale.attacked_first push; morale_module.md 2.6) the recount in which an enemy has just come into
+            # contact takes a one-off push: was_attacked_in_flank / _rear (front 0), x2 when that enemy comes in its
+            # charge (the run-up: its charge on, 0x1430dbc50); the strongest new one a unit
+            pts = torch.where(held == 3, float(params.morale["was_attacked_in_rear"]),
+                              torch.where(held == 2, float(params.morale["was_attacked_in_flank"]), 0.0))
+            pts = pts * torch.where((charge_now > 0)[:, :, None], 2.0, 1.0)
+            pts = torch.where(new_pair & (held > 0), pts, torch.zeros_like(pts))
+            u_push = pts.amin(1)
+        else:
+            u_push = None
 
     alive = present & (u["men"] > 0) & ~u["gone"]
     standing = alive & ~u["r"]
@@ -1346,6 +1378,7 @@ def step(st, orders, params=None, dt=None):
         "hill": ctx_hill if terrain.on(u) else None,
         "in_melee": engaged,
         "combat": combat_pts,
+        "attack_push": u_push,
         # A routing expendable unit scares nobody (morale.expendable_scares_expendable: only other expendable units;
         # the database's attribute text, measured: sim/config/sim.json morale.expendable_why).
         "routing_friends": (friends & u["r"][:, None, :] & ~(u["expendable"][:, None, :] & ~(

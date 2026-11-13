@@ -319,6 +319,8 @@ INTERNAL = {
     "ran_in": ("b", "it came into its present fight moving (or charging), not standing: set when its melee clock "
                     "starts, cleared when the clock resets (battle.py: the first strike; melee.py: men gather round "
                     "a lord only when he ran in)"),
+    "stood_in": ("b", "it struck its standing first strike at this fight's contact (contact.stand_first_strike): its men "
+                      "who swung then wait their interval (melee.stand_interval); cleared when the melee clock resets"),
     "aim": ("f", "seconds standing still able to shoot"),
     "quiet": ("f", "seconds left of the quiet window after a new order or target (quiet_s; no shot while > 0)"),
     "aim_tgt": ("i", "the enemy it aimed at last step (-1 none): a change makes it wait missile.retarget_s"),
