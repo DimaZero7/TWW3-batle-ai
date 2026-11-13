@@ -16,6 +16,10 @@ from sim import detour, direct, ground, impact, reform, regen, skirmish, stealth
 from sim import orders as O
 from sim.params import load
 
+# the time constant of u shot_dealt, a bookkeeping sum for net/strategist/drill_s1's metric (no effect on the battle;
+# the old morale balance's 30 s, kept so the metric reads as before)
+SHOT_DEALT_FADE_S = 30.0
+
 
 def threat_flags(u, pw, params, *, alive=None, standing=None):
     """Native lf/rf/bf proxies, shared by observation and exposed-flank morale.
@@ -225,7 +229,7 @@ def step(st, orders, params=None, dt=None):
     # mob's men within the database's pursue_charge_max_unit_separation 8 m, and the mob strings out ~8 m beyond its box);
     # the chaser strikes it (melee.py: the pursuit's rate), the router counts as in melee (u["m"] below), the chaser's own
     # melee flag is not lit by it (the game's: off 5 s after the rout). touch_geo: the contacts without these pairs (the
-    # missiles' contact test, the morale's fought enemies, the chaser's melee flag).
+    # missiles' contact test, the chaser's melee flag).
     touch_geo = touch
     chase_touch = torch.zeros_like(touch)
     pursue_gap = float(cal["contact"].get("pursue_gap_m") or 0.0)
@@ -1142,17 +1146,14 @@ def step(st, orders, params=None, dt=None):
     if "low_s" in u:
         low = present & ((u["hp"] < 0.25) | (u["low_s"] > 0))
         u["low_s"] = torch.where(low, u["low_s"] + dt, u["low_s"])
-    # Casualty windows (recent casualties: the last 4 s, extended: the last 60 s; morale.casualty_windows);
-    # recent_s: the melee balance (dealt / taken; reward.py reads the same).
-    morale.casualty_windows(u, taken, params, dt)
-    fade = math.exp(-dt / cal["morale"]["recent_s"])
+    # The game's casualty rings and the fight's HP (morale.casualty_windows: HP taken and dealt each step - every harm
+    # with a striking unit, friendly fire too, as 0x143260a34 books it; the rings move on whole seconds)
+    phase = morale.cell_phase(st.t + dt, params, dt)
+    morale.casualty_windows(u, taken, dmg.sum(2), params, dt, phase)
     melee_scaled = hp_melee * scale[:, None, :]
-    u["dealt"] = u["dealt"] * fade + melee_scaled.sum(2)
-    u["taken"] = u["taken"] * fade + melee_scaled.sum(1)
-    # the same balance of missile HP between enemies (the morale's winning / losing the fight counts both)
+    # bookkeeping: missile HP dealt to enemies, decaying (net/strategist/drill_s1's metric; no effect on the battle)
     shot_scaled = (hp_missile * scale[:, None, :] + db) * pw["enemy"]
-    u["shot_dealt"] = u["shot_dealt"] * fade + shot_scaled.sum(2)
-    u["shot_taken"] = u["shot_taken"] * fade + shot_scaled.sum(1)
+    u["shot_dealt"] = u["shot_dealt"] * math.exp(-dt / SHOT_DEALT_FADE_S) + shot_scaled.sum(2)
     # contact effects (poison, the censer's contagion, suppressing fire): a hit of a weapon that lays one starts it on
     # the enemy hit (effects.lay; friendly fire lays none); it acts from the next step
     effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t,
@@ -1275,15 +1276,16 @@ def step(st, orders, params=None, dt=None):
         open_ = (((listed & (rel <= 0)).any(2) & ~held_l) | ((listed & (rel > 0)).any(2) & ~held_r)
                  | (listed & (rel.abs() > 90)).any(2))
         secure = ~(u["lf"] | u["rf"] | u["bf"]) & ~open_
-    # In a fight (the morale's winning / losing): in melee, shooting, or shot at by an enemy shooting at it now.
+    # Winning / losing the fight (morale.outcome, the game's 0x142f55cd4): each unit's combat list - on whole seconds
+    # an enemy is in it while in melee contact with the unit (touch: the game's contact list) or while one of the two
+    # shoots at the other (aimed: the fire task with its target on top of the shooter's task stack, 0x142f59498 both
+    # ways); reverse/notes/morale_module.md 2.6
     slot = torch.arange(N, device=st.device)
     aimed = (firing & (m_target >= 0))[:, :, None] & (m_target.clamp(min=0)[:, :, None] == slot[None, None, :])
-    shot_now = (aimed & pw["enemy"]).any(1)
-    # the share of health lost by the enemies it fights (in contact, or the target it shoots): winning shows only
-    # once one of them has lost morale.combat_lost
-    fought = (touch_geo | aimed | aimed.transpose(1, 2)) & pw["enemy"] & alive[:, None, :]
-    lost_j = (1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6))[:, None, :]
-    foe_lost = torch.where(fought, lost_j, torch.zeros_like(lost_j)).amax(2)
+    t_end = st.t + dt
+    rel = (touch | aimed | aimed.transpose(1, 2)) & pw["enemy"] & alive[:, None, :] & alive[:, :, None]
+    morale.combat_list(u, rel, phase, t_end)
+    combat_pts = morale.outcome(u, params, dt, phase, t_end)
     # The charge's morale (+15, morale.charge): a block of block_s from the charge pose (an attack order, its target's
     # edge within the unit's charge_pose distance - the database's charge_distance_adopt_charge_pose, inside the
     # sprint's charge_dist - not yet in melee), a next one when it ends while the unit still charges or its charge
@@ -1324,19 +1326,6 @@ def step(st, orders, params=None, dt=None):
     u["chm_s"] = torch.where(standing, u["chm_s"], torch.zeros_like(u["chm_s"]))
     rr = mcal.get("routing_enemies_reach") or {}
     routing_enemies_m = float(rr["m"]) if rr.get("on") else M["routing_unit_effect_distance_front"]
-    fight_dealt = fight_taken = None
-    if (mcal.get("combat_shooter") or {}).get("on"):
-        # morale.combat_shooter: a unit out of melee that shoots weighs only the HP it exchanges with the enemy it shoots
-        # at (its missile HP dealt against what that enemy shoots back at it), not the fire of others on it (the
-        # recordings: shooters the game shows winning need +8 at every balance of all HP from 0.67 up, +5 below)
-        at = u["aim_tgt"]
-        tj = at.clamp(min=0)
-        back = (at >= 0) & (at.gather(1, tj) == slot[None, :]) & pw["enemy"].gather(2, tj[:, :, None]).squeeze(2)
-        own_shot = (at >= 0) & ~engaged
-        zero = torch.zeros_like(u["shot_dealt"])
-        fight_dealt = torch.where(own_shot, u["shot_dealt"], u["dealt"] + u["shot_dealt"])
-        fight_taken = torch.where(own_shot, torch.where(back, u["shot_dealt"].gather(1, tj), zero),
-                                  u["taken"] + u["shot_taken"])
     blocks = torch.ones_like(foes)
     rw = mcal.get("rally_weak") or {}
     if rw.get("on"):
@@ -1356,10 +1345,7 @@ def step(st, orders, params=None, dt=None):
         "secure": secure,
         "hill": ctx_hill if terrain.on(u) else None,
         "in_melee": engaged,
-        "in_combat": engaged | firing | shot_now,
-        "foe_lost": foe_lost,
-        "fight_dealt": fight_dealt,          # (morale.combat_shooter; None: the unit's HP dealt / taken, all of it)
-        "fight_taken": fight_taken,
+        "combat": combat_pts,
         # A routing expendable unit scares nobody (morale.expendable_scares_expendable: only other expendable units;
         # the database's attribute text, measured: sim/config/sim.json morale.expendable_why).
         "routing_friends": (friends & u["r"][:, None, :] & ~(u["expendable"][:, None, :] & ~(

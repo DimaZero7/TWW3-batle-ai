@@ -8,17 +8,16 @@ Effects (points; morale.terms): lord within 70 m +4 (fading to 0 at 105 m; not t
 lord killed -16 for 45 s, then -10; routed off the map -16 for 120 s (routed on the field: his aura only; battle.py,
 sim.json morale.lord_fall); flanks secure +5 (no standing enemy within morale.secure.enemy_m, or friends - not lords -
 at both sides within morale.secure.side_m; never with a threatened flank); casualties over the battle (share of HP)
--2 ... -74; recent casualties -6 ... -80 (HP lost in the last 4 s); extended casualties -4 ... -60 (the last 60 s);
-winning / losing the fight +3/+6/+8, -3/-8 by HP dealt / taken in melee and by missiles, while in melee, shooting or
-shot at by an enemy shooting at it (a single entity in melee always -3: morale.single_combat); attacked in the
-flank / rear -6 / -14 while struck from that side; flanks exposed (an enemy threatens the left, right or rear:
+-2 ... -74; recent casualties -6 ... -80 and extended casualties -4 ... -60 (HP taken in the game's rings of 1 s
+cells, 4 and 60 of them, of the start's health: casualty_windows); winning / losing the fight +3/+6/+8, -3/-8 by the
+game's rule (outcome: the shares of health lost by the unit and by the enemies in its combat list over 60 s);
+attacked in the flank / rear -6 / -14 while struck from that side; flanks exposed (an enemy threatens the left, right or rear:
 lf / rf / bf) -3, several -6; routing friends within 100 m -3 each (at most 4; a routing expendable unit scares only
 expendable units); routing enemies within 100 m +2.5 each (at most 5); under fire -5 until 15 s after the last
 projectile hit; very tired -2, exhausted -6; an enemy worth 3x as much within 70 m -3; the charge +15 in blocks
 of 6 s from the charge sprint (morale.charge); fear -8 (an enemy causing fear within 20 m, morale.fear); the army beaten as a whole -120 (army destruction).
 Switches measured on the step replay's recordings (sim/config/sim.json, off by default; battle.py): attacked_first (the side
-a pair's contact began on, held while in contact), combat_shooter (a shooter's balance only against the enemy it shoots),
-routing_enemies_reach (routing enemies counted to 200 m), charge.moving (another 6 s block while the unit still moves
+a pair's contact began on, held while in contact), routing_enemies_reach (routing enemies counted to 200 m), charge.moving (another 6 s block while the unit still moves
 under an attack order, no cap; in melee a move under an attack order starts one).
 
 States: wavering below 16 points (morale.waver_band: from below 12 to above 16, shaken from below 30 to above 32);
@@ -27,7 +26,7 @@ tenths of a second - 2.5 s - of unbroken wavering, the points held at 0 or above
 rout shatters, as does falling below the database's broken band (-50 points) during army destruction (shatter_rules: a
 1st / 2nd router below 5 % / 10 % of its health or, morale.shatter_by "men", of its men). Routing friends and enemies
 cancel with morale.routing_net; an enemy weaker than a third of a router does not hold its rally with morale.rally_weak
-(battle.py); 'losing' needs a share balance below combat_even.share with morale.combat_even (off). A routing
+(battle.py). A routing
 unit's morale follows its target like any other's (without the fight terms) and it rallies once the morale is above
 0, it has routed morale.rally_after_s and no standing enemy is within morale.rally_free_m (its army not collapsing);
 with morale.rally_hazard on, past rally_after_s and above 0 it rallies with a chance a second by the nearest enemy's
@@ -118,41 +117,94 @@ def hash_uniform(B, N, k, device, salt=86413, ids=None):
     return ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
 
 
-def window_steps(seconds, dt):
-    """Steps in a sliding window of `seconds` (at least one)."""
-    return max(1, int(round(float(seconds) / dt)))
+def cells(params, dt):
+    """(steps a cell, cells of the recent ring, cells of the extended ring, cells of an enemy's health) - the game's
+    rings of 1 s cells (sim.json morale.windows)."""
+    w = params.sim["morale"]["windows"]
+    c = max(1, int(round(float(w["cell_s"]) / dt)))
+    return c, int(w["recent_cells"]), int(w["extended_cells"]), int(w["enemy_cells"])
 
 
 def history_steps(params, dt):
-    """Steps of HP lost the state keeps (u["lost_hist"]) for the sliding casualty windows: the longer of
-    morale.casualties_s and extended_s; 0 when morale.casualties_window is not "sliding" (decaying sums)."""
-    cm = params.sim["morale"]
-    if cm.get("casualties_window") != "sliding":
-        return 0
-    return max(window_steps(cm["casualties_s"], dt), window_steps(cm.get("extended_s") or 0.0, dt))
+    """Steps of HP lost / dealt the state keeps (u["lost_hist"], u["dealt_hist"]): the extended ring's."""
+    c, _, ext, _ = cells(params, dt)
+    return c * ext
 
 
-def casualty_windows(u, taken, params, dt):
-    """HP lost recently (u["recent"]: recent casualties, morale.casualties_s) and over the extended window
-    (u["extended"]: extended casualties, morale.extended_s; 0: off), with this step's losses `taken` [B, N]
-    (in place). casualties_window "sliding": exactly the HP lost in the last casualties_s / extended_s seconds
-    (u["lost_hist"]: the HP lost each step, newest first; the database's 'last 4 s' / 'last 60 s', measured: a
-    volley holds the game's PercentHpLostRecently 3 one-second samples, then 0); otherwise decaying sums with
-    those time constants (the old fit)."""
-    cm = params.sim["morale"]
-    ext_s = float(cm.get("extended_s") or 0.0)
-    K = history_steps(params, dt)
-    if K:
-        B, N = taken.shape
-        hist = torch.cat([taken[:, None, :], u["lost_hist"].reshape(B, K, N)[:, :K - 1]], 1)
-        u["lost_hist"] = hist.reshape(B, K * N)
-        u["recent"] = hist[:, :window_steps(cm["casualties_s"], dt)].sum(1)
-        if ext_s > 0:
-            u["extended"] = hist[:, :window_steps(ext_s, dt)].sum(1)
-        return
-    u["recent"] = u["recent"] * math.exp(-dt / float(cm.get("casualties_s", cm["recent_s"]))) + taken
-    if ext_s > 0:
-        u["extended"] = u["extended"] * math.exp(-dt / ext_s) + taken
+def cell_phase(t_end, params, dt):
+    """[B] steps since the last cell boundary at the step's end t_end [B] (0: this step ends on a whole second - the
+    game's update of the rings and the combat list, battle tick % 10 == 0 in 0x142f5aa58)."""
+    c = cells(params, dt)[0]
+    return torch.round(t_end / dt).long() % c
+
+
+def casualty_windows(u, taken, dealt, params, dt, phase):
+    """The game's casualty rings (in place; reverse/notes/morale_module.md 2.6, sim/evidence/morale_outcome/spec.md):
+    u lost_hist / dealt_hist get this step's HP taken / dealt [B, N] (newest first); on a cell boundary (phase 0, the
+    game's 1 s update 0x142f5a040) u recent / extended = the HP taken in the ring's last cells - 4 / 60 cells, the
+    newest just zeroed, so the HP of the last 3 / 59 whole seconds - held to the next boundary."""
+    c, rc, ec, _ = cells(params, dt)
+    K = c * ec
+    B, N = taken.shape
+    for name, x in (("lost_hist", taken), ("dealt_hist", dealt)):
+        hist = torch.cat([x[:, None, :], u[name].reshape(B, K, N)[:, :K - 1]], 1)
+        u[name] = hist.reshape(B, K * N)
+    lost = u["lost_hist"].reshape(B, K, N)
+    tick = (phase == 0)[:, None]
+    u["recent"] = torch.where(tick, lost[:, :c * (rc - 1)].sum(1), u["recent"])
+    u["extended"] = torch.where(tick, lost[:, :c * (ec - 1)].sum(1), u["extended"])
+
+
+def combat_list(u, rel, phase, t_end):
+    """The game's combat list of each unit (0x142f5a040, once a second): on a cell boundary (phase 0) enemy j stays in
+    or joins unit i's list while rel [B, N, N] (i, j) holds, else leaves it; u cl_t [B, N * N] (row i, column j): the
+    step's end time j joined (0: not in the list), kept while it stays."""
+    B, N = u["side"].shape
+    cl = u["cl_t"].reshape(B, N, N)
+    new = torch.where(rel, torch.where(cl > 0, cl, t_end[:, None, None].expand_as(cl)), torch.zeros_like(cl))
+    u["cl_t"] = torch.where((phase == 0)[:, None, None], new, cl).reshape(B, N * N)
+
+
+def outcome(u, params, dt, phase, t_end):
+    """[B, N] winning / losing the fight, the game's rule (0x142f55cd4 every tick; reverse/notes/morale_module.md 2.6):
+    loss_us = HP taken in the 60 s ring (its last 59 whole seconds + the running cell) / the unit's most health over the
+    ring (= its health now + that HP: the samples are the health at each second); loss_them = HP dealt in the same ring
+    (to anyone) / the sum over the enemies in its combat list of each one's most health since it joined, at most the
+    last enemy_cells seconds (enemy's ring shifted twice a second: 30 s). No enemy in the list, or no health on either
+    side: 0. The larger share 0.1 or less: even (0). Else the smaller / the larger below 0.3 / 0.6 / 0.8: +8 / +6 / +3
+    when the enemies lost the larger share, -8 / -3 / 0 when the unit did; from 0.8 even."""
+    c, _, ec, enc = cells(params, dt)
+    oc = params.sim["morale"]["outcome"]
+    R = params.morale
+    K = c * ec
+    B, N = u["side"].shape
+    lost = u["lost_hist"].reshape(B, K, N)
+    k = torch.arange(K, device=lost.device)
+    within = (k[None, :] < (c * (ec - 1) + phase)[:, None]).float()[:, :, None]
+    taken = (lost * within).sum(1)
+    dealt = (u["dealt_hist"].reshape(B, K, N) * within).sum(1)
+    hp = u["hp_abs"]
+    own = torch.minimum(hp + taken, u["hp0"])
+    # each listed enemy's health at the later of its joining and the enemy ring's start: its health now + the HP it
+    # lost since (C: the HP lost in the last k steps, k = 0 .. K)
+    C = torch.cat([torch.zeros_like(lost[:, :1]), lost.cumsum(1)], 1)
+    cl = u["cl_t"].reshape(B, N, N)
+    listed = cl > 0
+    since = torch.round((t_end[:, None, None] - cl) / dt).long()
+    m = torch.minimum(since, (c * (enc - 1) + phase)[:, None, None]).clamp(0, K)
+    e_hp = torch.minimum(hp[:, None, :] + C.gather(1, m), u["hp0"][:, None, :])
+    enemy = torch.where(listed, e_hp, torch.zeros_like(e_hp)).sum(2)
+    us = taken / own.clamp(min=1e-6)
+    them = dealt / enemy.clamp(min=1e-6)
+    lead = torch.maximum(us, them)
+    r = torch.minimum(us, them) / lead.clamp(min=1e-9)
+    big, mid, slight = (float(x) for x in oc["ratio"])
+    zero = torch.zeros_like(us)
+    win = torch.where(r < big, R["winning_combat_significantly"],
+                      torch.where(r < mid, R["winning_combat"], torch.where(r < slight, R["winning_combat_slightly"], 0.0)))
+    lose = torch.where(r < big, R["losing_combat_significantly"], torch.where(r < mid, R["losing_combat"], 0.0))
+    active = listed.any(2) & (own > 0) & (enemy > 0) & (lead > float(oc["even_share"]))
+    return torch.where(active & (them > us), win, torch.where(active & (us > them), lose, zero))
 
 
 def table(rules, prefix, shares):
@@ -166,46 +218,6 @@ def steps(x, points):
     for share, pts in points[1:]:
         out = torch.where(x >= share, torch.full_like(x, pts), out)
     return out
-
-
-def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=None, win_scale=None):
-    """Winning or losing the fight, by HP dealt / taken recently (melee and missiles), while the unit is in a
-    fight (in melee, shooting, or shot at by an enemy shooting at it now: battle.py ctx in_combat); losing only
-    once the unit has lost morale.combat_lost of its health, winning only once an enemy it fights has (own_lost,
-    foe_lost: shares of health lost; None: no such gate). win_scale ([B, 1]; None: 1): the battle's factor on the
-    winning thresholds (fitted, combat_ratio slightly / yes / significantly: a per-battle draw in training,
-    sim/knobs.py)."""
-    ratio = (dealt + 1.0) / (taken + 1.0)
-    c = cal["combat_ratio"]
-    s = 1.0 if win_scale is None else win_scale         # (x 1.0: the same float)
-    pts = torch.zeros_like(ratio)
-    pts = torch.where(ratio >= c["slightly"] * s, rules["winning_combat_slightly"], pts)
-    pts = torch.where(ratio >= c["yes"] * s, rules["winning_combat"], pts)
-    pts = torch.where(ratio >= c["significantly"] * s, rules["winning_combat_significantly"], pts)
-    if c.get("losing") is not None:
-        # the losing side's own thresholds (combat_ratio losing / losing_significantly: the enemy's advantage, taken /
-        # dealt): losing (-3) once it takes more than it deals x losing (1: Goumin's WH3 guide - 'a unit is losing if
-        # engaged with an enemy taking less damage than it', no even band), losing significantly (-8) from
-        # losing_significantly (the morale probe T-D: an HP balance of 0.32 showed -8, 0.58-0.63 showed -3)
-        pts = torch.where(ratio < 1 / float(c["losing"]), rules["losing_combat"], pts)
-        pts = torch.where(ratio <= 1 / float(c["losing_significantly"]), rules["losing_combat_significantly"], pts)
-    else:
-        pts = torch.where(ratio <= 1 / c["slightly"], rules["losing_combat"], pts)
-        pts = torch.where(ratio <= 1 / c["significantly"], rules["losing_combat_significantly"], pts)
-    even = cal.get("combat_even") or {}
-    if even.get("on") and own_lost is not None and foe_lost is not None:
-        # morale.combat_even: 'losing' (-3) only once the enemies it fights have lost less than combat_even.share of the
-        # share of health it has lost itself (an even or slightly lost fight gives nothing); 'losing significantly' as
-        # before. The probe hyp (even fights): clanrats behind spearmen at a share balance of 0.62-0.71 for 35 s - no -3
-        # (an HP balance of 0.53-0.61), -3 from 0.58; spearmen behind clanrats at 0.59 - -3 (HP balance 0.68)
-        lag = foe_lost < float(even["share"]) * own_lost
-        pts = torch.where((pts == rules["losing_combat"]) & ~lag, torch.zeros_like(pts), pts)
-    gate = cal.get("combat_lost")
-    if gate is not None and own_lost is not None:
-        pts = torch.where((pts < 0) & (own_lost < float(gate)), torch.zeros_like(pts), pts)
-    if gate is not None and foe_lost is not None:
-        pts = torch.where((pts > 0) & (foe_lost < float(gate)), torch.zeros_like(pts), pts)
-    return torch.where(in_combat, pts, torch.zeros_like(pts))
 
 
 def strategic_value(u, params):
@@ -296,25 +308,14 @@ def terms(u, ctx, params):
         out["hill"] = torch.where(ctx["hill"], R["ume_encouraged_on_the_hill"], 0.0)
     lost = 1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6)
     out["casualties"] = steps(lost, table(R, "total_casualties_penalty_", (10, 20, 30, 40, 50, 60, 70, 80, 90)))
-    base = (u["hp_abs"] + u["recent"]) if cal["recent_of_current"] else u["hp0"]
-    recent = u["recent"] / base.clamp(min=1e-6)
-    out["recent"] = steps(recent, table(R, "recent_casualties_penalty_", (6, 10, 15, 33, 50)))
-    if cal.get("extended_s"):
-        ext = u["extended"] / u["hp0"].clamp(min=1e-6)
-        out["extended"] = steps(ext, table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
-    in_combat = ctx.get("in_combat", ctx["in_melee"])
-    # the HP the fight's balance weighs: the unit's dealt / taken (melee and missiles), or ctx fight_dealt / fight_taken
-    # (morale.combat_shooter: a shooter out of melee only against the enemy it shoots at; battle.py)
-    dealt = ctx["fight_dealt"] if ctx.get("fight_dealt") is not None else u["dealt"] + u["shot_dealt"]
-    taken = ctx["fight_taken"] if ctx.get("fight_taken") is not None else u["taken"] + u["shot_taken"]
-    combat = combat_points(dealt, taken, in_combat, cal, R,
-                           own_lost=lost, foe_lost=ctx.get("foe_lost"),
-                           win_scale=knobs.get(u, "combat_ratio_scale", None))
-    if cal.get("single_combat") == "losing":
-        # A single entity (a lord) in melee always gets the database's losing_combat (-3), whatever the HP balance
-        # (measured: sim/config/sim.json morale.lord_why).
-        combat = torch.where(ctx["in_melee"] & (u["men0"] <= 1), torch.full_like(combat, R["losing_combat"]), combat)
-    out["combat"] = combat
+    # recent / extended casualties: the HP of the game's rings (casualty_windows) over the start's health (unit + 0x80,
+    # 0x142f5a040)
+    out["recent"] = steps(u["recent"] / u["hp0"].clamp(min=1e-6),
+                          table(R, "recent_casualties_penalty_", (6, 10, 15, 33, 50)))
+    out["extended"] = steps(u["extended"] / u["hp0"].clamp(min=1e-6),
+                            table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
+    # winning / losing the fight: the game's rule (outcome, battle.py ctx combat)
+    out["combat"] = ctx["combat"]
     # Attacked in the flank / rear: the database's was_attacked_in_flank / _rear (-6 / -14) while an enemy strikes
     # it from that side (u flank_hit, this step's blows; the rear instead of the flank, not both).
     out["attacked"] = torch.where(u["flank_hit"] >= 2, R["was_attacked_in_rear"],

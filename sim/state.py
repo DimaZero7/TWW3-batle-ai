@@ -304,8 +304,9 @@ INTERNAL = {
     "hp_abs": ("f", "health left, HP"),
     "morale": ("f", "morale points"),
     "fatigue": ("f", "fatigue points"),
-    "recent": ("f", "HP lost recently (the last morale.casualties_s seconds: recent casualties)"),
-    "extended": ("f", "HP lost over the last morale.extended_s seconds (extended casualties)"),
+    "recent": ("f", "HP lost in the game's 4-cell ring at the last whole second (recent casualties; "
+                    "morale.casualty_windows)"),
+    "extended": ("f", "HP lost in the game's 60-cell ring at the last whole second (extended casualties)"),
     "contact_s": ("f", "seconds in melee since the contact began (it goes on through gaps shorter than "
                        "contact.reset_s out of contact)"),
     "out_s": ("f", "seconds out of contact since the last contact (contact.reset_s)"),
@@ -396,10 +397,8 @@ INTERNAL = {
                   "missile.hit_slow.duration_s from each step such hits land in), 0: none"),
     "lost_worst": ("f", "the worst share of the unit lost so far (sim/reward.py track: health, a rout's "
                         "share, out whole), kept by the reward's caller, not the simulator: a rally gives nothing back"),
-    "dealt": ("f", "HP dealt in melee recently (decaying)"),
-    "taken": ("f", "HP taken in melee recently (decaying)"),
-    "shot_dealt": ("f", "HP dealt by its missiles to enemies recently (decaying like dealt: the morale's fight balance)"),
-    "shot_taken": ("f", "HP taken from enemy missiles recently (decaying like taken: the morale's fight balance)"),
+    "shot_dealt": ("f", "bookkeeping (no effect on the battle): HP dealt by its missiles to enemies recently, decaying "
+                        "with battle.SHOT_DEALT_FADE_S (net/strategist/drill_s1's metric)"),
     "gold_out": ("f", "the gold of enemy health it has destroyed so far (HP dealt to an enemy / its starting HP x its "
                       "cost, summed; bookkeeping only: the network's 'eyes' learn from it, tools/nn/model/eyes.py)"),
     "chm_s": ("f", "seconds left of the charge's morale block (+15; morale.charge, battle.py)"),
@@ -484,8 +483,8 @@ INTERNAL = {
                       "events, each down for the getting-up delay)"),
     "bm_w": ("f", "HP of its wounds the bombardments left (their HP less the health of the men they killed, at most "
                   "its wounds): the next strike finds them where its dose falls (magic.bombard)"),
-    "cmb": ("f", "the morale's fight balance points of the last step (morale.combat_points: < 0 losing, > 0 winning; 0 "
-                 "out of a fight or routing): the 'losing its melee' of the effects (effects.py losing_melee)"),
+    "cmb": ("f", "the morale's winning / losing points of the last step (morale.outcome: < 0 losing, > 0 winning; 0 "
+                 "even, out of a fight or routing): the 'losing its melee' of the effects (effects.py losing_melee)"),
     "snap_s": ("f", "seconds left of an ability laid on it at a friend's cast (passport update_targets false: Stand "
                     "Your Ground keeps on the units in range at the cast wherever they go; abilities.py)"),
     "snap_ab": ("i", "that ability (index in the passports, -1 none)"),
@@ -567,8 +566,9 @@ GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
 # Per-unit histories, [B, K * N] (K steps of N slots, newest step first): kept 2-D so that every [B, ...]
 # copy of a State (narrowing, putting back, restarting a battle from the bank) carries them unchanged.
 HISTORY = {
-    "lost_hist": "HP lost each step over the last K steps (morale.casualties_window \"sliding\": the recent and "
-                 "extended casualty windows; K = sim/morale.history_steps, 0 when the windows decay)",
+    "lost_hist": "HP lost each step over the last K steps (the casualty rings and the fight's outcome, "
+                 "morale.casualty_windows / outcome; K = sim/morale.history_steps: 60 s)",
+    "dealt_hist": "HP dealt each step (to any unit) over the last K steps (the fight's outcome, morale.outcome)",
 }
 # Per pair of units, [B, N * N] (row: the attacker j, column: the unit i it strikes; 2-D for the same reason):
 PAIRS = {
@@ -577,6 +577,9 @@ PAIRS = {
     "hit_sec": "the side of i that j's contact began on, + 1 (1 front, 2 flank, 3 rear; 0: no contact): held while the "
                "pair stays in contact (morale.attacked_first: the database's 'attacked in the flank / rear' is the "
                "first contact's side)",
+    # (here row: the unit i, column: the enemy j)
+    "cl_t": "the step's end time enemy j joined unit i's combat list (0: not in it; morale.combat_list - the game's "
+            "list of the fight's outcome, 0x142f5a040)",
     # (31.10.2026, the Pusbags: sim/vortex.py; here row: the vortex's owner p, column: the enemy j) the men of p
     # who died k steps ago next to j - their vortices strike after the vortex's delay (k = round(delay / dt), at most
     # vortex.QUEUE)

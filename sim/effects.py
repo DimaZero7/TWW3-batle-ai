@@ -294,11 +294,10 @@ def auras(params):
 def predicates(u, engaged, params):
     """{predicate: [B, N] bool} from the unit's state at the step's start."""
     L = u["leadership"].clamp(min=1)
-    ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
     # the database's losing_melee_combat as the game acts on it: not winning its melee, out of melee too (module doc;
-    # winning = the morale's fight balance of the last step above 0: u cmb, morale.combat_points - HP dealt / taken
-    # recently, the database's ratios and the 10 % gate - one rule of winning and losing)
-    winning = (u["cmb"] > 0) if "cmb" in u else ((u["dealt"] + 1.0) >= ratio * (u["taken"] + 1.0))
+    # winning = the morale's winning / losing points of the last step above 0: u cmb, morale.outcome - one rule of
+    # winning and losing)
+    winning = u["cmb"] > 0
     return {"in_melee": engaged, "out_of_melee": ~engaged, "losing_melee": ~(engaged & winning),
             "morale_below_half": u["morale"] < 0.5 * L,
             "not_wavering": ~(u["w"] | u["r"]),

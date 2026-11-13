@@ -25,7 +25,6 @@ SCALARS = {
     "lord_splash_struck": "contact.lord_splash_struck",
     "min_runup_m": "charge.min_runup_m",
     "strong_ratio": "morale.strong_ratio",
-    "combat_ratio_scale": None,          # x morale.combat_ratio slightly / yes / significantly (winning)
     "rally_hazard_scale": None,          # x morale.rally_hazard.p_per_s (every bin)
     "multi_combat": "fatigue.calibration.multi_combat",
     "sk_cone_deg": "skirmish.cone_deg",

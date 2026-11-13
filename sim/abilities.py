@@ -229,12 +229,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None, fx_speed=
     foe_near = (~same_side & standing[:, None, :] & (dist <= near_m)).any(2)
     shaky = (u["w"] | u["r"]) & (u["men"] > 0)
     alive = present & (u["men"] > 0) & ~u["gone"]
-    # losing the melee: the morale's fight balance of the last step below 0 (u cmb, morale.combat_points)
-    if "cmb" in u:
-        losing = engaged & (u["cmb"] < 0)
-    else:
-        lose_ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
-        losing = engaged & ((u["taken"] + 1.0) >= lose_ratio * (u["dealt"] + 1.0))
+    # losing the melee: the morale's winning / losing points of the last step below 0 (u cmb, morale.outcome)
+    losing = engaged & (u["cmb"] < 0)
     # an ability laid on a unit at a friend's cast (update_targets false): its seconds left, its index
     snap = (u["snap_s"] - dt).clamp(min=0) if "snap_s" in u else None
     snap_ab = u["snap_ab"].clone() if "snap_ab" in u else None
