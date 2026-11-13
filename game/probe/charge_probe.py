@@ -572,7 +572,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
-              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter")
+              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2094,6 +2094,12 @@ def run_config(plan, index):
     if plan == "counter":
         # (game/probe/unit_probe.py) health every 0.25 s; the men every 0.5 s from 60 m on to 40 s after the contact
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=40, men_near_m=60)
+    if plan == "flank2v1":
+        # (game/probe/unit_probe.py) health every 0.25 s; no soldier places from the script (men_near_m 0); from memory
+        # the hammer's and the target's men every 0.5 s (the sparse polls: their places, the charge's clock) and the
+        # target's morale every 0.5 s (mem_morale: the effects, the sides its enemies struck from, the fight's outcome)
+        # (its 'clock' lane - the two Generals 100 m apart - is polled densely: the morale rows ride on that poll)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=110, mem_morale=True)
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -2452,7 +2458,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     rec = {"t": [], "rows": []}
     fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire", "mp", "fx_on", "run",
               "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload", "morale", "dd_sum", "dq_sum",
-              "ab_en", "hid", "vis")
+              "ab_en", "hid", "vis", "w", "charge", "flank_hit", "cmb", "hit_sec")
     from sim import effects as sim_effects
     fx_names = sim_effects.order(params)
     a_slot = {}
@@ -2873,6 +2879,16 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 for k in ("fatigue", "fat", "k"):
                     if k in r:
                         out[k] = float(r[k][b, i])
+                # (the flank2v1 plan, game/probe/unit_probe.py) wavering, the charge left, the worst side struck from
+                # now and the fight's balance points; the target's side its attacker's / its first extra's contact
+                # began on (hit_sec [B, N * N]: row the striker j, column the struck i; 1 front, 2 flank, 3 rear)
+                for k, k_out in (("w", "w"), ("charge", "chg"), ("flank_hit", "fh"), ("cmb", "cmb")):
+                    if k in r:
+                        out[k_out] = float(r[k][b, i])
+                if "hit_sec" in r and i == T:
+                    E1 = int(slot["e1"][b])
+                    out["hs_a"] = int(r["hit_sec"][b, A * N + T]) if A >= 0 else None
+                    out["hs_e1"] = int(r["hit_sec"][b, E1 * N + T]) if E1 >= 0 else None
                 if "hid" in r:
                     # hidden, and seen by the other side (the game's is_hidden, is_visible_to_alliance; stealth_rows)
                     out["hid"], out["v"] = bool(r["hid"][b, i]), bool(r["vis"][b, i])

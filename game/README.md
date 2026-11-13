@@ -12,9 +12,9 @@
 ## Проба механики
     bash game/probe/run.sh <план> [<план>...]       # по бою на план (BATTLE=N — его N-й бой), --mem, BAI_GRAPHICS=low
     python -m game.probe.charge_probe report <прогоны> [--sim]   # игра против двойника симулятора
-Планы — `PLANS` в `charge_probe.py` (новые отряды и этап 0 — `unit_probe.py`, его отчёт `python -m game.probe.unit_probe`:
-`reissue` — разворот и повтор приказа, `counter` — встречный удар); ещё `missile_probe`, `morale_probe`, `move_probe`,
-`mem_probe` (строки памяти). Выжимки проб этапа 0 — `probe/evidence/`.
+Планы — `PLANS` в `charge_probe.py` (этап 0 — `unit_probe.py`, отчёт `python -m game.probe.unit_probe`: `reissue`, `counter`,
+`flank2v1` — второй отряд к связанному врагу: `--flank2v1 game [--sim]`, двойник до игры `--flank2v1 layout`); ещё
+`missile_probe`, `morale_probe`, `move_probe`, `mem_probe` (строки памяти). Выжимки проб этапа 0 — `probe/evidence/`.
 ## Разметка вживую (играет пользователь)
     powershell -File game/label/live.ps1 [-Match 1]     # Ultra на RTX, мод LOD 3812267837 только на этот бой
     python -m game.label.digest <запись> --export       # лента по 15 с, кадры, gif
