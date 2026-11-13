@@ -2844,6 +2844,16 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         rec["t"].append(t)
         row_ = {k: st.u[k].detach().cpu().numpy().copy() for k in fields if k in st.u}
         row_["card"] = {k: v.detach().cpu().numpy().copy() for k, v in sim_effects.card(st.u, params).items()}
+        if any(sp.get("sim_face") for sp in specs):
+            # (the reissue plan) the brace as the simulator's melee takes it (melee.py: standing, not in its own charge,
+            # no re-form settling - melee.brace_reform), as the game's 'braced' state
+            u_ = st.u
+            spd = torch.sqrt(u_["vx"] ** 2 + u_["vz"] ** 2)
+            brc = (u_["brace_ok"] | u_["reflect"]) & (spd < float(params.sim["melee"]["braced_speed"])) & ~u_["r"]
+            brc = brc & (u_["charge"] <= 0)
+            if "brf" in u_ and (params.sim["melee"].get("brace_reform") or {}).get("on"):
+                brc = brc & (u_["brf"] <= 0)
+            row_["brc"] = brc.detach().cpu().numpy().copy()
         rec["rows"].append(row_)
     until = max((ln["end"] or {}).get("t", 0) / 1000 for ln in lanes) + 5 if any(ln["end"] for ln in lanes) else 200
     if any(ln["spec"].get("t_morale") for ln in lanes):
@@ -2870,6 +2880,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     out["ammo"] = float(r["a"][b, i])
                 if "fire" in r:
                     out["fire"] = float(r["fire"][b, i])
+                if "brc" in r:
+                    out["st"] = "braced" if bool(r["brc"][b, i]) else "none"
                 if "mp" in r:
                     out["mp"] = float(r["mp"][b, i])
                 if "morale" in r:

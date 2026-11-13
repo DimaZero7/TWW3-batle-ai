@@ -423,6 +423,10 @@ INTERNAL = {
     "oface": ("f", "its facing to stand at (Orders.face snapped to the game's 64 sectors), degrees; -1 none"),
     "oface_s": ("f", "seconds the unit has stood ready to take that facing (the re-form's clock: it turns from "
                      "turn.face_delay_s on; battle.py)"),
+    "brf": ("i", "the brace's re-form (melee.brace_reform; battle.py): 0 none, 1 a re-form in place begun standing (a near "
+                "point, a facing or a width) under way, 2 a march begun standing under way, 3 its men settled, the "
+                "brace back in unbr_s; unbraced while above 0"),
+    "unbr_s": ("f", "seconds left until the brace is back after a re-form in place (rf 3)"),
     "fim_s": ("f", "seconds left of the 10 s after a facing order given in melee in which it strikes nobody but its "
                    "order's target (melee_breakoff_total_immunity_secs; battle.py contact.face_breakoff)"),
     "ow": ("f", "the width order in force (Orders.width as given, m; -1 none): the same number re-given is no new order"),

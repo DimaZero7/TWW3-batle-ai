@@ -1251,13 +1251,17 @@ def counter_measure(lane):
                                    - half)
     ok = np.isfinite(ax)
     out["a_way_m"] = float(np.hypot(cp.at(t, ax, c) - ax[ok][0], cp.at(t, az, c) - az[ok][0]))
+    # the health from the sample before the first flag: the simulator's first strike lands in the flag's own sample,
+    # the game's 0.3-0.6 s after it (sim/evidence/counter)
+    i_c = int(np.searchsorted(t, c - 1e-6))
+    c0 = float(t[max(i_c - 1, 0)])
     for who in ("a", "tg"):
         v = _speed(lane, who, 2.0)
         out[f"{who}_v_contact"] = cp.at(t, v, c)
         hp = cp.series(s, who, "hp")
         h0 = float(hp[np.isfinite(hp)][0])
         for hi in (3, 10, 30):
-            out[f"{who}_0_{hi}"] = (cp.at(t, hp, c) - cp.at(t, hp, c + hi)) / h0
+            out[f"{who}_0_{hi}"] = (cp.at(t, hp, c0) - cp.at(t, hp, c + hi)) / h0
     for hi in (10, 30):
         out[f"trade_{hi}"] = out[f"tg_0_{hi}"] - out[f"a_0_{hi}"]
     return out

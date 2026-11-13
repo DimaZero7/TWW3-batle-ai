@@ -306,6 +306,9 @@ def bracing(u, params, speed, charge_now):
     mult = mult.clamp(1.0, float(R["bracing_max_multiplier_clamp"]))
     can = u["brace_ok"] | defence | u["reflect"]
     braced = can & (speed < float(params.sim["melee"]["braced_speed"])) & ~u["r"] & (charge_now <= 0) & (u["men0"] > 1)
+    if (params.sim["melee"].get("brace_reform") or {}).get("on") and "brf" in u:
+        # (melee.brace_reform; battle.py) no brace while a re-form begun standing settles
+        braced = braced & (u["brf"] <= 0)
     braced = braced & ~ridden(u, params)                               # (ride_in: the front men up and walking)
     return torch.where(braced, mult, torch.ones_like(mult))
 

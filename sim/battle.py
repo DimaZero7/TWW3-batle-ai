@@ -181,6 +181,17 @@ def step(st, orders, params=None, dt=None):
         width_new = reform.order(u, orders.width, take, kind, run, point, rf, spacing)
         face_new = face_new | width_new
         reform.advance(u, dt, spacing, standing & (kind == O.HOLD) & ~u["mv"], mdepth)
+    br_cal = cal["melee"].get("brace_reform") or {}
+    if br_cal.get("on") and "brf" in u:
+        # The brace's re-form (melee.brace_reform; sim/evidence/reissue): a unit standing out of melee that takes another
+        # point (a move over 1 m off the one in force), another facing or another width loses its brace while its men
+        # walk to their new places and settle_s after (rf 1 -> 3, battle's end of step); a point farther than reform_m is
+        # a march - braced again as it stands at the point (rf 2). The same order re-given, a halt and an attack: none.
+        trig = (standing & ~u["mv"] & ~u["m"] & (kind != O.ATTACK)
+                & ((take & point & new_order) | face_new))
+        far = point & (((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) > float(br_cal["reform_m"]) ** 2)
+        u["brf"] = torch.where(trig, torch.where(far, torch.full_like(u["brf"], 2), torch.ones_like(u["brf"])), u["brf"])
+        u["unbr_s"] = torch.where(trig, torch.zeros_like(u["unbr_s"]), u["unbr_s"])
     if "order_s" in u:
         # the order's clock (contact.fresh_incidental, melee.py): a new order given in melee starts it at 0, out of
         # melee at the window (an order given before the fight is not a fresh order in melee)
@@ -445,6 +456,9 @@ def step(st, orders, params=None, dt=None):
     # the steady rate from the first second (the recontact probe: swordsmen charging clanrats again after 2-80 s out
     # struck 0.24-1.35 of their 10-20 s rate in the first 3 s, their first contact 2.87).
     opened = torch.zeros_like(fresh)
+    # (charge.first_runup_m) a unit's first fight of the battle: its seconds in melee before this step, up to the
+    # charge's order_grace_s (the attack order may come just after the contact it ran into)
+    virgin = (u["melee_s"] <= float(cal["charge"]["order_grace_s"])) if "melee_s" in u else None
     if "melee_s" in u:
         if cal["contact"].get("opening_once"):
             opened = (u["melee_s"] > 0) & (u["men0"] > 1)
@@ -487,6 +501,12 @@ def step(st, orders, params=None, dt=None):
             block = block & (s_k == s_i[:, :, None])
         busy_t = (tgt >= 0) & block.any(2)
     min_runup = knobs.get(u, "min_runup_m", float(ccal["min_runup_m"]))
+    if ccal.get("first_runup_m") is not None and virgin is not None:
+        # (charge.first_runup_m; the counter probe, sim/evidence/counter) the first contact of the battle charges after
+        # a short run-up - the game's men take the charge gait as the attack order comes within the charge distance;
+        # a re-entry keeps min_runup_m (the cyclecharge lords, the knights' second charge)
+        min_runup = torch.where(virgin, torch.full_like(u["runup"], float(ccal["first_runup_m"])),
+                                knobs.full_like(u["runup"], min_runup))
     fire = engaged & (kind == O.ATTACK) & (u["runup"] >= min_runup) & ~busy_t
     u["charge"] = torch.where(fire, torch.ones_like(u["charge"]), u["charge"])
     charge_now = u["charge"]
@@ -592,6 +612,9 @@ def step(st, orders, params=None, dt=None):
         # Feature Focus #2: the interval runs after a blow); the probe: a charger lost 106-194 HP in the first second
         # to braced spearmen, 120 to swordsmen, 0 to a target facing away
         stand = fresh & (speed <= 0.3) & (kind == O.HOLD) & ~opened
+        if (cal["melee"].get("brace_reform") or {}).get("on") and "brf" in u:
+            # (melee.brace_reform) its men walking to their new places (a re-form begun standing, rf 1) do not stand
+            stand = stand & (u["brf"] != 1)
         deg = float(cal["contact"]["front_deg"])
         if cal["contact"].get("stand_first_angle") == "bracing":
             # (contact.stand_first_angle "bracing") within the database's bracing_attack_angle (80 deg) of its front, not
@@ -1730,6 +1753,12 @@ def step(st, orders, params=None, dt=None):
             u["b"] = torch.where(melee_face, turned, u["b"])
         delay = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal.get("face_delay_s", 0.0))),
                             torch.full_like(u["b"], float(t_cal.get("face_delay_single_s", 0.0))))
+        am = t_cal.get("face_after_move_s")
+        if am is not None:
+            # (turn.face_after_move_s; sim/evidence/reissue) a unit that walked to its point turns to its facing
+            # face_after_move_s after it stands, not face_delay_s: its clock is kept that far on while it moves
+            moving_f = mv & (u["oface"] >= 0) & ~engaged & (kind != O.ATTACK)
+            u["oface_s"] = torch.where(moving_f, (delay - float(am)).clamp(min=0), u["oface_s"])
         u["b"] = torch.where(face_ready & (u["oface_s"] >= delay - 1e-6), u["oface"], u["b"])
     if t_cal.get("formation_deg_s"):
         single = (torch.full_like(u["b"], float(t_cal["single_deg_s"])) if t_cal.get("single_deg_s") is not None
@@ -1753,6 +1782,22 @@ def step(st, orders, params=None, dt=None):
     held_router = held_router | (alive & u["r"] & stuck_touch.any(1))
     u["m"] = alive & (engaged | has_router | held_router)
     u["mv"] = mv
+    if br_cal.get("on") and "brf" in u:
+        # (melee.brace_reform, above) the re-form is under way while the unit moves, turns to its facing order or widens;
+        # then a re-form in place counts settle_s down (rf 3), a march is braced at once
+        f_off = (torch.remainder(u["oface"] - u["b"] + 180, 360) - 180).abs()
+        busy = (mv | ((u["oface"] >= 0) & (f_off > 1.0) & (kind != O.ATTACK))
+                | (u["wnew"] >= 0)) & alive & ~u["r"]
+        on = u["brf"] > 0
+        settle = float(br_cal["settle_s"])
+        walking = on & busy
+        u["unbr_s"] = torch.where(walking, torch.where(u["brf"] == 2, torch.zeros_like(u["unbr_s"]),
+                                                        torch.full_like(u["unbr_s"], settle)),
+                                  (u["unbr_s"] - dt).clamp(min=0))
+        u["brf"] = torch.where(walking & (u["brf"] == 3), torch.ones_like(u["brf"]), u["brf"])
+        done = on & ~walking & (u["unbr_s"] <= 0)
+        u["brf"] = torch.where(done | ~alive | u["r"], torch.zeros_like(u["brf"]),
+                              torch.where(on & ~walking, torch.full_like(u["brf"], 3), u["brf"]))
     u["f"] = mv & (spd > u["walk"] + 0.3)
     u["fire"] = shown
     hold = standing & (kind == O.HOLD)

@@ -37,6 +37,12 @@ def _mean(v):
     return float(v.mean()) if v.numel() else float("nan")
 
 
+def _duty(a):
+    """--gpu-duty: the GPU busy at most this share of the time (net/unit/train.Duty)."""
+    from net.unit.train import Duty
+    return Duty(a.device, a.gpu_duty)
+
+
 def _player(name, ckpt, device):
     from net.unit import scripts as SC
     if name in SC.PLAYERS:
@@ -90,7 +96,10 @@ def drill(a, P):
                 pl.gen, pl.seed = None, s          # (the random script: its own draws a seed)
             torch.manual_seed(1000 + s)
             t0 = time.time()
+            duty = _duty(a)
+            duty.start()
             m = u2.play(sp, pl, P, a.device, greedy=greedy)
+            duty.end()                                  # (--gpu-duty: u2.play has no duty of its own - per seed)
             wall += time.time() - t0
             rows.append({k: _mean(m[k]) for k in DRILL_KEYS if k in m})
             for k, v in m.items():
@@ -136,7 +145,7 @@ def general(a, P):
                     level.seed = s
             torch.manual_seed(2000 + s)
             t0 = time.time()
-            m, stt = BA.play_units(sp, level, unit_net, P, a.device, gate=True, unit_greedy=greedy)
+            m, stt = BA.play_units(sp, level, unit_net, P, a.device, gate=True, unit_greedy=greedy, duty=_duty(a))
             wall += time.time() - t0
             rows.append({k: _mean(m[k]) for k in GEN_KEYS if k in m})
             for k in GEN_KEYS:
@@ -172,6 +181,7 @@ def main(argv=None):
     ap.add_argument("--ckpt", default=None, help="the unit network (default: net/config/tactic.json train.unit_ckpt)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--gpu-duty", type=float, default=1.0, help="the GPU busy at most this share of the time")
     a = ap.parse_args(argv)
     from sim.params import load
     P = load()

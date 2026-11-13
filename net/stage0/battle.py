@@ -362,7 +362,7 @@ def unit_battles(specs):
     return out
 
 
-def play_units(specs, unit_level, unit_net, P, device, gate=True, unit_greedy=False, chunk=512, compile=None):
+def play_units(specs, unit_level, unit_net, P, device, gate=True, unit_greedy=False, chunk=512, compile=None, duty=None):
     """(measures {name: [B]}, stats) of stage 0's general battles of the unit level: my side UnitSide (unit_level - a
     scripted player or None: unit_net), the enemy its script (a spec's 'chain' enemy - a formula - not allowed here);
     batches padded as play's."""
@@ -378,7 +378,7 @@ def play_units(specs, unit_level, unit_net, P, device, gate=True, unit_greedy=Fa
         limit = max(int(s["limit"]) for s in batch)
         rd, stt = DU.play([NAME] * len(batch), unit_battles(batch), {1: mine, 2: enemy}, unit_net, P, device,
                           limit_s=limit, per_side=PER_SIDE, watch=watch, maps=[s["map"] for s in batch],
-                          compile=compile)
+                          compile=compile, duty=duty)
         m = watch.measures(limit, rd["winner"])
         for k, v in m.items():
             parts.setdefault(k, {}).update({i: float(x) for i, x in zip(ii, v.tolist()[:len(ii)])})

@@ -5,7 +5,7 @@
 
 **Запуск.** Бой в коде: `st = scenario.build(армии, params.load())`, затем `battle.step(st, orders, P)` по шагам
 (`battle.stepper(device)` — со сборкой `torch.compile` на видеокарте). Армии — `armies.generate.battle(seed)` →
-`scenario.from_arena(...)`; противник — `scripts.ai_game / nearest / hold_shoot`; счёт боя — `reward.measure`.
+`scenario.from_arena(...)`; противник — `scripts.human / nearest / hold_shoot` (учёба; `ai_game` — только экзамен этапа); счёт боя — `reward.measure`.
 Тест (дымовой: бой идёт и повторяется один в один):
 - хост без torch: `../TWW3-batle-ai/.venv/Scripts/python -m pytest -q sim/tests` (только проверка импорта);
 - контейнер: `docker run --rm -v <проект>:/repo -w /repo -e PYTHONPATH=/repo snake-ai-trainer python -m pytest -q sim/tests`

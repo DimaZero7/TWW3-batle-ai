@@ -157,7 +157,7 @@ def _touch(st, i, j):
     return (hs[:, i, j] > 0) | (hs[:, j, i] > 0)
 
 
-def play(sp, player, P, device, compile=False, record=()):
+def play(sp, player, P, device, compile=False, record=(), duty=None):
     """{measure: [B] (host)} of the skirmishes sp (one skill) with my unit played by player (scripts.py)."""
     from net.matchup import duel as DU
     from net.operative import lower as LW
@@ -201,6 +201,9 @@ def play(sp, player, P, device, compile=False, record=()):
     front_rad = math.radians(P.sim["contact"]["front_deg"])
     frames = {b: [] for b in record}
     for sec in range(int(limit.max()) + 2):
+        if duty is not None:
+            duty.end()                                  # (--gpu-duty: the last second's work, then its rest)
+            duty.start()
         for b in frames:
             if not bool(st.done[b]):
                 from game.vision import record as RC
@@ -304,7 +307,9 @@ def main(argv=None):
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--compile", type=int, default=0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--gpu-duty", type=float, default=1.0, help="the GPU busy at most this share of the time")
     a = ap.parse_args(argv)
+    from net.unit.train import Duty
     from sim.params import load
     P = load()
     res = {}
@@ -315,7 +320,7 @@ def main(argv=None):
                 sp = specs(skill, a.n, torch.Generator().manual_seed(SEED + 100 * SKILL_DRILLS.index(skill) + s))
                 torch.manual_seed(3000 + s)
                 t0 = time.time()
-                mm = play(sp, SC.player(name), P, a.device, compile=bool(a.compile))
+                mm = play(sp, SC.player(name), P, a.device, compile=bool(a.compile), duty=Duty(a.device, a.gpu_duty))
                 rows.append({k: _mean(v) for k, v in mm.items()})
                 print(json.dumps({"skill": skill, "player": name, "seed": s, "wall_s": round(time.time() - t0, 1),
                                   **{k: round(v, 4) for k, v in rows[-1].items()}}), flush=True)

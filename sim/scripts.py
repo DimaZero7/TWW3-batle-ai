@@ -28,9 +28,13 @@ of the side it plays.
                 the blow; the rest (~42 %) wait in reserve behind it until an enemy unit routs, then go in one at a
                 time where the line is worst (health x morale of its units in melee); the shooters shoot the enemy's
                 shooters in range first, else stand beyond the nearer end of the line and, once the melee begins,
-                walk forward along that flank and shoot from the side; no attack of its own before contact (an
-                attacker after patience_s: all go in, as hold_shoot). Human below has the numbers (mine, from those
-                battles: no fit)
+                walk forward along that flank and shoot from the side; no attack of its own before contact. As the
+                attacker (Human.attack; BY THE MANUAL, game/manual.md - the human defended in all his battles): the
+                line walks on together at a run, its leaders waiting for its rearmost unit; each line unit has its own
+                enemy (matched across the front: pairs, never all on one) and attacks it at a run within its charge
+                distance; the reserve follows behind the centre, sends one unit at a time round the flank-most enemy
+                fighting the line, and after the enemy's first rout one to where the line is worst. Human below has
+                the numbers (mine, from those battles: no fit; the attack's from the manual and the database)
 """
 import math
 from dataclasses import dataclass
@@ -754,6 +758,24 @@ class Human:
     lord_fight_m: float = 40.0    # the lord attacks an enemy this close
     patience_s: float = PATIENCE_S  # an attacker that has not fought by this time: everyone attacks (or it loses on time)
     post_slack_m: float = 8.0     # a unit within this of its post holds there
+    # The attack (the side that attacks, st.attacker; attack False: it defends as above). BY THE MANUAL (game/manual.md
+    # 2 'Ход боя', 'Строй и способ боя'), NOT FROM THE HUMAN'S BATTLES - he defended in all of them:
+    attack: bool = True
+    adv_m: float = 15.0           # the line walks on together: every free line unit's post this far ahead of its
+    #                               rearmost free unit (along the side's forward) - the leaders wait for the slowest
+    #                               (ours: well inside stage 0's line depth, net/config/stage0.json line_depth_m 40) ...
+    keep_m: float = 60.0          # ... the rearmost among the free line units within this of the foremost and not stuck
+    #                               (under a move, standing off its point): one farther back no longer holds the line
+    #                               (ours: stage 0's enemy rows stand 40 m apart, net/config/stage0.json enemy_rank_m)
+    adv_run: bool = True          # ... at a run ('в бой идут бегом'; the run is almost free: sim/config/sim.json fatigue)
+    reach_m: float = 15.0         # each line unit attacks its own enemy at a run once their centres are within its
+    #                               charge distance (the database's charge_distance_commence_run, u charge_dist: 30 m)
+    #                               + this (two half depths of 6-8 ranks: their fronts at ~30 m) - the charge's run-up
+    flank_gap_m: float = 20.0     # the reserve's flank blow: a free reserve unit runs to a point this far beyond the
+    #                               outer side of the flank-most enemy fighting our line ...
+    flank_arrive_m: float = 15.0  # ... and attacks it within this of the point (net/config/stage0.json behaviours:
+    #                               flank_gap_m 20, arrive_m 15 - the tactician's scripted flank)
+    flank_far_m: float = 30.0     # (a reserve unit whose move point is this far off its post is on its flank run)
 
 
 def human(st, p=Human()):
@@ -879,6 +901,57 @@ def human(st, p=Human()):
     put(step_now & ~stepping, O.MOVE, clamp(lpx + fx * p.step_m), clamp(lpz + fz * p.step_m), r=False)
     put(stepping, O.MOVE, u["ox"], u["oz"], r=False)
     put(line & fighting & has, O.ATTACK, tg=opp_i, r=True)
+    att = attacker & torch.tensor(bool(p.attack), device=x.device)
+    if p.attack and bool((att & line).any()):
+        # The attack (Human.attack; by the manual, not from the human's battles): the line - its posts across as above -
+        # walks on together, adv_m ahead of its rearmost free unit; each line unit has its own enemy, the enemy's
+        # standing units matched to ours by their order across our forward (ours spread wider: the outer ones share
+        # the end enemies - pairs, never all on one), and attacks it at a run once within its charge distance
+        # (+ reach_m); an attack in force on a standing enemy is kept
+        own_e = torch.zeros_like(near_i)
+        f_pos = (x - cx) * fx + (z - cz) * fz                                    # along the side's forward
+        lead = torch.zeros_like(x)
+        for s in (1, 2):
+            mine = side == s
+            sx, sz, sfx, sfz = frames[s]
+            lat_s = (x - sx) * -sfz + (z - sz) * sfx
+            ours = line & mine
+            theirs = standing & _seen(u) & (side == 3 - s) & ~lord
+            r_o = (ours[:, None, :] & ((lat_s[:, None, :] < lat_s[:, :, None]) | ((lat_s[:, None, :] == lat_s[:, :, None])
+                                                                                 & (ar[None, None, :] < ar[None, :, None])))
+                   ).sum(2).to(x.dtype)                                          # [B, N] our rank across
+            r_e = (theirs[:, None, :] & ((lat_s[:, None, :] < lat_s[:, :, None]) | ((lat_s[:, None, :] == lat_s[:, :, None])
+                                                                                   & (ar[None, None, :] < ar[None, :, None])))
+                   ).sum(2)                                                      # [B, N] the enemy's rank across
+            n_o = ours.sum(1, keepdim=True).to(x.dtype)
+            n_e = theirs.sum(1, keepdim=True)
+            want = torch.round(r_o * (n_e.to(x.dtype) - 1).clamp(min=0) / (n_o - 1).clamp(min=1))
+            want = torch.where(n_o > 1, want, torch.round((n_e.to(x.dtype) - 1).clamp(min=0) / 2))
+            hit = theirs[:, None, :] & (r_e[:, None, :] == want.long()[:, :, None])     # [B, i, j]
+            pick = hit.float().argmax(2)
+            own_e = torch.where(ours & hit.any(2), pick, own_e)
+            free_s = ours & ~fighting
+            front = torch.where(free_s, f_pos, torch.full_like(f_pos, -BIG)).max(1, keepdim=True).values
+            free_s = free_s & (f_pos >= front - p.keep_m)
+            # (a unit under a move off its point that does not get forward is stuck - blocked ground, a cliff: not
+            # waited for)
+            v_fwd = u["vx"] * sfx + u["vz"] * sfz
+            at_post = torch.sqrt((u["ox"] - x) ** 2 + (u["oz"] - z) ** 2) <= 2 * p.post_slack_m
+            free_s = free_s & ((v_fwd > 0.5) | at_post | (u["order_kind"] != O.MOVE))
+            lf = torch.where(free_s, f_pos, torch.full_like(f_pos, BIG)).min(1, keepdim=True).values
+            lead = torch.where(mine, torch.where(lf < BIG, lf, torch.zeros_like(lf)), lead)
+        has_e = foe.gather(2, own_e[:, :, None]).squeeze(2)
+        own_e = torch.where(has_e, own_e, near_i)
+        d_own = d.gather(2, own_e[:, :, None]).squeeze(2)
+        a_line = att & line & ~fighting & has
+        apx, apz = clamp(cx + lx * post_lat + fx * (lead + p.adv_m)), clamp(cz + lz * post_lat + fz * (lead + p.adv_m))
+        go_to(a_line, apx, apz, r=p.adv_run)
+        cur_t = u["order_target"].clamp(min=0)
+        keep_t = (a_line & (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0)
+                  & foe.gather(2, cur_t[:, :, None]).squeeze(2))
+        go = a_line & ~keep_t & (d_own <= u["charge_dist"] + p.reach_m)
+        put(go, O.ATTACK, tg=own_e, r=True)
+        put(keep_t, O.ATTACK, tg=cur_t, r=True)
     # the reserve: posts behind the line's centre, spread across; it waits until an enemy unit routs
     rrank = torch.zeros_like(x)
     rn = torch.zeros_like(x)
@@ -909,6 +982,42 @@ def human(st, p=Human()):
         rd, ri = dr.min(1)
         pick = (ar[None, :] == ri[:, None]) & (need & (rd < BIG))[:, None]
         put(pick, O.ATTACK, tg=opp_i.gather(1, worst[:, None]).expand_as(opp_i), r=True)
+    if p.attack and bool((att & reserve).any()):
+        # The attacker's flank blow (Human.attack; the manual: 'фланговый удар - когда ИИ втянулся в лоб'): once an enemy
+        # unit fights our line, one free reserve unit at a time runs to flank_gap_m beyond the outer side of the
+        # flank-most such enemy (across our forward) and attacks it within flank_arrive_m of that point; a reserve unit
+        # whose move point is flank_far_m off its post is on that run (kept)
+        rpx, rpz = clamp(bx + lx * off), clamp(bz + lz * off)
+        on_run = (att & free_res & (u["order_kind"] == O.MOVE)
+                  & (((u["ox"] - rpx) ** 2 + (u["oz"] - rpz) ** 2) > p.flank_far_m ** 2))
+        for s in (1, 2):
+            mine = att & (side == s)
+            if not bool(mine.any()):
+                continue
+            sx, sz, sfx, sfz = frames[s]
+            lat_s = (x - sx) * -sfz + (z - sz) * sfx
+            # the enemies our line fights (its units' opponents), the flank-most across
+            vs_line = torch.zeros_like(opp_i).scatter_add(1, opp_i, (line & fighting & opp_ok & (side == s)).long()) > 0
+            cand = vs_line & standing & (side == 3 - s)
+            wide = torch.where(cand, lat_s.abs(), torch.full_like(lat_s, -1.0))
+            wv, wi = wide.max(1)                                                          # [B]
+            ok_b = wv >= 0
+            ex_, ez_ = x.gather(1, wi[:, None]), z.gather(1, wi[:, None])
+            sg = torch.where(lat_s.gather(1, wi[:, None]) >= 0, torch.ones_like(ex_), -torch.ones_like(ex_))
+            reach = u["width"].gather(1, wi[:, None]) / 2 + p.flank_gap_m
+            fpx, fpz = clamp(ex_ + (-sfz) * sg * reach), clamp(ez_ + sfx * sg * reach)     # [B, 1]
+            runs = on_run & mine
+            busy = (runs | (committed & ~fighting & mine)).any(1)                          # [B]
+            # a unit on its run: on to the point, then the attack
+            near_pt = torch.sqrt((x - fpx) ** 2 + (z - fpz) ** 2) <= p.flank_arrive_m
+            put(runs & ok_b[:, None] & ~near_pt, O.MOVE, fpx.expand_as(x), fpz.expand_as(z), r=True)
+            put(runs & ok_b[:, None] & near_pt, O.ATTACK, tg=wi[:, None].expand_as(opp_i), r=True)
+            # a new one: the free reserve unit nearest the point
+            dr = torch.where(free_res & mine & ~runs, torch.sqrt((x - fpx) ** 2 + (z - fpz) ** 2),
+                             torch.full_like(x, BIG))
+            rd, ri = dr.min(1)
+            new = (ar[None, :] == ri[:, None]) & (ok_b & ~busy & (rd < BIG))[:, None]
+            put(new, O.MOVE, fpx.expand_as(x), fpz.expand_as(z), r=True)
     # the shooters: the enemy's shooters in range first (the nearest); else a post beyond the nearer end of the line,
     # level with it - once our melee units fight, flank_fwd_m forward along that flank - and fire at will there; step
     # back from an enemy melee unit that comes close; in melee they fight
@@ -945,6 +1054,11 @@ def human(st, p=Human()):
     ok = standing & has
     kind = torch.where(ok | (kind == O.HOLD), kind, torch.full_like(kind, O.HOLD))
     target = torch.where(kind == O.ATTACK, target, torch.full_like(target, -1))
+    if p.attack and bool(att.any()):
+        # (the attacker) a point on 'cannot stand' ground - the game refuses it, the line would wait for that unit
+        # forever - steps round it as ai_game's (Line.step_around, _around)
+        ax_, az_ = _around(u, torch.where(att, kind, torch.full_like(kind, O.HOLD)), x, z, tx, tz)
+        tx, tz = torch.where(att, ax_, tx), torch.where(att, az_, tz)
     return O.Orders(kind=kind, x=tx, z=tz, target=target, run=run & ((kind == O.ATTACK) | (kind == O.MOVE)
                                                                        | (kind == O.WITHDRAW)))
 

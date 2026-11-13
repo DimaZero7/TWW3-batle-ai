@@ -7,8 +7,8 @@ A spec is a dict:
     theirs      [unit key] the enemy's (no lord)
     map         'flat' | a captured map's name; east - my zone the east one (the game's alliance 1)
     mine_zone, enemy_zone   {x, z, b, front, depth} the game's deployment zones of Kislev (the flat field the same)
-    enemy       a script of tools/nn/train/opponents ('ai_game', 'nearest', 'hold_shoot') or 'chain' (our formula
-                chain under 'destroy')
+    enemy       a script of sim/scripts ('human', 'nearest', 'hold_shoot'; 'ai_game' only in the stage exam:
+                general.exam_enemies) or 'chain' (our formula chain under 'destroy')
     places_mine None - the strategist's formula deploys my side; else [(x, z, b)] per unit of mine
     places_theirs [(x, z, b)] per unit of theirs
     reserve     [index into mine] the units of the reserve (o03; a behaviour may name them in a general battle)

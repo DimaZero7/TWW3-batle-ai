@@ -41,7 +41,7 @@ def test_general_battles_are_equal_in_gold_and_mixed_as_the_plan():
     maps = Counter(s["map"] for s in sp)
     assert abs(maps["flat"] / len(sp) - 0.5) < 0.05
     en = Counter(s["enemy"] for s in sp)
-    assert abs(en["ai_game"] / len(sp) - 0.4) < 0.05 and abs(en["chain"] / len(sp) - 0.3) < 0.05
+    assert abs(en["human"] / len(sp) - 0.4) < 0.05 and abs(en["chain"] / len(sp) - 0.3) < 0.05
     assert {s["east"] for s in sp} == {True, False}
     assert {(s["fac"][1], s["fac"][2]) for s in sp} == {("emp", "emp"), ("emp", "skv"), ("skv", "emp"), ("skv", "skv")}
     for s in sp[:50]:
@@ -55,7 +55,7 @@ def test_the_drills_places():
     from net.stage0 import specs as SP
     rnd = random.Random(7)
     for s in SP.drills("c01", 50, rnd):
-        assert 3 <= len(s["mine"]) <= 6 and s["map"] == "ksl_plains_01" and s["enemy"] in ("ai_game", "nearest")
+        assert 3 <= len(s["mine"]) <= 6 and s["map"] == "ksl_plains_01" and s["enemy"] in ("human", "nearest")
     for s in SP.drills("t02", 50, rnd):
         assert 2 <= len(s["mine"]) <= 3 and len(s["theirs"]) == 2
         zn = s["mine_zone"]

@@ -876,6 +876,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         # Without a large unit in the battle and with no charge_defense (no unit of the pools has it) it changes nothing.
         speed_j = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)[:, None, :]
         braced_j = (speed_j < float(cal["braced_speed"])) & ~routing_j
+        if cal.get("brace_own_charge"):
+            # (melee.brace_own_charge) a man in his own charge keeps the brace flag he ran in with: none
+            braced_j = braced_j & (charge_now <= 0)[:, None, :]
+        if (cal.get("brace_reform") or {}).get("on") and "brf" in u:
+            # (melee.brace_reform; battle.py) a re-form begun standing: no brace till its men settle
+            braced_j = braced_j & (u["brf"] <= 0)[:, None, :]
         if unbraced is not None:
             braced_j = braced_j & ~unbraced[:, None, :]
         vs = u["cd"][:, None, :] | (u["cdl"][:, None, :] & u["large"][:, :, None])
@@ -924,6 +930,16 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     # do double damage within 3.9 s of the charge); it gets no charge of its own.
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     braced = (u["reflect"] & (speed < cal["braced_speed"]))[:, :, None]
+    if cal.get("brace_own_charge"):
+        # (melee.brace_own_charge; reverse/notes/charge_module.md 3: the brace's update returns at once while the man's own
+        # charge is on, the flag left as it was - he ran in unbraced) a unit that charged in reflects nothing until its
+        # charge has faded, though it stands in melee (the counter probe: Empire spearmen counter-charging clanrats took
+        # 0.024-0.031 of them in 0-3 s, the held ones 0.022; the twin with the reflection 0.047)
+        braced = braced & (charge_now <= 0)[:, :, None]
+    if (cal.get("brace_reform") or {}).get("on") and "brf" in u:
+        # (melee.brace_reform; battle.py, sim/evidence/reissue) a re-form begun standing - another point, facing or
+        # width - leaves the unit unbraced till its men settle
+        braced = braced & (u["brf"] <= 0)[:, :, None]
     if unbraced is not None:
         braced = braced & ~unbraced[:, :, None]
     facing = pw["rel_i"].abs() <= B["bracing_attack_angle"] * geometry.DEG
