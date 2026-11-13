@@ -6,6 +6,7 @@
     churn.py     per shooter / gun: orders given to the game and the bridge's own re-gives
     table.py     one row a run from the four above (the after-N tables)
     snip.py      own snipers, their guards and the enemy's snipers
+    aivai.py     the game's AI against the game's AI with stage 0 armies (aivai.sh): arenas, measures, the twin
 
 A run is a folder or a run name (yyyymmdd-hhmmss): build/nn-arena/runs/<name>, else the kept data/nn-arena/runs/<name>,
 else data/human/runs/<name>.

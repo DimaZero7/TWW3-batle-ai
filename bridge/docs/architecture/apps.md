@@ -13,7 +13,7 @@
 | [map](../apps/map.md) | `adapter`, `services` | Рамка радара, сетка, высота, грунт, проходимость клетки, здания и сооружения CCO |
 | [navigation](../apps/navigation.md) | `adapter`, `services` | Достижимость клеток для отряда, конец захода (`arrived`/`stopped`/`stuck`/`timeout`) |
 | [units](../apps/units.md) | `card_adapter`, `formation_adapter` | Карточка и профиль отряда, движение и бойцы |
-| [orders](../apps/orders.md) | `adapter`, `facing` | Проверенные в бою вызовы приказов, 64 направления движка |
+| [orders](../apps/orders.md) | `adapter`, `facing`, `planner_adapter` | Проверенные в бою вызовы приказов, 64 направления движка, отряды под планировщиком ИИ игры |
 | [telemetry](../apps/telemetry.md) | `adapter`, `observer_adapter` | JSONL-события, файлы состояния, запись боя человека |
 | [bridge](../apps/bridge.md) | `adapter`, `exchange_adapter`, `services`, `deploy_adapter` | Мост к помощнику: файл состояния, его приказы нашим отрядам, расстановка стратегом |
 | [mem](../apps/mem.md) | `projectiles`, `entities`, `hits`, `morale`, `order` | Только пробы (`--mem`): снаряды, бойцы, попадания, мораль и строй из памяти игры через memreader Plus |
@@ -25,7 +25,7 @@
 
 | Точка входа | Цель сборки | Сценарий | Что делает |
 |---|---|---|---|
-| [nn_arena](../apps/entries.md#nn_arena) | `nn-arena`, `human` | файл боя арены (`sim/arena.py`) | Бой цепочки против ИИ игры (мост к помощнику) или бой человека; каждый отряд обеих сторон раз в секунду в записи |
+| [nn_arena](../apps/entries.md#nn_arena) | `nn-arena`, `human` | файл боя арены (`sim/arena.py`) | Бой цепочки против ИИ игры (мост к помощнику), бой ИИ против ИИ (`own_ai 'ai'`) или бой человека; каждый отряд обеих сторон раз в секунду в записи |
 | [charge_probe](../apps/entries.md#charge_probe) | `charge-probe` | файл боя плана | Одна механика рукопашной в полосах, игра и двойник симулятора одинаково |
 | [missile_probe](../apps/entries.md#missile_probe) | `missile-probe` | файл боя плана | Одна механика стрельбы в полосах |
 | [morale_probe](../apps/entries.md#morale_probe) | `morale-probe` | файл боя плана | Одно слагаемое морали в полосах |

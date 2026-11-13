@@ -1,0 +1,966 @@
+{
+ "plan": "aivai (tmp/probes/aivai.py, aivai_measure.py; bridge nn-arena --own-ai ai)",
+ "date": "2026-11-13",
+ "what": "stage 0 armies (net/stage0/specs._sides, emp vs skv, 5-8 infantry + lord a side) in rows across the Kislev zones' centres; side 1 west under CA's script_ai_planner 'attack the force' (re-given every 15 s), side 2 east the game's battle AI attacking (f1 f2 k1 k2) or defending (f3 f4 k3 k4); 'f' mp_crossroads_flat with the zones' gap 192 m, 'k' ksl_plains_01; speed 10, timeout 600 s, Normal. sim: net.matchup.duel ai_game both sides from the game's first-second places (the game's AI re-deploys its side in the deployment phase), 2 copies, CPU. Measures: aivai_measure.measure (same function on both).",
+ "runs": {
+  "f1": "build/nn-arena/runs/20261113-093121",
+  "f2": "build/nn-arena/runs/20261113-093250",
+  "f3": "build/nn-arena/runs/20261113-093420",
+  "f4": "build/nn-arena/runs/20261113-093600",
+  "k1": "build/nn-arena/runs/20261113-092841",
+  "k2": "build/nn-arena/runs/20261113-093725",
+  "k3": "build/nn-arena/runs/20261113-093918",
+  "k4": "build/nn-arena/runs/20261113-094053"
+ },
+ "battles": {
+  "f1": {
+   "map": "flat",
+   "role": "attack",
+   "fac": {
+    "1": "emp",
+    "2": "skv"
+   },
+   "gold": [
+    3275.0,
+    3025.0
+   ]
+  },
+  "f2": {
+   "map": "flat",
+   "role": "attack",
+   "fac": {
+    "1": "skv",
+    "2": "emp"
+   },
+   "gold": [
+    3450.0,
+    3650.0
+   ]
+  },
+  "f3": {
+   "map": "flat",
+   "role": "defend",
+   "fac": {
+    "1": "emp",
+    "2": "skv"
+   },
+   "gold": [
+    2450.0,
+    2600.0
+   ]
+  },
+  "f4": {
+   "map": "flat",
+   "role": "defend",
+   "fac": {
+    "1": "skv",
+    "2": "emp"
+   },
+   "gold": [
+    2775.0,
+    2750.0
+   ]
+  },
+  "k1": {
+   "map": "ksl_plains_01",
+   "role": "attack",
+   "fac": {
+    "1": "emp",
+    "2": "skv"
+   },
+   "gold": [
+    2350.0,
+    2575.0
+   ]
+  },
+  "k2": {
+   "map": "ksl_plains_01",
+   "role": "attack",
+   "fac": {
+    "1": "skv",
+    "2": "emp"
+   },
+   "gold": [
+    5700.0,
+    5175.0
+   ]
+  },
+  "k3": {
+   "map": "ksl_plains_01",
+   "role": "defend",
+   "fac": {
+    "1": "emp",
+    "2": "skv"
+   },
+   "gold": [
+    2450.0,
+    2450.0
+   ]
+  },
+  "k4": {
+   "map": "ksl_plains_01",
+   "role": "defend",
+   "fac": {
+    "1": "skv",
+    "2": "emp"
+   },
+   "gold": [
+    3950.0,
+    4025.0
+   ]
+  }
+ },
+ "game": [
+  {
+   "contact_s": 43.0,
+   "s1_walked_m": 114.8,
+   "s1_off_s": 5.0,
+   "s1_lord_back_m": 17.7,
+   "s1_lord_melee_s": 7.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 132.8,
+   "s2_off_s": 5.0,
+   "s2_lord_back_m": 14.5,
+   "s2_lord_melee_s": 10.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.317,
+   "s2_flank_share": 0.555,
+   "s1_routs": 1,
+   "s1_first_rout_s": 109.0,
+   "s2_routs": 11,
+   "s2_first_rout_s": 40.0,
+   "end_s": 311.1,
+   "winner": 1,
+   "fight_s": 268.1,
+   "battle": "f1",
+   "run": "20261113-093121",
+   "frames": 312,
+   "status": "completed"
+  },
+  {
+   "contact_s": 45.0,
+   "s1_walked_m": 145.6,
+   "s1_off_s": 5.0,
+   "s1_lord_back_m": 17.1,
+   "s1_lord_melee_s": 9.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 109.5,
+   "s2_off_s": 5.0,
+   "s2_lord_back_m": 14.3,
+   "s2_lord_melee_s": 9.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.324,
+   "s2_flank_share": 0.546,
+   "s1_routs": 18,
+   "s1_first_rout_s": 99.0,
+   "s2_routs": 0,
+   "s2_first_rout_s": null,
+   "end_s": 322.9,
+   "winner": 2,
+   "fight_s": 277.9,
+   "battle": "f2",
+   "run": "20261113-093250",
+   "frames": 323,
+   "status": "completed"
+  },
+  {
+   "contact_s": 66.0,
+   "s1_walked_m": 21.7,
+   "s1_off_s": 6.0,
+   "s1_lord_back_m": 26.0,
+   "s1_lord_melee_s": 211.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 223.7,
+   "s2_off_s": 5.0,
+   "s2_lord_back_m": 19.9,
+   "s2_lord_melee_s": 18.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.127,
+   "s2_flank_share": 0.44,
+   "s1_routs": 6,
+   "s1_first_rout_s": 179.0,
+   "s2_routs": 7,
+   "s2_first_rout_s": 128.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 534.0,
+   "battle": "f3",
+   "run": "20261113-093420",
+   "frames": 600,
+   "status": "timeout"
+  },
+  {
+   "contact_s": 46.0,
+   "s1_walked_m": 145.7,
+   "s1_off_s": 5.0,
+   "s1_lord_back_m": 10.4,
+   "s1_lord_melee_s": 5.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 113.4,
+   "s2_off_s": 5.0,
+   "s2_lord_back_m": 7.0,
+   "s2_lord_melee_s": 5.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.551,
+   "s2_flank_share": 0.699,
+   "s1_routs": 17,
+   "s1_first_rout_s": 137.0,
+   "s2_routs": 0,
+   "s2_first_rout_s": null,
+   "end_s": 334.4,
+   "winner": 2,
+   "fight_s": 288.4,
+   "battle": "f4",
+   "run": "20261113-093600",
+   "frames": 335,
+   "status": "completed"
+  },
+  {
+   "contact_s": 65.0,
+   "s1_walked_m": 173.1,
+   "s1_off_s": 6.0,
+   "s1_lord_back_m": 4.9,
+   "s1_lord_melee_s": 6.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 154.3,
+   "s2_off_s": 6.0,
+   "s2_lord_back_m": -12.7,
+   "s2_lord_melee_s": 12.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.513,
+   "s2_flank_share": 0.567,
+   "s1_routs": 5,
+   "s1_first_rout_s": 218.0,
+   "s2_routs": 10,
+   "s2_first_rout_s": 170.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 535.0,
+   "battle": "k1",
+   "run": "20261113-092841",
+   "frames": 600,
+   "status": "timeout"
+  },
+  {
+   "contact_s": 59.0,
+   "s1_walked_m": 178.2,
+   "s1_off_s": 5.0,
+   "s1_lord_back_m": 13.5,
+   "s1_lord_melee_s": 20.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 133.1,
+   "s2_off_s": 7.0,
+   "s2_lord_back_m": -9.3,
+   "s2_lord_melee_s": 7.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.46,
+   "s2_flank_share": 0.636,
+   "s1_routs": 20,
+   "s1_first_rout_s": 78.0,
+   "s2_routs": 3,
+   "s2_first_rout_s": 268.0,
+   "end_s": 500.8,
+   "winner": 2,
+   "fight_s": 441.8,
+   "battle": "k2",
+   "run": "20261113-093725",
+   "frames": 501,
+   "status": "completed"
+  },
+  {
+   "contact_s": 66.0,
+   "s1_walked_m": 164.0,
+   "s1_off_s": 6.0,
+   "s1_lord_back_m": 18.3,
+   "s1_lord_melee_s": 18.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 153.3,
+   "s2_off_s": 7.0,
+   "s2_lord_back_m": -21.7,
+   "s2_lord_melee_s": 6.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.445,
+   "s2_flank_share": 0.467,
+   "s1_routs": 5,
+   "s1_first_rout_s": 47.0,
+   "s2_routs": 12,
+   "s2_first_rout_s": 168.0,
+   "end_s": 479.8,
+   "winner": 1,
+   "fight_s": 413.8,
+   "battle": "k3",
+   "run": "20261113-093918",
+   "frames": 480,
+   "status": "completed"
+  },
+  {
+   "contact_s": 61.0,
+   "s1_walked_m": 182.2,
+   "s1_off_s": 5.0,
+   "s1_lord_back_m": 8.8,
+   "s1_lord_melee_s": 110.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 139.8,
+   "s2_off_s": 8.0,
+   "s2_lord_back_m": -8.1,
+   "s2_lord_melee_s": 17.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.356,
+   "s2_flank_share": 0.552,
+   "s1_routs": 16,
+   "s1_first_rout_s": 60.0,
+   "s2_routs": 0,
+   "s2_first_rout_s": null,
+   "end_s": 360.4,
+   "winner": 2,
+   "fight_s": 299.4,
+   "battle": "k4",
+   "run": "20261113-094053",
+   "frames": 361,
+   "status": "completed"
+  }
+ ],
+ "sim": [
+  {
+   "contact_s": 102.0,
+   "s1_walked_m": 103.6,
+   "s1_off_s": 71.0,
+   "s1_lord_back_m": 29.4,
+   "s1_lord_melee_s": 10.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 151.7,
+   "s2_off_s": 63.0,
+   "s2_lord_back_m": 27.8,
+   "s2_lord_melee_s": 9.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.231,
+   "s2_flank_share": 0.177,
+   "s1_routs": 2,
+   "s1_first_rout_s": 240.0,
+   "s2_routs": 14,
+   "s2_first_rout_s": 55.0,
+   "end_s": 410.0,
+   "winner": 1,
+   "fight_s": 308.0,
+   "battle": "f1",
+   "run": "sim"
+  },
+  {
+   "contact_s": 102.0,
+   "s1_walked_m": 103.2,
+   "s1_off_s": 71.0,
+   "s1_lord_back_m": 28.9,
+   "s1_lord_melee_s": 8.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 150.4,
+   "s2_off_s": 63.0,
+   "s2_lord_back_m": 29.4,
+   "s2_lord_melee_s": 12.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.299,
+   "s2_flank_share": 0.12,
+   "s1_routs": 5,
+   "s1_first_rout_s": 153.0,
+   "s2_routs": 16,
+   "s2_first_rout_s": 76.0,
+   "end_s": 552.0,
+   "winner": 1,
+   "fight_s": 450.0,
+   "battle": "f1",
+   "run": "sim"
+  },
+  {
+   "contact_s": 110.0,
+   "s1_walked_m": 148.6,
+   "s1_off_s": 68.0,
+   "s1_lord_back_m": 29.4,
+   "s1_lord_melee_s": 9.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 120.9,
+   "s2_off_s": 69.0,
+   "s2_lord_back_m": 28.5,
+   "s2_lord_melee_s": 9.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.227,
+   "s2_flank_share": 0.323,
+   "s1_routs": 21,
+   "s1_first_rout_s": 64.0,
+   "s2_routs": 5,
+   "s2_first_rout_s": 144.0,
+   "end_s": 507.0,
+   "winner": 2,
+   "fight_s": 397.0,
+   "battle": "f2",
+   "run": "sim"
+  },
+  {
+   "contact_s": 110.0,
+   "s1_walked_m": 146.2,
+   "s1_off_s": 68.0,
+   "s1_lord_back_m": 29.1,
+   "s1_lord_melee_s": 10.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 119.7,
+   "s2_off_s": 69.0,
+   "s2_lord_back_m": 28.0,
+   "s2_lord_melee_s": 9.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.117,
+   "s2_flank_share": 0.187,
+   "s1_routs": 18,
+   "s1_first_rout_s": 87.0,
+   "s2_routs": 4,
+   "s2_first_rout_s": 147.0,
+   "end_s": 440.0,
+   "winner": 2,
+   "fight_s": 330.0,
+   "battle": "f2",
+   "run": "sim"
+  },
+  {
+   "contact_s": 98.0,
+   "s1_walked_m": 113.7,
+   "s1_off_s": 63.0,
+   "s1_lord_back_m": 29.6,
+   "s1_lord_melee_s": 9.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 138.0,
+   "s2_off_s": 63.0,
+   "s2_lord_back_m": 29.9,
+   "s2_lord_melee_s": 11.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.073,
+   "s2_flank_share": 0.142,
+   "s1_routs": 4,
+   "s1_first_rout_s": 237.0,
+   "s2_routs": 7,
+   "s2_first_rout_s": 147.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 502.0,
+   "battle": "f3",
+   "run": "sim"
+  },
+  {
+   "contact_s": 99.0,
+   "s1_walked_m": 113.2,
+   "s1_off_s": 63.0,
+   "s1_lord_back_m": 28.3,
+   "s1_lord_melee_s": 6.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 139.1,
+   "s2_off_s": 63.0,
+   "s2_lord_back_m": 26.3,
+   "s2_lord_melee_s": 4.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.319,
+   "s2_flank_share": 0.245,
+   "s1_routs": 6,
+   "s1_first_rout_s": 83.0,
+   "s2_routs": 14,
+   "s2_first_rout_s": 37.0,
+   "end_s": 513.0,
+   "winner": 1,
+   "fight_s": 414.0,
+   "battle": "f3",
+   "run": "sim"
+  },
+  {
+   "contact_s": 107.0,
+   "s1_walked_m": 146.6,
+   "s1_off_s": 68.0,
+   "s1_lord_back_m": 28.5,
+   "s1_lord_melee_s": 7.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 120.1,
+   "s2_off_s": 68.0,
+   "s2_lord_back_m": 27.9,
+   "s2_lord_melee_s": 10.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.247,
+   "s2_flank_share": 0.032,
+   "s1_routs": 6,
+   "s1_first_rout_s": 178.0,
+   "s2_routs": 9,
+   "s2_first_rout_s": 140.0,
+   "end_s": 456.0,
+   "winner": 1,
+   "fight_s": 349.0,
+   "battle": "f4",
+   "run": "sim"
+  },
+  {
+   "contact_s": 106.0,
+   "s1_walked_m": 145.6,
+   "s1_off_s": 68.0,
+   "s1_lord_back_m": 30.6,
+   "s1_lord_melee_s": 10.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 118.2,
+   "s2_off_s": 68.0,
+   "s2_lord_back_m": 29.8,
+   "s2_lord_melee_s": 11.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.304,
+   "s2_flank_share": 0.221,
+   "s1_routs": 9,
+   "s1_first_rout_s": 120.0,
+   "s2_routs": 12,
+   "s2_first_rout_s": 178.0,
+   "end_s": 516.0,
+   "winner": 1,
+   "fight_s": 410.0,
+   "battle": "f4",
+   "run": "sim"
+  },
+  {
+   "contact_s": 132.0,
+   "s1_walked_m": 168.1,
+   "s1_off_s": 71.0,
+   "s1_lord_back_m": 28.9,
+   "s1_lord_melee_s": 14.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 167.6,
+   "s2_off_s": 65.0,
+   "s2_lord_back_m": 26.3,
+   "s2_lord_melee_s": 11.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.263,
+   "s2_flank_share": 0.157,
+   "s1_routs": 3,
+   "s1_first_rout_s": 252.0,
+   "s2_routs": 13,
+   "s2_first_rout_s": 123.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 468.0,
+   "battle": "k1",
+   "run": "sim"
+  },
+  {
+   "contact_s": 133.0,
+   "s1_walked_m": 170.7,
+   "s1_off_s": 71.0,
+   "s1_lord_back_m": 29.0,
+   "s1_lord_melee_s": 13.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 171.9,
+   "s2_off_s": 65.0,
+   "s2_lord_back_m": 28.2,
+   "s2_lord_melee_s": 13.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.48,
+   "s2_flank_share": 0.438,
+   "s1_routs": 2,
+   "s1_first_rout_s": 309.0,
+   "s2_routs": 13,
+   "s2_first_rout_s": 223.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 467.0,
+   "battle": "k1",
+   "run": "sim"
+  },
+  {
+   "contact_s": 153.0,
+   "s1_walked_m": 237.7,
+   "s1_off_s": 69.0,
+   "s1_lord_back_m": 28.3,
+   "s1_lord_melee_s": 7.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 139.3,
+   "s2_off_s": 69.0,
+   "s2_lord_back_m": 24.9,
+   "s2_lord_melee_s": 11.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.098,
+   "s2_flank_share": 0.212,
+   "s1_routs": 15,
+   "s1_first_rout_s": 215.0,
+   "s2_routs": 1,
+   "s2_first_rout_s": 380.0,
+   "end_s": 569.0,
+   "winner": 2,
+   "fight_s": 416.0,
+   "battle": "k2",
+   "run": "sim"
+  },
+  {
+   "contact_s": 153.0,
+   "s1_walked_m": 236.6,
+   "s1_off_s": 69.0,
+   "s1_lord_back_m": 28.6,
+   "s1_lord_melee_s": 8.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 138.3,
+   "s2_off_s": 69.0,
+   "s2_lord_back_m": 26.1,
+   "s2_lord_melee_s": 10.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.067,
+   "s2_flank_share": 0.149,
+   "s1_routs": 6,
+   "s1_first_rout_s": 167.0,
+   "s2_routs": 3,
+   "s2_first_rout_s": 246.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 447.0,
+   "battle": "k2",
+   "run": "sim"
+  },
+  {
+   "contact_s": 123.0,
+   "s1_walked_m": 161.6,
+   "s1_off_s": 63.0,
+   "s1_lord_back_m": 28.2,
+   "s1_lord_melee_s": 14.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 167.2,
+   "s2_off_s": 68.0,
+   "s2_lord_back_m": 28.0,
+   "s2_lord_melee_s": 14.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.348,
+   "s2_flank_share": 0.317,
+   "s1_routs": 1,
+   "s1_first_rout_s": 238.0,
+   "s2_routs": 14,
+   "s2_first_rout_s": 112.0,
+   "end_s": 557.0,
+   "winner": 1,
+   "fight_s": 434.0,
+   "battle": "k3",
+   "run": "sim"
+  },
+  {
+   "contact_s": 123.0,
+   "s1_walked_m": 159.6,
+   "s1_off_s": 63.0,
+   "s1_lord_back_m": 28.1,
+   "s1_lord_melee_s": 14.0,
+   "s1_lord_routed": false,
+   "s2_walked_m": 167.4,
+   "s2_off_s": 68.0,
+   "s2_lord_back_m": 28.3,
+   "s2_lord_melee_s": 14.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.358,
+   "s2_flank_share": 0.298,
+   "s1_routs": 3,
+   "s1_first_rout_s": 251.0,
+   "s2_routs": 13,
+   "s2_first_rout_s": 120.0,
+   "end_s": 521.0,
+   "winner": 1,
+   "fight_s": 398.0,
+   "battle": "k3",
+   "run": "sim"
+  },
+  {
+   "contact_s": 131.0,
+   "s1_walked_m": 191.3,
+   "s1_off_s": 69.0,
+   "s1_lord_back_m": 28.4,
+   "s1_lord_melee_s": 11.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 161.5,
+   "s2_off_s": 74.0,
+   "s2_lord_back_m": 25.6,
+   "s2_lord_melee_s": 10.0,
+   "s2_lord_routed": false,
+   "s1_flank_share": 0.167,
+   "s2_flank_share": 0.075,
+   "s1_routs": 17,
+   "s1_first_rout_s": 183.0,
+   "s2_routs": 2,
+   "s2_first_rout_s": 186.0,
+   "end_s": 538.0,
+   "winner": 2,
+   "fight_s": 407.0,
+   "battle": "k4",
+   "run": "sim"
+  },
+  {
+   "contact_s": 131.0,
+   "s1_walked_m": 198.3,
+   "s1_off_s": 69.0,
+   "s1_lord_back_m": 30.8,
+   "s1_lord_melee_s": 10.0,
+   "s1_lord_routed": true,
+   "s2_walked_m": 163.1,
+   "s2_off_s": 74.0,
+   "s2_lord_back_m": 26.2,
+   "s2_lord_melee_s": 9.0,
+   "s2_lord_routed": true,
+   "s1_flank_share": 0.167,
+   "s2_flank_share": 0.064,
+   "s1_routs": 7,
+   "s1_first_rout_s": 206.0,
+   "s2_routs": 4,
+   "s2_first_rout_s": 367.0,
+   "end_s": 600.0,
+   "winner": 0,
+   "fight_s": 469.0,
+   "battle": "k4",
+   "run": "sim"
+  }
+ ],
+ "summary": {
+  "contact_s": {
+   "game": [
+    56.38,
+    43.0,
+    66.0,
+    8
+   ],
+   "sim": [
+    119.56,
+    98.0,
+    153.0,
+    16
+   ]
+  },
+  "s1_off_s": {
+   "game": [
+    5.38,
+    5.0,
+    6.0,
+    8
+   ],
+   "sim": [
+    67.75,
+    63.0,
+    71.0,
+    16
+   ]
+  },
+  "s2_off_s": {
+   "game": [
+    6.0,
+    5.0,
+    8.0,
+    8
+   ],
+   "sim": [
+    67.38,
+    63.0,
+    74.0,
+    16
+   ]
+  },
+  "s1_walked_m": {
+   "game": [
+    140.66,
+    21.7,
+    182.2,
+    8
+   ],
+   "sim": [
+    159.04,
+    103.2,
+    237.7,
+    16
+   ]
+  },
+  "s2_walked_m": {
+   "game": [
+    144.99,
+    109.5,
+    223.7,
+    8
+   ],
+   "sim": [
+    145.9,
+    118.2,
+    171.9,
+    16
+   ]
+  },
+  "s1_lord_back_m": {
+   "game": [
+    14.59,
+    4.9,
+    26.0,
+    8
+   ],
+   "sim": [
+    29.01,
+    28.1,
+    30.8,
+    16
+   ]
+  },
+  "s2_lord_back_m": {
+   "game": [
+    0.49,
+    -21.7,
+    19.9,
+    8
+   ],
+   "sim": [
+    27.57,
+    24.9,
+    29.9,
+    16
+   ]
+  },
+  "s1_lord_melee_s": {
+   "game": [
+    48.25,
+    5.0,
+    211.0,
+    8
+   ],
+   "sim": [
+    10.0,
+    6.0,
+    14.0,
+    16
+   ]
+  },
+  "s2_lord_melee_s": {
+   "game": [
+    10.5,
+    5.0,
+    18.0,
+    8
+   ],
+   "sim": [
+    10.44,
+    4.0,
+    14.0,
+    16
+   ]
+  },
+  "s1_flank_share": {
+   "game": [
+    0.39,
+    0.13,
+    0.55,
+    8
+   ],
+   "sim": [
+    0.24,
+    0.07,
+    0.48,
+    16
+   ]
+  },
+  "s2_flank_share": {
+   "game": [
+    0.56,
+    0.44,
+    0.7,
+    8
+   ],
+   "sim": [
+    0.2,
+    0.03,
+    0.44,
+    16
+   ]
+  },
+  "s1_routs": {
+   "game": [
+    11.0,
+    1.0,
+    20.0,
+    8
+   ],
+   "sim": [
+    7.81,
+    1.0,
+    21.0,
+    16
+   ]
+  },
+  "s2_routs": {
+   "game": [
+    5.38,
+    0.0,
+    12.0,
+    8
+   ],
+   "sim": [
+    9.0,
+    1.0,
+    16.0,
+    16
+   ]
+  },
+  "s1_first_rout_s": {
+   "game": [
+    115.88,
+    47.0,
+    218.0,
+    8
+   ],
+   "sim": [
+    186.44,
+    64.0,
+    309.0,
+    16
+   ]
+  },
+  "s2_first_rout_s": {
+   "game": [
+    154.8,
+    40.0,
+    268.0,
+    5
+   ],
+   "sim": [
+    167.56,
+    37.0,
+    380.0,
+    16
+   ]
+  },
+  "end_s": {
+   "game": [
+    438.68,
+    311.1,
+    600.0,
+    8
+   ],
+   "sim": [
+    536.19,
+    410.0,
+    600.0,
+    16
+   ]
+  },
+  "fight_s": {
+   "game": [
+    382.3,
+    268.1,
+    535.0,
+    8
+   ],
+   "sim": [
+    416.62,
+    308.0,
+    502.0,
+    16
+   ]
+  }
+ },
+ "counts": {
+  "s2_lord_routed": {
+   "game": [
+    3,
+    8
+   ],
+   "sim": [
+    12,
+    16
+   ]
+  },
+  "timeout": {
+   "game": 2,
+   "sim": 5
+  }
+ },
+ "deploy": "the game's AI (side 2) re-placed its army in the deployment phase: one row, 30-38 m between centres (ours: 48 m, 2 rows); on the flat map ~100 m forward to its zone's front (x 184 -> 80)"
+}

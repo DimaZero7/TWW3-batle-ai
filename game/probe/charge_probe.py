@@ -572,7 +572,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
-              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width")
+              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2088,6 +2088,12 @@ def run_config(plan, index):
         # the men of the pair and of the neighbours from memory every 0.1 s from 80 m on to the lane's end (their swings:
         # the strike mark, the target, the facing - tmp/width/swings.py); health every 0.25 s
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=WIDTH_MEN_S, men_near_m=80, mem_extras=True)
+    if plan == "reissue":
+        # (game/probe/unit_probe.py) the bearing every 0.25 s; the walker's men every 0.5 s all the lane (men_all_s)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=0, men_near_m=0)
+    if plan == "counter":
+        # (game/probe/unit_probe.py) health every 0.25 s; the men every 0.5 s from 60 m on to 40 s after the contact
+        config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=40, men_near_m=60)
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -2501,6 +2507,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
         o = O.hold(B, N, device)
         kind, target, run_, x, z, ab = (o.kind.clone(), o.target.clone(), o.run.clone(), o.x.clone(), o.z.clone(),
                                         o.ability.clone())
+        face = o.face.clone()
         for b in range(B):
             A, T, L = int(slot["a"][b]), int(slot["tg"][b]), int(slot["l"][b])
             sp = specs[b]
@@ -2551,6 +2558,19 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 # facing order): the unit holds and the twin turns it to the step's bearing at once (so that a later
                 # move starts from the game's facing)
                 due = [x for x in sp.get("steps", []) if t >= x["at_s"]]
+                if sp.get("sim_face"):
+                    # (the reissue plan, game/probe/unit_probe.py) the steps as the simulator's own orders: a move with a
+                    # bearing is MOVE with Orders.face, a 'face' step HOLD with it (the game's goto_location_angle_width)
+                    if due:
+                        x_ = due[-1]
+                        sx, sz = st_["start"][b]
+                        if x_["kind"] == "move":
+                            kind[b, A], x[b, A], z[b, A] = O.MOVE, sx + x_.get("dx", 0), sz + x_.get("dz", 0)
+                            run_[b, A] = bool(x_.get("run"))
+                        else:
+                            kind[b, A] = O.HOLD
+                        face[b, A] = float(x_.get("bearing", -1.0))
+                    due = []
                 for j, x_ in enumerate(due):
                     if x_["kind"] == "face" and (b, j) not in st_["faced"]:
                         st_["faced"].add((b, j))
@@ -2806,13 +2826,13 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                         kind[b, i], target[b, i], run_[b, i] = O.MOVE, -1, True
                         x[b, i], z[b, i] = point(who, ti["leg"][who]) if ti["phase"] == "tire" else ti["start"][who]
         # KEEP the orders in force (re-issuing every step would be a new order each time)
-        key = torch.stack([kind.float(), target.float(), run_.float(), x, z], -1)
+        key = torch.stack([kind.float(), target.float(), run_.float(), x, z, face], -1)
         last = st_["last"].get("key")
         if last is not None:
             same = (key == last).all(-1)
             kind = torch.where(same, torch.full_like(kind, O.KEEP), kind)
         st_["last"]["key"] = key
-        return O.Orders(kind=kind, x=x, z=z, target=target, run=run_, ability=ab)
+        return O.Orders(kind=kind, x=x, z=z, target=target, run=run_, ability=ab, face=face)
 
     next_t = [0.0]
 

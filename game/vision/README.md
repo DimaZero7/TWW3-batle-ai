@@ -6,6 +6,7 @@
 
 Прогон — папка или имя (`build/nn-arena/runs`, `data/nn-arena/runs`, `data/human/runs`). Пишет `<имя>.txt` и `<имя>.png`,
 печатает цену в токенах: картинка ⌈w/28⌉·⌈h/28⌉ (документация Anthropic, 11.2026), текст — оценка. Бой ≈ 2,5–3 тыс.
+Прогон пробы (`build/charge-probe/runs/<время>`): каждая дорожка — пара `own_L<n>` (нападающий) и `enemy_L<n>` (цель).
 Симулятор: `record.sim_frame(st)` каждую секунду → `record.from_sim(frames, secs)` → `vision.render(battle, out)`.
 
 **Текст (~1,6–2 тыс.) — главное.** Оси: lat + — наш правый фланг, fwd + — к врагу, метры от линии пехоты на старте.

@@ -248,7 +248,11 @@ def nn_arena_config(args, run_config):
     duration_s = max(3600, args.timeout + TIMEOUT_MARGIN_S)
     labels = side_labels(args)
     army = None
-    if args.army_from_run is not None:
+    if getattr(args, "arena_json", None) is not None:
+        # an arena dict written elsewhere (game: the stage 0 armies against the game's AI)
+        arena = json.loads(Path(args.arena_json).read_text(encoding="utf-8"))
+        army = {"from_file": str(args.arena_json)}
+    elif args.army_from_run is not None:
         # an old run's armies and deployment (game/arena/army_from_run.py): its manifest, not the generator
         from game.arena import army_from_run
         arena, army = army_from_run.load(args.army_from_run, swap=args.army_swap,
@@ -347,9 +351,11 @@ def parser_of():
     parser.add_argument("--window", type=float, nargs=4, metavar=("MIN_X", "MAX_X", "MIN_Z", "MAX_Z"),
                         help="map-capture: capture only this area")
     parser.add_argument("--plan", default="hamlet", help="move-probe: plan in bridge/config/move-plans/")
-    parser.add_argument("--own-ai", choices=("net",),
+    parser.add_argument("--own-ai", choices=("net", "ai"),
                         help="nn-arena: the network in the companion (bridge/companion: the chain, the strategist's "
-                             "deployment) commands our side; the game's AI the other (the default)")
+                             "deployment) commands our side ('net', the default); 'ai' - the game's own tactical AI "
+                             "(CA's script_ai_planner, 'attack the enemy force': no companion) - the game's AI against "
+                             "the game's AI; the game's AI the other side always")
     parser.add_argument("--own-role", choices=("attack", "defend"),
                         help="nn-arena, human: our side attacks (the game's AI defends and wins on timeout) or defends "
                              "(default: the game's AI attacks)")
@@ -373,6 +379,9 @@ def parser_of():
                         help="--army-seed: the generator's scheme (sim/armies/generate.py); v3 the training's")
     parser.add_argument("--army-swap", action="store_true",
                         help="--army-seed / --army-from-run: the armies swapped (our side gets the enemy army)")
+    parser.add_argument("--arena-json", type=Path, metavar="FILE",
+                        help="nn-arena, human: the arena dict (sim/arena.py shape: sides own / enemy with units' slot, "
+                             "key, men, forward, lateral, width) from a JSON file instead of the generator")
     parser.add_argument("--army-from-run", type=Path, metavar="RUN_DIR",
                         help="nn-arena, human: the armies, deployment, gap of an old run (its manifest.json) instead of "
                              "the generator (game/arena/army_from_run.py)")
@@ -428,7 +437,7 @@ def check_args(parser, args):
             parser.error("the human target is our side under a human: no --own-ai")
         args.own_ai = "human"
     elif args.target == "nn-arena":
-        args.own_ai = "net"
+        args.own_ai = args.own_ai or "net"
     elif args.own_ai is not None:
         parser.error("--own-ai is for nn-arena")
     if args.speed is None:

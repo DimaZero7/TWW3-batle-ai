@@ -251,6 +251,93 @@ def width_battles():
     return [_placed(base, k) for k in WIDTH_ROT]
 
 
+# the reissue plan (13.11; METHOD.md 'Уровень': the code re-gives an order only when its point moved past a threshold -
+# net/common/reissue.py MOVE_M 8 / FACE_DEG 22.5, not from a probe; sim.json turn.face_why 'after a move ... OPEN'):
+# Empire spearmen (30 m front) alone, the enemy REISSUE_GAP m off (held, never ordered). Battle 'stand': at 1 s a move
+# with width and facing (move_formation) REISSUE_STAND_DZ m ahead at a run, settled long before REISSUE_STAND_AT s; then
+# the same order again, its point shifted aside by dx m and / or its facing turned by deg ('same': both 0; 'f90': a facing
+# order where it stands, never moved before - the face_why control). Battle 'move': at 1 s the same order REISSUE_MOVE_DZ
+# m ahead, REISSUE_MOVE_AT s (mid-run) again shifted / turned ('none': no second order; 'mface90': a facing order where
+# it is - stop and turn). The facings sit on the game's 64 sectors (5.625 deg): base REISSUE_B, turns 2 / 4 / 8 / 16
+# sectors. (kind, dx m, turn deg, how: 'move' | 'face' | None)
+REISSUE_GAP, REISSUE_B, REISSUE_W = 200, 182.8125, 30.0
+REISSUE_STAND_DZ, REISSUE_STAND_AT, REISSUE_STAND_S = 30, 20, 50
+REISSUE_MOVE_DZ, REISSUE_MOVE_AT, REISSUE_MOVE_S = 100, 10, 60
+REISSUE_STAND = (("same", 0, 0, "move"), ("d2", 2, 0, "move"), ("d5", 5, 0, "move"), ("d10", 10, 0, "move"),
+                 ("d20", 20, 0, "move"), ("a11", 0, 11.25, "move"), ("a22", 0, 22.5, "move"), ("a45", 0, 45, "move"),
+                 ("a90", 0, 90, "move"), ("f90", 0, 90, "face"))
+REISSUE_MOVE = (("none", 0, 0, None), ("same", 0, 0, "move"), ("d2", 2, 0, "move"), ("d5", 5, 0, "move"),
+                ("d10", 10, 0, "move"), ("d20", 20, 0, "move"), ("a11", 0, 11.25, "move"), ("a22", 0, 22.5, "move"),
+                ("a45", 0, 45, "move"), ("mface90", 0, 90, "face"))
+REISSUE_PLACES = tuple((float(x), z) for z in (-450.0, 100.0) for x in (-480, -240, 0, 240, 480))
+
+
+def reissue_battles():
+    """The reissue plan's 4 battles: stand, move, stand and move with the places rotated by 5."""
+    def ln(kind, dx, deg, how, battle):
+        dz, at, max_s = ((REISSUE_STAND_DZ, REISSUE_STAND_AT, REISSUE_STAND_S) if battle == "stand"
+                         else (REISSUE_MOVE_DZ, REISSUE_MOVE_AT, REISSUE_MOVE_S))
+        first = {"at_s": 1, "kind": "move", "dx": 0, "dz": -dz, "bearing": REISSUE_B, "width": REISSUE_W, "run": True}
+        b2 = round((REISSUE_B + deg) % 360, 4)
+        steps = [] if (battle == "stand" and how == "face") else [first]
+        if how == "move":
+            steps.append({"at_s": at, "kind": "move", "dx": dx, "dz": -dz, "bearing": b2, "width": REISSUE_W,
+                          "run": True})
+        elif how == "face":
+            steps.append({"at_s": at, "kind": "face", "bearing": b2, "width": REISSUE_W})
+        return cp.lane("spear", "clanrat", "script", "hold", gap_m=REISSUE_GAP, fight_s=0, max_s=max_s, answer=False,
+                       kind=f"{battle}_{kind}", steps=steps, men_all_s=max_s, reissue_at=at, sim_face=True,
+                       turn_deg=deg, shift_m=dx, **FX)
+    stand = [ln(*x, "stand") for x in REISSUE_STAND]
+    move = [ln(*x, "move") for x in REISSUE_MOVE]
+    out = []
+    for k in (0, 5):
+        for base in (stand, move):
+            out.append([dict(s, place=p) for s, p in zip(cp.rotate(list(base), k), REISSUE_PLACES)])
+    return out
+
+
+# the counter plan (13.11; the counter-charge: net/unit/branch.py's moment - the enemy within its charge distance 30 m
+# + 4 s of its run - from the simulator): fearless clanrats (no shields, 30 m) charge at a run from COUNTER_GAP m (front
+# to front, 'both') our Empire spearmen / swordsmen (30 m), who hold (braced, never ordered) or counter-charge (an attack
+# at a run) when the gap is X m: the order's time from the clanrats' run on a held unit (the width plan's runs,
+# build/charge-probe/runs/20261109-123515: off at ~1.8 s, then ~3.85 m/s front to front) - the gap at the order is
+# measured; COUNTER_S of fight after contact. 4 battles of 10 of the 12 lanes, rotated on the grid
+COUNTER_T = "wh2_main_skv_inf_clanrats_0"
+COUNTER_DEF = ("spear", "swords")
+COUNTER_AT = (None, 60, 40, 30, 20, 10)
+COUNTER_GAP, COUNTER_S, COUNTER_T0, COUNTER_V = 90, 35, 1.8, 3.85
+COUNTER_ROT = (0, 6, 3, 9)
+COUNTER_LATE_S = 24.4
+
+
+def counter_battles():
+    base = []
+    for d in COUNTER_DEF:
+        for x in COUNTER_AT:
+            extra = {} if x is None else {"a_go_s": round(COUNTER_T0 + (COUNTER_GAP - x) / COUNTER_V, 1), "counter_at": x}
+            base.append(cp.lane(d, COUNTER_T, "hold" if x is None else "attack_run", "both", gap_m=COUNTER_GAP,
+                                fight_s=COUNTER_S, max_s=round(COUNTER_T0 + COUNTER_GAP / COUNTER_V) + COUNTER_S + 5,
+                                answer=False, kind=f"{d}_{'hold' if x is None else f'c{x}'}",
+                                **FX, **extra))
+    out = [_placed(base, k) for k in COUNTER_ROT]
+    # battles 5, 6: the counter at contact ('ans': the clanrats attack our unit standing - target mode 'stand' with
+    # the answer, our attack order at its first melee flag; ours is the lane's target, ours 'tg') and a late counter
+    # (the order COUNTER_LATE_S after the go: the gap ~10 m by battles 1-4), the holds again
+    more = []
+    for d in COUNTER_DEF:
+        more.append(cp.lane(COUNTER_T, d, "attack_run", "stand", gap_m=COUNTER_GAP, fight_s=COUNTER_S,
+                            max_s=round(COUNTER_T0 + COUNTER_GAP / COUNTER_V) + COUNTER_S + 5, answer=True,
+                            kind=f"{d}_ans", ours="tg", **FX))
+        more.append(cp.lane(d, COUNTER_T, "attack_run", "both", gap_m=COUNTER_GAP, fight_s=COUNTER_S,
+                            max_s=round(COUNTER_T0 + COUNTER_GAP / COUNTER_V) + COUNTER_S + 5, answer=False,
+                            kind=f"{d}_late", a_go_s=COUNTER_LATE_S, counter_at=5, **FX))
+    holds = [b for b in base if b["kind"].endswith("_hold")]
+    two = more + holds + more
+    out += [_placed(two, 0), _placed(two, 5)]
+    return out
+
+
 def _fwd(b):
     r = math.radians(b)
     return math.sin(r), math.cos(r)
@@ -407,6 +494,10 @@ def battles(plan):
         return forestwalk_battles()
     if plan == "width":
         return width_battles()
+    if plan == "reissue":
+        return reissue_battles()
+    if plan == "counter":
+        return counter_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -1068,7 +1159,111 @@ def width_measure(lane):
     return out
 
 
-MEASURE = {"width": width_measure, "lobfriend": losfriend_measure, "forestwalk": forestwalk_measure, "snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+def _still_after(t, v, t0, lim=0.3, mv=None):
+    """s after t0 to the unit's last sample moving (the game's is_moving flag mv when there is one: its centre jumps
+    1-2 m between two readings at rest; else faster than lim m/s - the simulator's), 0: it never moved after t0."""
+    if mv is not None and np.isfinite(mv).any():
+        sel = (t > t0 + 1e-6) & (np.nan_to_num(mv) > 0)
+    else:
+        sel = (t > t0 + 1e-6) & np.isfinite(v) & (v > lim)
+    return float(t[sel][-1] - t0) if sel.any() else 0.0
+
+
+def reissue_measure(lane):
+    """The reissue plan: from the second order (the step's phase; 'none': its nominal time) - the centre's way and
+    speed, s to the last sample moving (> 0.3 m/s over 0.5 s), s to the bearing staying within 10 deg of the facing
+    ordered, the bearing's widest swing from the one at the order within 15 s, the 'braced' flag (the game's) lost and
+    s to its return, the men's median way and s to the last 0.5 s in which they moved > 0.25 m/s on average, the
+    arrival (from the go: the last sample moving)."""
+    spec, s = lane["spec"], lane["samples"]
+    t = _t(lane)
+    x, z, b = cp.series(s, "a", "x"), cp.series(s, "a", "z"), cp.series(s, "a", "b")
+    v = _speed(lane, "a", 0.5)
+    steps = spec.get("steps") or []
+    tr = _phase_t(lane, f"step{len(steps)}:{steps[-1]['kind']}") if steps else None
+    if tr is None or (len(steps) < 2 and steps and steps[0]["kind"] == "move"):
+        tr = float(spec.get("reissue_at") or 0)            # ('none': no second order)
+    goal = float(steps[-1].get("bearing", np.nan)) if steps else np.nan
+    out = {"kind": spec["kind"], "run": lane.get("run")}
+    ok = np.isfinite(x) & np.isfinite(b)
+    if ok.sum() < 4 or tr > t[ok][-1]:
+        return out
+    after = (t >= tr) & ok
+    xr, zr = cp.at(t, x, tr), cp.at(t, z, tr)
+    out["v_at_order"] = cp.at(t, v, tr)
+    out["moved_m"] = float(np.hypot(x[ok][-1] - xr, z[ok][-1] - zr))
+    mv = cp.series(s, "a", "mv")
+    out["still_s"] = _still_after(t, v, tr, mv=mv)
+    out["arrive_s"] = _still_after(t, v, 0.0, mv=mv)
+    off = np.abs(cp._ang(b - goal))
+    bad = after & (off > 10)
+    out["b10_s"] = float(t[bad][-1] - tr + (t[1] - t[0])) if bad.any() else 0.0
+    br = cp.at(t, b, tr)
+    win = after & (t <= tr + 15)
+    out["b_swing_deg"] = float(np.max(np.abs(cp._ang(b[win] - br)))) if win.any() else None
+    out["b_end_off_deg"] = float(off[ok][-1])
+    out["ready_s"] = max(out["still_s"], out["b10_s"])     # still and on its facing (the simulator has no brace flag)
+    st = np.array(["braced" in str(_row(r, "a").get("st") or "") for r in s])
+    if any(_row(r, "a").get("st") is not None for r in s):
+        i0 = int(np.argmin(np.abs(t - tr)))
+        lost = after & ~st
+        out["braced_at_order"] = bool(st[i0])
+        out["braced_lost"] = bool(lost.any())
+        out["braced_back_s"] = float(t[lost][-1] - tr + (t[1] - t[0])) if lost.any() else 0.0
+    men = [(tm, np.asarray(a, float).reshape(-1, 2) / 10) for tm, a, _ in lane.get("men", []) if len(a) >= 8]
+    men = [(tm, p) for tm, p in men if tm >= tr - 0.6]
+    if len(men) >= 3:
+        n = min(len(p) for _, p in men)
+        p0 = men[0][1][:n]
+        out["men_moved_m"] = float(np.median(np.hypot(*(men[-1][1][:n] - p0).T)))
+        last = 0.0
+        for (t1, p1), (t2, p2) in zip(men, men[1:]):
+            if t2 > t1 and np.mean(np.hypot(*(p2[:n] - p1[:n]).T)) / (t2 - t1) > 0.25:
+                last = t2 - tr
+        out["men_settle_s"] = float(last)
+    return out
+
+
+def counter_measure(lane):
+    """The counter plan: the first contact (either unit's melee flag), the front-to-front gap at our counter-charge's
+    order ('a_go': the centres less the half depths), our way from the start and speed over the 2 s before contact, the
+    clanrats' too, each side's share of its starting health lost 0-3 / 0-10 / 0-30 s after contact, the trades (theirs
+    lost less ours) over 10 and 30 s."""
+    spec, s = lane["spec"], lane["samples"]
+    if spec.get("ours") == "tg":
+        # (the 'ans' lanes: ours is the lane's target) the rows swapped, 'a' ours as in the other lanes
+        s = [(x[0], x[2], x[1]) + tuple(x[3:]) for x in s]
+        lane = dict(lane, samples=s)
+    t = _t(lane)
+    m = np.nan_to_num(cp.series(s, "a", "m")) + np.nan_to_num(cp.series(s, "tg", "m"))
+    out = {"kind": spec["kind"], "run": lane.get("run")}
+    if not (m > 0).any():
+        return out
+    c = float(t[m > 0][0])
+    out["contact_s"] = c
+    ax, az = cp.series(s, "a", "x"), cp.series(s, "a", "z")
+    tx, tz = cp.series(s, "tg", "x"), cp.series(s, "tg", "z")
+    half = (spec.get("a_depth", 0) + spec.get("t_depth", 0)) / 2
+    go = _phase_t(lane, "a_go") if spec.get("ours") != "tg" else c
+    if go is not None:
+        out["order_s"] = go
+        out["order_gap_m"] = float(np.hypot(cp.at(t, ax, go) - cp.at(t, tx, go), cp.at(t, az, go) - cp.at(t, tz, go))
+                                   - half)
+    ok = np.isfinite(ax)
+    out["a_way_m"] = float(np.hypot(cp.at(t, ax, c) - ax[ok][0], cp.at(t, az, c) - az[ok][0]))
+    for who in ("a", "tg"):
+        v = _speed(lane, who, 2.0)
+        out[f"{who}_v_contact"] = cp.at(t, v, c)
+        hp = cp.series(s, who, "hp")
+        h0 = float(hp[np.isfinite(hp)][0])
+        for hi in (3, 10, 30):
+            out[f"{who}_0_{hi}"] = (cp.at(t, hp, c) - cp.at(t, hp, c + hi)) / h0
+    for hi in (10, 30):
+        out[f"trade_{hi}"] = out[f"tg_0_{hi}"] - out[f"a_0_{hi}"]
+    return out
+
+
+MEASURE = {"reissue": reissue_measure, "counter": counter_measure, "width": width_measure,"lobfriend": losfriend_measure, "forestwalk": forestwalk_measure, "snipe": snipe_measure, "losmove": losmove_measure, "losrange": losrange_measure, "losfriend": losfriend_measure, "ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -1104,7 +1299,11 @@ def _fmt(v):
 
 
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
-KEY = {"width": ("contact_s", "tg_0_5", "tg_5_15", "tg_15_30", "tg_30_60", "a_0_5", "a_5_15", "a_15_30", "a_30_60",
+KEY = {"reissue": ("v_at_order", "moved_m", "still_s", "b10_s", "ready_s", "b_swing_deg", "b_end_off_deg", "arrive_s",
+                   "braced_lost", "braced_back_s", "men_moved_m", "men_settle_s"),
+       "counter": ("order_gap_m", "contact_s", "a_way_m", "a_v_contact", "tg_v_contact", "a_0_3", "a_0_10", "a_0_30",
+                   "tg_0_3", "tg_0_10", "tg_0_30", "trade_10", "trade_30"),
+       "width": ("contact_s", "tg_0_5", "tg_5_15", "tg_15_30", "tg_30_60", "a_0_5", "a_5_15", "a_15_30", "a_30_60",
                  "tg_lost", "a_lost", "trade", "nb_lost"),
        "lobfriend": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "cover_hp_lost", "fwd_max_m"),
        "forestwalk": ("cruise", "cruise_first", "legs", "leg_s"),

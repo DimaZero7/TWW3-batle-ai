@@ -100,11 +100,39 @@ class Battle:
         return max(files * h, 3.0), max(ranks * v, 2.0)
 
 
+def _probe(R, m):
+    """A probe's run (charge-probe: lanes, no nn_sample) as a Battle: each lane's attacker as own_<lane>, its target
+    as enemy_<lane>, health as a share of the start, one frame a second."""
+    from game.probe import charge_probe as cp
+    keys, by_sec = {}, {}
+    for ln in cp.load_run(R):
+        sp, name = ln["spec"], ln["spec"]["name"]
+        keys[f"own_{name}"], keys[f"enemy_{name}"] = sp.get("a_key"), sp.get("t_key")
+        h0 = {}
+        for smp in ln["samples"]:
+            sec = round(smp[0])
+            f = by_sec.setdefault(sec, {})
+            for i, (n, side) in ((1, (f"own_{name}", 1)), (2, (f"enemy_{name}", 2))):
+                row = smp[i]
+                if not row or n in f:
+                    continue
+                h0.setdefault(n, row.get("hp") or 1)
+                f[n] = dict(row, n=n, side=side, hp=(row.get("hp") or 0) / (h0[n] or 1),
+                            ow=row.get("ow") or (sp.get("a_width") if side == 1 else sp.get("t_width")))
+    ts = sorted(by_sec)
+    full = [t for t in ts if len(by_sec[t]) == len(keys)]
+    ts = full or ts
+    return Battle(R.name, [by_sec[t] for t in ts], ts, keys, map_name=None, kind="probe")
+
+
 def load(run):
-    """A Battle of a game recording: a run folder or a run name (game.battle.run_dir)."""
+    """A Battle of a game recording: a run folder or a run name (game.battle.run_dir); a probe's run (lanes, no
+    units in the manifest) - each lane's pair (_probe)."""
     from game.battle import run_dir
     R = run_dir(run)
     m = json.loads((R / "manifest.json").read_text(encoding="utf-8"))["config"]
+    if "units" not in m and "lanes" in m:
+        return _probe(R, m)
     keys = {u["script_name"]: u["key"] for s in ("own", "enemy") for u in m["units"][s]}
     frames, ts, winner = [], [], None
     for line in (R / "events.jsonl").open(encoding="utf-8", errors="ignore"):

@@ -1,0 +1,1815 @@
+{
+ "plan": "reissue (game/probe/unit_probe.py)",
+ "date": "2026-11-13",
+ "runs": [
+  "build/charge-probe/runs/20261113-091636",
+  "build/charge-probe/runs/20261113-091806",
+  "build/charge-probe/runs/20261113-091905",
+  "build/charge-probe/runs/20261113-091959"
+ ],
+ "what": "Empire spearmen 30 m alone; stand_*: a move_formation 30 m ahead at a run (1 s), at 20 s the order again shifted aside dx m / turned deg (f90: a facing where it stands, never moved); move_*: a move 100 m ahead, at 10 s (mid-run) again shifted / turned (none: no second order; mface90: a facing where it is). Times from the second order: still_s - last game is_moving, b10_s - bearing within 10 deg of the facing ordered to the end, braced_back_s - the game's 'braced' flag back; arrive_s from the go. sim: the twin (game.probe.unit_probe --sim, the step's bearing as Orders.face), 2 battles x 2 copies.",
+ "summary": {
+  "move_a11": {
+   "n": 2,
+   "still_s": [
+    27.6,
+    27.3,
+    27.9
+   ],
+   "b10_s": [
+    26.1,
+    25.8,
+    26.4
+   ],
+   "ready_s": [
+    27.6,
+    27.3,
+    27.9
+   ],
+   "braced_back_s": [
+    27.6,
+    27.3,
+    27.9
+   ],
+   "men_settle_s": [
+    26.55,
+    26.3,
+    26.8
+   ],
+   "men_moved_m": [
+    75.98,
+    75.86,
+    76.11
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    37.8,
+    37.5,
+    38.1
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 29.0,
+    "ready_s": 29.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 35.0
+   }
+  },
+  "move_a22": {
+   "n": 2,
+   "still_s": [
+    28.5,
+    28.5,
+    28.5
+   ],
+   "b10_s": [
+    26.4,
+    26.4,
+    26.4
+   ],
+   "ready_s": [
+    28.5,
+    28.5,
+    28.5
+   ],
+   "braced_back_s": [
+    31.35,
+    31.2,
+    31.5
+   ],
+   "men_settle_s": [
+    27.3,
+    27.3,
+    27.3
+   ],
+   "men_moved_m": [
+    76.32,
+    76.3,
+    76.34
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    38.7,
+    38.7,
+    38.7
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 29.0,
+    "ready_s": 29.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 35.0
+   }
+  },
+  "move_a45": {
+   "n": 2,
+   "still_s": [
+    30.6,
+    30.6,
+    30.6
+   ],
+   "b10_s": [
+    26.7,
+    26.7,
+    26.7
+   ],
+   "ready_s": [
+    30.6,
+    30.6,
+    30.6
+   ],
+   "braced_back_s": [
+    33.3,
+    33.3,
+    33.3
+   ],
+   "men_settle_s": [
+    29.05,
+    28.8,
+    29.3
+   ],
+   "men_moved_m": [
+    77.39,
+    77.34,
+    77.45
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    40.8,
+    40.8,
+    40.8
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 29.0,
+    "ready_s": 29.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 35.0
+   }
+  },
+  "move_d10": {
+   "n": 2,
+   "still_s": [
+    27.15,
+    27.0,
+    27.3
+   ],
+   "b10_s": [
+    25.2,
+    25.2,
+    25.2
+   ],
+   "ready_s": [
+    27.15,
+    27.0,
+    27.3
+   ],
+   "braced_back_s": [
+    27.0,
+    27.0,
+    27.0
+   ],
+   "men_settle_s": [
+    26.3,
+    26.3,
+    26.3
+   ],
+   "men_moved_m": [
+    76.6,
+    76.58,
+    76.63
+   ],
+   "b_swing_deg": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "arrive_s": [
+    37.35,
+    37.2,
+    37.5
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 29.0,
+    "ready_s": 29.0,
+    "b_swing_deg": 7.72,
+    "arrive_s": 35.0
+   }
+  },
+  "move_d2": {
+   "n": 2,
+   "still_s": [
+    27.3,
+    26.4,
+    28.2
+   ],
+   "b10_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ready_s": [
+    27.3,
+    26.4,
+    28.2
+   ],
+   "braced_back_s": [
+    27.0,
+    26.1,
+    27.9
+   ],
+   "men_settle_s": [
+    26.55,
+    25.8,
+    27.3
+   ],
+   "men_moved_m": [
+    75.91,
+    75.88,
+    75.93
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    37.5,
+    36.6,
+    38.4
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 0.0,
+    "ready_s": 25.0,
+    "b_swing_deg": 1.55,
+    "arrive_s": 35.0
+   }
+  },
+  "move_d20": {
+   "n": 2,
+   "still_s": [
+    28.5,
+    28.5,
+    28.5
+   ],
+   "b10_s": [
+    26.85,
+    26.7,
+    27.0
+   ],
+   "ready_s": [
+    28.5,
+    28.5,
+    28.5
+   ],
+   "braced_back_s": [
+    28.8,
+    28.8,
+    28.8
+   ],
+   "men_settle_s": [
+    27.3,
+    27.3,
+    27.3
+   ],
+   "men_moved_m": [
+    78.51,
+    78.47,
+    78.54
+   ],
+   "b_swing_deg": [
+    16.0,
+    16.0,
+    16.0
+   ],
+   "arrive_s": [
+    38.7,
+    38.7,
+    38.7
+   ],
+   "sim": {
+    "still_s": 25.5,
+    "b10_s": 29.5,
+    "ready_s": 29.5,
+    "b_swing_deg": 15.17,
+    "arrive_s": 35.5
+   }
+  },
+  "move_d5": {
+   "n": 2,
+   "still_s": [
+    26.7,
+    26.7,
+    26.7
+   ],
+   "b10_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ready_s": [
+    26.7,
+    26.7,
+    26.7
+   ],
+   "braced_back_s": [
+    26.4,
+    26.4,
+    26.4
+   ],
+   "men_settle_s": [
+    25.8,
+    25.8,
+    25.8
+   ],
+   "men_moved_m": [
+    76.05,
+    76.03,
+    76.07
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    36.9,
+    36.9,
+    36.9
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 0.0,
+    "ready_s": 25.0,
+    "b_swing_deg": 3.88,
+    "arrive_s": 35.0
+   }
+  },
+  "move_mface90": {
+   "n": 2,
+   "still_s": [
+    17.25,
+    16.5,
+    18.0
+   ],
+   "b10_s": [
+    9.0,
+    8.7,
+    9.3
+   ],
+   "ready_s": [
+    17.25,
+    16.5,
+    18.0
+   ],
+   "braced_back_s": [
+    20.1,
+    19.2,
+    21.0
+   ],
+   "men_settle_s": [
+    11.55,
+    11.3,
+    11.8
+   ],
+   "men_moved_m": [
+    8.3,
+    8.24,
+    8.36
+   ],
+   "b_swing_deg": [
+    96.5,
+    96.0,
+    97.0
+   ],
+   "arrive_s": [
+    27.45,
+    26.7,
+    28.2
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 5.0,
+    "ready_s": 5.0,
+    "b_swing_deg": 92.81,
+    "arrive_s": 10.0
+   }
+  },
+  "move_none": {
+   "n": 2,
+   "still_s": [
+    26.9,
+    26.6,
+    27.2
+   ],
+   "b10_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ready_s": [
+    26.9,
+    26.6,
+    27.2
+   ],
+   "braced_back_s": [
+    26.3,
+    26.3,
+    26.3
+   ],
+   "men_settle_s": [
+    25.5,
+    25.5,
+    25.5
+   ],
+   "men_moved_m": [
+    77.35,
+    77.3,
+    77.4
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    36.9,
+    36.6,
+    37.2
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 0.0,
+    "ready_s": 25.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 35.0
+   }
+  },
+  "move_same": {
+   "n": 2,
+   "still_s": [
+    26.25,
+    26.1,
+    26.4
+   ],
+   "b10_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ready_s": [
+    26.25,
+    26.1,
+    26.4
+   ],
+   "braced_back_s": [
+    26.1,
+    26.1,
+    26.1
+   ],
+   "men_settle_s": [
+    25.3,
+    25.3,
+    25.3
+   ],
+   "men_moved_m": [
+    75.9,
+    75.9,
+    75.9
+   ],
+   "b_swing_deg": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "arrive_s": [
+    36.45,
+    36.3,
+    36.6
+   ],
+   "sim": {
+    "still_s": 25.0,
+    "b10_s": 0.0,
+    "ready_s": 25.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 35.0
+   }
+  },
+  "stand_a11": {
+   "n": 2,
+   "still_s": [
+    3.9,
+    3.6,
+    4.2
+   ],
+   "b10_s": [
+    2.1,
+    1.8,
+    2.4
+   ],
+   "ready_s": [
+    3.9,
+    3.6,
+    4.2
+   ],
+   "braced_back_s": [
+    7.5,
+    6.9,
+    8.1
+   ],
+   "men_settle_s": [
+    2.9,
+    2.4,
+    3.4
+   ],
+   "men_moved_m": [
+    1.75,
+    1.75,
+    1.75
+   ],
+   "b_swing_deg": [
+    13.0,
+    13.0,
+    13.0
+   ],
+   "arrive_s": [
+    24.0,
+    23.7,
+    24.3
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 4.0,
+    "ready_s": 4.0,
+    "b_swing_deg": 11.25,
+    "arrive_s": 11.5
+   }
+  },
+  "stand_a22": {
+   "n": 2,
+   "still_s": [
+    4.95,
+    4.5,
+    5.4
+   ],
+   "b10_s": [
+    2.7,
+    2.4,
+    3.0
+   ],
+   "ready_s": [
+    4.95,
+    4.5,
+    5.4
+   ],
+   "braced_back_s": [
+    7.35,
+    6.9,
+    7.8
+   ],
+   "men_settle_s": [
+    3.65,
+    3.4,
+    3.9
+   ],
+   "men_moved_m": [
+    3.54,
+    3.52,
+    3.55
+   ],
+   "b_swing_deg": [
+    23.0,
+    23.0,
+    23.0
+   ],
+   "arrive_s": [
+    25.05,
+    24.6,
+    25.5
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 4.0,
+    "ready_s": 4.0,
+    "b_swing_deg": 22.5,
+    "arrive_s": 11.5
+   }
+  },
+  "stand_a45": {
+   "n": 2,
+   "still_s": [
+    6.6,
+    6.3,
+    6.9
+   ],
+   "b10_s": [
+    3.9,
+    3.3,
+    4.5
+   ],
+   "ready_s": [
+    6.6,
+    6.3,
+    6.9
+   ],
+   "braced_back_s": [
+    9.15,
+    9.0,
+    9.3
+   ],
+   "men_settle_s": [
+    5.65,
+    5.4,
+    5.9
+   ],
+   "men_moved_m": [
+    6.9,
+    6.88,
+    6.92
+   ],
+   "b_swing_deg": [
+    45.0,
+    45.0,
+    45.0
+   ],
+   "arrive_s": [
+    26.7,
+    26.4,
+    27.0
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 4.0,
+    "ready_s": 4.0,
+    "b_swing_deg": 45.0,
+    "arrive_s": 11.5
+   }
+  },
+  "stand_a90": {
+   "n": 2,
+   "still_s": [
+    9.15,
+    8.1,
+    10.2
+   ],
+   "b10_s": [
+    4.5,
+    4.2,
+    4.8
+   ],
+   "ready_s": [
+    9.15,
+    8.1,
+    10.2
+   ],
+   "braced_back_s": [
+    9.15,
+    8.4,
+    9.9
+   ],
+   "men_settle_s": [
+    6.65,
+    6.4,
+    6.9
+   ],
+   "men_moved_m": [
+    9.9,
+    9.89,
+    9.91
+   ],
+   "b_swing_deg": [
+    92.5,
+    90.0,
+    95.0
+   ],
+   "arrive_s": [
+    29.25,
+    28.2,
+    30.3
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 4.5,
+    "ready_s": 4.5,
+    "b_swing_deg": 90.0,
+    "arrive_s": 11.5
+   }
+  },
+  "stand_d10": {
+   "n": 2,
+   "still_s": [
+    6.0,
+    5.7,
+    6.3
+   ],
+   "b10_s": [
+    6.9,
+    6.6,
+    7.2
+   ],
+   "ready_s": [
+    6.9,
+    6.6,
+    7.2
+   ],
+   "braced_back_s": [
+    8.25,
+    8.1,
+    8.4
+   ],
+   "men_settle_s": [
+    5.15,
+    4.9,
+    5.4
+   ],
+   "men_moved_m": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "b_swing_deg": [
+    96.0,
+    96.0,
+    96.0
+   ],
+   "arrive_s": [
+    26.1,
+    25.8,
+    26.4
+   ],
+   "sim": {
+    "still_s": 4.0,
+    "b10_s": 8.5,
+    "ready_s": 8.5,
+    "b_swing_deg": 60.0,
+    "arrive_s": 24.0
+   }
+  },
+  "stand_d2": {
+   "n": 2,
+   "still_s": [
+    3.3,
+    3.0,
+    3.6
+   ],
+   "b10_s": [
+    3.9,
+    3.6,
+    4.2
+   ],
+   "ready_s": [
+    3.9,
+    3.6,
+    4.2
+   ],
+   "braced_back_s": [
+    5.7,
+    5.4,
+    6.0
+   ],
+   "men_settle_s": [
+    2.65,
+    2.4,
+    2.9
+   ],
+   "men_moved_m": [
+    2.0,
+    2.0,
+    2.0
+   ],
+   "b_swing_deg": [
+    100.5,
+    100.0,
+    101.0
+   ],
+   "arrive_s": [
+    23.4,
+    23.1,
+    23.7
+   ],
+   "sim": {
+    "still_s": 1.0,
+    "b10_s": 0.0,
+    "ready_s": 1.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 21.0
+   }
+  },
+  "stand_d20": {
+   "n": 2,
+   "still_s": [
+    9.3,
+    9.0,
+    9.6
+   ],
+   "b10_s": [
+    10.2,
+    9.9,
+    10.5
+   ],
+   "ready_s": [
+    10.2,
+    9.9,
+    10.5
+   ],
+   "braced_back_s": [
+    11.85,
+    11.7,
+    12.0
+   ],
+   "men_settle_s": [
+    8.65,
+    8.4,
+    8.9
+   ],
+   "men_moved_m": [
+    20.0,
+    20.0,
+    20.0
+   ],
+   "b_swing_deg": [
+    96.0,
+    96.0,
+    96.0
+   ],
+   "arrive_s": [
+    29.4,
+    29.1,
+    29.7
+   ],
+   "sim": {
+    "still_s": 7.0,
+    "b10_s": 12.0,
+    "ready_s": 12.0,
+    "b_swing_deg": 92.69,
+    "arrive_s": 27.0
+   }
+  },
+  "stand_d5": {
+   "n": 2,
+   "still_s": [
+    4.2,
+    3.9,
+    4.5
+   ],
+   "b10_s": [
+    5.1,
+    4.8,
+    5.4
+   ],
+   "ready_s": [
+    5.1,
+    4.8,
+    5.4
+   ],
+   "braced_back_s": [
+    6.6,
+    6.3,
+    6.9
+   ],
+   "men_settle_s": [
+    3.65,
+    3.4,
+    3.9
+   ],
+   "men_moved_m": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "b_swing_deg": [
+    96.0,
+    96.0,
+    96.0
+   ],
+   "arrive_s": [
+    24.3,
+    24.0,
+    24.6
+   ],
+   "sim": {
+    "still_s": 2.0,
+    "b10_s": 0.0,
+    "ready_s": 2.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 22.0
+   }
+  },
+  "stand_f90": {
+   "n": 2,
+   "still_s": [
+    15.6,
+    15.3,
+    15.9
+   ],
+   "b10_s": [
+    6.6,
+    6.3,
+    6.9
+   ],
+   "ready_s": [
+    15.6,
+    15.3,
+    15.9
+   ],
+   "braced_back_s": [
+    18.3,
+    18.0,
+    18.6
+   ],
+   "men_settle_s": [
+    10.65,
+    10.4,
+    10.9
+   ],
+   "men_moved_m": [
+    7.77,
+    7.68,
+    7.86
+   ],
+   "b_swing_deg": [
+    90.0,
+    90.0,
+    90.0
+   ],
+   "arrive_s": [
+    35.7,
+    35.4,
+    36.0
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 4.5,
+    "ready_s": 4.5,
+    "b_swing_deg": 89.81,
+    "arrive_s": 0.0
+   }
+  },
+  "stand_same": {
+   "n": 2,
+   "still_s": [
+    1.35,
+    1.2,
+    1.5
+   ],
+   "b10_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ready_s": [
+    1.35,
+    1.2,
+    1.5
+   ],
+   "braced_back_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "men_settle_s": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "men_moved_m": [
+    0.05,
+    0.0,
+    0.1
+   ],
+   "b_swing_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "arrive_s": [
+    21.45,
+    21.3,
+    21.6
+   ],
+   "sim": {
+    "still_s": 0.0,
+    "b10_s": 0.0,
+    "ready_s": 0.0,
+    "b_swing_deg": 0.0,
+    "arrive_s": 11.5
+   }
+  }
+ },
+ "lanes": [
+  {
+   "kind": "stand_same",
+   "run": "20261113-091636",
+   "v_at_order": 3.006660087699475,
+   "moved_m": 0.0,
+   "still_s": 1.1999999999999993,
+   "arrive_s": 21.3,
+   "b10_s": 0.0,
+   "b_swing_deg": 0.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 1.1999999999999993,
+   "braced_at_order": true,
+   "braced_lost": false,
+   "braced_back_s": 0.0,
+   "men_moved_m": 0.0,
+   "men_settle_s": 0.0,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L1"
+  },
+  {
+   "kind": "stand_d2",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 0.5385210144135634,
+   "still_s": 3.0,
+   "arrive_s": 23.1,
+   "b10_s": 3.599999999999997,
+   "b_swing_deg": 100.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 3.599999999999997,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 5.399999999999998,
+   "men_moved_m": 2.002498439450077,
+   "men_settle_s": 2.3999999999999986,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L2"
+  },
+  {
+   "kind": "stand_d5",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 3.9395456213795312,
+   "still_s": 3.8999999999999986,
+   "arrive_s": 24.0,
+   "b10_s": 4.8,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 4.8,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 6.3,
+   "men_moved_m": 5.000999900019995,
+   "men_settle_s": 3.3999999999999986,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L3"
+  },
+  {
+   "kind": "stand_d10",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 11.498254686680983,
+   "still_s": 5.699999999999999,
+   "arrive_s": 25.8,
+   "b10_s": 6.599999999999997,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 6.599999999999997,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 8.099999999999998,
+   "men_moved_m": 10.000499987500625,
+   "men_settle_s": 4.899999999999999,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L4"
+  },
+  {
+   "kind": "stand_d20",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 18.660391931869526,
+   "still_s": 9.0,
+   "arrive_s": 29.1,
+   "b10_s": 9.899999999999999,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 9.899999999999999,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 11.7,
+   "men_moved_m": 20.000249998437518,
+   "men_settle_s": 8.399999999999999,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L5"
+  },
+  {
+   "kind": "stand_a11",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 1.5811388300841898,
+   "still_s": 4.199999999999999,
+   "arrive_s": 24.3,
+   "b10_s": 2.3999999999999977,
+   "b_swing_deg": 13.0,
+   "b_end_off_deg": 0.0625,
+   "ready_s": 4.199999999999999,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 8.099999999999998,
+   "men_moved_m": 1.7464249196573096,
+   "men_settle_s": 3.3999999999999986,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L6"
+  },
+  {
+   "kind": "stand_a22",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 2.23606797749979,
+   "still_s": 5.399999999999999,
+   "arrive_s": 25.5,
+   "b10_s": 2.999999999999999,
+   "b_swing_deg": 23.0,
+   "b_end_off_deg": 0.3125,
+   "ready_s": 5.399999999999999,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 7.8,
+   "men_moved_m": 3.516935567183267,
+   "men_settle_s": 3.8999999999999986,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L7"
+  },
+  {
+   "kind": "stand_a45",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 3.605551275463989,
+   "still_s": 6.899999999999999,
+   "arrive_s": 27.0,
+   "b10_s": 4.499999999999999,
+   "b_swing_deg": 45.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 6.899999999999999,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 9.3,
+   "men_moved_m": 6.92062565176113,
+   "men_settle_s": 5.899999999999999,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L8"
+  },
+  {
+   "kind": "stand_a90",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 4.614110319238728,
+   "still_s": 10.2,
+   "arrive_s": 30.3,
+   "b10_s": 4.8,
+   "b_swing_deg": 90.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 10.2,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 8.399999999999999,
+   "men_moved_m": 9.908830044750786,
+   "men_settle_s": 6.899999999999999,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L9"
+  },
+  {
+   "kind": "stand_f90",
+   "run": "20261113-091636",
+   "v_at_order": 0.0,
+   "moved_m": 4.825959263468872,
+   "still_s": 15.299999999999997,
+   "arrive_s": 35.4,
+   "b10_s": 6.899999999999998,
+   "b_swing_deg": 90.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 15.299999999999997,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 17.999999999999996,
+   "men_moved_m": 7.858114246697067,
+   "men_settle_s": 10.899999999999999,
+   "plan": "reissue",
+   "battle": 1,
+   "lane": "L10"
+  },
+  {
+   "kind": "move_none",
+   "run": "20261113-091806",
+   "v_at_order": 4.7660574209087345,
+   "moved_m": 76.51103509435923,
+   "still_s": 27.200000000000003,
+   "arrive_s": 37.2,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 27.200000000000003,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.3,
+   "men_moved_m": 77.40006459945623,
+   "men_settle_s": 25.5,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L1"
+  },
+  {
+   "kind": "move_same",
+   "run": "20261113-091806",
+   "v_at_order": 2.4774873954819743,
+   "moved_m": 76.31106174821858,
+   "still_s": 26.400000000000002,
+   "arrive_s": 36.6,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 26.400000000000002,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.1,
+   "men_moved_m": 75.90006587612427,
+   "men_settle_s": 25.3,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L2"
+  },
+  {
+   "kind": "move_d2",
+   "run": "20261113-091806",
+   "v_at_order": 3.9293450605987665,
+   "moved_m": 73.73589220570405,
+   "still_s": 28.2,
+   "arrive_s": 38.4,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 28.2,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 27.9,
+   "men_moved_m": 75.93484048840826,
+   "men_settle_s": 27.3,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L3"
+  },
+  {
+   "kind": "move_d5",
+   "run": "20261113-091806",
+   "v_at_order": 2.999979654933327,
+   "moved_m": 76.67652814428745,
+   "still_s": 26.7,
+   "arrive_s": 36.9,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 26.7,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.4,
+   "men_moved_m": 76.02830847321206,
+   "men_settle_s": 25.8,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L4"
+  },
+  {
+   "kind": "move_d10",
+   "run": "20261113-091806",
+   "v_at_order": 4.058438006706282,
+   "moved_m": 75.78951473135223,
+   "still_s": 27.000000000000004,
+   "arrive_s": 37.2,
+   "b10_s": 25.200000000000003,
+   "b_swing_deg": 10.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 27.000000000000004,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 27.0,
+   "men_moved_m": 76.5756812315579,
+   "men_settle_s": 26.3,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L5"
+  },
+  {
+   "kind": "move_d20",
+   "run": "20261113-091806",
+   "v_at_order": 3.0000203450599656,
+   "moved_m": 79.02530181933061,
+   "still_s": 28.500000000000004,
+   "arrive_s": 38.7,
+   "b10_s": 27.0,
+   "b_swing_deg": 16.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 28.500000000000004,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 28.800000000000004,
+   "men_moved_m": 78.47120490982665,
+   "men_settle_s": 27.3,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L6"
+  },
+  {
+   "kind": "move_a11",
+   "run": "20261113-091806",
+   "v_at_order": 4.800434686366015,
+   "moved_m": 73.60027783383353,
+   "still_s": 27.900000000000002,
+   "arrive_s": 38.1,
+   "b10_s": 26.4,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.0625,
+   "ready_s": 27.900000000000002,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 27.9,
+   "men_moved_m": 76.11185754794425,
+   "men_settle_s": 26.8,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L7"
+  },
+  {
+   "kind": "move_a22",
+   "run": "20261113-091806",
+   "v_at_order": 2.0044192192258867,
+   "moved_m": 75.13222289202076,
+   "still_s": 28.500000000000004,
+   "arrive_s": 38.7,
+   "b10_s": 26.4,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.3125,
+   "ready_s": 28.500000000000004,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 31.200000000000003,
+   "men_moved_m": 76.30160547080553,
+   "men_settle_s": 27.3,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L8"
+  },
+  {
+   "kind": "move_a45",
+   "run": "20261113-091806",
+   "v_at_order": 5.122924185810112,
+   "moved_m": 76.73155712698883,
+   "still_s": 30.599999999999998,
+   "arrive_s": 40.8,
+   "b10_s": 26.700000000000003,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 30.599999999999998,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 33.3,
+   "men_moved_m": 77.44705049717668,
+   "men_settle_s": 29.3,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L9"
+  },
+  {
+   "kind": "move_mface90",
+   "run": "20261113-091806",
+   "v_at_order": 3.0000203450599656,
+   "moved_m": 3.3540910479610226,
+   "still_s": 16.5,
+   "arrive_s": 26.7,
+   "b10_s": 9.3,
+   "b_swing_deg": 97.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 16.5,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 19.200000000000003,
+   "men_moved_m": 8.356525985775656,
+   "men_settle_s": 11.8,
+   "plan": "reissue",
+   "battle": 2,
+   "lane": "L10"
+  },
+  {
+   "kind": "stand_a11",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 0.7999877929599961,
+   "still_s": 3.599999999999998,
+   "arrive_s": 23.7,
+   "b10_s": 1.8,
+   "b_swing_deg": 13.0,
+   "b_end_off_deg": 0.0625,
+   "ready_s": 3.599999999999998,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 6.899999999999998,
+   "men_moved_m": 1.7478552440554578,
+   "men_settle_s": 2.3999999999999986,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L1"
+  },
+  {
+   "kind": "stand_a22",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 3.330173225393092,
+   "still_s": 4.5,
+   "arrive_s": 24.6,
+   "b10_s": 2.3999999999999977,
+   "b_swing_deg": 23.0,
+   "b_end_off_deg": 0.3125,
+   "ready_s": 4.5,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 6.899999999999998,
+   "men_moved_m": 3.5537363282743573,
+   "men_settle_s": 3.3999999999999986,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L2"
+  },
+  {
+   "kind": "stand_a45",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 4.669055447700677,
+   "still_s": 6.299999999999997,
+   "arrive_s": 26.4,
+   "b10_s": 3.3,
+   "b_swing_deg": 45.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 6.299999999999997,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 9.0,
+   "men_moved_m": 6.884494017875872,
+   "men_settle_s": 5.399999999999999,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L3"
+  },
+  {
+   "kind": "stand_a90",
+   "run": "20261113-091905",
+   "v_at_order": 1.0022200292331558,
+   "moved_m": 4.743430966023736,
+   "still_s": 8.099999999999998,
+   "arrive_s": 28.2,
+   "b10_s": 4.199999999999998,
+   "b_swing_deg": 95.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 8.099999999999998,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 9.899999999999999,
+   "men_moved_m": 9.889477479657351,
+   "men_settle_s": 6.399999999999999,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L4"
+  },
+  {
+   "kind": "stand_f90",
+   "run": "20261113-091905",
+   "v_at_order": 2.00443870515317,
+   "moved_m": 4.717003505461791,
+   "still_s": 15.899999999999999,
+   "arrive_s": 36.0,
+   "b10_s": 6.3,
+   "b_swing_deg": 90.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 15.899999999999999,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 18.599999999999998,
+   "men_moved_m": 7.679550237792851,
+   "men_settle_s": 10.399999999999999,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L5"
+  },
+  {
+   "kind": "stand_same",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 0.0,
+   "still_s": 1.5,
+   "arrive_s": 21.6,
+   "b10_s": 0.0,
+   "b_swing_deg": 0.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 1.5,
+   "braced_at_order": true,
+   "braced_lost": false,
+   "braced_back_s": 0.0,
+   "men_moved_m": 0.0999999999999659,
+   "men_settle_s": 0.0,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L6"
+  },
+  {
+   "kind": "stand_d2",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 2.64008431041937,
+   "still_s": 3.599999999999998,
+   "arrive_s": 23.7,
+   "b10_s": 4.199999999999998,
+   "b_swing_deg": 101.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 4.199999999999998,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 5.999999999999999,
+   "men_moved_m": 2.002498439450077,
+   "men_settle_s": 2.8999999999999986,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L7"
+  },
+  {
+   "kind": "stand_d5",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 3.501428454322786,
+   "still_s": 4.5,
+   "arrive_s": 24.6,
+   "b10_s": 5.399999999999998,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 5.399999999999998,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 6.899999999999998,
+   "men_moved_m": 5.000999900019995,
+   "men_settle_s": 3.8999999999999986,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L8"
+  },
+  {
+   "kind": "stand_d10",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 11.500434827463753,
+   "still_s": 6.299999999999997,
+   "arrive_s": 26.4,
+   "b10_s": 7.199999999999998,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 7.199999999999998,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 8.399999999999999,
+   "men_moved_m": 10.000499987500625,
+   "men_settle_s": 5.399999999999999,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L9"
+  },
+  {
+   "kind": "stand_d20",
+   "run": "20261113-091905",
+   "v_at_order": 0.0,
+   "moved_m": 20.15589852528389,
+   "still_s": 9.599999999999998,
+   "arrive_s": 29.7,
+   "b10_s": 10.5,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 10.5,
+   "braced_at_order": true,
+   "braced_lost": true,
+   "braced_back_s": 12.0,
+   "men_moved_m": 20.000249998437518,
+   "men_settle_s": 8.899999999999999,
+   "plan": "reissue",
+   "battle": 3,
+   "lane": "L10"
+  },
+  {
+   "kind": "move_d20",
+   "run": "20261113-091959",
+   "v_at_order": 4.99998372397757,
+   "moved_m": 77.76921098353354,
+   "still_s": 28.500000000000004,
+   "arrive_s": 38.7,
+   "b10_s": 26.700000000000003,
+   "b_swing_deg": 16.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 28.500000000000004,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 28.800000000000004,
+   "men_moved_m": 78.5420269664592,
+   "men_settle_s": 27.3,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L1"
+  },
+  {
+   "kind": "move_a11",
+   "run": "20261113-091959",
+   "v_at_order": 2.4747579848246364,
+   "moved_m": 76.83442027528058,
+   "still_s": 27.3,
+   "arrive_s": 37.5,
+   "b10_s": 25.800000000000004,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.0625,
+   "ready_s": 27.3,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 27.300000000000004,
+   "men_moved_m": 75.85794712352978,
+   "men_settle_s": 26.3,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L2"
+  },
+  {
+   "kind": "move_a22",
+   "run": "20261113-091959",
+   "v_at_order": 4.107425997079173,
+   "moved_m": 75.20001220703,
+   "still_s": 28.500000000000004,
+   "arrive_s": 38.7,
+   "b10_s": 26.4,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.3125,
+   "ready_s": 28.500000000000004,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 31.5,
+   "men_moved_m": 76.3379076510498,
+   "men_settle_s": 27.3,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L3"
+  },
+  {
+   "kind": "move_a45",
+   "run": "20261113-091959",
+   "v_at_order": 2.236049780349363,
+   "moved_m": 78.13098578631993,
+   "still_s": 30.599999999999998,
+   "arrive_s": 40.8,
+   "b10_s": 26.700000000000003,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 30.599999999999998,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 33.3,
+   "men_moved_m": 77.33868985940748,
+   "men_settle_s": 28.8,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L4"
+  },
+  {
+   "kind": "move_mface90",
+   "run": "20261113-091959",
+   "v_at_order": 1.0666503906267053,
+   "moved_m": 3.3540910479610226,
+   "still_s": 18.0,
+   "arrive_s": 28.2,
+   "b10_s": 8.700000000000003,
+   "b_swing_deg": 96.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 18.0,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 21.0,
+   "men_moved_m": 8.24225677663842,
+   "men_settle_s": 11.3,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L5"
+  },
+  {
+   "kind": "move_none",
+   "run": "20261113-091959",
+   "v_at_order": 1.7392410173427175,
+   "moved_m": 77.08326789833535,
+   "still_s": 26.6,
+   "arrive_s": 36.6,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 26.6,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.3,
+   "men_moved_m": 77.30025873177917,
+   "men_settle_s": 25.5,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L6"
+  },
+  {
+   "kind": "move_same",
+   "run": "20261113-091959",
+   "v_at_order": 2.999979654946628,
+   "moved_m": 76.5002614294834,
+   "still_s": 26.099999999999998,
+   "arrive_s": 36.3,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 26.099999999999998,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.1,
+   "men_moved_m": 75.9001646901391,
+   "men_settle_s": 25.3,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L7"
+  },
+  {
+   "kind": "move_d2",
+   "run": "20261113-091959",
+   "v_at_order": 3.8093384062838758,
+   "moved_m": 74.93529933047293,
+   "still_s": 26.400000000000002,
+   "arrive_s": 36.6,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 26.400000000000002,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.1,
+   "men_moved_m": 75.8835155154982,
+   "men_settle_s": 25.8,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L8"
+  },
+  {
+   "kind": "move_d5",
+   "run": "20261113-091959",
+   "v_at_order": 3.8649067701009914,
+   "moved_m": 74.01305182750077,
+   "still_s": 26.7,
+   "arrive_s": 36.9,
+   "b10_s": 0.0,
+   "b_swing_deg": 5.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 26.7,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 26.4,
+   "men_moved_m": 76.07453574319642,
+   "men_settle_s": 25.8,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L9"
+  },
+  {
+   "kind": "move_d10",
+   "run": "20261113-091959",
+   "v_at_order": 2.1333211262933673,
+   "moved_m": 75.51450049597376,
+   "still_s": 27.3,
+   "arrive_s": 37.5,
+   "b10_s": 25.200000000000003,
+   "b_swing_deg": 10.0,
+   "b_end_off_deg": 0.1875,
+   "ready_s": 27.3,
+   "braced_at_order": false,
+   "braced_lost": true,
+   "braced_back_s": 27.0,
+   "men_moved_m": 76.63213734472329,
+   "men_settle_s": 26.3,
+   "plan": "reissue",
+   "battle": 4,
+   "lane": "L10"
+  }
+ ]
+}

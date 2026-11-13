@@ -8,6 +8,10 @@
 --            the places read back - events nn_deploy, nn_deploy_check), then the phase ends; no plan within
 --            config.deploy_wait_s real seconds - as without it. Absent: the phase ends after 1 s (the battle file's
 --            places). The enemy stays where the file puts it.
+--   own_ai = 'ai'     — the game's own tactical AI commands our units too (CA's script_ai_planner, 'attack the
+--            enemy force', as generated battles lead an AI army: apps.orders.planner_adapter): the order again every
+--            M.AI_REISSUE_MS, rallied units and units idle under fire given back to it; records as for 'human' (no
+--            soldiers). The game's AI against the game's AI (game/README.md; build nn-arena --own-ai ai).
 --   own_ai = 'human'  — a human commands our units (the player's side); the script gives no orders, records as for
 --            the network plus apps.telemetry.observer_adapter (ordered bearing and width, idle, visibility, damage
 --            flags, effects, abilities; every soldier's place every config.soldiers_every ticks). config.live_label
@@ -34,13 +38,15 @@ local orders = require('apps.orders.adapter')
 local deploy = require('apps.bridge.deploy_adapter')
 local label_overlay = require('apps.battle.label_overlay')
 local live_label = require('apps.battle.live_label')
+local planner = require('apps.orders.planner_adapter')
 
 local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_nn_arena_tick'
 local DECIDE, POLL = 'tww3_bai_nn_arena_decide', 'tww3_bai_nn_arena_poll'
-M.OWN_AI = {net = true, human = true}
+M.OWN_AI = {net = true, human = true, ai = true}
+M.AI_REISSUE_MS = 15000
 M.SKIRMISH = {game = true, off = true}
 
 local function try(fn, ...)
@@ -220,6 +226,17 @@ function M.main(bm, config, globals)
             bm:force_battle_end(0, 'timeout', true)
             return
         end
+        if state.planner then
+            -- (own_ai 'ai') rallied and idle units back to the planner, its order again every AI_REISSUE_MS
+            local p = state.planner
+            local rallied = p.check_rallies()
+            if #rallied > 0 then emit('ai_rejoined', {units = rallied}) end
+            for _, k in ipairs(p.check_idle(now)) do emit('ai_idle_kick', {unit = k.unit, stage = k.stage}) end
+            if now - (state.planner_ms or 0) >= M.AI_REISSUE_MS then
+                state.planner_ms = now
+                p.attack()
+            end
+        end
         state.ticks = state.ticks + 1
         snapshot('nn_sample')
         if state.observer then
@@ -342,6 +359,17 @@ function M.main(bm, config, globals)
     end
 
     local function hand_over()
+        if config.own_ai == 'ai' then
+            observe(0)
+            local own, foes = {}, {}
+            for _, it in ipairs(state.sides[1]) do own[#own + 1] = it.unit end
+            for _, it in ipairs(state.sides[2]) do foes[#foes + 1] = it.unit end
+            state.planner = planner.hand_over(bm, 'bai_side_1', state.own_alliance, own, foes)
+            state.planner.attack()
+            state.planner_ms = bm:time_elapsed_ms()
+            emit('own_ai', {mode = 'ai', own_ai = config.own_ai, planner = state.planner.mode})
+            return
+        end
         if config.own_ai == 'human' then
             observe(config.soldiers_every)
             emit('own_ai', {mode = 'human', own_ai = config.own_ai, soldiers_every = config.soldiers_every})
@@ -392,7 +420,7 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
-        assert(M.OWN_AI[config.own_ai], 'own_ai must be net or human')
+        assert(M.OWN_AI[config.own_ai], 'own_ai must be net, human or ai')
         assert(config.skirmish == nil or M.SKIRMISH[config.skirmish], 'skirmish must be absent, game or off')
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army, state.enemy_army = sides[1].alliance, sides[1].army, sides[2].army

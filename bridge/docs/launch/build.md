@@ -14,7 +14,7 @@ python -m bridge.build map-capture --step 3 --features
 
 | Цель | Точка входа | Сценарий | Pack |
 |---|---|---|---|
-| `nn-arena` | `entries.nn_arena` (`own_ai` `net`) | `build/nn-arena/<арена>.xml` (`sim/arena.py`; `bridge/scenarios/nn_arena.xml` не трогается) | `tww3_bai_nn_arena.pack` |
+| `nn-arena` | `entries.nn_arena` (`own_ai` `net` или `ai`) | `build/nn-arena/<арена>.xml` (`sim/arena.py`; `bridge/scenarios/nn_arena.xml` не трогается) | `tww3_bai_nn_arena.pack` |
 | `human` | `entries.nn_arena` (`own_ai` `human`) | бой арены в `build/human/` ([бой, который играет человек](run.md#бой-который-играет-человек)) | `tww3_bai_human.pack` |
 | `charge-probe` | `entries.charge_probe` | файл боя плана (`game/probe/charge_probe.py`) | `tww3_bai_charge_probe.pack` |
 | `missile-probe` | `entries.missile_probe` | файл боя плана (`game/probe/missile_probe.py`) | `tww3_bai_missile_probe.pack` |
@@ -35,6 +35,8 @@ python -m bridge.build map-capture --step 3 --features
 | `--stall-minutes` | все, кроме map-capture | Завершить бой, если никто не получает урон столько минут игры (10). В пробах и move-probe — не меньше длины сценария + 2 мин |
 | `--scenario` | все | Другой файл из `bridge/scenarios/` вместо сценария цели |
 | `--own-ai net` | nn-arena | Нашей стороной командует помощник ([смотреть бой сети](watch.md)); по умолчанию |
+| `--own-ai ai` | nn-arena | Нашей стороной командует ИИ игры через планировщик CA ([planner_adapter](../apps/orders.md#planner_adapter)): бой ИИ против ИИ, помощник не нужен; запуск — `launch.ps1 -Target nn-arena` (серия этапа 0 — `game/battle/aivai.sh`) |
+| `--arena-json ФАЙЛ` | nn-arena, human | Арена (словарь `sim/arena.py`: стороны `own` / `enemy`, у отряда `slot`, `key`, `men`, `forward`, `lateral`, `width`, у стороны `faction`, `cost`) из файла вместо генератора; в манифест — `army.from_file`. С `--map` места переносятся на зоны карты, как у генератора (`game/battle/aivai.py make` пишет такие файлы) |
 | `--own-role attack\|defend` | nn-arena, human | Наша сторона атакует (ИИ игры обороняется и побеждает, когда время вышло) или обороняется (по умолчанию: ИИ игры атакует) |
 | `--deploy script\|strategist` | nn-arena | Кто ставит нашу сторону в расстановке: места файла боя (по умолчанию, фаза кончается через 1 с) или стратег помощника (`companion --strategist`, [расстановка стратегом](../apps/bridge.md#расстановка-стратегом)) |
 | `--decide-ms 250..5000` | nn-arena | Время боя между двумя решениями, мс (1000) |
