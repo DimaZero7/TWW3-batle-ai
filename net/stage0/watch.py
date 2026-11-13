@@ -13,11 +13,17 @@ The stage's measures (each battle; my side is side 1, the lords left out of ever
                   frontmost, towards the enemy's centre; the formation's front by geometry.dims) at the battle's first
                   contact second (NaN: fewer than 2 in the line)
     dh            my unit's height less the touched enemy's at my unit's first contact, the mean of my units (NaN: none)
+    head_on       my units' first contacts with the touched enemy's centre in their front sector (contact.front_deg),
+                  a share of my units with a contact (U2's judge, net/unit/u2.py)
     reserve_s     from my first rout (not the lord) to the first melee of the reserve (the named one - a drill's, a
                   behaviour's - else my units free at that second: not in melee, not routing), capped at
                   reserve_cap_s; NaN: no rout of mine
     orders_min    my units' order changes (the chain's intended order kind other than the last, not KEEP) per unit a
                   minute alive
+    game_orders_min   with the order gate (battle.play gate): my units' new orders to the game per unit a minute
+                  (net/common/reissue.py; raw_orders_min - the intended order's changes by the same rule, no gate)
+    frame_exec    my units' seconds standing out of melee (not routing) with the formation in their frame and facing by
+                  it, over all such seconds (U2's execution: net/unit/u2.in_frame)
     enemy_rout_s  the first rout of an enemy unit since the first contact (NaN: none)
 The drills' own:
     pin_flank     T0-2: a contact on an enemy's flank / rear while another of my units already touches it, within
@@ -77,6 +83,7 @@ class Watch:
         self.dmg, self.dmg_flank = f(0.0), f(0.0)
         self.gap = f()
         self.dh_sum, self.dh_n = f(0.0), f(0.0)
+        self.ho_sum, self.ho_n = f(0.0), f(0.0)
         self.t_rout_own, self.t_rout_foe = f(), f()
         self.reserve = torch.zeros((B, N), dtype=torch.bool, device=dev)
         self.t_reserve = f()
@@ -84,6 +91,7 @@ class Watch:
         self.pin_flank = f(0.0)
         self.trade_after = f()
         self.changes, self.alive_s = f(0.0), f(0.0)
+        self.exec_ok, self.exec_n = f(0.0), f(0.0)
         self.touch = torch.zeros((B, N, N), dtype=torch.bool, device=dev)
         self.first = torch.zeros((B, N), dtype=torch.bool, device=dev)
         self.hp = u["hp_abs"].clone()
@@ -131,6 +139,11 @@ class Watch:
             dh = h - h.gather(1, j)
             self.dh_sum += (dh * now_first).sum(1)
             self.dh_n += now_first.float().sum(1)
+            dx, dz = u["x"].gather(1, j) - u["x"], u["z"].gather(1, j) - u["z"]
+            rel = torch.remainder(torch.atan2(dx, dz) - torch.deg2rad(u["b"]) + math.pi, 2 * math.pi) - math.pi
+            front = rel.abs() <= math.radians(self.P.sim["contact"]["front_deg"])
+            self.ho_sum += (front & now_first).float().sum(1)
+            self.ho_n += now_first.float().sum(1)
             self.first = self.first | now_first
         # the melee damage from the flank / rear
         d_hp = (self.hp - u["hp_abs"]).clamp(min=0)
@@ -168,6 +181,11 @@ class Watch:
                 self.changes += ((k != self.last_kind) & (k != O.KEEP) & alive).float().sum(1)
             self.last_kind = k.clone()
             self.alive_s += alive.float().sum(1)
+            from net.unit import u2
+            ins, face = u2.in_frame(u, self.chain.units.area, self.spacing)
+            scored = alive & ~u["m"]
+            self.exec_ok += (scored & ins & face).float().sum(1)
+            self.exec_n += scored.float().sum(1)
         self.touch = touch
 
     def _gap(self, st, out):
@@ -188,22 +206,16 @@ class Watch:
         s = (u["x"] - mx[:, None]) * fz[:, None] - (u["z"] - mz[:, None]) * fx[:, None]
         fmax = torch.where(ok, f, torch.full_like(f, -1e9)).amax(1, keepdim=True)
         line = ok & (f >= fmax - self.line_depth)
-        out_g = torch.full((st.B,), float("nan"), device=st.device)
-        S, W, Ln = s.cpu(), front.cpu(), line.cpu()
-        vals = []
-        for b in range(st.B):
-            idx = Ln[b].nonzero()[:, 0].tolist()
-            if len(idx) < 2:
-                vals.append(float("nan"))
-                continue
-            seg = sorted((float(S[b, i]) - float(W[b, i]) / 2, float(S[b, i]) + float(W[b, i]) / 2) for i in idx)
-            g, reach = 0.0, seg[0][1]
-            for lo, hi in seg[1:]:
-                g = max(g, lo - reach)
-                reach = max(reach, hi)
-            vals.append(max(g, 0.0))
-        out_g = torch.tensor(vals, device=st.device)
-        return out_g
+        # the widest gap between the line's formations along the front: by their left edges, each one's left edge less
+        # the farthest right edge of those before it
+        big = 1e9
+        lo = torch.where(line, s - front / 2, torch.full_like(s, big))
+        hi = torch.where(line, s + front / 2, torch.full_like(s, -big))
+        lo, order = lo.sort(1)
+        reach = hi.gather(1, order).cummax(1).values
+        gaps = torch.where(lo[:, 1:] < big / 2, lo[:, 1:] - reach[:, :-1], torch.full_like(lo[:, 1:], -big))
+        g = gaps.amax(1).clamp(min=0.0) if gaps.shape[1] else torch.zeros(st.B, device=st.device)
+        return torch.where(line.sum(1) >= 2, g, torch.full_like(g, float("nan")))
 
     def measures(self, limit, winner=None):
         st = self.st
@@ -232,6 +244,14 @@ class Watch:
                                       torch.full_like(self.pin_flank, float("nan"))),
              "trade_after": ta, "reserve_early": early,
              "t_end": torch.where(self.t_end > 0, self.t_end, torch.full_like(self.t_end, float(limit)))}
+        if self.chain is not None and getattr(getattr(self.chain, "units", None), "gate", None) is not None:
+            gt = self.chain.units.gate
+            m["game_orders_min"] = gt.per_minute(self.mine)
+            m["raw_orders_min"] = gt.per_minute(self.mine, raw=True)
+        m["head_on"] = torch.where(self.ho_n > 0, self.ho_sum / self.ho_n.clamp(min=1),
+                                   torch.full_like(self.ho_n, float("nan")))
+        m["frame_exec"] = torch.where(self.exec_n > 0, self.exec_ok / self.exec_n.clamp(min=1),
+                                      torch.full_like(self.exec_n, float("nan")))
         my_lord = (self.lord & (u["side"] == 1)).float()
         moved = torch.sqrt((u["x"] - self.x0) ** 2 + (u["z"] - self.z0) ** 2)
         m["lord_moved_m"] = (moved * my_lord).sum(1)          # (my lord holds 150 m behind: a check of the rule)

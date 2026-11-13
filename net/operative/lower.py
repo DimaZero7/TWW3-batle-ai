@@ -187,10 +187,15 @@ class Tacticians:
 class Units:
     """The frozen unit network's second for my units (as tactic/env.play)."""
 
-    def __init__(self, setup, unit_net, unit_greedy=False, targets=False, still=False, aim=False):
+    def __init__(self, setup, unit_net, unit_greedy=False, targets=False, still=False, aim=False, gate=False):
         st, P, dev = setup.st, setup.P, setup.device
         B, N = st.B, st.N
+        # unit_net: the network, or the unit's script (net/unit/scripts.py: intend(raw, order, own) - its orders in the
+        # network's place, none of the rules below; order: the skill self.skill, the frame, the main target self.prio,
+        # the pace); gate: the orders to the game re-issued only when they change (net/common/reissue.py; self.gate)
         self.setup, self.net, self.greedy = setup, unit_net, unit_greedy
+        from net.common import reissue
+        self.gate = reissue.Gate(B, N, dev) if gate else None
         # the group's target to its units (07.11, sim/evidence/diag_m1/night.md): each unit's main target - the order's
         # has_target and the 'my_target' flag of that enemy's row (drill U8: the unit attacks it while allowed) - the
         # target unit of its group nearest to it; off: no target named (as before)
@@ -214,6 +219,7 @@ class Units:
         self.ubuf = torch.zeros((V.T + 1, B, N, len(V.RAW)), device=dev)
         self.in_force = O.hold(B, N, dev)
         self.intended = O.hold(B, N, dev)
+        self.intended.kind[:] = O.KEEP                # (no order given yet: the script's 'last' at the first second)
         own = setup.own
         u = st.u
         # before the first frames: a box of 48 m where each unit stands (hold in place)
@@ -222,6 +228,7 @@ class Units:
                      "sb": u["b"].clone(), "sw": torch.zeros((B, N), device=dev), "on": own.clone()}
         self.arrived = torch.zeros((B, N), dtype=torch.bool, device=dev)
         self.pace = torch.full((B, N), Nt.PACE_ANY, dtype=torch.long, device=dev)
+        self.skill = torch.zeros((B, N), dtype=torch.long, device=dev)     # (scripts.SKILLS; 0 hold)
         self.bi, self.ii = own.nonzero(as_tuple=True)
         self.n = 0
 
@@ -471,7 +478,15 @@ class Units:
         bl, il = bi[live], ii[live]
         intended = O.hold(B, N, st.device)
         intended.kind[:] = O.KEEP
-        if bl.numel():
+        mine = torch.zeros((B, N), dtype=torch.bool, device=st.device)
+        mine[bl, il] = True
+        if hasattr(self.net, "intend"):
+            # the unit's script reads the input's columns only (view.RAW, as the bridge gives them)
+            order = {"skill": self.skill, "area": ar, "target": self.prio, "pace": self.pace,
+                     "last": self.intended}           # (its own order in force: the last one given)
+            intended = self.net.intend(raw_u, order, mine)
+            self.n += int(bl.numel())
+        elif bl.numel():
             idx = torch.full_like(bl, V.T)
             prio = self.prio if self.targets else None
             v = UT.views(self.ubuf, idx, bl, il, self.setup.card, self.area, UNIT_CFG, wlim=self.wlim, prio=prio)
@@ -489,6 +504,8 @@ class Units:
                 intended = self.sticky_rule(intended, st, inside)
                 intended = self.fast_rule(intended, st)
             self.n += int(bl.numel())
+        if self.gate is not None:
+            intended = self.gate.apply(intended, mine)
         self.intended = intended
         return self.cad.delays(P.dt, B, st.device)
 
@@ -496,7 +513,9 @@ class Units:
         now_in = lands <= j
         mine = O.Orders(*(torch.where(now_in[:, None], getattr(self.intended, f), getattr(self.in_force, f))
                           for f in O.FIELDS))
-        return O.merge(script(st), self.leash.apply(st, mine, self.area, self.setup.own), self.setup.own)
+        if not hasattr(self.net, "intend"):          # (the unit's script: its skills say where it goes - no leash)
+            mine = self.leash.apply(st, mine, self.area, self.setup.own)
+        return O.merge(script(st), mine, self.setup.own)
 
     def end_second(self):
         self.in_force = self.intended

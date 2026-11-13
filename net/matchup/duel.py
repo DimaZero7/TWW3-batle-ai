@@ -53,8 +53,11 @@ class _SideSetup:
 
 class Chain:
     def __init__(self, side, op="formula", tactic=None, command="hold", op_greedy=True, targets=True, unit_greedy=True, still=True,
-                 aim=True, groups0=None):
+                 aim=True, groups0=None, unit_level=None, gate=False):
         self.aim = aim
+        # unit_level: this side's own unit level (a network or a scripted player, net/unit/scripts.py) instead of the
+        # play's unit_net; gate: the orders to the game re-issued only when they change (net/common/reissue.py)
+        self.unit_level, self.gate = unit_level, gate
         self.groups0 = groups0          # the strategist's groups (strategist/battle.placed): the operative's last groups
         self.side, self.op, self.tactic, self.command_word, self.op_greedy = side, op, tactic, command, op_greedy
         self.targets = targets
@@ -68,8 +71,9 @@ class Chain:
         self.groups = GR.Groups.empty(B, N, self.G, device) if self.groups0 is None else self.groups0.padded(self.G)
         self._parcels0 = self.groups0 is not None
         self.tac = LW.Tacticians(B, N, self.G, device, net=self.tactic)
-        self.units = LW.Units(self.setup, unit_net, unit_greedy=self.unit_greedy, targets=self.targets,
-                              still=self.still, aim=self.aim)
+        self.units = LW.Units(self.setup, unit_net if self.unit_level is None else self.unit_level,
+                              unit_greedy=self.unit_greedy, targets=self.targets, still=self.still, aim=self.aim,
+                              gate=self.gate)
         self.sidev = torch.full((B,), self.side, dtype=torch.long, device=device)
         self.command = DC.order_vec(B, self.command_word, "any", device)
         self.destroy = torch.full((B,), self.command_word == "destroy", dtype=torch.bool, device=device)
@@ -177,9 +181,10 @@ def build(name, battles, device, P, per_side=20, maps=None):
 
 @torch.no_grad()
 def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, duty=None, per_side=20, watch=None,
-         maps=None):
+         maps=None, compile=None):
     """sides {1: Chain | Script, 2: ...}; battles [{1: units, 2: units}]; watch(sec, st) after every second (a
-    reading of its own); maps - build's. Returns (readings, stats)."""
+    reading of its own); maps - build's; compile - battle.stepper's (None: compiled on CUDA). Returns (readings,
+    stats)."""
     from sim.params import load
     P = P or load()
     st, card = build(name, battles, device, P, per_side, maps=maps)
@@ -192,7 +197,7 @@ def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, dut
         if isinstance(sd, Chain):
             sd.start(st, P, device, card, unit_net)
     seer = TR.Seer(P)
-    sim_step = battle.stepper(device)
+    sim_step = battle.stepper(device, compile)
     m0 = reward.measure(st)
     side = st.u["side"]
     over = torch.zeros(B, dtype=torch.bool, device=device)

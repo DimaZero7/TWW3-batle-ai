@@ -8,8 +8,12 @@ behaviour on top (behave.py), the enemy a script or the formula chain, the readi
                   middle, away from the enemy, out of every group; the named reserve [B, N]
     StageChain    matchup/duel.Chain under the behaviour: its lord hidden from the chain (its row of the raw state not
                   alive: no group, no tile) and holding; the behaviour's orders over the chain's
-    play(specs, behaviour, unit_net, P, device) -> (measures {name: [B]}, stats): the specs split by the enemy's kind
-                  (scripts in one batch, the formula chain in another), each played, the measures put back in order
+    play(specs, behaviour, unit_net, P, device, unit_level=None, gate=False, unit_greedy=True) -> (measures {name: [B]},
+                  stats): the specs in batches of every enemy kind together (Mixed: the chain plays all, the scripts'
+                  orders where theirs), each padded to a multiple of PAD (few shapes of the compiled step), the
+                  measures put back in order; unit_level - my side's unit level instead of unit_net (a
+                  network or a scripted player, net/unit/scripts.py; the enemy's chain keeps unit_net), gate - my
+                  orders to the game re-issued only when they change (net/common/reissue.py: watch's game_orders_min)
 """
 import copy
 import math
@@ -168,8 +172,10 @@ class Prep:
 
 
 class StageChain(DU.Chain):
-    def __init__(self, side, behaviour=None, reserve=None, command="hold", groups0=None):
-        super().__init__(side, "formula", command=command, groups0=groups0)
+    def __init__(self, side, behaviour=None, reserve=None, command="hold", groups0=None, unit_level=None, gate=False,
+                 unit_greedy=True):
+        super().__init__(side, "formula", command=command, groups0=groups0, unit_level=unit_level, gate=gate,
+                         unit_greedy=unit_greedy)
         self.behaviour = behaviour or BH.Behaviour()
         self.reserve0 = reserve
         self.over = None
@@ -220,22 +226,38 @@ class Scripts(DU.Script):
         return O.merge(out, O.hold(st.B, st.N, st.device), lord)
 
 
-def _play_one(specs, behaviour, unit_net, P, device, duty=None):
+class Mixed(StageChain):
+    """The enemy of a batch with both kinds: the formula chain plays every battle, the scripts' orders replace its own
+    where the battle's enemy is a script - one batch, so one shape of the compiled step (module doc of play)."""
+
+    def __init__(self, names, device):
+        super().__init__(2, BH.Behaviour(), command="destroy")
+        self.script = torch.tensor([n != "chain" for n in names], device=device)
+        self.scripts = Scripts([n if n != "chain" else "hold" for n in names], device)
+
+    def orders(self, st, j):
+        return O.merge(super().orders(st, j), self.scripts.orders(st, j), self.script[:, None].expand(st.B, st.N))
+
+
+def _play_one(specs, behaviour, unit_net, P, device, duty=None, unit_level=None, gate=False, unit_greedy=True,
+              compile=None):
     prep = Prep(specs, P, device, behaviour)
     limit = max(int(s["limit"]) for s in specs)
-    chain = StageChain(1, behaviour, reserve=prep.reserve, command=cfg()["general"]["command"], groups0=prep.groups0)
+    chain = StageChain(1, behaviour, reserve=prep.reserve, command=cfg()["general"]["command"], groups0=prep.groups0,
+                       unit_level=unit_level, gate=gate, unit_greedy=unit_greedy)
     kinds = {s["enemy"] for s in specs}
     if kinds == {"chain"}:
         enemy = StageChain(2, BH.Behaviour(), command="destroy")
+    elif "chain" in kinds:
+        enemy = Mixed([s["enemy"] for s in specs], device)
     else:
-        assert "chain" not in kinds
         enemy = Scripts([s["enemy"] for s in specs], device)
     d = cfg()["drills"]
     t02, o03 = d["t02"], d["o03"]
     watch = W.Watch(P, cfg()["general"], chain=chain, reserve=prep.reserve, window_s=t02["flank_window_s"],
                     after_s=t02["trade_after_s"], early_s=o03["early_s"])
     rd, stats = DU.play([NAME] * len(specs), prep.battles, {1: chain, 2: enemy}, unit_net, P, device, limit_s=limit,
-                        per_side=prep.per_side, watch=watch, maps=prep.maps, duty=duty)
+                        per_side=prep.per_side, watch=watch, maps=prep.maps, duty=duty, compile=compile)
     m = watch.measures(limit, rd["winner"])
     m["deploy_errors"] = prep.deploy_errors if prep.groups0 is None else prep.no_cell
     s1 = stats.get("side1", {})
@@ -247,23 +269,121 @@ def _play_one(specs, behaviour, unit_net, P, device, duty=None):
     return m, stats
 
 
-def play(specs, behaviour, unit_net, P, device, chunk=512, duty=None):
-    """(measures {name: [B]} in the specs' order, stats summed) (module doc)."""
-    groups = {}
-    for i, s in enumerate(specs):
-        groups.setdefault("chain" if s["enemy"] == "chain" else "scripts", []).append(i)
+PAD = 64          # a batch is padded to a multiple of this many battles (copies, their results dropped)
+
+
+def _pad(n, device, compile):
+    """The copies a batch of n gets: up to a multiple of PAD when the step is compiled (CUDA), none else."""
+    compiled = torch.device(device).type == "cuda" if compile is None else bool(compile)
+    return (-n) % PAD if compiled else 0
+
+
+def play(specs, behaviour, unit_net, P, device, chunk=512, duty=None, unit_level=None, gate=False, unit_greedy=True,
+         compile=None):
+    """(measures {name: [B]} in the specs' order, stats summed) (module doc). The specs go in batches of chunk, every
+    enemy kind together (Mixed), each batch padded to a multiple of PAD on CUDA: the compiled step (sim/battle.stepper,
+    torch.compile without dynamic shapes) is compiled anew - ~18 min on the RTX - for every new batch shape and is kept
+    in the container's cache for the next runs, so few shapes; compile False: the plain step (no warm-up, ~5x slower a
+    step)."""
     parts = {}
     total = {"battles": 0, "wall_s": 0.0, "parcels": 0, "parcel_errors": 0, "enemy_parcel_errors": 0, "errors": []}
-    for kind, idx in groups.items():
-        for a in range(0, len(idx), chunk):
-            ii = idx[a:a + chunk]
-            m, st = _play_one([specs[i] for i in ii], copy.deepcopy(behaviour), unit_net, P, device, duty)
-            for k, v in m.items():
-                parts.setdefault(k, {}).update({i: float(x) for i, x in zip(ii, v.tolist())})
-            for k in ("battles", "wall_s", "parcels", "parcel_errors", "enemy_parcel_errors"):
-                total[k] += st.get(k, 0)
-            total["errors"] += st["errors"]
+    for a in range(0, len(specs), chunk):
+        ii = list(range(a, min(a + chunk, len(specs))))
+        pad = _pad(len(ii), device, compile)
+        batch = [specs[i] for i in ii] + [copy.deepcopy(specs[ii[k % len(ii)]]) for k in range(pad)]
+        m, st = _play_one(batch, copy.deepcopy(behaviour), unit_net, P, device, duty, unit_level=unit_level,
+                          gate=gate, unit_greedy=unit_greedy, compile=compile)
+        for k, v in m.items():
+            parts.setdefault(k, {}).update({i: float(x) for i, x in zip(ii, v.tolist()[:len(ii)])})
+        for k in ("battles", "wall_s", "parcels", "parcel_errors", "enemy_parcel_errors"):
+            total[k] += st.get(k, 0)
+        total["errors"] += st["errors"]
     m = {k: torch.tensor([v[i] for i in range(len(specs))]) for k, v in parts.items()}
     total["errors"] = total["errors"][:5]
+    total["wall_s"] = round(total["wall_s"], 1)
+    return m, total
+
+
+FRAME_ROW = ("enemy_row_m", "enemy_rank_m")    # the unit level's frame in a general battle: its slot of the rows
+
+
+class UnitSide(DU.Chain):
+    """My side of a general battle of the unit level (play_units): no level above - each unit's frame is its slot of
+    the deployment (the environment's rule, the same for every player and the network: the centre where it stands at
+    the start, the zone's course, enemy_row_m across x enemy_rank_m deep - the rows' spacing); the frames never move;
+    the lord holds."""
+
+    def __init__(self, unit_level=None, gate=True, unit_greedy=False):
+        super().__init__(1, "formula", unit_level=unit_level, gate=gate, unit_greedy=unit_greedy)
+
+    def start(self, st, P, device, card, unit_net):
+        from net.operative import lower as LW
+        B, N = st.B, st.N
+        u = st.u
+        self.setup = DU._SideSetup(st, P, device, 1, card)
+        level = unit_net if self.unit_level is None else self.unit_level
+        self.units = LW.Units(self.setup, level, unit_greedy=self.unit_greedy, targets=False, still=True, aim=True,
+                              gate=self.gate)
+        g = cfg()["general"]
+        own = self.setup.own
+        self.units.area = {"x": u["x"].clone(), "z": u["z"].clone(), "b": u["b"].clone(),
+                           "front": torch.full((B, N), float(g[FRAME_ROW[0]]), device=device),
+                           "depth": torch.full((B, N), float(g[FRAME_ROW[1]]), device=device),
+                           "sb": u["b"].clone(), "sw": torch.zeros((B, N), device=device), "on": own.clone()}
+        self.hide = u["lord"] & own
+        self.stats = {"parcels": 0, "parcel_errors": 0, "errors": [], "groups": 0.0, "decisions": 0}
+
+    def decide(self, st, raw, K):
+        pass
+
+    def tick(self, st, raw):
+        pass
+
+    def second(self, st):
+        self.lands = self.units.second(st)
+
+    def orders(self, st, j):
+        o = self.units.orders(st, j, self.lands, lambda s_: O.hold(st.B, st.N, st.device))
+        return O.merge(o, O.hold(st.B, st.N, st.device), self.hide)
+
+
+def unit_battles(specs):
+    """The battles of specs for play_units: my units in rows across my zone (specs.rows, as the enemy's; centred), the
+    enemy at its places, each lord lord_back_m behind its side."""
+    from net.stage0 import specs as SP
+    out = []
+    for s in specs:
+        mz, ez = s["mine_zone"], s["enemy_zone"]
+        mine = [_unit(k, *p) for k, p in zip(s["mine"], SP.rows(mz, len(s["mine"])))]
+        theirs = [_unit(k, *p) for k, p in zip(s["theirs"], s["places_theirs"])]
+        l1 = _unit(cfg()["lords"][s["fac"][1]], *_lord_place(mz, [(u["x"], u["z"]) for u in mine]), general=True)
+        l2 = _unit(cfg()["lords"][s["fac"][2]], *_lord_place(ez, [(u["x"], u["z"]) for u in theirs]), general=True)
+        out.append({1: [l1] + mine, 2: [l2] + theirs, "factions": dict(s["factions"])})
+    return out
+
+
+def play_units(specs, unit_level, unit_net, P, device, gate=True, unit_greedy=False, chunk=512, compile=None):
+    """(measures {name: [B]}, stats) of stage 0's general battles of the unit level: my side UnitSide (unit_level - a
+    scripted player or None: unit_net), the enemy its script (a spec's 'chain' enemy - a formula - not allowed here);
+    batches padded as play's."""
+    assert all(s["enemy"] != "chain" for s in specs), "the unit level's general battles: script enemies only"
+    parts, total = {}, {"battles": 0, "wall_s": 0.0}
+    for a in range(0, len(specs), chunk):
+        ii = list(range(a, min(a + chunk, len(specs))))
+        pad = _pad(len(ii), device, compile)
+        batch = [specs[i] for i in ii] + [copy.deepcopy(specs[ii[k % len(ii)]]) for k in range(pad)]
+        mine = UnitSide(unit_level, gate=gate, unit_greedy=unit_greedy)
+        enemy = Scripts([s["enemy"] for s in batch], device)
+        watch = W.Watch(P, cfg()["general"], chain=mine)
+        limit = max(int(s["limit"]) for s in batch)
+        rd, stt = DU.play([NAME] * len(batch), unit_battles(batch), {1: mine, 2: enemy}, unit_net, P, device,
+                          limit_s=limit, per_side=PER_SIDE, watch=watch, maps=[s["map"] for s in batch],
+                          compile=compile)
+        m = watch.measures(limit, rd["winner"])
+        for k, v in m.items():
+            parts.setdefault(k, {}).update({i: float(x) for i, x in zip(ii, v.tolist()[:len(ii)])})
+        total["battles"] += stt["battles"]
+        total["wall_s"] += stt["wall_s"]
+    m = {k: torch.tensor([v[i] for i in range(len(specs))]) for k, v in parts.items()}
     total["wall_s"] = round(total["wall_s"], 1)
     return m, total

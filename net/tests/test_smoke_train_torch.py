@@ -89,6 +89,45 @@ def test_the_operative_trains_a_step(tmp_path, unit_net):
     assert ck["kind"] == OK.KIND and _same(net, n2) and _same(critic, c2)
 
 
+def test_the_operatives_memory_trains_a_step():
+    """net/operative/memory.py (a prototype, not in the network yet): a short battle seen every second, two decisions'
+    records; the groups' sequences through the time attention and the units' summary through its block, one step."""
+    from net.operative import frame as FR
+    from net.operative import memory as MM
+    from net.tactic import raw as TR
+    from sim import battle, scenario
+    from sim import scripts as opponents
+    torch.manual_seed(0)
+
+    def line(keys, z, b):
+        return [{"key": k, "x": -30.0 + 30.0 * i, "z": z, "b": b} for i, k in enumerate(keys)]
+    spec = {"attacker": 1, "sides": {
+        1: {"faction": "wh_main_emp_empire", "units": line(["wh_main_emp_inf_spearmen_0"] * 2, -60.0, 0.0)},
+        2: {"faction": "wh2_main_skv_skaven", "units": line(["wh2_main_skv_inf_clanrat_spearmen_0"] * 2, 60.0, 180.0)}}}
+    st = scenario.build([spec], P)
+    seer, store, axes = TR.Seer(P), MM.Store(1, st.N, 1, T=4), None
+    for sec in range(1, 31):
+        for _ in range(round(1.0 / P.dt)):
+            battle.step(st, opponents.nearest(st), P)
+        raw = seer.raw(st)
+        axes = axes or FR.Axes.of(raw, torch.ones(1, dtype=torch.long), st.bounds)
+        store.see(raw, float(sec))
+        if sec % 15 == 0:
+            store.tick(float(sec), axes)
+    members = torch.stack([store.enemy == 0, store.enemy], 1) & (raw[..., TR.I["side"]] > 0)[:, None]
+    seq, mask, age = store.sequence(members)
+    att, summ = MM.TimeAttention(), MM.Summary()
+    G = members.shape[1]
+    out = att(seq.flatten(0, 1), mask.flatten(0, 1), age.flatten(0, 1))
+    out2 = summ(store.units()[0][:, :, 0].flatten(0, 1), store.summary(30.0, axes).flatten(0, 1))
+    assert out.shape == (G, 64) and out2.shape == (st.N, 64) and bool(mask[:, :, :2].all())
+    opt = torch.optim.Adam(list(att.parameters()) + list(summ.parameters()), lr=1e-3)
+    before = _params(att) + _params(summ)
+    (out.pow(2).mean() + out2.pow(2).mean()).backward()
+    opt.step()
+    assert _changed(before[:len(_params(att))], att) and _changed(before[len(_params(att)):], summ)
+
+
 def test_the_strategist_trains_a_step(tmp_path, unit_net):
     from net.strategist import battle as BT
     from net.strategist import cases as CS

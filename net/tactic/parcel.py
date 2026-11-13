@@ -140,19 +140,21 @@ def check(raw, parcel, field=None, groups_of_battle=True, near_rule=True):
     """The parcel's errors: a list per group of the rules it breaks (empty: correct). raw [B, N, len(tactic.raw.RAW)];
     field: {cx, cz, b, front, depth} [B] the playable field of each battle as a turned rectangle (None: not checked);
     groups_of_battle: also 'a unit in one group only' across the parcel's groups of a battle; near_rule: the new zone not
-    farther than half the near window's side from the group's actual centre."""
+    farther than half the near window's side from the group's actual centre. Every rule is read for all the groups at
+    once and brought to the host once (a group's own reading a GPU round trip each made the general battles crawl);
+    the texts are written only for the groups that break one."""
     from net.tactic import raw as TR
     from net.tactic import zone as ZN
     c = cfg()
+    R = parcel.bi.shape[0]
+    if R == 0:
+        return []
     S = raw[parcel.bi]
     alive = S[..., TR.I["alive"]] > 0
     side = S[..., TR.I["side"]]
     n = parcel.mine.sum(1)
     my_side = torch.where(parcel.mine, side, torch.zeros_like(side)).amax(1)
-    errs = [[] for _ in range(parcel.bi.shape[0])]
-    for r in range(len(errs)):
-        if not 1 <= int(n[r]) <= int(c["max_group"]):
-            errs[r].append(f"my slots: {int(n[r])} (1-{c['max_group']})")
+    max_group = int(c["max_group"])
     bad_mine = parcel.mine & (~alive | (side != my_side[:, None]))
     bad_target = parcel.target & ((side == my_side[:, None]) | (side <= 0))
     tiles = ZN.Tiles.of(parcel)
@@ -160,44 +162,57 @@ def check(raw, parcel, field=None, groups_of_battle=True, near_rule=True):
     ok_conn = connected(s, f, hs, hf, on)
     w, d = frame_size(s, f, hs, hf, on)
     size = tiles.near_size()
-    for r in range(len(errs)):
-        if bool(bad_mine[r].any()):
-            errs[r].append(f"my slots not alive or not one side: {bad_mine[r].nonzero()[:, 0].tolist()}")
-        if bool(bad_target[r].any()):
-            errs[r].append(f"target slots not the enemy's: {bad_target[r].nonzero()[:, 0].tolist()}")
-        if not bool(ok_conn[r]):
-            errs[r].append("target not connected (squares' rule)")
-        if float(w[r]) > float(size[r]) + 1e-3 or float(d[r]) > float(size[r]) + 1e-3:
-            errs[r].append(f"target not compact: frame {float(w[r]):.0f} x {float(d[r]):.0f} m > window "
-                           f"{float(size[r]):.0f} m")
+    loose = (w > size + 1e-3) | (d > size + 1e-3)
+    twice = torch.zeros_like(parcel.mine)
     if groups_of_battle:
-        for b in parcel.bi.unique().tolist():
-            k = (parcel.bi == b).nonzero()[:, 0]
-            twice = parcel.mine[k].sum(0) > 1
-            if bool(twice.any()):
-                for r in k.tolist():
-                    errs[r].append(f"a unit in two groups: {twice.nonzero()[:, 0].tolist()}")
+        B = int(raw.shape[0])
+        cnt = torch.zeros((B, parcel.mine.shape[1]), device=parcel.mine.device).index_add_(0, parcel.bi,
+                                                                                          parcel.mine.float())
+        twice = cnt[parcel.bi] > 1
+    outside = torch.zeros_like(ok_conn)
     if field is not None:
-        fx, fz = field["cx"][parcel.bi], field["cz"][parcel.bi]
-        hw = torch.stack([tiles.front, tiles.depth], 1) / 2
-        for r in range(len(errs)):
-            for sx, sf in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
-                x, z = Z.world(torch.tensor(sx * float(hw[r, 0])), torch.tensor(sf * float(hw[r, 1])),
-                               parcel.cx[r], parcel.cz[r], parcel.heading()[r])
-                ls, lf = Z.local(x, z, fx[r], fz[r], field["b"][parcel.bi][r])
-                if float(ls.abs()) > float(field["front"][parcel.bi][r]) / 2 + 1e-3 or \
-                        float(lf.abs()) > float(field["depth"][parcel.bi][r]) / 2 + 1e-3:
-                    errs[r].append("zone outside the field")
-                    break
+        fx, fz, fb = field["cx"][parcel.bi], field["cz"][parcel.bi], field["b"][parcel.bi]
+        ff, fd = field["front"][parcel.bi], field["depth"][parcel.bi]
+        hw0, hw1 = tiles.front / 2, tiles.depth / 2
+        head = parcel.heading()
+        for sx, sf in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+            x, z = Z.world(sx * hw0, sf * hw1, parcel.cx, parcel.cz, head)
+            ls, lf = Z.local(x, z, fx, fz, fb)
+            outside = outside | (ls.abs() > ff / 2 + 1e-3) | (lf.abs() > fd / 2 + 1e-3)
+    far_g = torch.zeros_like(ok_conn)
     if near_rule:
         x, z = S[..., TR.I["x"]], S[..., TR.I["z"]]
         m = (parcel.mine & alive).float()
         k = m.sum(1).clamp(min=1)
         gx, gz = (x * m).sum(1) / k, (z * m).sum(1) / k
-        far = torch.sqrt((gx - parcel.cx) ** 2 + (gz - parcel.cz) ** 2) > size / 2
-        for r in range(len(errs)):
-            if bool(far[r]) and bool(m[r].any()):
-                errs[r].append("the zone farther than half the window from the group")
+        far_g = (torch.sqrt((gx - parcel.cx) ** 2 + (gz - parcel.cz) ** 2) > size / 2) & (m > 0).any(1)
+    n_l = n.tolist()
+    flags = torch.stack([(n < 1) | (n > max_group), bad_mine.any(1), bad_target.any(1), ~ok_conn, loose,
+                         twice.any(1), outside, far_g], 1)
+    errs = [[] for _ in range(R)]
+    bad_rows = flags.any(1).nonzero()[:, 0].tolist()
+    if not bad_rows:
+        return errs
+    fl = flags.tolist()
+    for r in bad_rows:
+        e = errs[r]
+        if fl[r][0]:
+            e.append(f"my slots: {int(n_l[r])} (1-{c['max_group']})")
+        if fl[r][1]:
+            e.append(f"my slots not alive or not one side: {bad_mine[r].nonzero()[:, 0].tolist()}")
+        if fl[r][2]:
+            e.append(f"target slots not the enemy's: {bad_target[r].nonzero()[:, 0].tolist()}")
+        if fl[r][3]:
+            e.append("target not connected (squares' rule)")
+        if fl[r][4]:
+            e.append(f"target not compact: frame {float(w[r]):.0f} x {float(d[r]):.0f} m > window "
+                     f"{float(size[r]):.0f} m")
+        if fl[r][5]:
+            e.append(f"a unit in two groups: {twice[r].nonzero()[:, 0].tolist()}")
+        if fl[r][6]:
+            e.append("zone outside the field")
+        if fl[r][7]:
+            e.append("the zone farther than half the window from the group")
     return errs
 
 
