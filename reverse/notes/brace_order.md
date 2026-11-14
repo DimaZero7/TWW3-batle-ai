@@ -149,7 +149,13 @@ Against `sim/config/sim.json`:
 - When the direct-intercept task's flag +0x5a is set (written in `14326a574` from a parameter; its callers not read),
   hence when the 3 s turn hold applies.
 - What mode +0xb28 == 2 is in `1430915a8` (the 60° turn-on-the-spot branch).
-- Meaning of unit +0x3d1c bit 0x10, +0x330/+0x340 in the brace gate, `143046ab0` in the upkeep threshold, unit +0x154.
+- Meaning of unit +0x3d1c bit 0x10, `143046ab0` in the upkeep threshold, unit +0x154.
+- Found 14.11: +0x330 in the brace gate is the man's embedded current action, +0x340 its "finished" byte (action
+  +0x10) - В for the code, С for the name: `143085f9c`(man+0x328) runs only while +0x47c == 1 and that byte is 0,
+  calls the action's vfunc 8 once, then vfunc 0x10 on every call (`143085fa2..143085fd7`); the approach action's
+  update `143087d24` sets the byte to 1 when it ends (`143087f35`). Still not found: which action returns non-zero
+  from vfunc 0x28 - the approach action's vtable `143ad2d18` and its nine neighbours of the same layout
+  (`143ad24b8` … `143ad2f98`) all hold `1408d3ca0` (return 0) there.
 
 ## 5. The external model's claims
 | claim | verdict |

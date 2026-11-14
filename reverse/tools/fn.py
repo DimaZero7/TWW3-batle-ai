@@ -10,6 +10,8 @@ def bounds(va):
 if __name__=='__main__':
     for a in sys.argv[1:]:
         va=int(a,16); s,e=bounds(va)
+        if not s<=va<e:  # a leaf without a .pdata entry: bounds() gives the function before it
+            print('!!! %x is not inside a .pdata function (the one before it is %x-%x): not printed; read it with tdis.py %x <bytes>'%(va,s,e,va)); continue
         print('=== func %x-%x (%s)'%(s,e,names.get('%x'%s,'')))
         for l in dis(s, e-s):
             for k,v in names.items():
