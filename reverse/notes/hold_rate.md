@@ -48,7 +48,8 @@ paths**; no hold-rate key found in `_kv_rules` by name (idle / ordered / reactio
   3. an enemy swings at him: `143074dcc` (no angle, if not busy: +0x330 vfuncs 0x60/0x70).
   Each opens a free-fight action of kind 0 (`143053864` leaves @0 = 0) that carries the enemy's unit (@8). It lives
   while its target is valid and in reach; when the target dies it re-targets from that unit only on ticks where
-  (tick ^ man id) & 7 == 0, within the range of the unit's enemy record state (`14302c6c4` → `143016670`):
+  (tick ^ man id) & 7 == 0 (every 8 ticks: 0.8 s at the 100 ms step, 1.6 s at 200 ms — `tick_step.md`), within the
+  range of the unit's enemy record state (`14302c6c4` → `143016670`):
   1 → `max_range_for_attack_mode_free_attack` 100 m (→ 2, `…_melee_reaction_attack` 40 m, when the caller's flag
   param_5 is set), 3 → `…_ranged_attack` 15 m, 4 → `…_local_attack` 3 m (0 and 5 = breakoff: skipped). It ends if the target runs off faster than its walk speed or 4 m/s (`14307f80c`, first block of
   `14308b938`), or (missile units, @0x22 answer actions) when `143075e5c` says so. Then the man is idle until the next
@@ -70,7 +71,8 @@ opening wave and then runs the steady rate for everyone from the next second cou
 ### 2.4 Bracing — В (where read), С (effect)
 The brace bit (+0x68 & 8) is read in: `1430472a8` (count), hit-reaction handlers vfunc 0x548 `14306f37c`
 (`14306f461`) and 0x550 `14306f594` (`14306f67e`), and `143146868`, `143243d7c`, `143248984` (not read). In 0x548 /
-0x550 a braced man inside his attack window (`14305ae80`: animation frame within −8..+5 ticks of a mark) ignores the
+0x550 a braced man inside his attack window (`14305ae80`: animation frame within −8..+5 ticks of a mark — bare ticks:
+−0.8..+0.5 s at the 100 ms step, −1.6..+1.0 s at 200 ms, `tick_step.md`) ignores the
 reaction — his swing is not broken. The melee hit reaction `14306ee40` (vfunc 0x558, `melee_cycle` 2.4) has no brace
 check. Which hits go through 0x548 / 0x550 — not found. No brace check in target choice or in the swing timer.
 

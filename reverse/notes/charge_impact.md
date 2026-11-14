@@ -9,6 +9,9 @@ Builds on `charge_module.md` 4–5, `melee_cycle.md`, `hold_rate.md` 2.2–2.3, 
 Confidence: **A** read in the code and agrees with the memory rows; **B** read in the code, not checked against data;
 **C** inferred. A swing = a new value of a man's strike mark (+0xa30). t0 of a lane = the first tick a man of either
 unit loses HP (rows every 0.1 s from 60 m before contact to 5 s after it, every 0.5 s later). ± = standard error.
+The step (added 14.11): these battles ran at 100 ms a tick (4202 men each). In a battle of more than 5000 men the game
+runs 200 ms a tick: the tick counts quoted below (every 3 ticks, every 5th tick, −8 … +5 ticks) then last twice the
+seconds, and 1.5–1.9 times as many men join in the first 5 s against a charging enemy — `tick_step.md`.
 
 ## 0. The answer in short
 Not a weaker impact and not hit reactions. In the game
@@ -35,11 +38,11 @@ Not a weaker impact and not hit reactions. In the game
 | free fight: target choice, reach, start | `1430877ec` → `14308d10c` → `14308b938` |
 | start an attack: four kinds tried in turn | `143081f18`: `143255edc`, `143256008`, `143256134`, `143255db0` (vtables `143918230`, `…278`, `…2c0`, `…308`) |
 | kind "standard" (a man on men of his size): pick the animation / try to start it every tick | `14325f190` / `143264d34` → `14325fca4` → `143251af8` (mark = now) |
-| kind for the classes whose slot 0x248 or 0x260 holds (both false for `143912950`; riders, monsters — C): start test every 5th tick | `14325f8d4` / `1432651a0` → `143260464` → `143251608` |
+| kind for the classes whose slot 0x248 or 0x260 holds (both false for `143912950`; riders, monsters — C): start test every 5th tick (0.5 s at the 100 ms step, 1.0 s at 200 ms) | `14325f8d4` / `1432651a0` → `143260464` → `143251608` |
 | kind "smaller target" (the target's size class below the man's, `14305e6b0`) | `14325f60c` |
 | kind played while the timer still runs (time left ≥ 0.01 s; ends when it falls under the animation's +0x50) — C | `14325f468` / `143264ea4` |
 | hit reaction (slot 0x558), knock down (0x548), fly (0x550) | `14306ee40`, `14306f37c`, `14306f594` |
-| "inside my attack window": animation frame within −8 … +5 ticks of its hit mark | `14305ae80` |
+| "inside my attack window": animation frame within −8 … +5 ticks of its hit mark (bare ticks: −0.8 … +0.5 s at the 100 ms step, −1.6 … +1.0 s at 200 ms) | `14305ae80` |
 
 ## 2. What the program does
 ### 2.1 One timer a man, hit or miss — A
@@ -96,7 +99,7 @@ A man who is not in the first rank has no enemy of his own. He gets one when
    or of a unit with attribute 0x45; `14306e89c` every state but 0 and 1 (so not a man in a hit reaction or knocked);
 2. an enemy swings at him (`143074dcc`, `melee_wrap` 5) or comes at him by order (2.3).
 The command builds the free-fight action (`143053684`, state +0x324 = 1); its tick (`14308d10c`, candidates refreshed
-every 3 ticks) calls `14308b938`, which starts an attack (`143081f18`) only if the man is not moving by order, no enemy
+every 3 ticks: 0.3 s at the 100 ms step, 0.6 s at 200 ms) calls `14308b938`, which starts an attack (`143081f18`) only if the man is not moving by order, no enemy
 stands on the line to the target and the gap is under r + r + 3 × scale; the attack then waits in `14325fca4` for the
 10° facing (2.2).
 Memory, the men whose first swing comes 0.5–3.0 s after t0 (1,300 men of the mutual-charge lanes; `stats4.py`): an
