@@ -48,7 +48,7 @@ which paired each name with the record after it.
 ### 2.2 A man is braced — В (conditions), С (meaning of stances)
 ```
 unit can brace: attribute 3 / 4 / 0x27 or land_units can_brace (+0x1d1)        else unbraced     (1430892ef..143089334)
-unit flag +0x3d1c bit 0x10 clear (meaning not found)                          else unbraced     (1430892e1)
+unit flag +0x3d1c bit 0x10 clear (manned artillery: charge_module.md 3)                          else unbraced     (1430892e1)
 man's charge factor f > 0  → return, bit unchanged                                              (143089350..14308935e)
 if +0x340 != 0, or vfunc +0x28 of the object at +0x330 returns 0:  check +0x26c   (143089364..14308937d)
    0x1e, 0x1f, 0x29, 0x37 → bit unchanged;  0,5,6,0x1a,0x1b,0x21,0x22,0x25,0x2c..0x30,0x35,0x7d..0x7f → go on;
@@ -149,7 +149,8 @@ Against `sim/config/sim.json`:
 - When the direct-intercept task's flag +0x5a is set (written in `14326a574` from a parameter; its callers not read),
   hence when the 3 s turn hold applies.
 - What mode +0xb28 == 2 is in `1430915a8` (the 60° turn-on-the-spot branch).
-- Meaning of unit +0x3d1c bit 0x10, `143046ab0` in the upkeep threshold, unit +0x154.
+- `143046ab0` in the upkeep threshold, unit +0x154. (Unit +0x3d1c bit 0x10 = the 'change_formation_spacing' mode, set only
+  for a unit with engines: charge_module.md 3, 14.11.)
 - Found 14.11: +0x330 in the brace gate is the man's embedded current action, +0x340 its "finished" byte (action
   +0x10) - В for the code, С for the name: `143085f9c`(man+0x328) runs only while +0x47c == 1 and that byte is 0,
   calls the action's vfunc 8 once, then vfunc 0x10 on every call (`143085fa2..143085fd7`); the approach action's
