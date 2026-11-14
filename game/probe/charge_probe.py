@@ -572,7 +572,8 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
-              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1")
+              "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
+              "counterfar", "intercept")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -1953,6 +1954,8 @@ def layout(specs):
                 row["t2_dx"] = -row["t2_dx"]
             if spec.get("a_mid"):                    # the attacker between the two targets (the retarget plan)
                 row["a_dx"] = round(row["t2_dx"] / 2, 1)
+            if spec.get("t2_place"):                 # (the intercept plan) its centre (dx, dz) from the target's
+                row["t2_dx"], row["t2_dz"] = (round(float(v), 1) for v in spec["t2_place"])
         if spec.get("extras"):
             # units of the attacker's side (or, with e.side 't', of the target's: the ratcover plan's cover beside a
             # lone man) placed (dx, dz) from the target's centre, halted, fearless, never ordered (fire: fire at will
@@ -2100,7 +2103,18 @@ def run_config(plan, index):
         # target's morale every 0.5 s (mem_morale: the effects, the sides its enemies struck from, the fight's outcome)
         # (its 'clock' lane - the two Generals 100 m apart - is polled densely: the morale rows ride on that poll)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=110, mem_morale=True)
-    model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
+    if plan == "counterfar":
+        # (game/probe/unit_probe.py, the meetfar probe's part 1) health every 0.25 s; the men from memory every 0.1 s
+        # from 60 m (centres) to 5 s after the contact (the charge's clock, the formation's depth at contact)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=5, men_near_m=60)
+    if plan == "intercept":
+        # (game/probe/unit_probe.py, the meetfar probe's part 2) health every 0.25 s; the men of all four units from
+        # memory (mem_extras: the anvil A and the second enemy E2 too) every 0.1 s from 110 m (B to E1, centres) to 30 s
+        # after the lane's contact, else every 0.5 s; the morale of E1 and of our A and B every 0.5 s (mem_morale,
+        # mem_morale_ours; the 'clock' lane keeps the poll going, as in flank2v1)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=30, men_near_m=110, mem_morale=True,
+                      mem_extras=True)
+    model_s =max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
 
@@ -2393,6 +2407,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             sides[roles["tg"]]["units"].append({"key": spec["t_key"], "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
                                                 "b": s0[2]["b"], "men": s0[2]["men"], "width": spec["t_width"],
                                                 "general": False, "name": "keep"})
+        if spec.get("a_morale") or any(e.get("morale") for e in spec.get("extras") or []):
+            # (the intercept plan) our units keep their morale: a far-off standing unit of our side keeps the battle going
+            sides[roles["a"]]["units"].append({"key": spec["a_key"], "x": s0[1]["x"], "z": s0[1]["z"] + 400.0,
+                                               "b": s0[1]["b"], "men": s0[1]["men"], "width": spec["a_width"],
+                                               "general": False, "name": "keep_a"})
         if spec.get("target_mode") == "skirmish":
             # the skirmish plan: the shooter's mode on or off as the lane set it (change_behaviour_active); the twin's
             # sides have no game AI, so the mode is off everywhere else (sim/skirmish.py)
@@ -2423,6 +2442,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             for r_ in ("a", "tg"):
                 if int(slot[r_][b]) >= 0:
                     keep[b, int(slot[r_][b])] = True
+        # (the intercept plan) the attacker (a_morale) and the extras with e.morale keep theirs
+        if ln["spec"].get("a_morale") and int(slot["a"][b]) >= 0:
+            keep[b, int(slot["a"][b])] = True
+        for j, e in enumerate((ln["spec"].get("extras") or [])[:3], 1):
+            if e.get("morale") and int(slot[f"e{j}"][b]) >= 0:
+                keep[b, int(slot[f"e{j}"][b])] = True
     # the new units' plans (UNIT_PLANS) and memshot: the entry turns every unit's fire at will off and only the 'shoot'
     # attacker and a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
     for b, ln in enumerate(meta):
@@ -2443,7 +2468,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
            "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B,
            "t_halt": {}, "after2": [None] * B, "arrive": [None] * B, "clear": [None] * B, "held_range": {},
-           "push_goal": {}}
+           "push_goal": {}, "go": [None] * B, "go_s": [{} for _ in range(B)]}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     # (the cavcheck plan's recharge) the game's goto point is the formation's front centre - the knights' centre stopped
@@ -2558,8 +2583,37 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             if sp.get("a_ability") and c is not None and not st_["a_ability"][b]                     and t - c >= sp.get("a_ability_after_s", 0) and a_slot.get(sp["a_key"], -1) >= 0:
                 ab[b, A] = a_slot[sp["a_key"]]
                 st_["a_ability"][b] = True
+            # (the counterfar and intercept plans; entries/charge_probe.lua a_go_m / a_go_melee_s / a_go_closest) the
+            # attacker's attack held until its order's target is within a_go_m (centres), has been in melee
+            # a_go_melee_s, or (a_go_closest) its distance grew 2 m past its least or it is in melee
+            held = False
+            if ((sp.get("a_go_m") is not None or sp.get("a_go_melee_s") is not None or sp.get("a_go_closest"))
+                    and mode[b] in ("attack_run", "attack_walk", "attack_t2") and st_["go"][b] is None):
+                G = int(slot["t2"][b]) if mode[b] == "attack_t2" else T
+                d_ = math.hypot(ax[b] - float(u["x"][b, G]), az[b] - float(u["z"][b, G]))
+                g_m = bool(u["m"][b, G])
+                gs = st_["go_s"][b]
+                if g_m and gs.get("melee") is None:
+                    gs["melee"] = t - params.dt
+                why = None
+                if sp.get("a_go_m") is not None and d_ <= sp["a_go_m"]:
+                    why = "gap"
+                elif (sp.get("a_go_melee_s") is not None and gs.get("melee") is not None
+                      and t - gs["melee"] >= sp["a_go_melee_s"] - 1e-6):
+                    why = "melee"
+                elif sp.get("a_go_closest"):
+                    if gs.get("dmin") is not None and (d_ > gs["dmin"] + 2 or g_m):
+                        why = "closest"
+                    gs["dmin"] = min(gs.get("dmin", d_), d_)
+                if why:
+                    st_["go"][b] = t
+                    st_["phases"][b].append({"phase": "a_go", "t": t * 1000, "why": why, "d": round(d_, 1)})
+                held = why is None
             # the attacker
-            if mode[b] == "script":
+            if held:
+                sx, sz = st_["start"][b]
+                kind[b, A], target[b, A], run_[b, A], x[b, A], z[b, A] = O.HOLD, -1, False, sx, sz
+            elif mode[b] == "script":
                 # a 'move' step: MOVE to its start + (dx, dz); a 'face' step has no order in the simulator (it has no
                 # facing order): the unit holds and the twin turns it to the step's bearing at once (so that a later
                 # move starts from the game's facing)
@@ -2662,7 +2716,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 sx, _ = st_["start"][b]
                 kind[b, A], x[b, A], z[b, A], run_[b, A] = (O.MOVE, sx, sp["z"] - sp.get("pass_beyond_m", 100),
                                                             not sp.get("pass_walk"))
-            elif mode[b] == "attack_t2" and int(slot["t2"][b]) >= 0:
+            elif mode[b] == "attack_t2" and int(slot["t2"][b]) >= 0 and not held:
                 # the skirmish2 plan's 'neighbour': a melee attack at a run on the target's neighbour
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, int(slot["t2"][b]), True
             elif mode[b] == "retarget":
@@ -2734,6 +2788,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             # the second target: halted unless it attacks (t2_mode)
             if sp.get("t2_mode") == "attack" and int(slot["t2"][b]) >= 0:
                 kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = O.ATTACK, A, False
+            if sp.get("t2_mode") == "attack_extra" and int(slot["t2"][b]) >= 0 and int(slot["e1"][b]) >= 0:
+                # (the intercept plan) the second target attacks the first extra at a run (t2_walk: at a walk)
+                T2_ = int(slot["t2"][b])
+                kind[b, T2_], target[b, T2_], run_[b, T2_] = O.ATTACK, int(slot["e1"][b]), not sp.get("t2_walk")
             # the target
             if sp.get("t_at_leave") == "halt" and st_["phase"][b] == "out":
                 # the leave plan's 'stand': the target halts where it is at the withdraw (entries/charge_probe.lua)
@@ -2765,7 +2823,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     kind[b, Ej], target[b, Ej], run_[b, Ej] = O.ATTACK, T, False
             if sp.get("t_attack_extra") and int(slot["e1"][b]) >= 0:
                 # the walkpass plan's 'busy': the target attacks the first extra at a walk from the go
-                kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), False
+                kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), sp.get("t_attack_extra") == "run"
             # the reengage plan (entries/charge_probe.lua): the attacker stands at +z facing the target at -z, so straight
             # back is +z for it and -z for the target
             if mode[b] == "reengage":

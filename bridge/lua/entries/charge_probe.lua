@@ -80,7 +80,8 @@
 -- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>' (n = 1). lane.after2 (optional,
 -- the same fields): a second order at its own at_s after the first contact (n = 2; the holdmelee plan: a halt 3 or
 -- 10 s after a move or an attack given in melee).
--- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one).
+-- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one);
+-- 'attack_extra' (the intercept plan): it attacks the first extra at a run at the go (lane.t2_walk: at a walk).
 -- lane.damage (optional) {t = {method, share}, t2 = ..., a = ...}: once placed (settle_ms before the go) the unit is
 -- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
 -- (the engine's own calls); event probe_damage with the men and health before and after.
@@ -100,8 +101,14 @@
 -- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
 -- The busycharge plan: lane.a_side (degrees, 0 front / 90 right flank / 180 rear) places the attacker gap_m off the
 -- target's front / right edge / back (M.layout), facing it; an extra with e.b is placed at that world bearing and with
--- e.attack attacks the target at a walk at the go (the anvil: with lane.t_attack_extra both fight); lane.a_go_s holds the
--- attacker's order (its mode's) until that long after the go (probe_phase 'a_go'); lane.contact_a_only: the lane's
+-- e.attack attacks the target at a walk at the go (the anvil: with lane.t_attack_extra both fight; t_attack_extra 'run':
+-- at a run); lane.a_go_s holds the
+-- attacker's order (its mode's) until that long after the go (probe_phase 'a_go'); the counterfar and intercept plans
+-- (game/probe/unit_probe.py) hold an attack_run / attack_walk / attack_t2 order instead until the centres of the
+-- attacker and its order's target are within lane.a_go_m (why 'gap'), until that target has been in melee
+-- lane.a_go_melee_s seconds (why 'melee'), or - lane.a_go_closest - once that distance grew 2 m past its least or the
+-- target is in melee before a_go_m was reached (why 'closest'; probe_phase 'a_go' {why, d}). lane.a_morale and an extra's
+-- e.morale: that unit keeps its morale (not fearless). lane.contact_a_only: the lane's
 -- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
 -- attacker's row carries dd (CCO DamageDealt); lane.dd_rows 'both' (the pusbags plan): the target's row too.
 -- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
@@ -144,8 +151,10 @@
 -- config.mem_form (with config.mem; the memform plan): after each men's poll 'mem_form' {t, tick, units, new, jobs}: the
 -- units' top behaviours and machines, their groups' marks, the way's job and nodes (apps.mem.order).
 -- config.mem_morale (with config.mem; the globes2 plan): every MEM_SPARSE polls 'mem_morale' {t, tick, units = {name = morale row of apps.mem.morale}} of the lanes' targets
--- (game/probe/mem_probe.py load_morale): the effects a unit's morale holds, the morale probe's reading on a charge probe's lanes.
--- config.mem_extras (with config.mem; the tacwalk plan): the lanes' extras are bound and polled like the attacker and the target.
+-- (game/probe/mem_probe.py load_morale): the effects a unit's morale holds, the morale probe's reading on a charge probe's lanes;
+-- with lane.mem_morale_ours (the intercept plan) the lane's attacker and extras too (bound: config.mem_extras).
+-- config.mem_extras (with config.mem; the tacwalk plan): the lanes' extras (and second targets) are bound and polled like
+-- the attacker and the target.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -820,17 +829,38 @@ function M.main(bm, config, globals)
                 if lane.mode == 'cast' then
                     for _, i in ipairs(M.due_casts(lane.casts, lane.cast_done, now - lane.t0)) do cast(lane, i, now) end
                 end
-                if lane.a_pending and now - lane.t0 >= lane.a_go_s * 1000 then
-                    -- (the busycharge plan) the attacker's order, held until a_go_s after the go
+                local go_why, go_d = nil, nil
+                if lane.a_pending then
+                    -- (the busycharge plan) the attacker's order, held until a_go_s after the go; (the counterfar and
+                    -- intercept plans) until its target is near, has been in melee a while, or is at its closest
+                    local gt = lane.mode == 'attack_t2' and lane.t2 or lane.t
+                    go_d = dist(lane.a.unit, gt.unit)
+                    local gt_m = read(function() return gt.unit:is_in_melee() end)
+                    if gt_m and not lane.go_melee_ms then lane.go_melee_ms = now end
+                    if lane.a_go_s and now - lane.t0 >= lane.a_go_s * 1000 then
+                        go_why = 'time'
+                    elseif lane.a_go_m and go_d and go_d <= lane.a_go_m then
+                        go_why = 'gap'
+                    elseif lane.a_go_melee_s and lane.go_melee_ms and now - lane.go_melee_ms >= lane.a_go_melee_s * 1000 then
+                        go_why = 'melee'
+                    elseif lane.a_go_closest and go_d then
+                        if lane.go_dmin and (go_d > lane.go_dmin + 2 or gt_m) then go_why = 'closest' end
+                        lane.go_dmin = math.min(lane.go_dmin or go_d, go_d)
+                    end
+                end
+                if go_why then
                     lane.a_pending = false
-                    if lane.mode == 'shoot' then
+                    if lane.mode == 'attack_t2' then
+                        attack(lane, lane.a, lane.t2, false)
+                    elseif lane.mode == 'shoot' then
                         -- (the snipe plan) the ranged attack held until a_go_s: the shooter hides first
                         orders.set_fire_at_will(lane.a.uc, true)
                         orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
                     else
                         attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
                     end
-                    emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0})
+                    emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0, why = go_why,
+                        d = go_d and round(go_d, 1) or nil})
                 end
                 if lane.mode == 'shoot' and lane.reorder_s and now - (lane.reorder_ms or lane.t0) >= lane.reorder_s * 1000 then
                     -- (the cover plan) a shooter not firing gets its ranged attack again every reorder_s: a target hidden
@@ -1100,6 +1130,7 @@ function M.main(bm, config, globals)
                     names[#names + 1] = lane.a.name
                     names[#names + 1] = lane.t.name
                     for _, e in ipairs(config.mem_extras and lane.extras or {}) do names[#names + 1] = e.name end
+                    if config.mem_extras and lane.t2 then names[#names + 1] = lane.t2.name end
                 end
                 if lane.contact then
                     lane.mem_disc = lane.mem_disc or 1
@@ -1212,13 +1243,17 @@ function M.main(bm, config, globals)
                 attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
             end
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
+            if lane.t2 and lane.t2_mode == 'attack_extra' and lane.extras and lane.extras[1] then
+                -- (the intercept plan) the second target attacks the first extra at a run
+                attack(lane, lane.t2, state.units[lane.extras[1].name], lane.t2_walk == true)
+            end
             for _, e in ipairs(lane.extras or {}) do
                 -- (the busycharge plan's anvil) the extra attacks the target at a walk
                 if e.attack then attack(lane, state.units[e.name], lane.t, true) end
             end
             if lane.t_attack_extra and lane.extras and lane.extras[1] then
                 -- (the walkpass plan's 'busy' lanes) the target attacks the first extra at a walk: it is busy fighting
-                attack(lane, lane.t, state.units[lane.extras[1].name], true)
+                attack(lane, lane.t, state.units[lane.extras[1].name], lane.t_attack_extra ~= 'run')
             end
             if lane.target_mode == 'push' then
                 -- (lane.push_run: at a run - the losmove plan's running target)
@@ -1236,7 +1271,8 @@ function M.main(bm, config, globals)
                 orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
             end
             local m = lane.mode
-            if lane.a_go_s and (m == 'attack_run' or m == 'attack_walk' or m == 'shoot') then
+            if (lane.a_go_s or lane.a_go_m or lane.a_go_melee_s or lane.a_go_closest)
+                    and (m == 'attack_run' or m == 'attack_walk' or m == 'shoot' or m == 'attack_t2') then
                 lane.a_pending, m = true, nil
             end
             if lane.a_on_sight and (m == 'attack_run' or m == 'attack_walk') then
@@ -1463,6 +1499,10 @@ function M.main(bm, config, globals)
         for _, l in ipairs(config.lanes) do
             if l.t_morale then keep_morale[l.target] = true end
             if l.morale_both then keep_morale[l.target], keep_morale[l.attacker] = true, true end
+            if l.a_morale then keep_morale[l.attacker] = true end
+            for _, e in ipairs(l.extras or {}) do
+                if e.morale then keep_morale[e.name] = true end
+            end
         end
         for side = 1, 2 do
             for _, u in ipairs(sides[side].units) do
@@ -1537,6 +1577,10 @@ function M.main(bm, config, globals)
                         local ok, info = handle.bind(e.name, state.units[e.name].unit)
                         bound[e.name] = ok and info or {why = info}
                     end
+                    if config.mem_extras and lane.t2 and bound[lane.t2.name] == nil then
+                        local ok, info = handle.bind(lane.t2.name, lane.t2.unit)
+                        bound[lane.t2.name] = ok and info or {why = info}
+                    end
                 end
                 handle.unhook()
             end
@@ -1544,10 +1588,18 @@ function M.main(bm, config, globals)
             if handle and config.mem_morale then
                 local R, names = memmorale.reader(_G.memreader_plus, config.mem.layout), {}
                 for _, lane in ipairs(state.lanes) do
-                    local U = handle.reader.units[lane.t.name]
-                    if U then
-                        R.add(lane.t.name, U.ptr)
-                        names[#names + 1] = lane.t.name
+                    local who = {lane.t.name}
+                    if lane.mem_morale_ours then
+                        -- (the intercept plan) our attacker's and extras' morale too
+                        who[#who + 1] = lane.a.name
+                        for _, e in ipairs(lane.extras or {}) do who[#who + 1] = e.name end
+                    end
+                    for _, name in ipairs(who) do
+                        local U = handle.reader.units[name]
+                        if U then
+                            R.add(name, U.ptr)
+                            names[#names + 1] = name
+                        end
                     end
                 end
                 state.mem_mor = {R = R, names = names}
