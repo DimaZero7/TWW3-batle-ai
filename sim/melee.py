@@ -35,7 +35,9 @@ Per pair of units in contact (i strikes j), per second:
                       interval runs only after a blow, so a unit coming into a fight (moving in, or its charge landing)
                       or a standing one reached by an enemy it faces strikes once at once with every man in contact
                       (battle.py decides when: a formation at its first contact of the battle only, contact.opening_once);
-                      F without the opening wave (contact.first_strike_steady)
+                      F without the opening wave (contact.first_strike_steady); after it the men who struck wait their
+                      interval and the rest of the rate starts melee.swing_join s after the contact; against a
+                      formation that stood at the contact the opening wave is x melee.wave.stand_k
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database, weight 1;
 a standing lone man: contact.lord_direction of it - the lord swarm probe's measure, the game's rules have no separate
@@ -276,6 +278,13 @@ def front_kills(h_front, h_rest, men, front, hp_man, hp_abs, per_hit, fw):
     kills = torch.where(one, hits, ka + kr).clamp(min=0) * (men > 0)
     lost = torch.where(one, torch.zeros_like(hits), wa + wr) * (men > 0)
     return kills, lost, torch.where(one | (men <= 0), torch.zeros_like(fw_new), fw_new)
+
+
+def _small_pair(u):
+    """[B, N, N]: striker i and target j are both men of size small or below (not u large) - the pairs
+    melee.swing_join and melee.wave.stand_k were measured on (infantry on infantry, reverse/notes/charge_impact.md)."""
+    small = ~u["large"] if "large" in u else torch.ones_like(u["contact_s"], dtype=torch.bool)
+    return small[:, :, None] & small[:, None, :]
 
 
 def spacing_of(u, spacing):
@@ -844,7 +853,15 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         clock = (torch.maximum(u["contact_s"], u["melee_s"]) if cc.get("opening_once") and "melee_s" in u
                  else u["contact_s"])
         t_pair = torch.minimum(clock[:, :, None], clock[:, None, :])
-        w = 1.0 + knobs.get(u, "wave_amp", float(wave["amp"]), 3) * torch.exp(-t_pair / float(wave["tau_s"]))
+        amp = knobs.get(u, "wave_amp", float(wave["amp"]), 3)
+        if wave.get("stand_k") is not None and "stood_in" in u:
+            # (melee.wave.stand_k; reverse/notes/charge_impact.md 2.6, 5) against a formation that stood at the contact
+            # (it struck the standing first strike: stood_in) fewer of the striker's men come to touch its men and join:
+            # the wave's amplitude x stand_k for the men striking it; the standing formation's own men keep the wave.
+            # Men on men only (_small_pair): riders and monsters were not measured (another attack kind, the note's 6)
+            st_j = u["stood_in"][:, None, :].expand_as(t_pair) & _small_pair(u)
+            amp = amp * torch.where(st_j, torch.full_like(t_pair, float(wave["stand_k"])), torch.ones_like(t_pair))
+        w = 1.0 + amp * torch.exp(-t_pair / float(wave["tau_s"]))
         floor = wave.get("missile_attack_floor")
         if floor:
             # A missile unit fighting under an attack order (the wavemiss probes, tmp/old-build/routmorale/wavemiss_report.py):
@@ -1253,8 +1270,17 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             # (melee.cycle) every man who swung, hit or miss, swings again an interval after the swing's start
             back = (t >= interval).to(p.dtype)
         else:
-            back = torch.where(t >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
-                                                                                                   torch.zeros_like(p))
+            join_s = float(cal["miss_s"])
+            sj = cal.get("swing_join")
+            if sj and sj.get("on", 1):
+                # (melee.swing_join; reverse/notes/charge_impact.md 2.1, 2.4, 5) the share 1 - p is not the men who missed
+                # (one timer a man, hit or miss) but the men who had no target at the contact: they get a fight when an
+                # enemy body touches them, turn to within 10 deg and swing, the blow landing a swing later - the rest of
+                # the rate starts swing_join s after the contact, not at miss_s; the openers back at the interval. Men on
+                # men only (_small_pair): riders and monsters were not measured (another attack kind, the note's 6)
+                join_s = torch.where(_small_pair(u), torch.full_like(p, float(sj["s"])), torch.full_like(p, join_s))
+            back = torch.where(t >= join_s, 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
+                                                                                     torch.zeros_like(p))
         back = torch.where(swung, back, torch.ones_like(back))
         if ride is not None and "size_k" in u:
             # (contact.impact ride_in, impact.deferred) a large charger that rode in swung its front rank's first blow when

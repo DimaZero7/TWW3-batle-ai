@@ -37,8 +37,9 @@ The impact (land(): a large charger's charge lands this step - battle.py `fire`;
   the chain   a man knocked down hits the man behind at his flight speed, at most 3.3 m/s (M8): (1 + e) m / (m B + m)
               x 3.3 <= 2.2 m/s, below the step back (3) - no chain in numbers; the horse riding on is the ranks above
 The ride-in (contact.impact ride_in; sim/evidence/diag_cav/mechanic.md M25-M27): the brace is each man's own, recomputed every
-              tick - a man standing within his radius + 10 m of his place is braced, a man who steps is not (that same
-              tick), a man in a reaction keeps the flag he had. Where the charger knocks the first rank down and rides
+              tick - a man standing within his radius + 10 m of the unit's formation rectangle (not of his own place:
+              reverse/notes/charge_module.md 3, 14306bb68) is braced, a man who steps is not (that same tick), a man in
+              a reaction keeps the flag he had. Where the charger knocks the first rank down and rides
               on (ride = 1: kd_q of the landing), those men get up off their places and walk back and into the fight -
               out of the brace - while the horses stand among them: the charge defence and the charge reflection, which
               look at the struck / striking man's own brace, are off for that unit, and so is the bracing of a new
