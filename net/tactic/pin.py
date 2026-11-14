@@ -21,8 +21,11 @@ the rows and the orders in force); the code's masks (orders.masks) stand over al
     T_recall     T, and a striker out of melee farther than 30 m from its target (edge to edge) whose target has no other
                  unit of mine within scripts.STICK_M gets 'hold' (a reference; design section 6)
     T_nohyg      T without its melee row; run with lower.Tacticians(hygiene=False) (a reference)
-    TC           T, and my units under 'hold' (no target) get 'counter' (the unit script's counter-charge at ~35 m) -
-                 a reference; P4 is the same without T's attacks (also named C)
+    TC           T, and my units under 'hold' (no target) get 'counter' (the unit script's 'meet': a charge on the enemy
+                 coming at the unit within ~35 m) - a reference; P4 is the same without T's attacks (also named C)
+    T_wait2, T_nonear, T_nospeed, T_sign   T with one of its four differences from A1 turned to A1's rule (Teacher
+                 doc: e pinned on two ticks; free(i) without 'no enemy within STICK_M'; pinned without the speed rule;
+                 the nearest free unit by the side's sign); T_a1rules - all four
 """
 import torch
 
@@ -33,11 +36,12 @@ D35_M = SC.CHARGE_M + 5.0            # D35: 'meet at ~35 m' (scripts.py: the cou
 RECALL_M = 30.0                      # T_recall: farther than this from its target (design section 6, a setting)
 
 
-def pinned(fx):
-    """[R, K] (module doc)."""
+def pinned(fx, speed=True):
+    """[R, K] (module doc); speed False: without the speed rule on e (A1's)."""
     hold = fx.mine & ~fx.r & fx.m                                                   # [R, K] my units in melee
     touch = hold[:, :, None] & (fx.gap <= SC.TOUCH_M)                               # [R, a, e]
-    return fx.valid & fx.m & (fx.speed < SC.APPROACH_MS) & touch.any(1)
+    slow = (fx.speed < SC.APPROACH_MS) if speed else torch.ones_like(fx.valid)
+    return fx.valid & fx.m & slow & touch.any(1)
 
 
 def _out(v, fr, skill=None, tgt=None, side=None):
@@ -62,22 +66,63 @@ class Keep:
 class Teacher:
     name = "T"
 
-    def __init__(self, melee_row=True, recall=False, dumb=None, counter=False):
-        # dumb: None (T), "reach" (D), "d35" (D35); counter: my units under 'hold' get 'counter' (TC)
+    def __init__(self, melee_row=True, recall=False, dumb=None, counter=False, wait2=False, near=True, speed=True,
+                 sign=False):
+        # dumb: None (T), "reach" (D), "d35" (D35); counter: my units under 'hold' get 'counter' (TC). The four rules
+        # where T differs from A1 (the ablation; T's own rule first): wait2 - e pinned at this tick and the one before
+        # (A1's memory: by the Tacticians' row and the battle's slot); near False - free(i) without 'no standing enemy
+        # within STICK_M'; speed False - pinned without the speed rule; sign - the nearest free unit by the sign of its
+        # offset across e's facing line (A1's), not by the side class (axis / left / right)
         self.melee_row, self.recall, self.dumb, self.counter = melee_row, recall, dumb, counter
+        self.wait2, self.near, self.speed, self.sign = wait2, near, speed, sign
+        self.prev_pin = None
         if counter:
             self.allow = (SC.HOLD, SC.ATTACK, SC.COUNTER)
+
+    def _pinned(self, v):
+        fx = v.fx
+        pin = pinned(fx, self.speed)
+        if not self.wait2:
+            return pin
+        N = int(fx.slot.max()) + 1 if fx.slot.numel() else 1
+        n = int(v.idx.max()) + 1
+        if self.prev_pin is None or self.prev_pin.shape[0] < n or self.prev_pin.shape[1] < N:
+            t = torch.zeros((max(n, 1), max(N, 64)), dtype=torch.bool, device=d_dev(fx))
+            if self.prev_pin is not None:
+                t[:self.prev_pin.shape[0], :self.prev_pin.shape[1]] = self.prev_pin
+            self.prev_pin = t
+        now_s = torch.zeros((fx.R, self.prev_pin.shape[1]), dtype=torch.bool, device=d_dev(fx))
+        now_s.scatter_(1, fx.slot.clamp(min=0), pin & (fx.slot >= 0))
+        before = self.prev_pin[v.idx].gather(1, fx.slot.clamp(min=0)) & (fx.slot >= 0)
+        self.prev_pin[v.idx] = now_s
+        return pin & before
+
+    def _free(self, fx):
+        if self.near:
+            return fx.free
+        idle = (fx.order["skill"] == SC.HOLD) | (fx.order["skill"] == SC.COUNTER)
+        return fx.able & ~fx.g_m & (idle | (fx.attack & ~fx.t_valid))
+
+    def _side(self, fx):
+        """[R, G, K] the side my units are grouped by for 'the nearest free unit of its side'."""
+        if not self.sign:
+            return fx.g_side
+        th = torch.deg2rad(fx.b)[:, None, :]
+        gs, gf = fx.s.gather(1, fx.g_row), fx.f.gather(1, fx.g_row)
+        off = (gs[:, :, None] - fx.s[:, None, :]) * torch.cos(th) - (gf[:, :, None] - fx.f[:, None, :]) * torch.sin(th)
+        return torch.where(off >= 0, 1, -1)
 
     def __call__(self, v):
         fx = v.fx
         fr = v.frames()
         G = fx.G
         reach = float(OR.c_orders()["reach_m"])
-        pin = pinned(fx)
+        pin = self._pinned(v)
+        free = self._free(fx)
         w = OR.Walk(fx)
         skill, tgt, side = v.order["skill"].clone(), v.order["tgt"].clone(), v.order["side"].clone()
         melee = v.melee if self.melee_row else torch.zeros_like(v.melee)
-        elig = fx.able & ~melee & (fx.free | v.must)                    # may be given an order in this walk
+        elig = fx.able & ~melee & (free | v.must)                       # may be given an order in this walk
         if self.recall:
             k = fx.t_row.clamp(min=0)
             gap_t = fx.g_gap.gather(2, k[..., None])[..., 0]
@@ -96,10 +141,10 @@ class Teacher:
                 w.release(g, rec[:, g])
                 skill[:, g] = torch.where(rec[:, g], torch.full_like(skill[:, g], SC.HOLD), skill[:, g])
                 tgt[:, g] = torch.where(rec[:, g], torch.full_like(tgt[:, g], -1), tgt[:, g])
-            go = a & (v.must[:, g] | fx.free[:, g] | (self.recall and rec[:, g]))
+            go = a & (v.must[:, g] | free[:, g] | (self.recall and rec[:, g]))
             op = w.open(g)
             if self.dumb is None:
-                sd = fx.g_side                                                       # [R, G, K]
+                sd = self._side(fx)                                                  # [R, G, K]
                 same = sd == sd[:, g:g + 1, :]
                 d = fx.g_dist + torch.arange(G, device=d_dev(fx))[None, :, None] * 1e-4      # (ties by slot)
                 best = torch.where(same & elig[:, :, None], d, torch.full_like(d, OR.INF)).amin(1)
@@ -222,7 +267,10 @@ class Counter:
 
 PLAYERS = {"K": Keep, "T": Teacher, "D": lambda: Teacher(dumb="reach"), "D35": lambda: Teacher(dumb="d35"),
            "A1": Attack1, "P4": Counter, "T_recall": lambda: Teacher(recall=True),
-           "T_nohyg": lambda: Teacher(melee_row=False), "TC": lambda: Teacher(counter=True), "C": Counter}
+           "T_nohyg": lambda: Teacher(melee_row=False), "TC": lambda: Teacher(counter=True), "C": Counter,
+           "T_wait2": lambda: Teacher(wait2=True), "T_nonear": lambda: Teacher(near=False),
+           "T_nospeed": lambda: Teacher(speed=False), "T_sign": lambda: Teacher(sign=True),
+           "T_a1rules": lambda: Teacher(wait2=True, near=False, speed=False, sign=True)}
 HYGIENE_OFF = ("T_nohyg",)
 
 

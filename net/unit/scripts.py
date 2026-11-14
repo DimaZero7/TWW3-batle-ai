@@ -9,9 +9,13 @@ The skills of stage 0 (SKILLS; design/unit, METHOD.md table):
     hold      to the frame's centre (a run beyond RUN_M, the order's pace first) facing the frame's course; there
               (within the gate's MOVE_M, facing within its FACE_DEG) settled: a HOLD where it stands with no facing,
               kept while it is in the frame
-    counter   hold; the target (the main one, else the nearest seen standing enemy) within the counter's reach
-              (CHARGE_M + its run x LEAD_S, edge to edge: ~35 m) - attack it at a run (the charge on the last metres);
-              back to hold once it routs, dies or is unseen
+    counter   'meet': hold; out of melee, the main target or else the nearest seen standing enemy coming at the unit
+              (Facts.coming) within the counter's reach (CHARGE_M + its run x LEAD_S, edge to edge: ~35 m) - attack it
+              at a run (the charge on the last metres), kept on that target while it stands, is seen and is within
+              KEEP_M (no switch to a nearer one, no drop at the reach's edge); in melee no attack of its own (the
+              reflexes strike / melee_still); its fight over out of the frame - a HOLD where it stands (not back to the
+              frame: the same health, 0.10 fewer orders a unit-minute, tmp/tactic_slice/v2/stage1c). Not memorised:
+              a frame moved while the unit holds out of it is not followed (the tactician's 'hold' brings it back)
     attack    attack the main target (a run unless the pace is slow) while it stands and is seen; then stand where it is
     withdraw  out of the frame: break off and go to its centre (WITHDRAW: a run), facing its course, no strike on the
               way; in the frame: hold (the game's price - 24 s with no blow, struck in the back - is paid once: the
@@ -34,7 +38,8 @@ The reflexes (REFLEXES, a short list with their mechanics):
               stupidity). The cause of 'straight' (the script without it) trading worse than 'stand' in the general
               battles (tmp/u2/razbor2.md: battles 84, 10, 233 seen - a unit routed, rallied 100-200 m back and walked
               alone 500-1300 m back into its frame, into the enemy that broke it, and broke again).
-    turn      (on; Unit(turn=False) without it) out of melee, standing in its frame under hold / counter: the
+    turn      (on; Unit(turn=False) without it) out of melee, standing in its frame under hold (counter's charge faces
+              the one coming itself): the
               nearest seen standing enemy coming at it (its velocity towards us over APPROACH_MS; one in melee, whose
               velocity column is 0 by the bridge's rule: moving with us in its front - Facts.coming) within the turn's
               reach (CHARGE_M + its run x TURN_S) and off our front by more than FRONT_DEG - face it (a HOLD facing
@@ -79,6 +84,10 @@ LEAD_S = 1.0
 # probe game/probe/evidence/reissue_game.json: a turn of 11-22.5 deg costs 7-8 s with no brace; the simulator's
 # turn.face_delay 3.9 s) is ~35 m of an infantry run, + the charge distance: the turn is over before the contact
 TURN_S = 4.0
+# a counter's attack in force is kept while its target is within this edge gap: the game's counter probe still gains at
+# its farthest lane (counter_game.json c60, the order at a measured 64-67 m: swordsmen +0.016 over 30 s against -0.069
+# standing, sim/evidence/counter/spec.md) - the plateau's far end as the plan laid it; beyond, nothing is measured
+KEEP_M = 60.0
 STICK_M = 8.0         # the strike keeps its target while within this edge gap (TOUCH_M + a pushed rank's depth)
 FRONT_DEG = 45.0      # our front sector (sim.json contact.front_deg: the sector a contact is labelled front by)
 APPROACH_MS = 0.5     # 'coming at us': its velocity towards us over this (m/s; a walk is 1-1.5)
@@ -169,6 +178,19 @@ class Facts:
         faces = (torch.remainder(to_us - g("b") + 180.0, 360.0) - 180.0).abs() <= FRONT_DEG
         return (v > APPROACH_MS) | (unread & faces)
 
+    def comes(self):
+        """[B, i, j] coming(j) of each unit i for every slot j (the same rule; mask the enemies yourself)."""
+        raw = self.raw
+        x, z = _c(raw, "x"), _c(raw, "z")
+        wx, wz = x[:, :, None] - x[:, None, :], z[:, :, None] - z[:, None, :]                # from j to i
+        n = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
+        vx, vz = _c(raw, "vx")[:, None, :], _c(raw, "vz")[:, None, :]
+        v = (vx * wx + vz * wz) / n
+        unread = (vx == 0) & (vz == 0) & (_c(raw, "m") > 0)[:, None, :] & (_c(raw, "mv") > 0)[:, None, :]
+        to_us = torch.rad2deg(torch.atan2(wx, wz))
+        faces = (torch.remainder(to_us - _c(raw, "b")[:, None, :] + 180.0, 360.0) - 180.0).abs() <= FRONT_DEG
+        return (v > APPROACH_MS) | (unread & faces)
+
 
 def _keep(raw):
     B, N = raw.shape[:2]
@@ -236,10 +258,19 @@ class Unit:
             k = f.nearest(held)
             stop = base & ~in_frame & ~f.melee & (k >= 0)
             o = _set(o, stop, O.HOLD, x=x, z=z, run=False, face=f.bearing(k))
-        # counter: the target within its reach - attack it at a run
+        # counter (module doc): out of melee - the attack in force kept on its target while that one stands, is seen and
+        # is within KEEP_M; else the main target within its reach, else the nearest enemy coming at the unit within its
+        # reach (CHARGE_M + its run x LEAD_S); none, out of the frame and its fight over - stand where it is
         main_ok = f.valid(tgt)
-        c_t = torch.where(main_ok, tgt, f.nearest(f.foe))
-        charge = own & (skill == COUNTER) & (c_t >= 0) & (f.gap_to(c_t) <= f.reach(c_t))
+        cnt = own & (skill == COUNTER) & ~f.melee
+        pool = f.foe & f.comes() & (f.gap <= CHARGE_M + _c(raw, "run")[:, None, :] * LEAD_S)
+        c_t = torch.where(main_ok & (f.gap_to(tgt) <= f.reach(tgt)), tgt, f.nearest(pool))
+        if last is not None:
+            lt = torch.where(last.kind == O.ATTACK, last.target, torch.full_like(last.target, -1))
+            c_t = torch.where(f.valid(lt) & (f.gap_to(lt) <= KEEP_M), lt, c_t)
+            after = cnt & ~in_frame & (c_t < 0) & ((last.kind == O.ATTACK) | (last.kind == O.HOLD))
+            o = _set(o, after, O.HOLD, x=x, z=z, run=False, face=-1.0)
+        charge = cnt & (c_t >= 0)
         o = _set(o, charge, O.ATTACK, target=c_t, run=True, face=-1.0)
         # attack: the main target while it stands and is seen; else stand where it is
         att = own & (skill == ATTACK)
@@ -251,10 +282,10 @@ class Unit:
         # the reflexes
         if self.turn:
             n = f.nearest(f.foe)
-            standing_in = (base & ~charge) & in_frame & ~f.melee & (n >= 0)
+            standing_in = base & (skill != COUNTER) & in_frame & ~f.melee & (n >= 0)
             side_on = standing_in & f.coming(n) & (f.gap_to(n) <= f.reach(n, TURN_S)) & (f.off_front(n) > FRONT_DEG)
             o = _set(o, side_on, O.HOLD, x=x, z=z, run=False, face=f.bearing(n))
-        busy = (att & main_ok) | (charge & f.melee) | wd
+        busy = (att & main_ok) | wd
         hit = own & (j >= 0) & ~busy
         o = _set(o, hit, O.ATTACK, target=j, run=True, face=-1.0)
         return o
