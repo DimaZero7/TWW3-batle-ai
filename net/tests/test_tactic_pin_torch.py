@@ -115,6 +115,16 @@ def test_teacher_walk_and_masks():
     assert tgt[0].tolist() == [-1, 5, -1, 5, -1]
     assert float(cnt["melee_blocked"].sum()) == 1 and float(cnt["rejected"].sum()) == 1
     assert float(cnt["melee_changes"].sum()) == 0
+    # the branch test's two masks (pin.Teacher.shut, tactic/replay.py): unit 1 closed to orders - the next free unit of
+    # its side (2) takes 5; enemy 5 closed as a target - no striker at all
+    p = PN.player("T")
+    shut = lambda: {"units": torch.zeros((1, 8), dtype=torch.bool), "targets": torch.zeros((1, 8), dtype=torch.bool)}  # noqa
+    p.shut = shut()
+    p.shut["units"][0, 1] = True
+    assert p(v)["target"][0].tolist() == [-1, -1, 5, 5, -1]
+    p.shut = shut()
+    p.shut["targets"][0, 5] = True
+    assert p(v)["target"][0].tolist() == [-1] * 5
     # D: each free unit at the nearest valid open enemy within reach (enemy 6 is 160-173 m from units 1-3; unit 4 is
     # not free, enemy 6 within 8 m of it): 1 and 3 at enemy 5, unit 2 finds its side taken
     out = PN.player("D")(v)
@@ -232,8 +242,17 @@ def test_nearest_unit_trigger():
     assert not PN.second(v.fx, nearest_m=40.0)[0].any(), "gap(e, u) within second_m"
     out = PN.player("TIu")(v)
     assert out["target"][0].tolist() == [-1, 4, -1]           # one interceptor (the first of two equally near)
-    t = PN.player("TEACH")                                     # the config's teacher: TIu with back and co
-    assert t.nearest and t.tight and t.back and t.co and not t.wait_mt and t.second_m == 150.0
+    # the masks on cause (b): unit 1 closed - it keeps its order (the default fill still applies), unit 2 takes 4; enemy 4
+    # closed - nobody
+    p = PN.player("TIu")
+    p.shut = {"units": torch.tensor([[False, True, False, False, False]]), "targets": torch.zeros((1, 5), dtype=torch.bool)}
+    out = p(v)
+    assert out["target"][0].tolist() == [-1, -1, 4] and int(out["skill"][0, 1]) == SC.COUNTER
+    p = PN.player("TIu")                                       # (fresh: a second call would see 3 pinned on two ticks)
+    p.shut = {"units": torch.zeros((1, 5), dtype=torch.bool), "targets": torch.tensor([[False, False, False, False, True]])}
+    assert p(v)["target"][0].tolist() == [-1, -1, -1]
+    t = PN.player("TEACH")                                     # the config's teacher: 'strike the pinned one' (TCw)
+    assert t.second_m is None and t.wait2 and t.back and t.co and not t.wait_mt   # with back and co; no cause (b)
 
 
 def test_ticks_in_melee():

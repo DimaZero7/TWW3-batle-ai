@@ -36,12 +36,17 @@ the rows and the orders in force); the code's masks (orders.masks) stand over al
                  centre within R m; no two-tick wait for (b). TIp / TIi - a pinned target first / a second enemy
                  first, R 150 m (the loose trigger: second(tight=False))
     TIt<R>       TIn<R> with the tight trigger (second(tight=True): u in melee only); TI - the same at
-                 R = config orders.second_m (the drill's teacher as set)
+                 R = config orders.second_m. Cause (b) is measured and NOT taught: the game probe `tight` of
+                 14.11 has it below 'strike the pinned one' at both engine steps (config _teach_why); TEACH = TCw
     DH, DP       D restricted to enemies that come at one of my units / at none (coming_at), the default skill
     A player built on the level's default (default="config": TIn*, TIt*, TIp, TIi, DH, DP) hands a unit it leaves under
     'hold' without a target config orders.default_skill; K, T, D, D35, TCw, C keep their own fixed skill. Every Teacher
     keeps last_tags {cause (0 none, 1 cause (a), 2 cause (b), 3 a dumb player's), u (the battle's slot of the unit a
     cause (b) target came at), cell (cell())} [r, G] of its last tick (watch.PinWatch's measures by cause)
+    Teacher.shut     the branch test's two masks (tactic/replay.py), set by a wrapper before each call: None, or {units,
+                 targets} [r, S] bool by the view's rows and the battle's slots - my units closed to every attack order of
+                 the walk (they keep the order in force; the default fill still applies) and enemies closed as targets, so
+                 the rest of the army does not repair a branch
 """
 import torch
 
@@ -170,6 +175,18 @@ class Teacher:
         if self.idle is not None:
             self.allow = (SC.HOLD, SC.ATTACK, self.idle)
         self.last_tags = None
+        self.shut = None
+
+    def _shut(self, v):
+        """([r, G] my units closed to orders, [r, K] enemy rows closed as targets) from self.shut (module doc)."""
+        fx = v.fx
+        if self.shut is None:
+            return torch.zeros_like(fx.able), torch.zeros_like(fx.valid)
+        su, se = self.shut["units"], self.shut["targets"]
+        S = su.shape[1]
+        u = (fx.my >= 0) & (fx.my < S) & su.gather(1, fx.my.clamp(0, S - 1))
+        e = (fx.slot >= 0) & (fx.slot < S) & se.gather(1, fx.slot.clamp(0, S - 1)) & fx.mask
+        return u, e
 
     def _pinned(self, v):
         fx = v.fx
@@ -216,7 +233,8 @@ class Teacher:
         w = OR.Walk(fx)
         skill, tgt, side = v.order["skill"].clone(), v.order["tgt"].clone(), v.order["side"].clone()
         melee = v.melee if self.melee_row else torch.zeros_like(v.melee)
-        elig = fx.able & ~melee & (free | v.must)                       # may be given an order in this walk
+        shut_u, shut_e = self._shut(v)
+        elig = fx.able & ~melee & (free | v.must) & ~shut_u            # may be given an order in this walk
         if self.recall:
             k = fx.t_row.clamp(min=0)
             gap_t = fx.g_gap.gather(2, k[..., None])[..., 0]
@@ -243,8 +261,8 @@ class Teacher:
                 w.release(g, rec[:, g])
                 skill[:, g] = torch.where(rec[:, g], torch.full_like(skill[:, g], SC.HOLD), skill[:, g])
                 tgt[:, g] = torch.where(rec[:, g], torch.full_like(tgt[:, g], -1), tgt[:, g])
-            go = a & (v.must[:, g] | free[:, g] | (self.recall and rec[:, g]))
-            op = w.open(g)
+            go = a & ~shut_u[:, g] & (v.must[:, g] | free[:, g] | (self.recall and rec[:, g]))
+            op = w.open(g) & ~shut_e
             cand_b = None
             if self.dumb is None:
                 sd = self._side(fx)                                                  # [R, G, K]
@@ -293,7 +311,7 @@ class Teacher:
             cause[:, g] = torch.where(att, c_g, cause[:, g])
             if sec_u is not None:
                 u_of[:, g] = torch.where(att & is_b, fx.slot_of_row(sec_u.gather(1, k[:, None]))[:, 0], u_of[:, g])
-            hold = a & v.must[:, g] & ~has                                         # forced, no candidate: hold
+            hold = go & v.must[:, g] & ~has                                        # forced, no candidate: hold
             skill[:, g] = torch.where(hold, torch.full_like(skill[:, g], SC.HOLD), skill[:, g])
             tgt[:, g] = torch.where(hold, torch.full_like(tgt[:, g], -1), tgt[:, g])
         if self.idle is not None:
