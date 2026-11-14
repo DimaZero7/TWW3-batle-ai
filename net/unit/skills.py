@@ -186,7 +186,7 @@ def play(sp, player, P, device, compile=False, record=(), duty=None):
     a0 = {k: area[k][:, 0] for k in ("x", "z", "b", "front", "depth")}
     start = {"x": u["x"][:, :1].expand(B, N).clone(), "z": u["z"][:, :1].expand(B, N).clone()}
     from net.unit import decode as Dc
-    from net.unit import view as V
+    from net.unit import zmap as Z
     from sim import geometry
     nan = lambda: torch.full((B,), float("nan"), device=device)          # noqa: E731
     f0 = lambda: torch.zeros(B, dtype=torch.bool, device=device)         # noqa: E731
@@ -242,8 +242,10 @@ def play(sp, player, P, device, compile=False, record=(), duty=None):
             inside = Dc.signed_dist(u["x"][:, 0], u["z"][:, 0], a0) >= 0
             m["left"] = m["left"] | (live & ~inside)
             if skill == "counter":
-                raw = V.raw(st, P.sim["formation"]["spacing_m"], missile=P.sim["missile"])
-                gap = geometry.rect_gap(*(raw[..., V.I[k]] for k in ("x", "z", "b", "front", "depth")))[:, 0, A]
+                # (the boxes from the state, not view.raw: a call of view.raw every step would move its velocity's
+                # reference - view.shift_velocity - and the unit level's input would read one step's shift)
+                rc = Z.rects_of(u, P.sim["formation"]["spacing_m"])
+                gap = geometry.rect_gap(u["x"].float(), u["z"].float(), u["b"].float(), rc["front"], rc["depth"])[:, 0, A]
                 reach = SC.CHARGE_M + u["run"][:, A] * SC.LEAD_S
                 came = live & (gap <= reach) & torch.isnan(m["t_reachA"])
                 m["waited"] = torch.where(came, inside, m["waited"])

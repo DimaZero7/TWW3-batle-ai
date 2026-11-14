@@ -35,7 +35,8 @@ The reflexes (REFLEXES, a short list with their mechanics):
               battles (tmp/u2/razbor2.md: battles 84, 10, 233 seen - a unit routed, rallied 100-200 m back and walked
               alone 500-1300 m back into its frame, into the enemy that broke it, and broke again).
     turn      (on; Unit(turn=False) without it) out of melee, standing in its frame under hold / counter: the
-              nearest seen standing enemy coming at it (its velocity towards us over APPROACH_MS) within the turn's
+              nearest seen standing enemy coming at it (its velocity towards us over APPROACH_MS; one in melee, whose
+              velocity column is 0 by the bridge's rule: moving with us in its front - Facts.coming) within the turn's
               reach (CHARGE_M + its run x TURN_S) and off our front by more than FRONT_DEG - face it (a HOLD facing
               it): the brace and the stand-first strike work only for the front (game/manual.md 'Упор'; sim.json
               contact.front_deg).
@@ -149,14 +150,24 @@ class Facts:
         return (torch.remainder(self.bearing(t) - _c(self.raw, "b") + 180.0, 360.0) - 180.0).abs()
 
     def coming(self, t):
-        """[B, N] enemy t moves towards the unit faster than APPROACH_MS."""
+        """[B, N] enemy t comes at the unit: its velocity towards us over APPROACH_MS; or, where its velocity column says
+        nothing - 0 by the bridge's rule for a unit in melee in both snapshots (view.shift_velocity: the centre of a
+        formation in melee jitters) - it moves (its mv, the game's is_moving) in melee and has us in its front sector
+        (FRONT_DEG of its facing: a unit walks along its facing). Mostly a pursuer or a unit sliding off a fight at a run
+        (tmp/unit_vel: 92 % of the turns the shift column lost; the game's records: in melee with mv in both seconds the
+        centre moves 2.2 m/s by the median, without mv 0.45)."""
         raw = self.raw
         tc = t.clamp(min=0)
         x, z = _c(raw, "x"), _c(raw, "z")
         wx, wz = x - x.gather(1, tc), z - z.gather(1, tc)
         n = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
-        v = (_c(raw, "vx").gather(1, tc) * wx + _c(raw, "vz").gather(1, tc) * wz) / n
-        return v > APPROACH_MS
+        vx, vz = _c(raw, "vx").gather(1, tc), _c(raw, "vz").gather(1, tc)
+        v = (vx * wx + vz * wz) / n
+        g = lambda k: _c(raw, k).gather(1, tc)                                       # noqa: E731
+        unread = (vx == 0) & (vz == 0) & (g("m") > 0) & (g("mv") > 0)
+        to_us = torch.rad2deg(torch.atan2(wx, wz))
+        faces = (torch.remainder(to_us - g("b") + 180.0, 360.0) - 180.0).abs() <= FRONT_DEG
+        return (v > APPROACH_MS) | (unread & faces)
 
 
 def _keep(raw):
