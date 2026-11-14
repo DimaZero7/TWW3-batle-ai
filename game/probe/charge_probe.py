@@ -576,7 +576,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
-              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01")
+              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2131,7 +2131,7 @@ def run_config(plan, index):
         # mem_morale_ours; the 'clock' lane keeps the poll going, as in flank2v1)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=30, men_near_m=110, mem_morale=True,
                       mem_extras=True)
-    if plan in ("tight", "tight01"):
+    if plan in ("tight", "tight01", "behind", "own"):
         # (game/probe/unit_probe.py, the night probes' tight; tight01 its lanes under the 0.1 s step's men count) health every 0.25 s; the men of all four units from memory
         # every 0.1 s while B and E1 (centres) are within 105 m - the last ~20 s of the approach - and every 0.5 s after
         # the contact (men_after_s 0: the 245 s fights would make the dense polls the battle's cost); the morale of E1,
@@ -2823,7 +2823,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     x[b, A], z[b, A] = sx + af.get("dx", 0), sz + af.get("dz", 0)
             # the second target: halted unless it attacks (t2_mode)
             if sp.get("t2_mode") == "attack" and int(slot["t2"][b]) >= 0:
-                kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = O.ATTACK, A, False
+                # (lane.t2_run, the own plan: at a run)
+                kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = (
+                    O.ATTACK, A, bool(sp.get("t2_run")))
             if sp.get("t2_mode") == "attack_extra" and int(slot["t2"][b]) >= 0 and int(slot["e1"][b]) >= 0:
                 # (the intercept plan) the second target attacks the first extra at a run (t2_walk: at a walk)
                 T2_ = int(slot["t2"][b])

@@ -80,7 +80,8 @@
 -- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>' (n = 1). lane.after2 (optional,
 -- the same fields): a second order at its own at_s after the first contact (n = 2; the holdmelee plan: a halt 3 or
 -- 10 s after a move or an attack given in melee).
--- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one);
+-- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one; lane.t2_run:
+-- at a run - the own plan);
 -- 'attack_extra' (the intercept plan): it attacks the first extra at a run at the go (lane.t2_walk: at a walk).
 -- lane.damage (optional) {t = {method, share}, t2 = ..., a = ...}: once placed (settle_ms before the go) the unit is
 -- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
@@ -1251,7 +1252,8 @@ function M.main(bm, config, globals)
             elseif lane.target_mode == 'both' or lane.target_mode == 'both_walk' then
                 attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
             end
-            if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
+            -- (lane.t2_run, the own plan: at a run)
+            if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, lane.t2_run ~= true) end
             if lane.t2 and lane.t2_mode == 'attack_extra' and lane.extras and lane.extras[1] then
                 -- (the intercept plan) the second target attacks the first extra at a run
                 attack(lane, lane.t2, state.units[lane.extras[1].name], lane.t2_walk == true)
