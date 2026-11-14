@@ -77,8 +77,15 @@ within 5–7° (median), p90 12–16° (the row comes up to 0.1 s after the star
   chargers' 15.3–17.0 swings had 14.7–16.3 distinct targets (`stats7.py`). Nobody else of the held unit swings.
   Standing clanrats answer with 10.4 ± 0.4.
 - The chance and the blow are the database's: hits by t0 + 1.3 s over swings × chance — clanrats 0.88–1.08 in six
-  cells (pooled 0.98 ± 0.05), swordsmen attacking 0.84 ± 0.05 / 0.92 ± 0.10, spearmen attacking 0.75 ± 0.06 / 0.67 ± 0.10,
-  swordsmen holding 0.89 ± 0.14, spearmen holding 0.55 ± 0.13 (`stats8.py`). Single hits: 30 HP from charging clanrats
+  cells (pooled 0.98 ± 0.05; `stats8.py`). The Empire's blows on clanrats, corrected 14.11 (review): the hand counts took
+  the clanrats' defence as 18, without the Skaven passive Strength in Numbers (+8 melee defence above half health,
+  `sim/config/effects.json`); the chance is 0.28 for spearmen and 0.40 for swordsmen (0.32 / 0.54 with the charge), not
+  0.36 / 0.48 (0.40 / 0.62). Recount, one HP drop to one swing (`tmp/melee_core/critic1/a4.py`), against a charging /
+  a standing unit: swordsmen attacking 0.98 ± 0.04 (30 lanes) / 1.05 ± 0.06 (9), spearmen attacking 0.94 ± 0.05 (30) /
+  0.83 ± 0.09 (9), swordsmen holding 1.07 ± 0.10 (6), spearmen holding 0.71 ± 0.21 (6; 17 hits of 86 swings) — written
+  before as 0.84 ± 0.05 / 0.92 ± 0.10, 0.75 ± 0.06 / 0.67 ± 0.10, 0.89 ± 0.14, 0.55 ± 0.13. In the steady fight (20–60 s,
+  30 lanes a cell, HP-drop events over swings × chance): clanrats on spearmen 1.09 ± 0.03, on swordsmen 1.06 ± 0.02,
+  spearmen on clanrats 1.01 ± 0.03, swordsmen on clanrats 0.93 ± 0.02. Single hits: 30 HP from charging clanrats
   falling to 21.5 after 13 s, 36–37 → 24 from swordsmen, 25 → 21.5 from spearmen, and **42–44 HP from held spearmen in
   the first 4 s** (26 of 26 hits; 23–29 % of hits at 4–13 s): the charge reflection ×2 holds (`hitsizes.py`).
 
@@ -157,8 +164,9 @@ from a standing one 0.58, 0.05, 0.06 (code 0.095, 0.05). On a clanrat inside his
 - Not the lull: at 0.5–1.5 s at most 6 of the 32–73 Empire men within reach are in a reaction and 0.2–1.0 of the
   clanrats, yet both sides stop swinging alike; none of the second-wave men was hit before his swing.
 - The opening: 0.0–0.2 of the clanrats' opening swingers a lane are knocked or staggered before their blow would land,
-  2.0–5.7 of the Empire's 14–20 — it takes the Empire side's opening hits to 0.55–0.92 of the rule (2.3) and leaves the
-  clanrats' at 0.98.
+  2.0–5.7 of the Empire's 14–20. 14.11 (review): with the clanrats' passive counted the Empire side's opening hits are
+  0.71 ± 0.21 … 1.07 ± 0.10 of the rule (2.3; written 0.55–0.92) and the clanrats' 0.98 — no loss to these knocks is
+  resolved.
 
 ## 3. The four questions
 HP lost a second, clock t0, pooled (`stats7.py`); "opening" = everything before t0 + 1 s:
@@ -190,9 +198,11 @@ HP lost a second, clock t0, pooled (`stats7.py`); "opening" = everything before 
    wave's 1.9–1.6, while in the game the swings stay flat (2.5), the opening's men return over interval … interval +
    4 s (2.1) and fewer men join against a holder (2.6). Over 1–10 s: 486 ± 12 (72 lanes) against 579. The rates meet
    after ~10 s because the charge bonus is spent, not because a wave of strikers has ebbed.
-4. **(iv) held spearmen.** Their answer is 14.3 swings (2.3); its hits are 0.55 ± 0.13 of the rule (17 in 6 lanes for
-   31) — 121 ± 43 HP against the rule's 221 and the twin's 152–175; 2.3 of the 14.3 swingers are knocked or staggered
-   first. After it they swing at their steady hold rate (2.7, 3.2, 2.3, 1.7, 0.8 a second at 0.5–5 s against 2.2 at
+4. **(iv) held spearmen.** Their answer is 14.3 swings (2.3); its hits are 0.71 ± 0.21 of the rule (17 in 6 lanes for
+   24 at the chance 0.28; corrected 14.11, review — written 0.55 ± 0.13, 17 for 31, at 0.36 without the clanrats'
+   passive) — 121 ± 43 HP against the rule's 172 (written 221) and the twin's 152–175; 2.3 of the 14.3 swingers are
+   knocked or staggered first.
+   After it they swing at their steady hold rate (2.7, 3.2, 2.3, 1.7, 0.8 a second at 0.5–5 s against 2.2 at
    20–60 s), each blow 42–44 HP while the enemy's charge is above 0.7: 7, 36, 22, 17 HP/s. The twin multiplies the held
    rate by the wave (46, 43, 41 HP/s at 1–4 s). At 4–5 s they hardly swing (0.8 a second): the opening's men are still
    inside their 5.7 s interval.
@@ -201,9 +211,9 @@ HP lost a second, clock t0, pooled (`stats7.py`); "opening" = everything before 
 | item | game | simulator | verdict |
 |---|---|---|---|
 | a charger's first strike | its first rank, one blow each, the rule's chance | `first_strike_rank`: the files in contact | right (176–187 against 164–191) |
-| a standing unit's first strike | the men the chargers aim at: 14–15 of 20 files | `stand_first_strike`: the steady front | swordsmen 120–135 against 152 ± 23 HP; spearmen 152–175 against 121 ± 43 (their hits fall short of the rule) |
+| a standing unit's first strike | the men the chargers aim at: 14–15 of 20 files | `stand_first_strike`: the steady front | swordsmen 120–135 against 152 ± 23 HP; spearmen 152–175 against 121 ± 43 (their hits are 0.71 ± 0.21 of the rule over 6 lanes, 2.3 — not a shortfall; corrected 14.11) |
 | when the rest of the rate starts | first swings +1.0 s after the first damage, landing +1 s later | `swing_interval`: `miss_s` 0.5 s after the contact | **0.5 s against ~1.7 s** |
-| who is back before the interval | men who had not swung (2.4); nobody who missed (2.1) | the share 1 − p "who missed" | close for clanrats and spearmen (1 − p ≈ 0.6); low for swordsmen (0.38: 196 HP at 1–4 s against 279) |
+| who is back before the interval | men who had not swung (2.4); nobody who missed (2.1) | the share 1 − p "who missed" | close for clanrats and spearmen (1 − p ≈ 0.65–0.7); low for swordsmen (0.46 at p 0.54 with the clanrats' passive — written 0.38, corrected 14.11: 196 HP at 1–4 s against 279) |
 | the opening's men's next blow | no sooner than the interval, median 1.2–1.65 × interval | all at the interval | the twin steps up at 4.3 s (59 → 68 → 75 HP/s), the game does not |
 | men striking at 2–10 s | swings 1.15–1.3 × the steady rate | `wave`: × 2.2 → 1.6 | too many, offset by the weak answer of `p / (p × interval + miss_s)` to the charge's attack bonus (× 1.06 where a swing an interval gives × 1.23) |
 | the enemy stood at the contact | 0.57–0.73 of the joiners, −12 % swings in 0.5–10 s | the same wave | **the holder and the counter-charger lose the same** |
@@ -250,7 +260,8 @@ mean of the cell's lanes):
 | meet − hold, swordsmen / spearmen | 0.125 / 0.077 | 0.164 / 0.084 | 0.159 / 0.084 | 0.148 / 0.072 | 0.144 / 0.069 |
 
 What they do not mend: the share 1 − p (swordsmen's blows on charging clanrats in 0–10 s: game 1079 ± 21, now 1054, with
-1: 967 — their second wave of 11.6 swings is cut to 0.38); the opening's men all back at the bare interval (tried: back at
+1: 967 — their second wave of 11.6 swings is cut to 1 − p, 0.46 with the clanrats' passive (written 0.38; corrected
+14.11)); the opening's men all back at the bare interval (tried: back at
 1.3 × interval takes our loss in 0–10 s to 669 / 655 but the swordsmen's blows to 903); our losses to standing clanrats
 (0.120–0.125 against 0.087–0.099); a held unit's own wave (iv). A swing an interval a man (`melee.cycle`) is the frame
 these belong to; with it alone the twin falls to 503.
@@ -260,12 +271,15 @@ these belong to; with it alone the twin falls to 503.
 - Why state 1 comes a median 0.4–0.5 s after the bodies are within 1.35 m (when `14311b320` / `14311b428` fire).
 - Why clanrats inside their swing or charge are almost never staggered or knocked and Empire men are (2.7): the hit's
   flag +0x14, the man's +0x18f, or the swing's push level (`14307fb18`, animation data).
-- Why spearmen's opening hits are 0.55–0.75 of the rule beyond the swingers knocked first.
+- (Dropped 14.11, review: "why spearmen's opening hits are 0.55–0.75 of the rule" — with the clanrats' passive counted
+  they are 0.94 ± 0.05 (30 lanes) / 0.83 ± 0.09 (9) attacking and 0.71 ± 0.21 (6) holding, 2.3; the Empire's blows on
+  clanrats land by the rule.)
 - Whether 2.4–2.6 hold for large bodies: riders and monsters use another attack kind (`14325f8d4`, `143260464`: a start
   test every 5th tick, 20° facing) and knock men down.
 
 ## 7. Probes that would decide what is left (not run)
-1. **Stand_k by unit and the held answer** (2.6 has 12 hold lanes; the 0.55 ± 0.13): 2 battles × 15 lanes, clanrats and
+1. **Stand_k by unit and the held answer** (2.6 has 12 hold lanes; the 0.55 ± 0.13 — 0.71 ± 0.21 with the clanrats'
+   passive, 14.11: the chances below must carry every Skaven target's + 8): 2 battles × 15 lanes, clanrats and
    stormvermin at a run on held spearmen, swordsmen, halberdiers and the same counter-charging at 60 m (hold : attack
    2 : 1), memory rows every 0.1 s from 60 m to 10 s after contact, every 0.5 s to 60 s, fearless. Numbers: first swings
    of men 0.5–5 s and swings 0.5–10 s, holder over counter-charger (this note: 0.73 and 0.88; "no difference" predicts
