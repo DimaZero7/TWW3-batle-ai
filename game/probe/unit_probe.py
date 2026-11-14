@@ -77,6 +77,21 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             the second one far out / near / strikes either once pinned - 8 battles. Tables and twins:
                 python -m game.probe.unit_probe --counterfar game [runs] [--sim] | --counterfar layout
                 python -m game.probe.unit_probe --intercept game [runs] [--sim]  | --intercept layout
+  tight     night probe 1 (TG_* below; tmp/night_probes/design.md 1): the intercept lane with B's order on A's own
+            melee flag - B takes the second enemy E2 2.5 s after A's first flag (cause (b) at the tight trigger), strikes
+            the pinned E1 8 s after it (cause (a)), takes E2 8 s after E2's flag, strikes E1 at 2.5 s, or holds; E2 30 /
+            60 / 90 m behind E1, B 36 / 48 / 80 m beside A, both sides of A; 12 battles of 9 lanes (11-12: the kinds of A
+            and B swapped). Reads to 240 s after the contact with A's and B's routs;
+  walkout   night probe 2 (WO_* below; design 2): a line of three against three (groups of three counterfar lanes 36 m
+            apart): mine attack at 35 m (a), 100 m (b), 60 m (c), or the flanks at 100 m and the centre at 35 m (d), the
+            enemies arriving together (tog) or the centre first, the flanks 13 and 26 s later (seq) - 6 battles of 6
+            groups; its twin is one simulator battle a group (walkout_twin);
+  standk    night probe 3 (SK_* below; design 3): melee.wave.stand_k by unit - clanrats and stormvermin on held / counter-
+            charging / standing-attacked spearmen, swordsmen and halberdiers, and 18 held lanes for the held answer - 5
+            battles of 18 lanes. Tables and twins:
+                python -m game.probe.unit_probe --tight game [runs] [--sim]    | --tight layout
+                python -m game.probe.unit_probe --walkout game [runs] [--sim]  | --walkout layout
+                python -m game.probe.unit_probe --standk game [runs] [--sim]   | --standk layout
 
 All the units are fearless (but the t_morale targets); every lane's rows carry the morale fields with the active phases (fx)
 and the unit card's values (cs: leadership, speed, melee attack / defence, weapon and missile damage).
@@ -526,6 +541,161 @@ def intercept_battles(e2=None, n=IC_BATTLES):
     return out
 
 
+def _clock(max_s):
+    """The clock lane (flank2v1's F2_CLOCK: the two lords 100 m apart, never ordered; polled densely, so the morale rows
+    come every 0.5 s - entries/charge_probe.lua mem_poll); its max_s must be the battle's longest."""
+    (gx_, gz_), (wx_, wz_) = F2_CLOCK
+    return cp.lane("general", "warlord", "hold", "hold", gap_m=round(gz_ - wz_), fight_s=max_s, max_s=max_s,
+                   answer=False, kind="clock", a_at={"x": gx_, "z": gz_, "b": 180.0}, t_at={"x": wx_, "z": wz_, "b": 0.0},
+                   place=(wx_, wz_))
+
+
+# The night probes of 14-15.11 (tmp/night_probes/design.md; HEAD 1925110). Probe 1 'tight' (design 1): the intercept
+# lane with new constants - when the first enemy E1 is fighting A, what should the free unit B do with the second one E2?
+# A (Empire spearmen, an extra, keeps its morale, never ordered) 200 m (front to front) from E1; E2 TG_E2_DX m toward B and
+# D m behind E1 (centres); both clanrats_0 (fearless) attack A at a run at the go; B (swordsmen, keeps its morale) dx m
+# (centres) beside A. B: 'hold' never ordered; 'tight' attacks E2 TG_TIGHT_S after A's first melee flag (cause (b) at the
+# tight trigger's moment: 2.3-2.4 s after A's flag in the pilot's lanes, review G); 'pinE1' attacks E1 TG_PIN_S after A's
+# flag (cause (a), the two-tick wait: game 7.2-8.7 s, review G); 'pinE2' attacks E2 TG_PIN_S after E2's own flag;
+# 'e1now' attacks E1 TG_TIGHT_S after A's flag; 'near' (the dx 36 battles instead of e1now) intercept's near lane. The
+# clocks: lane.a_go_melee_of 'e1' = the first extra's (A's) melee flag (entries/charge_probe.lua). One battle = one cell
+# (D, dx, side) of TG_CELLS, 9 lanes (hold, tight, pinE1, pinE2 twice + the ninth) rotated over TG_PLACES by the battle's
+# index, and the clock lane; battles 11-12 with the kinds of A and B swapped (kind suffix '_sw').
+TG_A, TG_B, TG_E = "spear", "swords", COUNTER_T
+TG_GAP, TG_E2_DX = 200.0, 24.0         # E1 - A front to front and E2 toward B: the intercept plan's (IC_GAP, IC_E2)
+TG_FIGHT_S, TG_MAX_S = 245, 320        # contact ~54 s after the go (the intercept runs); reads to 240 s after it
+TG_TIGHT_S, TG_PIN_S, TG_NEAR = 2.5, 8, 35   # design 1.1 (review G: tight 2.3-2.4 s, pin 7.2-8.7 s; IC_NEAR)
+TG_WINDOWS = (30, 60, 120, 180, 240)
+# (D: E2's centre behind E1's, m; dx: B's centre from A's, m - 36 the arena's line spacing, sim/config/arena.json;
+# side: B on the right +1 / left -1)
+TG_CELLS = ((60, 48, 1), (90, 48, -1), (30, 48, 1), (60, 80, -1), (60, 36, 1), (60, 48, -1), (90, 48, 1), (30, 48, -1),
+            (60, 80, 1), (60, 36, -1), (60, 48, 1), (60, 48, -1))
+TG_SWAP_FROM = 11                      # battles 11-12: A swordsmen, B spearmen
+TG_PLACES = tuple((float(x), z) for z in (-350.0, 150.0) for x in (-480, -240, 0, 240, 480))[:9]
+TG_KINDS = ("hold", "tight", "pinE1", "pinE2") * 2
+
+
+def tight_battles(cells=TG_CELLS):
+    """The tight plan's battles (comment above TG_*): 9 lanes and the clock a battle."""
+    W = cp.WIDTH_M
+    ek, em, _ = cp.UNITS[TG_E]
+    ed = cp.depth(ek, em, W)
+    out = []
+    for i, (D, dx, s) in enumerate(cells, 1):
+        swap = i >= TG_SWAP_FROM
+        a_s, b_s = (TG_B, TG_A) if swap else (TG_A, TG_B)
+        ad, bd = cp.depth(*cp.UNITS[a_s][:2], W), cp.depth(*cp.UNITS[b_s][:2], W)
+        half = (bd + ed) / 2
+        kinds = list(TG_KINDS) + ["near" if dx == 36 else "e1now"]
+        lanes = []
+        for kind, place in zip(cp.rotate(kinds, i - 1), TG_PLACES):
+            mode, extra = {"hold": ("hold", {}),
+                           "tight": ("attack_t2", {"a_go_melee_s": TG_TIGHT_S, "a_go_melee_of": "e1"}),
+                           "pinE1": ("attack_run", {"a_go_melee_s": TG_PIN_S, "a_go_melee_of": "e1"}),
+                           "pinE2": ("attack_t2", {"a_go_melee_s": TG_PIN_S}),
+                           "e1now": ("attack_run", {"a_go_melee_s": TG_TIGHT_S, "a_go_melee_of": "e1"}),
+                           "near": ("attack_t2", {"a_go_m": round(TG_NEAR + half, 1), "a_go_closest": True})}[kind]
+            anvil = {"short": a_s, "dx": 0.0, "dz": round(ed / 2 + TG_GAP + ad / 2, 1), "b": 180.0, "width": W,
+                     "morale": True}
+            lanes.append(cp.lane(b_s, TG_E, mode, "hold", gap_m=TG_GAP, fight_s=TG_FIGHT_S, max_s=TG_MAX_S,
+                                 answer=False, kind=kind + ("_sw" if swap else ""), b_side="right" if s > 0 else "left",
+                                 a_dx=s * float(dx), target2=TG_E, t2_place=(s * TG_E2_DX, -float(D)),
+                                 t2_mode="attack_extra", extras=[anvil], t_attack_extra="run", a_morale=True,
+                                 mem_morale_ours=True, morale_rows=True, place=place, D=D, dx=dx, **extra))
+        out.append(lanes + [_clock(TG_MAX_S)])
+    return out
+
+
+# Probe 2 'walkout' (design 2): a line of three that goes out against a line that waits. A group = three counterfar lanes
+# side by side WO_DX m apart (centres; 6 m between 30 m fronts - the arena's line spacing): roles L (swordsmen), M
+# (spearmen), R (swordsmen), mine on one line facing -z, each against its own fearless clanrats_0 that attack it at a run
+# from the go ('both'); mine keep their morale and attack at a run once the centres are within X + the half depths
+# (a_go_m; X front to front by WO_AT[var][role]). Arrival 'tog': every enemy WO_GAP m off; 'seq': M at WO_GAP, then L
+# +50, R +100 m (clanrats close at ~3.85 m/s, COUNTER_V: 13 and 26 s later; even battles swap L and R). Battle i: three
+# 'tog' groups a + WO_PAIRS[(i - 1) % 3], three 'seq' groups a + WO_PAIRS[i % 3] on WO_PLACES rotated by i - 1, and the
+# clock lane; every lane fight_s = max_s = WO_S (all end together: no unit is halted while its neighbours fight).
+WO_ROLES = (("L", "swords", -36.0), ("M", "spear", 0.0), ("R", "swords", 36.0))
+WO_DX, WO_GAP, WO_S = 36.0, 200.0, 365
+WO_SEQ = {"L": 50.0, "M": 0.0, "R": 100.0}      # the enemies' extra gap in 'seq' (odd battles; even: L and R swapped)
+WO_AT = {"a": {"L": 35, "M": 35, "R": 35}, "b": {"L": 100, "M": 100, "R": 100}, "c": {"L": 60, "M": 60, "R": 60},
+         "d": {"L": 100, "M": 35, "R": 100}}    # a: the unit script's counter (~35 m: sim/evidence/counter)
+WO_PAIRS = (("b", "c"), ("c", "d"), ("d", "b"))
+WO_PLACES = ((-400.0, -460.0), (0.0, -460.0), (400.0, -460.0), (-400.0, 130.0), (0.0, 130.0), (400.0, 130.0))
+WO_BATTLES = 6
+WO_WINDOWS = (30, 60, 120, 180, 300)
+WO_TOUCH_M = 8.0                       # touch: both flags on and the rectangles within 8 m (review G's touch distance)
+WO_TOUCH_TIGHT_M = 1.0                 # ... and within 1 m (the lanes stand 6 m apart: 8 m also takes a neighbour's enemy)
+
+
+def walkout_battles(n=WO_BATTLES):
+    """The walkout plan's battles (comment above WO_*): 6 groups of 3 lanes and the clock a battle."""
+    W = cp.WIDTH_M
+    ek, em, _ = cp.UNITS[COUNTER_T]
+    ed = cp.depth(ek, em, W)
+    out = []
+    for i in range(1, n + 1):
+        groups = [("tog", "a")] + [("tog", v) for v in WO_PAIRS[(i - 1) % 3]] + \
+                 [("seq", "a")] + [("seq", v) for v in WO_PAIRS[i % 3]]
+        lanes = []
+        for g, ((arr, var), (px, pz)) in enumerate(zip(groups, cp.rotate(list(WO_PLACES), i - 1)), 1):
+            for role, mine, off in WO_ROLES:
+                extra_gap = 0.0
+                if arr == "seq":
+                    r_ = {"L": "R", "R": "L"}.get(role, role) if i % 2 == 0 else role
+                    extra_gap = WO_SEQ[r_]
+                gap = WO_GAP + extra_gap
+                half = (cp.depth(*cp.UNITS[mine][:2], W) + ed) / 2
+                X = WO_AT[var][role]
+                lanes.append(cp.lane(mine, COUNTER_T, "attack_run", "both", gap_m=gap, fight_s=WO_S, max_s=WO_S,
+                                     answer=False, kind=f"{arr}_{var}", group=g, role=role, var=var, arr=arr,
+                                     a_go_m=round(X + half, 1), counter_at=X, a_morale=True, morale_rows=True,
+                                     mem_morale_ours=True, place=(px + off, pz + WO_GAP - gap)))
+        out.append(lanes + [_clock(WO_S)])
+    return out
+
+
+# Probe 3 'standk' (design 3; reverse/notes/charge_impact.md 7.1, corrected): melee.wave.stand_k by unit and the held
+# answer. The counterfar lane, everyone fearless, 200 m as before (the old lanes pool). Template A (18 lanes): attacker
+# (clanrats_0 'clan', stormvermin_1 'sv') x holder (spearmen, swordsmen, halberdiers) x kind - 'run_hold' ours never
+# ordered, the Skaven attack at a run; 'run_c60' ours attack at a run once the gap is 60 m; 'stand_c45' the Skaven never
+# ordered, ours attack at the go from 45 m. Template B (18 'run_hold' lanes against clanrats_0: spearmen x 8, swordsmen
+# x 4, halberdiers x 6): the held answer. Battles A, A, B, A, A (A rotated by 5 places a repeat) on SK_PLACES.
+SK_DEF = ("spear", "swords", "halb")
+SK_ATT = ((COUNTER_T, "clan"), ("svsh", "sv"))
+SK_B = (("spear", 8), ("swords", 4), ("halb", 6))
+SK_GAP, SK_STAND_GAP, SK_FIGHT_S = 200.0, 45.0, 65
+# max_s = 3 + gap / speed + 75: the clanrats' measured 3.85 m/s (COUNTER_V) from 200 m, 2.5 m/s of ours from 45 m
+SK_MAX_RUN, SK_MAX_STAND = 131, 96
+SK_PLACES = tuple((float(x), z) for z in (-450.0, -50.0, 350.0) for x in (-500, -300, -100, 100, 300, 500))
+SK_ORDER = ("A", "A", "B", "A", "A")
+
+
+def standk_battles():
+    """The standk plan's 5 battles (comment above SK_*)."""
+    W = cp.WIDTH_M
+    tmpl_a = []
+    for d in SK_DEF:
+        for att, tag in SK_ATT:
+            half = (cp.depth(*cp.UNITS[d][:2], W) + cp.depth(*cp.UNITS[att][:2], W)) / 2
+            tmpl_a.append(cp.lane(d, att, "hold", "both", gap_m=SK_GAP, fight_s=SK_FIGHT_S, max_s=SK_MAX_RUN,
+                                  answer=False, kind=f"{d}-{tag}_run_hold"))
+            tmpl_a.append(cp.lane(d, att, "attack_run", "both", gap_m=SK_GAP, fight_s=SK_FIGHT_S, max_s=SK_MAX_RUN,
+                                  answer=False, kind=f"{d}-{tag}_run_c60", a_go_m=round(60 + half, 1), counter_at=60))
+            tmpl_a.append(cp.lane(d, att, "attack_run", "hold", gap_m=SK_STAND_GAP, fight_s=SK_FIGHT_S,
+                                  max_s=SK_MAX_STAND, answer=False, kind=f"{d}-{tag}_stand_c45", counter_at=45))
+    tmpl_b = [cp.lane(d, COUNTER_T, "hold", "both", gap_m=SK_GAP, fight_s=SK_FIGHT_S, max_s=SK_MAX_RUN, answer=False,
+                      kind=f"{d}-clan_run_hold") for d, n in SK_B for _ in range(n)]
+    out, rep = [], 0
+    for t_ in SK_ORDER:
+        if t_ == "A":
+            base, k = tmpl_a, 5 * rep
+            rep += 1
+        else:
+            base, k = tmpl_b, 0
+        out.append([dict(s, place=p) for s, p in zip(cp.rotate(list(base), k), SK_PLACES)])
+    return out
+
+
 def _fwd(b):
     r = math.radians(b)
     return math.sin(r), math.cos(r)
@@ -692,6 +862,12 @@ def battles(plan):
         return counterfar_battles()
     if plan == "intercept":
         return intercept_battles()
+    if plan == "tight":
+        return tight_battles()
+    if plan == "walkout":
+        return walkout_battles()
+    if plan == "standk":
+        return standk_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -1582,8 +1758,10 @@ def flank2v1_mem(run_dir, rows):
     mor = mp.load_morale(run_dir)
     men = mp.load_men(run_dir)
     g = (mor["go_ms"] or 0) / 1000
+    tl = _tick_len(men["polls"])
     for p in men["polls"]:
         p["t"] = p["t"] - g
+        p["tick_len"] = tl
     col = mp.COL
     for row in rows:
         if row.get("ref") is None or row.get("lane") not in names:
@@ -1643,7 +1821,7 @@ def flank2v1_mem(run_dir, rows):
             d = np.hypot(la[:, None, col["x"]] - lt[None, :, col["x"]], la[:, None, col["z"]] - lt[None, :, col["z"]])
             near.append((p["t"] - ref, int((d.min(1) <= 4.0).sum())))
             if chg is None and row.get("h_s") is not None and p["t"] >= ref - 0.25 and p.get("tick") is not None:
-                mult = np.clip((la[:, col["chg"]] - p["tick"] / 10.0) / 13.0, 0, 1)
+                mult = np.clip((la[:, col["chg"]] - _now_s(p)) / 13.0, 0, 1)
                 chg = {"charge_share": float((mult > 0.5).mean()), "charge_mean": float(mult.mean()),
                        "charge_poll_s": p["t"] - ref}
         if near:
@@ -1817,6 +1995,24 @@ def counterfar_measure(lane):
     return out
 
 
+def _tick_len(polls):
+    """The engine tick's length (s) in a run's memory polls: the median model time between two polls over their ticks
+    (0.1 s in the meetfar runs of 14.11 morning, 0.2 s in the night runs of 14-15.11 - the strike mark and the charge's
+    deadline are game seconds = tick x this, not tick / 10)."""
+    tt = np.array([p["t"] for p in polls if p.get("tick") is not None], float)
+    tk = np.array([p["tick"] for p in polls if p.get("tick") is not None], float)
+    if len(tt) < 3:
+        return 0.1
+    d_t, d_k = np.diff(tt), np.diff(tk)
+    ok = d_k > 0
+    return float(np.median(d_t[ok] / d_k[ok])) if ok.any() else 0.1
+
+
+def _now_s(p):
+    """A poll's game time (s) on the strike mark's clock."""
+    return p["tick"] * p.get("tick_len", 0.1)
+
+
 def _charge_at(p, name, col):
     """(share of the unit's living men with the charge multiplier clamp((deadline - now) / 13 s) > 0.5, the mean) in one
     memory poll (flank2v1_mem), or None."""
@@ -1826,7 +2022,7 @@ def _charge_at(p, name, col):
     m = u["m"][u["m"][:, col["live"]] == 1]
     if not len(m):
         return None
-    mult = np.clip((m[:, col["chg"]] - p["tick"] / 10.0) / 13.0, 0, 1)
+    mult = np.clip((m[:, col["chg"]] - _now_s(p)) / 13.0, 0, 1)
     return float((mult > 0.5).mean()), float(mult.mean())
 
 
@@ -1853,7 +2049,8 @@ def counterfar_mem(run_dir, lanes, rows):
         return rows
     mor = mp.load_morale(run_dir)
     g = (mor["go_ms"] or 0) / 1000
-    polls = [dict(p, t=p["t"] - g) for p in men["polls"]]
+    tl = _tick_len(men["polls"])
+    polls = [dict(p, t=p["t"] - g, tick_len=tl) for p in men["polls"]]
     col = mp.COL
     by = {ln["spec"]["name"]: ln for ln in lanes}
     for row in rows:
@@ -1943,11 +2140,12 @@ def _ang_d(a):
     return float((a + 180) % 360 - 180)
 
 
-def intercept_measure(lane):
+def intercept_measure(lane, windows=IC_WINDOWS):
     """The intercept plan's lane (IC_*): c0 the lane's first melee flag (any of the four units); every unit's first melee
     flag, B's order (a_go: s after the go, why, the gap then - the centres less the half depths) and the rectangles' gaps
     (edge to edge, at the ordered widths) B-E2, E2-A over time; each unit's share of its starting health lost over
-    0-IC_WINDOWS s from the sample before c0, ours (A + B) and theirs (E1 + E2) as shares of the side's starting health,
+    0-`windows` s (IC_WINDOWS) from the sample before c0, ours (A + B) and theirs (E1 + E2) as shares of the side's
+    starting health,
     the trade (theirs - ours) at 30 / 60 / 120 s; A's and B's first waver and rout (s from c0), routs; E2: the first time
     its gap to A is within 3 m (it reached A), B's first melee with E2 (gap within 3 m), intercepted (B on E2 before E2
     reached A), E2's way to A after B met it, and the per-second track of E2 from 5 s before to 20 s after B met it (its
@@ -1956,9 +2154,11 @@ def intercept_measure(lane):
     spec = lane["spec"]
     t, R = _roles(lane)
     W = cp.WIDTH_M
-    dims = {"A": (W, cp.depth(*cp.UNITS[IC_A][:2], W)), "B": (spec["a_width"], spec["a_depth"]),
+    a_short = spec["extras"][0]["short"]
+    dims = {"A": (W, cp.depth(*cp.UNITS[a_short][:2], W)), "B": (spec["a_width"], spec["a_depth"]),
             "E1": (spec["t_width"], spec["t_depth"]), "E2": (spec["t_width"], spec["t_depth"])}
-    out = {"kind": spec["kind"], "side": spec.get("b_side"), "run": lane.get("run")}
+    out = {"kind": spec["kind"], "side": spec.get("b_side"), "run": lane.get("run"), "D": spec.get("D"),
+           "dx": spec.get("dx")}
     first = {r: _first(t, np.nan_to_num(R[r]["m"]) > 0) for r in R}
     for r, v in first.items():
         out[f"m_{r}"] = v
@@ -1985,11 +2185,11 @@ def intercept_measure(lane):
         if not ok.any():
             continue
         h0[r] = float(hp[ok][0])
-        for hi in IC_WINDOWS:
+        for hi in windows:
             v = cp.at(t, hp, r0) - cp.at(t, hp, c0 + hi)
             lost[(r, hi)] = v if np.isfinite(v) else None
             out[f"{r}_0_{hi}"] = None if lost[(r, hi)] is None else v / h0[r]
-    for hi in IC_WINDOWS:
+    for hi in windows:
         sides = {}
         for side, rs in (("own", ("A", "B")), ("en", ("E1", "E2"))):
             vals = [lost.get((r, hi)) for r in rs]
@@ -2064,6 +2264,33 @@ def intercept_measure(lane):
         out["A_fh_max_60"] = float(np.nanmax(R["A"]["fh"][k])) if k.any() else None
         for dt in (5, 20, 60):
             out[f"A_cmb_{dt}"] = cp.at(t, R["A"]["cmb"], c0 + dt)
+    # (the tight plan, tmp/night_probes/design.md 1.3) B's order from A's / E2's first flag; E2's gap to A at the tight
+    # trigger's moment (A's flag + TG_TIGHT_S, every kind); B's first melee on E1; B's engine target 5 s after its flag;
+    # no unit of mine routed before T (clean_T); the order's pair over 60 s: its target's share lost less B's, B's loss
+    o_s = out.get("order_s")
+    for r_ in ("A", "E2"):
+        m_ = out.get(f"m_{r_}")
+        out[f"order_after_{r_}_s"] = None if o_s is None or m_ is None else o_s - m_
+    if out.get("m_A") is not None:
+        out["e2_gapA_tight"] = float(cp.at(t, gE2A, c0 + out["m_A"] + TG_TIGHT_S))
+    gBE1 = _gap_series(t, R, "B", "E1", dims)
+    metE1 = _first(t, (np.nan_to_num(gBE1, nan=99) <= 3.0) & (np.nan_to_num(R["B"]["m"]) > 0))
+    out["b_e1_s"] = None if metE1 is None else metE1 - c0
+    if first["B"] is not None:
+        i = int(np.argmin(np.abs(t - (first["B"] + 5))))
+        ct = R["B"]["ct"][i]
+        names = {spec["target"]: "E1", spec.get("target2"): "E2", spec["extras"][0].get("name"): "A"}
+        out["B_ct_5"] = None if ct is None else names.get(ct, "other" if ct else "none")
+    for hi in windows:
+        rs = [out.get(f"{r_}_rout_s") for r_ in ("A", "B")]
+        out[f"clean_{hi}"] = all(v is None or v >= hi for v in rs)
+    if go is not None and "B" in h0:
+        og = go["t"] / 1000
+        tg_ = "E2" if spec["mode"] == "attack_t2" else "E1"
+        if tg_ in h0 and og + 60 <= t[-1] + 1e-6:
+            sh = {r_: (cp.at(t, R[r_]["hp"], og) - cp.at(t, R[r_]["hp"], og + 60)) / h0[r_] for r_ in ("B", tg_)}
+            out["B_60_order"] = sh["B"]
+            out["pair60_order"] = sh[tg_] - sh["B"]
     return out
 
 
@@ -2077,7 +2304,8 @@ def intercept_mem(run_dir, lanes, rows):
     mor = mp.load_morale(run_dir)
     men = mp.load_men(run_dir)
     g = (mor["go_ms"] or 0) / 1000
-    polls = [dict(p, t=p["t"] - g) for p in men["polls"]]
+    tl = _tick_len(men["polls"])
+    polls = [dict(p, t=p["t"] - g, tick_len=tl) for p in men["polls"]]
     col = mp.COL
     by = {ln["spec"]["name"]: ln for ln in lanes}
     for row in rows:
@@ -2127,8 +2355,9 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
     """The counterfar / intercept lanes measured: source 'game' (the runs, with the memory numbers), 'twin' (the
     simulator on the runs' recorded starts, `copies` a lane) or 'layout' (the simulator on the plan's own places, before
     any game run)."""
-    measure = counterfar_measure if plan == "counterfar" else intercept_measure
-    mem = counterfar_mem if plan == "counterfar" else intercept_mem
+    measure = {"counterfar": counterfar_measure, "standk": counterfar_measure, "intercept": intercept_measure,
+               "tight": lambda ln: intercept_measure(ln, TG_WINDOWS)}[plan]
+    mem = {"counterfar": counterfar_mem, "standk": counterfar_mem, "intercept": intercept_mem, "tight": tight_mem}[plan]
     if source == "game":
         rows = []
         for d in runs:
@@ -2148,12 +2377,19 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
         lanes = [ln for d in runs for ln in cp.load_run(d) if ln.get("plan") == plan and ln["spec"]["kind"] != "clock"]
     else:
         lanes = []
-        which = range(1, 3) if plan == "counterfar" else range(1, 3)      # (both defenders; both sides of B)
+        # (counterfar: both defenders; intercept: both sides of B; tight: every cell; standk: templates A and B)
+        which = {"tight": range(1, len(TG_CELLS) + 1), "standk": (1, SK_ORDER.index("B") + 1)}.get(plan, range(1, 3))
         for i in which:
             config, _, _ = cp.run_config(plan, i)
+            seen = set()
             for l in config["lanes"]:
                 if l["kind"] == "clock":
                     continue
+                if plan in ("tight", "standk"):
+                    # (the twin runs each lane alone: a battle's repeated kinds are one lane, `copies` times)
+                    if l["kind"] in seen:
+                        continue
+                    seen.add(l["kind"])
                 a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] + l["gap_m"] + l["a_depth"] / 2, "b": 180.0,
                      "men": cp.UNITS[cp.SHORT[l["a_key"]]][1]}
                 tg = {"x": l["x"], "z": l["z"] - l["t_depth"] / 2, "b": 0.0, "men": cp.UNITS[cp.SHORT[l["t_key"]]][1]}
@@ -2182,6 +2418,84 @@ IC_KEY = ("order_s", "order_gap_m", "order_gap_rect_m", "order_e2_gap_A_m", "m_A
           "A_outcome_20", "A_outcome_e2_5")
 
 
+TG_NEW = ("order_after_A_s", "order_after_E2_s", "e2_gapA_tight", "b_e1_s", "B_ct_5", "pair60_order", "B_60_order")
+TG_KEY = tuple(dict.fromkeys(
+    ("D", "dx") + IC_KEY + TG_NEW
+    + tuple(f"{r}_0_{hi}" for hi in (180, 240) for r in ("A", "B", "E1", "E2"))
+    + tuple(f"{s}_0_{hi}" for hi in (30, 180, 240) for s in ("own", "en")) + ("trade_180", "trade_240")
+    + tuple(f"clean_{hi}" for hi in TG_WINDOWS)
+    + tuple(f"E2_tgt_{w}_{dt}" for dt in (5, 10, 20, 40) for w in ("B", "A", "none"))
+    + tuple(f"B_tgt_{w}_{dt}" for dt in (5, 10, 20, 40) for w in ("E2", "E1"))))
+TG_PAIR_KEY = tuple(f"trade_{hi}" for hi in TG_WINDOWS) + tuple(f"{s}_0_{hi}" for hi in (60, 120, 240)
+                                                                for s in ("own", "en")) + ("A_0_60", "A_0_120", "B_0_60",
+                                                                                           "B_0_120")
+
+
+def _tg_base(name):
+    """kind -> its base kind `name` in the same battle family (the swapped battles' kinds end in '_sw')."""
+    return lambda k: name + ("_sw" if k.endswith("_sw") else "")
+
+
+def tight_paired(rows):
+    """{cut: {base: mf_paired}}: every kind minus 'hold' and minus 'pinE1' of its battle, over all lanes and per D / dx
+    (design 1.3 item 4)."""
+    out = {}
+    cuts = [("all", rows)] + [(f"D{d}", [r for r in rows if r.get("D") == d]) for d in (30, 60, 90)] + \
+           [(f"dx{x}", [r for r in rows if r.get("dx") == x]) for x in (36, 48, 80)]
+    for cut, rs in cuts:
+        if rs:
+            out[cut] = {b: mf_paired(rs, _tg_base(b), TG_PAIR_KEY, sim_within=True) for b in ("hold", "pinE1")}
+    return out
+
+
+def tight_mem(run_dir, lanes, rows):
+    """intercept_mem's numbers and (design 1.3 item 3) who E2's men strike: the share of E2's living men whose target man
+    (MAN tgt) is a man of B / of A / nobody at b_e2_s + 5 / 10 / 20 / 40 s (the lanes where B never met E2: from E2's
+    first flag), and the share of B's living men on E2 / on E1 then (the nearest memory poll)."""
+    from game.probe import mem_probe as mp
+    rows = intercept_mem(run_dir, lanes, rows)
+    men = mp.load_men(run_dir)
+    if not men["polls"]:
+        return rows
+    mor = mp.load_morale(run_dir)
+    g = (mor["go_ms"] or 0) / 1000
+    tl = _tick_len(men["polls"])
+    polls = [dict(p, t=p["t"] - g, tick_len=tl) for p in men["polls"]]
+    pt = np.array([p["t"] for p in polls])
+    unit_of = {i: name for i, (name, _) in men["ids"].items()}
+    col = mp.COL
+    by = {ln["spec"]["name"]: ln for ln in lanes}
+    for row in rows:
+        ln, c0 = by.get(row.get("lane")), row.get("c0")
+        if ln is None or c0 is None:
+            continue
+        spec = ln["spec"]
+        names = {"B": spec["attacker"], "E1": spec["target"], "A": spec["extras"][0]["name"], "E2": spec["target2"]}
+        ref = row.get("b_e2_s") if row.get("b_e2_s") is not None else row.get("m_E2")
+        if ref is None:
+            continue
+        row["tgt_ref"] = "b_e2" if row.get("b_e2_s") is not None else "m_E2"
+        for dt in (5, 10, 20, 40):
+            want = c0 + ref + dt
+            for who, onto in (("E2", ("B", "A")), ("B", ("E2", "E1"))):
+                # the nearest poll that holds this unit (the sparse polls: every MEM_SPARSE-th, ~0.5-1 s)
+                has = [i for i in np.argsort(np.abs(pt - want))[:40] if names[who] in polls[i]["units"]]
+                if not has or abs(pt[has[0]] - want) > 1.1:
+                    continue
+                u = polls[has[0]]["units"].get(names[who])
+                if u is None or not len(u["m"]):
+                    continue
+                m = u["m"][u["m"][:, col["live"]] == 1]
+                if not len(m):
+                    continue
+                tg = [unit_of.get(int(x)) if np.isfinite(x) and int(x) != 0 else None for x in m[:, col["tgt"]]]
+                for w in onto:
+                    row[f"{who}_tgt_{w}_{dt}"] = float(np.mean([x == names[w] for x in tg]))
+                if who == "E2":
+                    row[f"E2_tgt_none_{dt}"] = float(np.mean([x is None for x in tg]))
+    return rows
+
+
 def mf_summary(rows, keys):
     """{kind: {field: [mean, standard error of the mean, n] for numbers (booleans as shares); {value: count} for texts}}."""
     out = {}
@@ -2201,26 +2515,35 @@ def mf_summary(rows, keys):
     return out
 
 
-def mf_paired(rows, base, keys, by=("run", "battle")):
+def mf_paired(rows, base, keys, by=("run", "battle"), sim_within=False):
     """{kind: {field: [mean, standard error, n]}}: each lane minus the `base` kind's lane of the same battle (a game run),
-    or minus the base kind's mean (the simulator: its copies are not paired)."""
+    or minus the base kind's mean (the simulator: its copies are not paired; sim_within - the mean of the base kind's
+    copies in the same battle, the plans whose battles differ in geometry); base: a kind, or kind -> its base kind
+    (None: no pair; the tight plan's swapped battles pair within their '_sw' kinds)."""
+    base_of = base if callable(base) else (lambda k: base)
     out = {}
     groups = {}
     for r in rows:
         groups.setdefault(tuple(r.get(k) for k in by), {}).setdefault(r["kind"], []).append(r)
     sim = all(r.get("run") == "sim" for r in rows)
-    base_mean = {f: np.nanmean([float(r[f]) for r in rows if r["kind"] == base and r.get(f) is not None] or [np.nan])
-                 for f in keys}
+    means = {}
+
+    def base_mean(b, f):
+        if (b, f) not in means:
+            means[(b, f)] = np.nanmean([float(r[f]) for r in rows if r["kind"] == b and r.get(f) is not None] or [np.nan])
+        return means[(b, f)]
     for kind in dict.fromkeys(r["kind"] for r in rows):
-        if kind == base:
+        base = base_of(kind)
+        if base is None or kind == base:
             continue
         row = {}
         for f in keys:
             d = []
             for g in groups.values():
                 for r in g.get(kind, []):
-                    b_ = base_mean[f] if sim else (np.mean([float(x[f]) for x in g.get(base, []) if x.get(f) is not None])
-                                                   if any(x.get(f) is not None for x in g.get(base, [])) else np.nan)
+                    b_ = base_mean(base, f) if sim and not sim_within else (
+                        np.mean([float(x[f]) for x in g.get(base, []) if x.get(f) is not None])
+                        if any(x.get(f) is not None for x in g.get(base, [])) else np.nan)
                     if r.get(f) is not None and np.isfinite(b_):
                         d.append(float(r[f]) - float(b_))
             if d:
@@ -2242,21 +2565,26 @@ def _mf_cell(v):
 def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", out=None):
     """Prints the counterfar / intercept table per kind (game | twin on the same recorded starts with sim) and the pairs
     against the hold lanes; writes build/charge-probe/<plan>_<source>.json (not in Git)."""
-    keys = CF_KEY if plan == "counterfar" else IC_KEY
+    keys = {"intercept": IC_KEY, "tight": TG_KEY}.get(plan, CF_KEY)
     rows = _mf_lanes(plan, source, runs, copies=copies, device=device)
     table = mf_summary(rows, keys)
-    pair_keys = ("trade_30", "trade_60", "trade_120", "own_0_60", "own_0_120", "en_0_60", "en_0_120") \
-        if plan == "intercept" else ("trade_10", "trade_30", "trade_60", "a_0_60", "tg_0_60")
+    pair_keys = {"intercept": ("trade_30", "trade_60", "trade_120", "own_0_60", "own_0_120", "en_0_60", "en_0_120"),
+                 "tight": TG_PAIR_KEY}.get(plan, ("trade_10", "trade_30", "trade_60", "a_0_60", "tg_0_60"))
     result = {"plan": plan, "source": source, "runs": [str(r) for r in runs], "lanes": rows, "summary": table}
-    if plan == "intercept":
-        result["paired"] = mf_paired(rows, "hold", pair_keys)
+
+    def pairs(rs):
+        if plan == "intercept":
+            return mf_paired(rs, "hold", pair_keys)
+        return tight_paired(rs) if plan == "tight" else None
+    if pairs(rows) is not None:
+        result["paired"] = pairs(rows)
     twin_table = None
     if sim and source == "game":
         trows = _mf_lanes(plan, "twin", runs, copies=copies, device=device)
         twin_table = mf_summary(trows, keys)
         result["twin"] = {"lanes": trows, "summary": twin_table}
-        if plan == "intercept":
-            result["twin"]["paired"] = mf_paired(trows, "hold", pair_keys)
+        if pairs(trows) is not None:
+            result["twin"]["paired"] = pairs(trows)
     print(f"== {plan} ({source}{' | twin' if twin_table else ''}): mean±se(n) over lanes")
     for kind, r in table.items():
         cells = []
@@ -2269,11 +2597,437 @@ def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", o
             cells.append(f"{f} {c}")
         print(f"  {kind} (n {r['n']}): " + "; ".join(cells))
     for name, pt in (("paired", result.get("paired")), ("twin paired", (result.get("twin") or {}).get("paired"))):
-        if pt:
+        if pt and plan == "tight":
+            for cut, sub in pt.items():
+                for base, tab in sub.items():
+                    print(f"== {name} {cut} (minus {base})")
+                    for kind, r in tab.items():
+                        print(f"  {kind}: " + "; ".join(f"{f} {_mf_cell(v)}" for f, v in r.items()))
+        elif pt:
             print(f"== {name} (minus hold)")
             for kind, r in pt.items():
                 print(f"  {kind}: " + "; ".join(f"{f} {_mf_cell(v)}" for f, v in r.items()))
     out = Path(out) if out else cp.ROOT / f"{plan}_{source}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
+# ---------------------------------------------------------------- the walkout probe (WO_*: a line of three a side)
+
+WO_RS = tuple(r for r, _, _ in WO_ROLES)
+
+
+def _resample(lane, t):
+    """{unit key 'a' / 'tg': {field: array on the times t}} of a lane (the nearest sample at or before each time; the
+    game's lanes of one battle share the tick clock, the twin's too)."""
+    tt = _t(lane)
+    k = np.clip(np.searchsorted(tt, t + 1e-6) - 1, 0, len(tt) - 1)
+    out = {}
+    for who in ("a", "tg"):
+        d = {}
+        for f in ("hp", "m", "x", "z", "b", "r", "w", "ow", "chg"):
+            v = cp.series(lane["samples"], who, f)
+            d[f] = v[k]
+        out[who] = d
+    return out
+
+
+def walkout_measure(group_lanes):
+    """One walkout group (its three lanes, game or twin shape): design 2.2. c0 = the first melee flag of any of the six
+    units; the side's trade over WO_WINDOWS from the sample before c0 (own / en: shares of the side's starting health,
+    trade = en - own) and each unit's loss; per role r: m_r / em_r (my / its enemy's first flag less c0), order_s_r and
+    order_gap_r (the a_go: s from c0, the centres less the half depths), fwd_r (my way toward the enemy at my first
+    flag), who_r (whose rectangle is nearest then: 'own' or the other role); the line at the contact: stagger_c0 /
+    stagger_all (max less min of my three ways at c0 and when all three have flagged), gap_lat_c0 (the widest
+    edge-to-edge gap between adjacent units of mine at c0, their ordered widths); local numbers at c0 + 30 / 60 / 120 s
+    (touch: both flags on and the rectangles within WO_TOUCH_M): on_one_enemy_T, on_one_mine_T, own_pairs_T; routs:
+    r_waver_s, r_rout_s, own_routs_T, first_own_rout_s, clean_T."""
+    by = {ln["spec"]["role"]: ln for ln in group_lanes}
+    sp = by["M"]["spec"]
+    out = {"kind": sp["kind"], "arr": sp["arr"], "var": sp["var"], "group": sp.get("group"),
+           "run": by["M"].get("run"), "battle": by["M"].get("battle")}
+    t = _t(by["M"])
+    U = {}
+    dims = {}
+    for r, ln in by.items():
+        rs = _resample(ln, t)
+        U["a" + r], U["t" + r] = rs["a"], rs["tg"]
+        s_ = ln["spec"]
+        dims["a" + r] = (s_["a_width"], s_["a_depth"])
+        dims["t" + r] = (s_["t_width"], s_["t_depth"])
+    first = {k: _first(t, np.nan_to_num(v["m"]) > 0) for k, v in U.items()}
+    cs = [v for v in first.values() if v is not None]
+    if not cs:
+        return out
+    c0 = min(cs)
+    out["c0"] = c0
+    i_c = int(np.searchsorted(t, c0 - 1e-6))
+    r0 = float(t[max(i_c - 1, 0)])
+    h0 = {k: float(v["hp"][np.isfinite(v["hp"])][0]) for k, v in U.items() if np.isfinite(v["hp"]).any()}
+    mine, theirs = ["a" + r for r in WO_RS], ["t" + r for r in WO_RS]
+    for hi in WO_WINDOWS:
+        lost = {}
+        for k in mine + theirs:
+            v = cp.at(t, U[k]["hp"], r0) - cp.at(t, U[k]["hp"], c0 + hi) if k in h0 else np.nan
+            lost[k] = v if np.isfinite(v) else None
+            out[f"{k}_0_{hi}"] = None if lost[k] is None else lost[k] / h0[k]
+        sides = {}
+        for side, ks in (("own", mine), ("en", theirs)):
+            vals = [lost[k] for k in ks]
+            sides[side] = sum(vals) / sum(h0[k] for k in ks) if None not in vals and all(k in h0 for k in ks) else None
+            out[f"{side}_0_{hi}"] = sides[side]
+        out[f"trade_{hi}"] = None if None in sides.values() else sides["en"] - sides["own"]
+
+    def at_(k, f, when):
+        return cp.at(t, U[k][f], when)
+
+    def rect(k, when):
+        return (at_(k, "x", when), at_(k, "z", when), at_(k, "b", when)) + dims[k]
+
+    def gap(k1, k2, when):
+        v1, v2 = rect(k1, when), rect(k2, when)
+        return rect_gap(v1, v2) if all(np.isfinite(v1[:3])) and all(np.isfinite(v2[:3])) else np.nan
+    z0 = {k: float(U[k]["z"][np.isfinite(U[k]["z"])][0]) for k in mine}
+    for r in WO_RS:
+        a, e = "a" + r, "t" + r
+        out[f"m_{r}"] = None if first[a] is None else first[a] - c0
+        out[f"em_{r}"] = None if first[e] is None else first[e] - c0
+        go = next((p for p in by[r].get("phases", []) if p["phase"] == "a_go"), None)
+        if go is not None:
+            out[f"order_s_{r}"] = go["t"] / 1000 - c0
+            if go.get("d") is not None:
+                out[f"order_gap_{r}"] = float(go["d"]) - (dims[a][1] + dims[e][1]) / 2
+        if first[a] is not None:
+            out[f"fwd_{r}"] = z0[a] - at_(a, "z", first[a])
+            g = {q: gap(a, "t" + q, first[a]) for q in WO_RS}
+            g = {q: v for q, v in g.items() if np.isfinite(v)}
+            if g:
+                q = min(g, key=g.get)
+                out[f"who_{r}"] = "own" if q == r else q
+        w = U[a]["w"]
+        wv = _first(t, np.nan_to_num(w) > 0) if np.isfinite(w).any() else None
+        out[f"{r}_waver_s"] = None if wv is None else wv - c0
+        rt, routs, _, _ = _episodes(t, U[a]["r"], np.zeros(len(t)))
+        out[f"{r}_rout_s"] = None if rt is None else rt - c0
+    fw = [z0[k] - at_(k, "z", c0) for k in mine]
+    out["stagger_c0"] = float(np.nanmax(fw) - np.nanmin(fw))
+    if all(first[k] is not None for k in mine):
+        ta = max(first[k] for k in mine)
+        fw = [z0[k] - at_(k, "z", ta) for k in mine]
+        out["stagger_all"] = float(np.nanmax(fw) - np.nanmin(fw))
+        out["all_flag_s"] = ta - c0
+    lat = []
+    for k1, k2 in (("aL", "aM"), ("aM", "aR")):
+        ow = [at_(k, "ow", c0) for k in (k1, k2)]
+        v1, v2 = list(rect(k1, c0)), list(rect(k2, c0))
+        if np.isfinite(ow[0]):
+            v1[3] = ow[0]
+        if np.isfinite(ow[1]):
+            v2[3] = ow[1]
+        if all(np.isfinite(v1[:3])) and all(np.isfinite(v2[:3])):
+            lat.append(rect_gap(tuple(v1), tuple(v2)))
+    out["gap_lat_c0"] = max(lat) if lat else None
+    for dt in (30, 60, 120):
+        when = c0 + dt
+        if when > t[-1]:
+            continue
+        gm = np.full((3, 3), np.inf)
+        for i, r in enumerate(WO_RS):
+            for j, q in enumerate(WO_RS):
+                mi, mj = at_("a" + r, "m", when), at_("t" + q, "m", when)
+                if mi > 0.5 and mj > 0.5:
+                    gm[i, j] = gap("a" + r, "t" + q, when)
+        for lim, tag in ((WO_TOUCH_M, ""), (WO_TOUCH_TIGHT_M, "1m_")):
+            touch = gm <= lim
+            out[f"on_one_enemy_{tag}{dt}"] = int(touch.sum(0).max())
+            out[f"on_one_mine_{tag}{dt}"] = int(touch.sum(1).max())
+            out[f"own_pairs_{tag}{dt}"] = int(np.trace(touch))
+    routs = [out[f"{r}_rout_s"] for r in WO_RS if out[f"{r}_rout_s"] is not None]
+    out["first_own_rout_s"] = min(routs) if routs else None
+    for hi in WO_WINDOWS:
+        out[f"own_routs_{hi}"] = sum(1 for v in routs if v < hi)
+        out[f"clean_{hi}"] = out[f"own_routs_{hi}"] == 0
+    return out
+
+
+WO_EFFECTS = ("flank_attacked", "rear_attacked", "flanks_exposed_single", "flanks_exposed_multiple", "enemy_numbers")
+
+
+def walkout_mem(run_dir, groups, rows):
+    """The memory numbers of a walkout game run, added to its group rows in place (design 2.2): per unit of mine r the
+    number of its living men whose target man (MAN tgt) is a man of each enemy unit q at c0 + 30 / 60 s (men_r_q_T,
+    q in L / M / R or 'none'); the first time (s from c0) each unit of mine held WO_EFFECTS."""
+    from game.probe import mem_probe as mp
+    men = mp.load_men(run_dir)
+    mor = mp.load_morale(run_dir)
+    g = (mor["go_ms"] or 0) / 1000
+    tl = _tick_len(men["polls"])
+    polls = [dict(p, t=p["t"] - g, tick_len=tl) for p in men["polls"]]
+    pt = np.array([p["t"] for p in polls]) if polls else np.array([])
+    unit_of = {i: name for i, (name, _) in men["ids"].items()}
+    col = mp.COL
+    for row, grp in zip(rows, groups):
+        c0 = row.get("c0")
+        if c0 is None:
+            continue
+        by = {ln["spec"]["role"]: ln["spec"] for ln in grp}
+        mine = {r: by[r]["attacker"] for r in WO_RS}
+        enemy = {by[r]["target"]: r for r in WO_RS}
+        for dt in (30, 60):
+            if not len(pt):
+                break
+            k = int(np.argmin(np.abs(pt - (c0 + dt))))
+            if abs(pt[k] - (c0 + dt)) > 0.6:
+                continue
+            for r, name in mine.items():
+                u = polls[k]["units"].get(name)
+                if u is None or not len(u["m"]):
+                    continue
+                m = u["m"][u["m"][:, col["live"]] == 1]
+                tg = [enemy.get(unit_of.get(int(x))) if np.isfinite(x) and int(x) != 0 else None
+                      for x in m[:, col["tgt"]]]
+                for q in WO_RS:
+                    row[f"men_{r}_{q}_{dt}"] = int(sum(1 for x in tg if x == q))
+                row[f"men_{r}_none_{dt}"] = int(sum(1 for x in tg if x is None))
+        for r, name in mine.items():
+            ser = mp.morale_series(mor, name)
+            tt = np.array(ser["t"]) if ser["t"] else np.array([])
+            for eff in WO_EFFECTS:
+                v = ser["fx"].get(eff) or []
+                on = [tp - c0 for tp, x_ in zip(tt, v) if x_]
+                row[f"{r}_{eff}_first"] = on[0] if on else None
+    return rows
+
+
+def walkout_twin(groups, copies=8, device="cpu", params=None, seed=0, jitter_m=1.0):
+    """The group twin (design 2.5): one simulator battle a group - side 1 my L, M, R at the lanes' starts and a far
+    keeper (z + 400, fearless: the battle goes on when mine rout), side 2 their three clanrat units (fearless); each
+    enemy attacks its own unit of mine at a run from the go; mine hold at their starts until the centres are within the
+    lane's a_go_m, then attack their own enemy at a run (an 'a_go' phase {t, why 'gap', d}); orders kept (KEEP) while
+    unchanged; rows every 0.5 s. Returns per group and copy the three lanes in the game's shape."""
+    import torch
+    from sim import battle, orders as O, scenario as sim_scenario
+    from sim.params import load
+    params = params or load()
+    H = 4
+    armies, meta = [], []
+    for grp in groups:
+        by = {ln["spec"]["role"]: ln for ln in grp}
+        sides = {1: {"faction": cp.EMP, "ai": False, "units": []}, 2: {"faction": cp.SKV, "ai": False, "units": []}}
+        for r in WO_RS:
+            ln = by[r]
+            s_, s0 = ln["spec"], ln["samples"][0]
+            for side, row, key, width, name in ((1, s0[1], s_["a_key"], s_["a_width"], "a" + r),
+                                                (2, s0[2], s_["t_key"], s_["t_width"], "t" + r)):
+                sides[side]["units"].append({"key": key, "x": row["x"], "z": row["z"], "b": row["b"], "men": row["men"],
+                                             "width": width, "general": False, "name": name})
+        m0 = by["M"]["samples"][0][1]
+        sides[1]["units"].append({"key": by["M"]["spec"]["a_key"], "x": m0["x"], "z": m0["z"] + 400.0, "b": m0["b"],
+                                  "men": m0["men"], "width": by["M"]["spec"]["a_width"], "general": False,
+                                  "name": "keep"})
+        army = {"attacker": 1, "sides": sides}
+        for _ in range(copies):
+            armies.append(army)
+            meta.append(grp)
+    st = sim_scenario.build(armies, params, device=device, per_side=H)
+    gen = torch.Generator().manual_seed(seed)
+    for k in ("x", "z"):
+        st.u[k] = st.u[k] + ((torch.rand(st.u[k].shape, generator=gen) * 2 - 1) * jitter_m).to(device)
+    B, N = st.B, st.N
+    sl = sim_scenario.slots(armies[0], H)
+    A = [sl["a" + r] for r in WO_RS]
+    T = [sl["t" + r] for r in WO_RS]
+    K = sl["keep"]
+    keep = torch.zeros((B, N), dtype=torch.bool, device=device)
+    keep[:, A] = True
+    st.u["leadership"] = torch.where(keep, st.u["leadership"], st.u["leadership"] + 1e4)
+    st.u["morale"] = torch.where(keep, st.u["morale"], st.u["morale"] + 1e4)
+    st.u["range"][:, A + T] = 0.0
+    go_m = torch.tensor([[float({ln["spec"]["role"]: ln for ln in grp}[r]["spec"]["a_go_m"]) for r in WO_RS]
+                         for grp in meta], device=device)
+    sx, sz = st.u["x"].clone(), st.u["z"].clone()
+    go = torch.zeros((B, 3), dtype=torch.bool, device=device)
+    phases = [[[] for _ in WO_RS] for _ in range(B)]
+    last = {}
+
+    def policy(st):
+        u = st.u
+        t = float(st.t.max())
+        o = O.hold(B, N, device)
+        kind, target, run_, x, z = o.kind.clone(), o.target.clone(), o.run.clone(), sx.clone(), sz.clone()
+        for j in range(3):
+            a, e = A[j], T[j]
+            kind[:, e], target[:, e], run_[:, e] = O.ATTACK, a, True
+            d = torch.hypot(u["x"][:, a] - u["x"][:, e], u["z"][:, a] - u["z"][:, e])
+            new = (~go[:, j]) & (d <= go_m[:, j])
+            for b in torch.nonzero(new).flatten().tolist():
+                phases[b][j].append({"phase": "a_go", "t": t * 1000, "why": "gap", "d": round(float(d[b]), 1)})
+            go[:, j] |= new
+            kind[:, a] = torch.where(go[:, j], torch.full_like(kind[:, a], O.ATTACK), torch.full_like(kind[:, a], O.HOLD))
+            target[:, a] = torch.where(go[:, j], torch.full_like(target[:, a], e), torch.full_like(target[:, a], -1))
+            run_[:, a] = go[:, j]
+        kind[:, K] = O.HOLD
+        key = torch.stack([kind.float(), target.float(), run_.float(), x, z], -1)
+        if "key" in last:
+            same = (key == last["key"]).all(-1)
+            kind = torch.where(same, torch.full_like(kind, O.KEEP), kind)
+        last["key"] = key
+        return O.Orders(kind=kind, x=x, z=z, target=target, run=run_, ability=o.ability.clone(), face=o.face.clone())
+    rec = {"t": [], "rows": []}
+    next_t = [0.0]
+    fields = ("x", "z", "b", "men", "hp_abs", "m", "r", "w", "charge")
+
+    def record(st):
+        t = float(st.t.max())
+        if t + 1e-6 < next_t[0]:
+            return
+        next_t[0] = t + cp.TICK_MS / 1000
+        rec["t"].append(t)
+        rec["rows"].append({k: st.u[k].detach().cpu().numpy().copy() for k in fields if k in st.u})
+    until = max(float(ln["spec"]["max_s"]) for grp in groups for ln in grp) + 5
+    battle.run(st, policy, params, until_s=until, record=record)
+    out = []
+    for b, grp in enumerate(meta):
+        by = {ln["spec"]["role"]: ln for ln in grp}
+        lanes = []
+        for j, r in enumerate(WO_RS):
+            def row(rr, i):
+                d = {"x": float(rr["x"][b, i]), "z": float(rr["z"][b, i]), "b": float(rr["b"][b, i]),
+                     "men": float(rr["men"][b, i]), "hp": float(rr["hp_abs"][b, i]), "m": bool(rr["m"][b, i])}
+                for k, ko in (("r", "r"), ("w", "w"), ("charge", "chg")):
+                    if k in rr:
+                        d[ko] = float(rr[k][b, i])
+                return d
+            samples = [(t, row(rr, A[j]), row(rr, T[j]), None) for t, rr in zip(rec["t"], rec["rows"])]
+            lanes.append({"run": "sim", "plan": "walkout", "battle": by[r].get("battle"), "spec": by[r]["spec"],
+                          "samples": samples, "men": [], "contacts": {}, "end": None, "abilities": [],
+                          "phases": phases[b][j]})
+        out.append(lanes)
+    return out
+
+
+def _wo_groups(lanes):
+    """[[L, M, R lane]] of a run's (or a layout's) walkout lanes, by battle and group."""
+    g = {}
+    for ln in lanes:
+        if ln.get("plan") == "walkout" and ln["spec"]["kind"] != "clock":
+            g.setdefault((ln.get("battle"), ln["spec"]["group"]), {})[ln["spec"]["role"]] = ln
+    return [[v[r] for r in WO_RS] for _, v in sorted(g.items(), key=lambda x: (x[0][0] or 0, x[0][1]))
+            if all(r in v for r in WO_RS)]
+
+
+def walkout_lanes(source, runs=(), copies=8, device="cpu", params=None):
+    """The walkout group rows: source 'game' (the runs, with the memory numbers), 'twin' (the group twin on the runs'
+    recorded starts) or 'layout' (the group twin on the plan's own places: the twelve distinct groups - arrival, variant,
+    L / R swapped or not - before any game run)."""
+    if source == "game":
+        rows = []
+        for d in runs:
+            groups = _wo_groups(cp.load_run(d))
+            rs = []
+            for grp in groups:
+                r = walkout_measure(grp)
+                r.update(plan="walkout", run=Path(d).name)
+                rs.append(r)
+            try:
+                rows += walkout_mem(d, groups, rs)
+            except (OSError, ValueError, KeyError) as e:
+                print(f"{d}: no memory numbers ({e})")
+                rows += rs
+        return rows
+    if source == "twin":
+        groups = [g for d in runs for g in _wo_groups(cp.load_run(d))]
+    else:
+        lanes, seen = [], set()
+        for i in range(1, WO_BATTLES + 1):
+            config, _, _ = cp.run_config("walkout", i)
+            for l in config["lanes"]:
+                if l["kind"] == "clock":
+                    continue
+                a = {"x": l["x"], "z": l["z"] + l["gap_m"] + l["a_depth"] / 2, "b": 180.0,
+                     "men": cp.UNITS[cp.SHORT[l["a_key"]]][1]}
+                tg = {"x": l["x"], "z": l["z"] - l["t_depth"] / 2, "b": 0.0, "men": cp.UNITS[cp.SHORT[l["t_key"]]][1]}
+                lanes.append({"run": "layout", "plan": "walkout", "battle": i, "spec": l, "samples": [(0.0, a, tg, None)],
+                              "men": [], "contacts": {}, "end": {"t": l["max_s"] * 1000}, "abilities": [], "phases": []})
+        groups = []
+        for grp in _wo_groups(lanes):
+            sig = (grp[0]["spec"]["kind"],) + tuple(ln["spec"]["gap_m"] for ln in grp)
+            if sig not in seen:
+                seen.add(sig)
+                groups.append(grp)
+    rows = []
+    for grp in walkout_twin(groups, copies=copies, device=device, params=params):
+        r = walkout_measure(grp)
+        r.update(plan="walkout", run="sim", sig=f"{grp[0]['spec']['kind']} {[ln['spec']['gap_m'] for ln in grp]}")
+        rows.append(r)
+    return rows
+
+
+WO_KEY = tuple(dict.fromkeys(
+    ("c0",) + tuple(f"{s}_{hi}" for hi in WO_WINDOWS for s in ("trade", "own_0", "en_0"))
+    + tuple(f"a{r}_0_{hi}" for hi in (60, 120) for r in WO_RS)
+    + tuple(f"{f}_{r}" for r in WO_RS for f in ("m", "em", "order_s", "order_gap", "fwd", "who"))
+    + ("stagger_c0", "stagger_all", "all_flag_s", "gap_lat_c0")
+    + tuple(f"{f}_{tag}{dt}" for tag in ("", "1m_") for dt in (30, 60, 120)
+            for f in ("on_one_enemy", "on_one_mine", "own_pairs"))
+    + tuple(f"{r}_{f}" for r in WO_RS for f in ("waver_s", "rout_s"))
+    + ("first_own_rout_s",) + tuple(f"{f}_{hi}" for hi in WO_WINDOWS for f in ("own_routs", "clean"))
+    + tuple(f"men_{r}_{q}_{dt}" for dt in (30, 60) for r in WO_RS for q in WO_RS + ("none",))
+    + tuple(f"{r}_{e}_first" for r in WO_RS for e in WO_EFFECTS)))
+WO_PAIR_KEY = tuple(f"trade_{hi}" for hi in WO_WINDOWS) + tuple(f"{s}_0_{hi}" for hi in (60, 120) for s in ("own", "en"))
+
+
+def walkout_answers(rows):
+    """{'paired': variant - a of the same battle and arrival (game) / of the arrival's means (twin), 'tog_seq': each
+    variant's mean in 'tog' less its mean in 'seq' (independent means)}."""
+    out = {"paired": mf_paired(rows, lambda k: k.split("_")[0] + "_a", WO_PAIR_KEY), "tog_seq": {}}
+    for var in WO_AT:
+        cell = {}
+        for f in WO_PAIR_KEY:
+            a = [float(r[f]) for r in rows if r["kind"] == f"tog_{var}" and r.get(f) is not None]
+            b = [float(r[f]) for r in rows if r["kind"] == f"seq_{var}" and r.get(f) is not None]
+            if len(a) > 1 and len(b) > 1:
+                cell[f] = [float(np.mean(a) - np.mean(b)),
+                           float(math.sqrt(np.var(a, ddof=1) / len(a) + np.var(b, ddof=1) / len(b))), min(len(a), len(b))]
+        out["tog_seq"][var] = cell
+    return out
+
+
+def walkout_report(runs=(), source="game", sim=False, copies=8, device="cpu", out=None):
+    """Prints the walkout table per kind (game | twin on the recorded starts with sim), the pairs 'variant - a' and 'tog -
+    seq'; writes build/charge-probe/walkout_<source>.json (not in Git)."""
+    rows = walkout_lanes(source, runs, copies=copies, device=device)
+    table = mf_summary(rows, WO_KEY)
+    result = {"plan": "walkout", "source": source, "runs": [str(r) for r in runs], "lanes": rows, "summary": table,
+              "answers": walkout_answers(rows)}
+    twin_table = None
+    if sim and source == "game":
+        trows = walkout_lanes("twin", runs, copies=copies, device=device)
+        twin_table = mf_summary(trows, WO_KEY)
+        result["twin"] = {"lanes": trows, "summary": twin_table, "answers": walkout_answers(trows)}
+    print(f"== walkout ({source}{' | twin' if twin_table else ''}): mean±se(n) over groups")
+    for kind, r in table.items():
+        cells = []
+        for f in WO_KEY:
+            if f not in r and not (twin_table and f in twin_table.get(kind, {})):
+                continue
+            c = _mf_cell(r.get(f))
+            if twin_table:
+                c += " | " + _mf_cell(twin_table.get(kind, {}).get(f))
+            cells.append(f"{f} {c}")
+        print(f"  {kind} (n {r['n']}): " + "; ".join(cells))
+    for name, ans in (("", result["answers"]), ("twin ", (result.get("twin") or {}).get("answers"))):
+        if not ans:
+            continue
+        print(f"== {name}variant - a (same arrival)")
+        for kind, r in ans["paired"].items():
+            print(f"  {kind}: " + "; ".join(f"{f} {_mf_cell(v)}" for f, v in r.items()))
+        print(f"== {name}tog - seq")
+        for var, r in ans["tog_seq"].items():
+            print(f"  {var}: " + "; ".join(f"{f} {_mf_cell(v)}" for f, v in r.items()))
+    out = Path(out) if out else cp.ROOT / f"walkout_{source}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
     print(out)
@@ -2457,13 +3211,17 @@ def main(argv=None):
     parser.add_argument("--flank2v1", choices=("game", "layout"),
                         help="the flank2v1 plan's table: 'game' the runs (+ the twin on their starts with --sim), "
                              "'layout' the twin on the plan's own places (no game run needed)")
-    for plan in ("counterfar", "intercept"):
+    for plan in ("counterfar", "intercept", "tight", "walkout", "standk"):
         parser.add_argument(f"--{plan}", choices=("game", "layout"),
-                            help=f"the meetfar probe's {plan} table: 'game' the runs (+ the twin on their starts with "
-                                 "--sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
+                            help=f"the {plan} probe's table (meetfar, night probes): 'game' the runs (+ the twin on "
+                                 "their starts with --sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
-    for plan in ("counterfar", "intercept"):
+    if args.walkout:
+        runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "walkout"]
+        walkout_report(runs, source=args.walkout, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
+        return 0
+    for plan in ("counterfar", "intercept", "tight", "standk"):
         if getattr(args, plan):
             runs = args.runs or [d for d in cp.runs() if _plan_of(d) == plan]
             mf_report(plan, runs, source=getattr(args, plan), sim=args.sim, copies=args.copies, device=args.device,

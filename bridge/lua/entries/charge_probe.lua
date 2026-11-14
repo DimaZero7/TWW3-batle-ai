@@ -107,7 +107,9 @@
 -- (game/probe/unit_probe.py) hold an attack_run / attack_walk / attack_t2 order instead until the centres of the
 -- attacker and its order's target are within lane.a_go_m (why 'gap'), until that target has been in melee
 -- lane.a_go_melee_s seconds (why 'melee'), or - lane.a_go_closest - once that distance grew 2 m past its least or the
--- target is in melee before a_go_m was reached (why 'closest'; probe_phase 'a_go' {why, d}). lane.a_morale and an extra's
+-- target is in melee before a_go_m was reached (why 'closest'; probe_phase 'a_go' {why, d, of}); lane.a_go_melee_of
+-- ('e1' the first extra, 't' the lane's target; the tight plan) names whose melee flag starts that clock instead of the
+-- order's target's. lane.a_morale and an extra's
 -- e.morale: that unit keeps its morale (not fearless). lane.contact_a_only: the lane's
 -- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
 -- attacker's row carries dd (CCO DamageDealt); lane.dd_rows 'both' (the pusbags plan): the target's row too.
@@ -836,7 +838,14 @@ function M.main(bm, config, globals)
                     local gt = lane.mode == 'attack_t2' and lane.t2 or lane.t
                     go_d = dist(lane.a.unit, gt.unit)
                     local gt_m = read(function() return gt.unit:is_in_melee() end)
-                    if gt_m and not lane.go_melee_ms then lane.go_melee_ms = now end
+                    -- (lane.a_go_melee_of, the tight plan) whose melee flag starts the a_go_melee_s clock: 'e1' the
+                    -- first extra, 't' the lane's target; absent - the order's target (a_go_closest reads gt_m still)
+                    local ck = gt
+                    if lane.a_go_melee_of == 'e1' then ck = state.units[lane.extras[1].name]
+                    elseif lane.a_go_melee_of == 't' then ck = lane.t end
+                    local ck_m = gt_m
+                    if ck ~= gt then ck_m = read(function() return ck.unit:is_in_melee() end) end
+                    if ck_m and not lane.go_melee_ms then lane.go_melee_ms = now end
                     if lane.a_go_s and now - lane.t0 >= lane.a_go_s * 1000 then
                         go_why = 'time'
                     elseif lane.a_go_m and go_d and go_d <= lane.a_go_m then
@@ -860,7 +869,7 @@ function M.main(bm, config, globals)
                         attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
                     end
                     emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0, why = go_why,
-                        d = go_d and round(go_d, 1) or nil})
+                        d = go_d and round(go_d, 1) or nil, of = lane.a_go_melee_of})
                 end
                 if lane.mode == 'shoot' and lane.reorder_s and now - (lane.reorder_ms or lane.t0) >= lane.reorder_s * 1000 then
                     -- (the cover plan) a shooter not firing gets its ranged attack again every reorder_s: a target hidden
@@ -1553,6 +1562,8 @@ function M.main(bm, config, globals)
             for _, e in ipairs(l.extras or {}) do
                 assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))
             end
+            assert(l.a_go_melee_of == nil or l.a_go_melee_of == 't' or (l.a_go_melee_of == 'e1' and l.extras
+                and l.extras[1]), 'a_go_melee_of is t, or e1 with an extra: ' .. tostring(l.a_go_melee_of))
             for _, f in ipairs(l.rally_friends or {}) do
                 assert(state.units[f.name], 'scenario unit missing: ' .. tostring(f.name))
             end

@@ -573,7 +573,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
-              "counterfar", "intercept")
+              "counterfar", "intercept", "tight", "walkout", "standk")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2114,6 +2114,21 @@ def run_config(plan, index):
         # mem_morale_ours; the 'clock' lane keeps the poll going, as in flank2v1)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=30, men_near_m=110, mem_morale=True,
                       mem_extras=True)
+    if plan == "tight":
+        # (game/probe/unit_probe.py, the night probes' tight) health every 0.25 s; the men of all four units from memory
+        # every 0.1 s while B and E1 (centres) are within 105 m - the last ~20 s of the approach - and every 0.5 s after
+        # the contact (men_after_s 0: the 245 s fights would make the dense polls the battle's cost); the morale of E1,
+        # A and B every 0.5 s (the clock lane keeps the poll going) - tmp/night_probes/design.md 1.2
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True,
+                      mem_extras=True)
+    if plan == "walkout":
+        # (the night probes' walkout) as tight, without the extras (a group's lanes have none): design.md 2.1
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True)
+    if plan == "standk":
+        # (the night probes' standk) health every 0.25 s; the men from memory every 0.1 s from 60 m (centres) to 11 s
+        # after the contact, every 0.5 s to the lane's end (reverse/notes/charge_impact.md 7.1's request: 10 s, + 1 s -
+        # the first HP drop comes 0.3-1 s after the first melee flag, so the first 10 s on that clock stay dense)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=11, men_near_m=60)
     model_s =max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -2593,7 +2608,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 d_ = math.hypot(ax[b] - float(u["x"][b, G]), az[b] - float(u["z"][b, G]))
                 g_m = bool(u["m"][b, G])
                 gs = st_["go_s"][b]
-                if g_m and gs.get("melee") is None:
+                # (lane.a_go_melee_of, the tight plan) whose melee flag starts the a_go_melee_s clock: 'e1' the first
+                # extra, 't' the lane's target, absent the order's target (a_go_closest reads g_m still)
+                C = {"e1": int(slot["e1"][b]), "t": T}.get(sp.get("a_go_melee_of"), G)
+                c_m = bool(u["m"][b, C]) if C >= 0 else False
+                if c_m and gs.get("melee") is None:
                     gs["melee"] = t - params.dt
                 why = None
                 if sp.get("a_go_m") is not None and d_ <= sp["a_go_m"]:
