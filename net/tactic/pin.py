@@ -34,9 +34,11 @@ the rows and the orders in force); the code's masks (orders.masks) stand over al
                  come_own) takes the nearest target of either cause; cause (b): e with no holder of an attack order
                  on it (one interceptor an enemy, inside the cap), the unit the nearest such interceptor to e, e's
                  centre within R m; no two-tick wait for (b). TIp / TIi - a pinned target first / a second enemy
-                 first, R = config orders.second_m
+                 first, R 150 m (the loose trigger: second(tight=False))
+    TIt<R>       TIn<R> with the tight trigger (second(tight=True): u in melee only); TI - the same at
+                 R = config orders.second_m (the drill's teacher as set)
     DH, DP       D restricted to enemies that come at one of my units / at none (coming_at), the default skill
-    A player built on the level's default (default="config": TIn*, TIp, TIi, DH, DP) hands a unit it leaves under
+    A player built on the level's default (default="config": TIn*, TIt*, TIp, TIi, DH, DP) hands a unit it leaves under
     'hold' without a target config orders.default_skill; K, T, D, D35, TCw, C keep their own fixed skill. Every Teacher
     keeps last_tags {cause (0 none, 1 cause (a), 2 cause (b), 3 a dumb player's), u (the battle's slot of the unit a
     cause (b) target came at), cell (cell())} [r, G] of its last tick (watch.PinWatch's measures by cause)
@@ -66,14 +68,15 @@ def coming_at(fx):
     return at, torch.where(at.any(1), gu.argmin(1), torch.full_like(fx.slot, -1))
 
 
-def second(fx):
+def second(fx, tight=False):
     """([R, e] e is a second enemy, [R, e] the row of its unit u, -1 none): valid, not in melee, and it comes at a
-    standing unit u of mine (orders.comes) that is in melee, or that another standing enemy coming at it nearer (edge
-    gap) than e also comes at; u the nearest such unit to e. Whether a unit of mine already holds an attack order on e
+    standing unit u of mine (orders.comes) that is in melee, or (not tight: the loose trigger) that another standing
+    enemy coming at it nearer (edge gap) than e also comes at; u the nearest such unit to e. tight: u in melee only -
+    the case the game probe meetfar measured (the loose one is true before any melee in an advancing line). Whether a unit of mine already holds an attack order on e
     is the walk's (Teacher: count 0)."""
     at, _ = coming_at(fx)
     gu = torch.where(at, fx.gap, torch.full_like(fx.gap, OR.INF))                   # [R, u, e]
-    q = at & (fx.m[:, :, None] | (gu > gu.amin(2, keepdim=True)))
+    q = at & fx.m[:, :, None] if tight else at & (fx.m[:, :, None] | (gu > gu.amin(2, keepdim=True)))
     gq = torch.where(q, fx.gap, torch.full_like(fx.gap, OR.INF))
     e = q.any(1) & fx.valid & ~fx.m
     return e, torch.where(e, gq.argmin(1), torch.full_like(fx.slot, -1))
@@ -133,7 +136,7 @@ class Teacher:
     name = "T"
 
     def __init__(self, melee_row=True, recall=False, dumb=None, counter=False, wait2=False, near=True, speed=True,
-                 sign=False, second_m=None, first=None, default=None, restrict=None):
+                 sign=False, second_m=None, first=None, default=None, restrict=None, tight=False):
         # dumb: None (T), "reach" (D), "d35" (D35); counter: my units under 'hold' get 'counter' (TC). The four rules
         # where T differs from A1 (the ablation; T's own rule first): wait2 - e pinned at this tick and the one before
         # (A1's memory: by the Tacticians' row and the battle's slot); near False - free(i) without 'no standing enemy
@@ -141,12 +144,12 @@ class Teacher:
         # offset across e's facing line (A1's), not by the side class (axis / left / right).
         # second_m: cause (b) 'take the second one' on (second(): its interceptor's reach, centre to centre, m); first:
         # with both causes - None the nearest target of either, "pin" a pinned target first, "second" a second enemy
-        # first; default "config": my units left under 'hold' without a target get the level's default skill (config
-        # orders.default_skill; counter=True is the same with 'counter' fixed); restrict (D only): "coming" - only an
+        # first; tight - cause (b)'s trigger 'u in melee' only (second()); default "config": my units left under
+        # 'hold' without a target get the level's default skill (config orders.default_skill; counter=True is the same with 'counter' fixed); restrict (D only): "coming" - only an
         # enemy that comes at one of my units (DH), "nobody" - only one that comes at none (DP)
         self.melee_row, self.recall, self.dumb, self.counter = melee_row, recall, dumb, counter
         self.wait2, self.near, self.speed, self.sign = wait2, near, speed, sign
-        self.second_m, self.first, self.restrict = second_m, first, restrict
+        self.second_m, self.first, self.restrict, self.tight = second_m, first, restrict, tight
         self.prev_pin = None
         self.idle = SC.COUNTER if counter else None
         if default == "config":
@@ -212,7 +215,7 @@ class Teacher:
             self.n_recall = getattr(self, "n_recall", 0) + int(rec.sum())
         sec_e = sec_u = free_b = None
         if self.second_m is not None:
-            sec_e, sec_u = second(fx)
+            sec_e, sec_u = second(fx, self.tight)
             free_b = free & ~come_own(fx)
         come_u = coming_at(fx)[1] if self.restrict is not None else None
         cause = torch.zeros_like(skill)
@@ -390,8 +393,12 @@ PLAYERS = {"K": Keep, "T": Teacher, "D": lambda: Teacher(dumb="reach"), "D35": l
            "TIn60": lambda: Teacher(default="config", wait2=True, second_m=60.0),
            "TIn100": lambda: Teacher(default="config", wait2=True, second_m=100.0),
            "TIn150": lambda: Teacher(default="config", wait2=True, second_m=150.0),
-           "TIp": lambda: Teacher(default="config", wait2=True, second_m=_second_m(), first="pin"),
-           "TIi": lambda: Teacher(default="config", wait2=True, second_m=_second_m(), first="second"),
+           "TIp": lambda: Teacher(default="config", wait2=True, second_m=150.0, first="pin"),
+           "TIi": lambda: Teacher(default="config", wait2=True, second_m=150.0, first="second"),
+           "TI": lambda: Teacher(default="config", wait2=True, second_m=_second_m(), tight=True),
+           "TIt60": lambda: Teacher(default="config", wait2=True, second_m=60.0, tight=True),
+           "TIt100": lambda: Teacher(default="config", wait2=True, second_m=100.0, tight=True),
+           "TIt150": lambda: Teacher(default="config", wait2=True, second_m=150.0, tight=True),
            "DH": lambda: Teacher(dumb="reach", restrict="coming", default="config"),
            "DP": lambda: Teacher(dumb="reach", restrict="nobody", default="config")}
 

@@ -165,6 +165,17 @@ def test_second_enemy_walk():
     p = PN.Teacher(default="config", wait2=True, second_m=150.0, first="second")
     p(v)
     assert p(v)["target"][0].tolist() == [-1, 4, 4, 5]
+    # the tight trigger (u in melee only): the same here - 5 and 6 come at the anvil in melee
+    assert PN.second(fx, tight=True)[0][0].tolist() == e[0].tolist()
+    p = PN.Teacher(default="config", wait2=True, second_m=150.0, tight=True)
+    assert p(v)["target"][0].tolist() == [-1, -1, -1, 5]
+    # before any melee (the anvil and 4 not fighting): the loose trigger still finds 5 second at unit 2 (6 nearer to
+    # it), the tight one finds no second enemy and gives no order
+    calm = [(w, s, f, b, fr, dp, 0, r, sp) for (w, s, f, b, fr, dp, m, r, sp) in units]
+    vc = _tick(calm)
+    assert PN.second(vc.fx)[0][0, 5] and not PN.second(vc.fx, tight=True)[0].any()
+    assert PN.Teacher(default="config", wait2=True, second_m=150.0)(vc)["target"][0].tolist() == [-1, -1, -1, 5]
+    assert PN.Teacher(default="config", wait2=True, second_m=150.0, tight=True)(vc)["target"][0].tolist() == [-1] * 4
     # DH / DP: D restricted to enemies that come at one of my units / at none (4 pinned comes at nobody); in DH unit 3
     # finds 5's side on it taken by unit 1 and goes at 6
     assert PN.player("DH")(v)["target"][0].tolist() == [-1, 5, 6, 6]
