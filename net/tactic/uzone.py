@@ -7,9 +7,10 @@ frames all stand the same way, so every test is on axis-aligned rectangles.
 
 The order within a decision: first every unit that keeps its frame (keep()) closes its cells, then the others choose in
 slot order among what is left. A unit must change when it has no frame in force or its frame lies on a hole or out of the
-group's zone (must_change). Kept frames may leave too few tiles for the units changing (they were placed when others
-stood elsewhere): the code then lets go of kept frames from the last slot back until there is room (keep(), the same
-counting as room()), so the 'no room' error below stays an error of the level above.
+group's zone (must_change; the hole's part can be off - net/config/tactic.json orders.hole_fits). Kept frames may leave
+too few tiles for the units changing (they were placed when others stood elsewhere): the code then lets go of kept
+frames from the last slot back until there is room (keep(), the same counting as room()) - never a fixed one (a unit in
+melee, a striker) - so the 'no room' error below stays an error of the level above.
 
 A cell is closed when the frame of that size at its centre laps over the edge of the group's zone or over a frame / hole
 by more than one cell, or when the nudge leaves it no room, or when it would leave too few tiles for the units still to
@@ -160,24 +161,40 @@ class Seq:
              ((self.qf[..., None] - f[:, None, None]).abs() < self.q_half + hd[:, None, None] - TOL) & on[:, None, None]
         return self.left[:, :, None] & ~ov.any(-1)
 
-    def must_change(self, prev, able):
+    def must_change(self, prev, able, holes=True):
         """[R, G] bool: the units that choose and have no frame to keep: none in force (prev None or off), or it lies on a
-        hole or out of the group's zone. prev {s, f, hw, hd, on} [R, G]."""
-        if prev is None:
-            return able.clone()
-        ok = _clear(prev["s"], prev["f"], prev["hw"], prev["hd"], self.hole, self.zs[:, None], self.zf[:, None])
-        return able & ~(prev["on"] & ok)
+        hole or out of the group's zone. prev {s, f, hw, hd, on} [R, G]. holes False: a hole forces nothing (the frame
+        still fits in the zone: net/config/tactic.json orders.hole_fits)."""
+        c = self.causes(prev, able)
+        return c["first"] | c["zone"] | (c["hole"] if holes else torch.zeros_like(c["hole"]))
 
-    def keep(self, want, prev, able):
+    def causes(self, prev, able):
+        """{first, hole, zone} [R, G] bool: why a unit that chooses has no frame to keep - none in force; its frame lies
+        on a hole (in the zone); out of the group's zone."""
+        if prev is None:
+            z = torch.zeros_like(able)
+            return {"first": able.clone(), "hole": z, "zone": z.clone()}
+        none = {k: torch.zeros((self.R, 0), device=self.dev) for k in ("s", "f", "hw", "hd")}
+        none["on"] = torch.zeros((self.R, 0), dtype=torch.bool, device=self.dev)
+        zs, zf = self.zs[:, None], self.zf[:, None]
+        inside = _clear(prev["s"], prev["f"], prev["hw"], prev["hd"], none, zs, zf)
+        clear = _clear(prev["s"], prev["f"], prev["hw"], prev["hd"], self.hole, zs, zf)
+        on = prev["on"]
+        return {"first": able & ~on, "zone": able & on & ~inside, "hole": able & on & inside & ~clear}
+
+    def keep(self, want, prev, able, fixed=None):
         """Commits the units that keep their frames, first of all: want [R, G] bool (their choice, never where must_change).
-        Kept frames that leave too few tiles for the units to change are let go from the last slot back. Returns the
-        kept [R, G]."""
+        Kept frames that leave too few tiles for the units to change are let go from the last slot back - never the
+        fixed [R, G] ones (a unit in melee, a striker: no new order may reach it). Returns the kept [R, G]."""
         kept = want & able
         if prev is None or not bool(kept.any()):
             return kept
         for j in reversed(range(self.G)):
             free = self._free_of(prev["s"], prev["f"], prev["hw"], prev["hd"], kept).any(-1).sum(-1)
-            kept[:, j] = kept[:, j] & ~(free < (able & ~kept).sum(1))
+            go = free < (able & ~kept).sum(1)
+            if fixed is not None:
+                go = go & ~fixed[:, j]
+            kept[:, j] = kept[:, j] & ~go
         for name, have in (("s", self.s), ("f", self.f), ("hw", self.hw), ("hd", self.hd)):
             have[kept] = prev[name][kept]
         self.on = self.on | kept

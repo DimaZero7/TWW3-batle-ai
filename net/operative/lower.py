@@ -6,8 +6,10 @@
                  slot so a row can start anew alone), then the frames: the tactician's formula (tactic/teacher.drive,
                  the default) or a TacticNet (the run4 network: the end-to-end run). A new parcel: the tactician
                  starts anew (new tiles, no frames); a move of the same members and form: the same tiles (holes too)
-                 on the new centre and turn, the frames in the zone's axes go with it
-    Units        the unit network's second (as tactic/env.play): the frames -> the units' areas (a shooter's fire
+                 on the new centre and turn, the frames in the zone's axes go with it. With a player (tactic/pin.py, in
+                 the formula's place) the level carries orders in force - skill, main target, side, the order's second
+                 - beside the frames, under the code's masks (tactic/orders.py); a fresh parcel resets them too
+    Units       the unit network's second (as tactic/env.play): the frames -> the units' areas (a shooter's fire
                  sector forward along the zone), the order with the stage by code, the latency, the leash
 """
 import math
@@ -37,11 +39,23 @@ FR_KEYS = ("s", "f", "hw", "hd")
 
 
 class Tacticians:
-    def __init__(self, B, N, G, device, net=None, greedy=False):
+    def __init__(self, B, N, G, device, net=None, greedy=False, player=None, hygiene=True):
         R = B * G
         self.B, self.N, self.G, self.R = B, N, G, R
         self.dev = device
         self.net, self.greedy = net, greedy
+        # player: a callable in the place of teacher.drive - the level's output for a tick (tactic/orders.py module doc:
+        # K, T, A1, D, ... of tactic/pin.py); with it the level carries orders in force (skill, main target, side, the
+        # order's battle second) beside the frames, its masks (orders.masks; hygiene: no new order to a unit in melee) and
+        # the counts of what they did (self.cnt [R]); Units.write then takes skill and target from here. None: as before
+        self.player, self.hygiene = player, hygiene
+        self.skill = torch.zeros((R, N), dtype=torch.long, device=device)          # (unit/scripts.SKILLS; 0 hold)
+        self.tgt = torch.full((R, N), -1, dtype=torch.long, device=device)
+        self.side = torch.full((R, N), -1, dtype=torch.long, device=device)       # (orders.SIDES; -1 none)
+        self.born = torch.zeros((R, N), device=device)
+        self.clock = 0.0
+        self.cnt = {}
+        self.view = None                       # (the last tick's orders.View and the new orders: the drill's measures)
         z = lambda dt=torch.float32: torch.zeros(R, dtype=dt, device=device)          # noqa: E731
         self.bi = torch.arange(B, device=device).repeat_interleave(G)
         self.gi = torch.arange(G, device=device).repeat(B)
@@ -105,8 +119,18 @@ class Tacticians:
         self.order = torch.where(t[:, None], o, self.order)
         self.fr_on = self.fr_on & ~fresh[:, None]
         self.out = self.out & ~fresh[:, None]
+        # (the orders in force start anew with the frames; a move of the same members keeps them)
+        self.skill = torch.where(fresh[:, None], torch.zeros_like(self.skill), self.skill)
+        self.tgt = torch.where(fresh[:, None], torch.full_like(self.tgt, -1), self.tgt)
+        self.side = torch.where(fresh[:, None], torch.full_like(self.side, -1), self.side)
+        self.born = torch.where(fresh[:, None], torch.zeros_like(self.born), self.born)
         idx = t.nonzero()[:, 0]
         return self.parcel(idx), idx
+
+    def shape(self, rows, cols):
+        """Override the zone's grid of every row ([R] long: tactic/zfit.zone_for's) after apply - a fresh grid."""
+        self.rows, self.cols = rows.to(self.dev).long(), cols.to(self.dev).long()
+        self.tmask = torch.arange(ZN.MAX_TILES, device=self.dev)[None] < (self.rows * self.cols)[:, None]
 
     def _keep(self, raw, idx):
         """The tiles between decisions of the rows idx (module doc); writes tmask back."""
@@ -139,11 +163,16 @@ class Tacticians:
         self.tmask[idx] = tiles.mask
         return tiles
 
-    def tick(self, raw, card, bounds=None):
-        """The tacticians' decision (every 5 s): the frames of the active rows (per slot)."""
+    def tick(self, raw, card, bounds=None, now=None):
+        """The tacticians' decision (every 5 s): the frames of the active rows (per slot); with a player also the orders
+        (now: the battle's second; None - this level's own clock, decide_s a tick)."""
+        now = self.clock if now is None else float(now)
+        self.clock = now + float(tcfg()["decide_s"])
         idx = (self.active & self.mine.any(1)).nonzero()[:, 0]
         if idx.numel() == 0:
             return
+        if self.player is not None:
+            return self._tick_player(raw, card, idx, now)
         tiles = self._keep(raw, idx)
         p = self.parcel(idx)
         my = DC.my_slots(p)                                                   # [r, Gm]
@@ -174,6 +203,110 @@ class Tacticians:
         cur = self.fr_on[idx]
         cur[k.expand_as(s0)[my >= 0], s0[my >= 0]] = (on | prev["on"])[my >= 0]
         self.fr_on[idx] = cur
+
+    def _count(self, name, idx, v):
+        """self.cnt[name] [R] += v [r] (summed over its last axis when 2-D)."""
+        if name not in self.cnt:
+            self.cnt[name] = torch.zeros(self.R, device=self.dev)
+        v = v.float()
+        self.cnt[name][idx] += v.sum(1) if v.dim() > 1 else v
+
+    def _tick_player(self, raw, card, idx, now):
+        """A tick with a player (module doc of tactic/orders.py): the causes and the exempt, the player's output, the
+        code's masks, then the frames and the orders written back per slot."""
+        from net.tactic import orders as OR
+        tiles = self._keep(raw, idx)
+        p = self.parcel(idx)
+        my = DC.my_slots(p)                                                   # [r, Gm]
+        r = idx.shape[0]
+        k = torch.arange(r, device=self.dev)[:, None]
+        s0 = my.clamp(min=0)
+        on_my = my >= 0
+        prev = {n: self.fr[n][idx][k, s0] for n in FR_KEYS}
+        prev["on"] = self.fr_on[idx][k, s0] & on_my
+        has_prev = bool(prev["on"].any())
+        K = min(int(tcfg()["rows"]), self.N)
+        rr = RW.build(raw, card, p, tiles, rows=K)
+        ctx = DC.ctx_of(rr, p, tiles, prev if has_prev else None)
+        order = {"skill": self.skill[idx][k, s0], "tgt": torch.where(on_my, self.tgt[idx][k, s0], -1),
+                 "side": torch.where(on_my, self.side[idx][k, s0], -1), "born": self.born[idx][k, s0]}
+        # the orders that end by themselves (taking an order away is no new order: before the masks, in melee too):
+        # the target routs or dies -> no target (an attack without one stands where it is: unit/scripts.py);
+        # my striker routs or dies -> its order goes (config tactic.json orders.end_on_rout, cap_all)
+        oc = tcfg()["orders"]
+        S = raw[self.bi[idx]]                                                  # [r, N, RAW]
+        att = on_my & (order["skill"] == 2) & (order["tgt"] >= 0)
+        if bool(oc.get("end_on_rout", True)):
+            tc = order["tgt"].clamp(min=0)
+            gone = (S[..., TR.I["r"]].gather(1, tc) > 0) | (S[..., TR.I["alive"]].gather(1, tc) <= 0)
+            end = att & gone
+            order["tgt"] = torch.where(end, torch.full_like(order["tgt"], -1), order["tgt"])
+            self._count("ended_on_rout", idx, end)
+        if bool(oc.get("cap_all", True)):
+            me = S.gather(1, s0[..., None].expand(-1, -1, S.shape[-1]))
+            out_me = on_my & ((me[..., TR.I["r"]] > 0) | (me[..., TR.I["alive"]] <= 0)) & (order["skill"] == 2)
+            order["skill"] = torch.where(out_me, torch.zeros_like(order["skill"]), order["skill"])
+            order["tgt"] = torch.where(out_me, torch.full_like(order["tgt"], -1), order["tgt"])
+            self._count("striker_routed", idx, out_me & (order["tgt"] >= -1))
+        fx = OR.Facts(rr, ctx, order)
+        cause = U.Seq(tiles, my.shape[1]).causes(ctx.prev, ctx.able)
+        hole = not bool(tcfg()["orders"]["hole_fits"])
+        must = cause["first"] | cause["zone"] | (cause["hole"] if hole else torch.zeros_like(cause["hole"]))
+        melee = fx.g_m
+        exempt = fx.striking | (melee if self.hygiene else torch.zeros_like(melee))
+        must = must & ~exempt
+        view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene)
+        out = self.player(view)
+        skill, tgt, side, change, cnt = OR.masks(view, out, getattr(self.player, "allow", (0, 2)))
+        self.fell += float(out["fell"].sum())
+        self.ticks += r
+        bi = self.bi[idx]
+        for name, v in cnt.items():
+            self._count(name, idx, v)
+        for c in ("first", "hole", "zone"):
+            self._count("forced_" + c, idx, cause[c] & must & out["forced"])
+        self._count("hole_kept", idx, cause["hole"] & ~must)
+        self._count("let_go", idx, out.get("let_go", torch.zeros_like(must)))
+        self._count("changes", idx, change)
+        new_att = change & (skill == 2) & (tgt >= 0) & ((tgt != order["tgt"]) | (order["skill"] != 2))
+        self._count("attack_orders", idx, new_att)
+        # the frames (as the formula's path) and the orders, per slot
+        new = out["frames"]
+        on = new["on"] & on_my
+        sel = (k.expand_as(s0)[on_my], s0[on_my])
+        for n in FR_KEYS:
+            v = torch.where(on, new[n], prev[n])
+            cur = self.fr[n][idx]
+            cur[sel] = v[on_my]
+            self.fr[n][idx] = cur
+        drop = out.get("drop", torch.zeros_like(on)) & on_my
+        cur = self.fr_on[idx]
+        cur[sel] = ((on | prev["on"]) & ~drop)[on_my]
+        self.fr_on[idx] = cur
+        born = torch.where((skill != order["skill"]) | (tgt != order["tgt"]), torch.full_like(order["born"], now),
+                           order["born"])
+        for name, v in (("skill", skill), ("tgt", tgt), ("side", side), ("born", born)):
+            cur = getattr(self, name)[idx]
+            cur[sel] = v[on_my]
+            getattr(self, name)[idx] = cur
+        self.view = {"view": view, "skill": skill, "tgt": tgt, "side": side, "change": change, "new_attack": new_att, "bi": bi,
+                     "my": my}
+
+    def counts(self):
+        """{name: [B]} the level's counts (self.cnt) summed over each battle's rows."""
+        return {n: v.view(self.B, self.G).sum(1) for n, v in self.cnt.items()}
+
+    def orders_of(self):
+        """{skill, tgt, born} [B, N] each unit's order in force (the row of its group; skill 0, tgt -1 when none)."""
+        mem = (self.mine & self.active[:, None]).view(self.B, self.G, self.N)
+        any_m = mem.any(1)
+        g = mem.float().argmax(1)[:, None]
+        out = {}
+        for name, none in (("skill", 0), ("tgt", -1), ("born", 0.0)):
+            v = getattr(self, name).view(self.B, self.G, self.N).gather(1, g)[:, 0]
+            out[name] = torch.where(any_m, v, torch.full_like(v, none))
+        out["on"] = any_m
+        return out
 
     def areas(self):
         """{x, z, b, front, depth, sb} [R, N] the frames in the world and on [R, N] (active rows, the members)."""
@@ -250,7 +383,12 @@ class Units:
         self.area["sw"] = torch.where(any_on & self.setup.shooter, torch.full_like(self.area["sw"], sector),
                                       self.area["sw"])
         self.arrived = self.arrived & ~moved
-        if self.targets:
+        if getattr(tac, "player", None) is not None:
+            # the level carries orders: the skill and the main target it chose (not the group's nearest target)
+            o = tac.orders_of()
+            self.skill = torch.where(o["on"], o["skill"], self.skill)
+            self.prio = torch.where(o["on"], o["tgt"], self.prio)
+        elif self.targets:
             self.prio = self.prio_of(tac)
 
     def prio_of(self, tac):

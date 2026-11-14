@@ -260,6 +260,227 @@ class Watch:
         return m
 
 
+def hp_trade(u, lord):
+    """[B] the trade by plain health (the gold trade's form without the rout surcharge): each unit's health lost
+    (1 - hp_abs / hp0) x its cost, the enemy's less mine, over the mean of the two armies' cost; the lords out."""
+    keep = ~lord & (u["side"] > 0)
+    c = u["cost"] * keep
+    lost_hp = c * (1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6)).clamp(0, 1)
+    lost = [(lost_hp * (u["side"] == s)).sum(1) for s in (1, 2)]
+    budget = torch.stack([(c * (u["side"] == s)).sum(1) for s in (1, 2)], 1).mean(1).clamp(min=1.0)
+    return (lost[1] - lost[0]) / budget
+
+
+class PinWatch(Watch):
+    """Watch + the measures of drill T0-2 'pin and strike' (tmp/tactic_slice/design_flank_v2.md section 6), my side a
+    battle.TacticSide (its level's orders in force: lower.Tacticians.orders_of). Each counts what its name says; from
+    the simulator's state (a measure, not an input), contact = either unit's hit_sec on the other:
+    hp_trade        hp_trade() at the end of the play; hp_series [B, T] the same every SERIES_S s, kept from the second
+                    the battle ended (the judge's window is read off it: the anchor + 300 s)
+    routs_own, routs_enemy   rout events (a unit's r turning on), the lords out
+    attack_orders   attack orders given (an order = its target and its second)
+    intercepted     attack orders whose striker, before its first contact with its target, was in contact with another
+                    enemy while its target's formation was INTERCEPT_M or more away (edge to edge)
+    pin_lost        attack orders whose target, standing, before the striker's first contact, had no other standing unit
+                    of mine in contact with it
+    gone_before     attack orders whose target routed, died or left before the striker's first contact
+    resumed_on_rallied   attack orders whose target routed while the order stood and rallied, and the unit's script
+                    then took the attack on it up again; resumed_way_m - the striker's distance to it then (summed)
+    reached         attack orders whose striker came into contact with its target
+    inter_nearer    intercepted orders whose catching enemy was nearer the striker than its target at the order
+    order60_{inter,clean}_{n,sum}   attack orders, intercepted or not: the striker's and its target's trade from the
+                    order to 60 s on (or to the next order): (target's health lost x its cost - the striker's) / the mean
+                    of the two costs
+    fc_{cat}_{n,n30,s30,n60,s60}   first contacts of my units with enemy units by who charged (FC_CATS: _contacts) and
+                    the pair's trade summed 30 / 60 s on"""
+    SERIES_S = 5
+    INTERCEPT_M = 10.0
+    FC_CATS = ("mine_charging", "enemy_onto_standing", "both_moving", "neither")
+    MOVING_MS = 1.0          # (the first contacts' split: 'charging' = moving over this the second before, m/s)
+
+    def _init(self, st):
+        super()._init(st)
+        B, N, dev = self.B, self.N, self.dev
+        z = torch.zeros(B, device=dev)
+        self.routs = {1: z.clone(), 2: z.clone()}
+        self.r_prev = st.u["r"].clone()
+        self.series = []
+        self.hp_last = None
+        self.ev = {k: z.clone() for k in ("attack_orders", "intercepted", "pin_lost", "gone_before",
+                                          "resumed_on_rallied", "resumed_way_m", "reached")}
+        zb = lambda: torch.zeros((B, N), dtype=torch.bool, device=dev)          # noqa: E731
+        self.cur_t = torch.full((B, N), -1, dtype=torch.long, device=dev)
+        self.cur_born = torch.full((B, N), -1.0, device=dev)
+        self.f_reach, self.f_inter, self.f_lost, self.f_gone, self.f_routed, self.f_res = (zb() for _ in range(6))
+        # (the orders' 60 s trade by interception; the first contacts' pair trade by who charged)
+        zf = lambda: torch.zeros((B, N), device=dev)                            # noqa: E731
+        self.o_t0, self.o_hi, self.o_ht, self.o_ci, self.o_ct = (zf() for _ in range(5))
+        self.o_pend, self.o_int = zb(), zb()
+        self.o_d0 = torch.zeros((B, N, N), device=dev)
+        self.o_tg = torch.zeros((B, N), dtype=torch.long, device=dev)
+        for k in ("order60_inter_n", "order60_inter_sum", "order60_clean_n", "order60_clean_sum", "inter_nearer"):
+            self.ev[k] = z.clone()
+        zz = lambda: torch.zeros((B, N, N), device=dev)                         # noqa: E731
+        self.fc_seen = torch.zeros((B, N, N), dtype=torch.bool, device=dev)
+        self.fc_t0, self.fc_hi, self.fc_hj = zz(), zz(), zz()
+        self.fc_cat = torch.full((B, N, N), -1, dtype=torch.long, device=dev)
+        for c in self.FC_CATS:
+            for w in ("n", "n30", "s30", "n60", "s60"):
+                self.ev[f"fc_{c}_{w}"] = z.clone()
+        self.v_prev = torch.zeros((B, N), device=dev)
+
+    def __call__(self, sec, st):
+        super().__call__(sec, st)
+        u = st.u
+        live = ~st.done
+        new = u["r"] & ~self.r_prev & ~self.lord & live[:, None]
+        for s in (1, 2):
+            self.routs[s] += (new & (u["side"] == s)).float().sum(1)
+        self.r_prev = u["r"].clone()
+        hp = hp_trade(u, self.lord)
+        self.hp_last = hp if self.hp_last is None else torch.where(live, hp, self.hp_last)
+        if sec % self.SERIES_S == 0:
+            self.series.append(self.hp_last.clone())
+        tac = getattr(self.chain, "tac", None)
+        if tac is None or getattr(tac, "player", None) is None:
+            return
+        self._events(st, tac, live, sec)
+        self._contacts(st, live, sec)
+        self.v_prev = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
+
+    def _hpf(self, u):
+        return u["hp_abs"] / u["hp0"].clamp(min=1e-6)
+
+    def _contacts(self, st, live, sec):
+        """The first contact of each pair (my unit i, an enemy j): who charged - my unit moving over MOVING_MS the
+        second before under the game order ATTACK on j (mine_charging), else my unit under MOVING_MS and j over it
+        (enemy_onto_standing), else both over it (both_moving), else neither - and the pair's trade 30 and 60 s on:
+        (j's health lost x its cost - i's x its cost) / the mean of the two costs (from all sources)."""
+        from sim import orders as O
+        u = st.u
+        B, N = self.B, self.N
+        hs = u["hit_sec"].view(B, N, N)
+        touch = (hs > 0) | (hs.transpose(1, 2) > 0)
+        pair = self.mine[:, :, None] & self.foe[:, None, :] & live[:, None, None]
+        new = touch & pair & ~self.fc_seen
+        hp = self._hpf(u)
+        if bool(new.any()):
+            it = self.chain.units.intended
+            j = torch.arange(N, device=self.dev)[None, None, :]
+            mine_att = (it.kind == O.ATTACK)[:, :, None] & (it.target[:, :, None] == j)
+            vi, vj = self.v_prev[:, :, None], self.v_prev[:, None, :]
+            fast_i, fast_j = vi > self.MOVING_MS, vj > self.MOVING_MS
+            cat = torch.where(mine_att & fast_i, 0, torch.where(~fast_i & fast_j, 1, torch.where(fast_i & fast_j, 2, 3)))
+            self.fc_cat = torch.where(new, cat, self.fc_cat)
+            self.fc_t0 = torch.where(new, torch.full_like(self.fc_t0, float(sec)), self.fc_t0)
+            self.fc_hi = torch.where(new, hp[:, :, None].expand(B, N, N), self.fc_hi)
+            self.fc_hj = torch.where(new, hp[:, None, :].expand(B, N, N), self.fc_hj)
+            self.fc_seen |= new
+        c = u["cost"]
+        ci, cj = c[:, :, None], c[:, None, :]
+        tr = ((self.fc_hj - hp[:, None, :]) * cj - (self.fc_hi - hp[:, :, None]) * ci) / ((ci + cj) / 2).clamp(min=1e-6)
+        for w in (30, 60):
+            due = self.fc_seen & (float(sec) - self.fc_t0 == w)
+            if not bool(due.any()):
+                continue
+            for k, name in enumerate(self.FC_CATS):
+                d = due & (self.fc_cat == k)
+                self.ev[f"fc_{name}_n{w}"] += d.flatten(1).float().sum(1)
+                self.ev[f"fc_{name}_s{w}"] += (tr * d).flatten(1).sum(1)
+        for k, name in enumerate(self.FC_CATS):
+            self.ev[f"fc_{name}_n"] += (new & (self.fc_cat == k)).flatten(1).float().sum(1)
+
+    def _order_close(self, st, which):
+        """The pending orders which [B, N] evaluated: the striker and its target's trade since the order (as the first
+        contacts'), summed by intercepted or not."""
+        u = st.u
+        hp = self._hpf(u)
+        ht = hp.gather(1, self.o_tg)
+        tr = ((self.o_ht - ht) * self.o_ct - (self.o_hi - hp) * self.o_ci) / ((self.o_ci + self.o_ct) / 2).clamp(min=1e-6)
+        for flag, k in ((self.o_int, "inter"), (~self.o_int, "clean")):
+            d = which & flag
+            self.ev[f"order60_{k}_n"] += d.float().sum(1)
+            self.ev[f"order60_{k}_sum"] += (tr * d).sum(1)
+        self.o_pend &= ~which
+
+    def _events(self, st, tac, live, sec=0):
+        from sim import orders as O
+        u = st.u
+        B, N = self.B, self.N
+        o = tac.orders_of()
+        att = o["on"] & (o["skill"] == 2) & (o["tgt"] >= 0) & self.mine & live[:, None]      # (scripts.ATTACK)
+        t = o["tgt"].clamp(min=0)
+        fresh = att & ((o["tgt"] != self.cur_t) | (o["born"] != self.cur_born))
+        # the orders' trade: 60 s after the order, or when another order replaces it
+        self._order_close(st, self.o_pend & (fresh | (float(sec) - self.o_t0 >= 60.0)))
+        if bool(fresh.any()):
+            hp = self._hpf(u)
+            dd = torch.sqrt((u["x"][:, :, None] - u["x"][:, None, :]) ** 2 + (u["z"][:, :, None] - u["z"][:, None, :]) ** 2)
+            self.o_t0 = torch.where(fresh, torch.full_like(self.o_t0, float(sec)), self.o_t0)
+            self.o_tg = torch.where(fresh, t, self.o_tg)
+            self.o_hi = torch.where(fresh, hp, self.o_hi)
+            self.o_ht = torch.where(fresh, hp.gather(1, t), self.o_ht)
+            self.o_ci = torch.where(fresh, u["cost"], self.o_ci)
+            self.o_ct = torch.where(fresh, u["cost"].gather(1, t), self.o_ct)
+            self.o_d0 = torch.where(fresh[..., None], dd, self.o_d0)
+            self.o_pend |= fresh
+            self.o_int &= ~fresh
+        for f in (self.f_reach, self.f_inter, self.f_lost, self.f_gone, self.f_routed, self.f_res):
+            f &= ~fresh
+        self.ev["attack_orders"] += fresh.float().sum(1)
+        self.cur_t = torch.where(att, o["tgt"], torch.full_like(self.cur_t, -1))
+        self.cur_born = torch.where(att, o["born"], torch.full_like(self.cur_born, -1.0))
+        hs = u["hit_sec"].view(B, N, N)
+        touch = (hs > 0) | (hs.transpose(1, 2) > 0)
+        standing = (u["men"] > 0) & ~u["gone"] & ~u["r"]
+        g = lambda v: v.gather(1, t)                                                 # noqa: E731
+        t_touch = touch.gather(2, t[..., None])[..., 0]
+        front, depth = geometry.dims(u, self.spacing)
+        gap = geometry.rect_gap(u["x"], u["z"], u["b"], front, depth).gather(2, t[..., None])[..., 0]
+        foe_touch = (touch & self.foe[:, None, :] & (torch.arange(N, device=self.dev)[None, None, :] != t[..., None])).any(2)
+        mine_on = (touch & (self.mine & standing)[:, :, None]).float().sum(1)               # [B, e] my touchers
+        others = g(mine_on) - t_touch.float()
+        before = att & ~self.f_reach
+        icp = before & foe_touch & (gap >= self.INTERCEPT_M) & ~t_touch
+        nw_i = icp & ~self.f_inter
+        if bool(nw_i.any()):
+            jn = torch.arange(N, device=self.dev)[None, None, :]
+            catch = touch & self.foe[:, None, :] & (jn != t[..., None])
+            dj = torch.where(catch, self.o_d0, torch.full_like(self.o_d0, float("inf"))).amin(2)
+            near = nw_i & (dj < self.o_d0.gather(2, t[..., None])[..., 0])
+            self.ev["inter_nearer"] += near.float().sum(1)
+            self.o_int |= nw_i & self.o_pend
+        self._flag(self.f_inter, icp, "intercepted")
+        self._flag(self.f_lost, before & g(standing) & (others <= 0) & ~t_touch, "pin_lost")
+        self._flag(self.f_gone, before & ~g(standing), "gone_before")
+        self._flag(self.f_reach, att & t_touch, "reached")
+        self.f_routed |= att & g(u["r"])
+        it = self.chain.units.intended
+        back = att & self.f_routed & g(standing) & (it.kind == O.ATTACK) & (it.target == o["tgt"])
+        nw = back & ~self.f_res
+        d = torch.sqrt((u["x"] - g(u["x"])) ** 2 + (u["z"] - g(u["z"])) ** 2)
+        self.ev["resumed_way_m"] += (d * nw).sum(1)
+        self._flag(self.f_res, back, "resumed_on_rallied")
+
+    def _flag(self, f, cond, name):
+        nw = cond & ~f
+        self.ev[name] += nw.float().sum(1)
+        f |= nw
+
+    def measures(self, limit, winner=None):
+        m = super().measures(limit, winner)
+        u = self.st.u
+        m["hp_trade"] = hp_trade(u, self.lord)             # (at the end of the play, as the pilot's: tmp/tactic_slice/pilot)
+        m["routs_own"], m["routs_enemy"] = self.routs[1], self.routs[2]
+        ser = torch.stack(self.series, 1)
+        T = int(limit) // self.SERIES_S + 1                 # (a play that ended early: its last value kept to the limit)
+        if ser.shape[1] < T:
+            ser = torch.cat([ser, ser[:, -1:].expand(-1, T - ser.shape[1])], 1)
+        m["hp_series"] = ser[:, :T]
+        m.update(self.ev)
+        return m
+
+
 def mean_ci(x):
     """(mean, 1.96 x the standard error) over the finite values; (nan, nan) when none."""
     x = x.float()

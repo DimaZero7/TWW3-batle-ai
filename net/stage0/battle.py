@@ -14,6 +14,8 @@ behaviour on top (behave.py), the enemy a script or the formula chain, the readi
                   measures put back in order; unit_level - my side's unit level instead of unit_net (a
                   network or a scripted player, net/unit/scripts.py; the enemy's chain keeps unit_net), gate - my
                   orders to the game re-issued only when they change (net/common/reissue.py: watch's game_orders_min)
+    play_units / play_tactic   the general battles of the unit level (UnitSide: each frame its slot of the deployment)
+                  / through the tactic level (TacticSide: one group, its zone by formation, a player of tactic/pin.py)
 """
 import copy
 import math
@@ -345,6 +347,169 @@ class UnitSide(DU.Chain):
     def orders(self, st, j):
         o = self.units.orders(st, j, self.lands, lambda s_: O.hold(st.B, st.N, st.device))
         return O.merge(o, O.hold(st.B, st.N, st.device), self.hide)
+
+
+class TacticSide(UnitSide):
+    """My side of a general battle through the tactic level (tmp/tactic_slice/design_flank_v2.md section 4): one group
+    = my units but the lord (his row hidden, holding), its zone by formation (tactic/zfit.zone_for; config
+    tactic.json orders.zone_fit off - a line 1 x n on the units' middle, as the pilot) handed once at second 0 through
+    lower.Tacticians.apply, no operative; every 5 s the level's tick with the player (tactic/pin.py) and
+    lower.Units.write, every second the unit's script. The level's own per-tick measures (self.acc [B]):
+    unpinned_attacks (attack orders on an enemy not pinned by pin.pinned at the order), two_on_side (enemies with more
+    strikers than the cap, or two on one side, after a tick)."""
+
+    def __init__(self, player, hygiene=True, unit_level=None):
+        from net.unit import scripts as SC
+        super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False)
+        self.player, self.hygiene = player, hygiene
+
+    def start(self, st, P, device, card, unit_net):
+        from net.operative import lower as LW
+        from net.tactic import cfg as tcfg
+        from net.tactic import zfit
+        super().start(st, P, device, card, unit_net)
+        u = st.u
+        B, N = st.B, st.N
+        self.mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0)
+        self.tac = LW.Tacticians(B, N, 1, device, player=self.player, hygiene=self.hygiene)
+        g = GR.Groups.empty(B, N, 1, device)
+        g.member = torch.where(self.mine, torch.zeros_like(g.member), g.member)
+        g.on[:, 0] = self.mine.any(1)
+        g.n0[:, 0] = self.mine.sum(1)
+        g.verb[:, 0] = DC.VERBS.index("hold")
+        rows, cols = [], []
+        self.worst = []
+        fit = bool(tcfg()["orders"]["zone_fit"])
+        x, z, b = u["x"].cpu(), u["z"].cpu(), u["b"].cpu()
+        for k in range(B):
+            sl = self.mine[k].nonzero()[:, 0].tolist()
+            pl = [(float(x[k, i]), float(z[k, i])) for i in sl]
+            course = float(b[k, sl[0]]) if sl else 0.0
+            zn = zfit.zone_for(pl, course) if (fit and pl) else None
+            if zn is None:
+                n = max(len(pl), 1)
+                mx = sum(p[0] for p in pl) / n if pl else 0.0
+                mz = sum(p[1] for p in pl) / n if pl else 0.0
+                zn = {"cx": mx, "cz": mz, "heading": course, "line": True, "rows": 1, "cols": n, "worst": float("nan")}
+            g.cx[k, 0], g.cz[k, 0], g.heading[k, 0], g.line[k, 0] = zn["cx"], zn["cz"], zn["heading"], bool(zn["line"])
+            rows.append(zn["rows"])
+            cols.append(zn["cols"])
+            self.worst.append(zn["worst"])
+        self.groups0 = g
+        self.shape0 = (torch.tensor(rows), torch.tensor(cols))
+        self.applied = False
+        self.acc = {k: torch.zeros(B, device=device) for k in ("unpinned_attacks", "two_on_side")}
+
+    def _raw(self, raw):
+        r = raw.clone()
+        a = TR.I["alive"]
+        r[..., a] = torch.where(self.hide, torch.zeros_like(r[..., a]), r[..., a])
+        return r
+
+    def tick(self, st, raw):
+        raw = self._raw(raw)
+        if not self.applied:
+            self.applied = True
+            on = self.groups0.on
+            self.tac.apply(self.groups0, on, torch.zeros_like(on), raw)
+            self.tac.shape(*self.shape0)
+        self.tac.tick(raw, self.setup.card, None, now=float(st.t.float().max()))
+        self.units.write(self.tac)
+        self._measure()
+
+    APPROACH_M = 60.0            # (the drill's split of attack orders: 'approaching my line within 60 m')
+
+    def _measure(self):
+        """The level's per-tick measures (class doc) and the split of the new attack orders by what the target was
+        doing at the order (from the level's facts): pinned (pin.pinned); else chasing a router (moving at
+        scripts.APPROACH_MS or more, the nearest unit of mine by the edge gap routing); else approaching (closing on the
+        nearest standing unit of mine at APPROACH_MS or more, within APPROACH_M edge to edge); else standing (under
+        APPROACH_MS, not in melee); else other."""
+        from net.tactic import orders as OR
+        from net.tactic import pin as PN
+        from net.unit import scripts as SC
+        v = self.tac.view
+        if v is None:
+            return
+        fx, bi = v["view"].fx, v["bi"]
+        pin = PN.pinned(fx)
+        k = fx.row_of_slot(v["tgt"])
+        kc = k.clamp(min=0)
+        at_pin = (k >= 0) & pin.gather(1, kc)
+        new = v["new_attack"]
+        self.acc["unpinned_attacks"].index_add_(0, bi, (new & ~at_pin).float().sum(1))
+        # what the target was doing
+        g = lambda t: t.gather(1, kc)                                                        # noqa: E731
+        moving = g(fx.speed) >= SC.APPROACH_MS
+        mine_any = fx.mine[:, None, :]
+        gap_m = torch.where(mine_any, fx.gap, torch.full_like(fx.gap, OR.INF))              # [R, e, a]
+        near_a = gap_m.argmin(2)                                                             # [R, K] my nearest unit
+        router = fx.r.gather(1, near_a)
+        stand = fx.mine & ~fx.r
+        gap_s = torch.where(stand[:, None, :], fx.gap, torch.full_like(fx.gap, OR.INF))
+        a_s = gap_s.argmin(2)
+        dxs = fx.s.gather(1, a_s) - fx.s
+        dfs = fx.f.gather(1, a_s) - fx.f
+        nrm = torch.sqrt(dxs ** 2 + dfs ** 2).clamp(min=1e-6)
+        closing = (fx.vs * dxs + fx.vf * dfs) / nrm
+        appr = (closing >= SC.APPROACH_MS) & (gap_s.amin(2) <= self.APPROACH_M)
+        chase = moving & g(router)
+        cats = {"ord_pinned": at_pin, "ord_chasing": ~at_pin & chase,
+                "ord_approaching": ~at_pin & ~chase & g(appr),
+                "ord_standing": ~at_pin & ~chase & ~g(appr) & ~moving & ~g(fx.m)}
+        cats["ord_other"] = ~(cats["ord_pinned"] | cats["ord_chasing"] | cats["ord_approaching"] | cats["ord_standing"])
+        for name, c in cats.items():
+            if name not in self.acc:
+                self.acc[name] = torch.zeros_like(self.acc["unpinned_attacks"])
+            self.acc[name].index_add_(0, bi, (new & (k >= 0) & c).float().sum(1))
+        # every unit of mine holding an attack order on the enemy, routing or not
+        att = (fx.my >= 0) & (v["skill"] == SC.ATTACK) & (k >= 0)
+        hot = torch.nn.functional.one_hot(kc, fx.K).bool() & att[..., None]                # [r, G, K]
+        side = v["side"]                                       # (the side written at each order)
+        cap = int(OR.c_orders()["strikers"])
+        over = (hot.sum(1) > cap).float().sum(1)
+        for sd in (OR.LEFT, OR.RIGHT):
+            over += ((hot & (side == sd)[..., None]).sum(1) > 1).float().sum(1)
+        self.acc["two_on_side"].index_add_(0, bi, over)
+
+
+def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None, watch_cls=None):
+    """(measures {name: [B]}, stats) of stage 0's general battles of the unit level (play_units' battles and enemies)
+    with my side through the tactic level (TacticSide) under player() - a factory of a fresh player of tactic/pin.py
+    each batch (its memory starts anew); watch_cls - a watch.Watch subclass (watch.PinWatch for the drill's events)."""
+    assert all(s["enemy"] != "chain" for s in specs), "the unit level's general battles: script enemies only"
+    parts, total = {}, {"battles": 0, "wall_s": 0.0}
+    for a in range(0, len(specs), chunk):
+        ii = list(range(a, min(a + chunk, len(specs))))
+        pad = _pad(len(ii), device, compile)
+        batch = [specs[i] for i in ii] + [copy.deepcopy(specs[ii[k % len(ii)]]) for k in range(pad)]
+        mine = TacticSide(player(), hygiene=hygiene)
+        enemy = Scripts([s["enemy"] for s in batch], device)
+        watch = (watch_cls or W.Watch)(P, cfg()["general"], chain=mine)
+        limit = max(int(s["limit"]) for s in batch)
+        rd, stt = DU.play([NAME] * len(batch), unit_battles(batch), {1: mine, 2: enemy}, None, P, device,
+                          limit_s=limit, per_side=PER_SIDE, watch=watch, maps=[s["map"] for s in batch],
+                          compile=compile)
+        m = watch.measures(limit, rd["winner"])
+        for name, v in mine.tac.counts().items():
+            m[name] = v
+        for name, v in mine.acc.items():
+            m[name] = v
+        m["zone_worst_m"] = torch.tensor(mine.worst, device=m["trade"].device)
+        for k, v in m.items():
+            v = v.to(m["trade"].device) if torch.is_tensor(v) else v
+            if torch.is_tensor(v) and v.dim() == 1:
+                parts.setdefault(k, {}).update({i: float(x) for i, x in zip(ii, v.tolist()[:len(ii)])})
+            elif torch.is_tensor(v) and v.dim() == 2:
+                parts.setdefault(k, {}).update({i: x for i, x in zip(ii, v.tolist()[:len(ii)])})
+        total["battles"] += stt["battles"]
+        total["wall_s"] += stt["wall_s"]
+    m = {}
+    for k, v in parts.items():
+        vals = [v[i] for i in range(len(specs))]
+        m[k] = torch.tensor(vals)
+    total["wall_s"] = round(total["wall_s"], 1)
+    return m, total
 
 
 def unit_battles(specs):

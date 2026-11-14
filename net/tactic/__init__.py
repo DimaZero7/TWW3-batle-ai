@@ -19,6 +19,11 @@ sim/evidence/diag_g49/unit_base.md "Заметки для старших уро�
     drill1.py   the first drill: 2 infantry + 1 lobbing shooters against 3 infantry under a script; the contact's reading
     env.py      a batch of battles: the tactician every 5 s, the frozen unit network a second, the reward
     exam1.py    the first drill's exam; train.py PPO over the tactician's decisions
+    orders.py   the orders in force (skill, main target, side, frame, age), the level's facts from its rows, the frame
+                walk, the code's masks (no new order in melee, two strikers an enemy, one a side)
+    zfit.py     the group's zone by its formation: the first frames where the units stand ('keep' = 'hold')
+    pin.py      drill T0-2 'pin and strike': pinned(e) and the players K, T (the teacher), D, A1, references
+    exam_pin.py the drill's runs: the players through the level on general battles, paired by battle
 
 The bridge's side: bridge/companion/tactic_input.py (the same input from the bridge's documents).
 The numbers: net/config/tactic.json.
