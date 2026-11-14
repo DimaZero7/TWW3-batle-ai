@@ -53,9 +53,9 @@ def test_first_frames_hold_where_deployed():
     assert not bad, bad[:5]
 
 
-def _tick(units):
+def _tick(units, skill=None):
     """A hand-built tick of one group: units [(who, s, f, b, front, depth, m, r, speed)] in slot order (who 'mine' /
-    'enemy'); orders in force: hold, no target. Returns the orders.View."""
+    'enemy'); orders in force: hold (or skill [G]), no target. Returns the orders.View."""
     K = len(units)
     rows = torch.zeros((1, K, len(RW.ROW)))
     RI = RW.RI
@@ -75,7 +75,8 @@ def _tick(units):
     tiles = ZN.Tiles(torch.zeros(1), torch.zeros(1), torch.zeros(1), torch.tensor([1]), torch.tensor([G]))
     able = torch.tensor([[not units[k][7] for k in mine]])
     ctx = DC.Ctx(tiles, torch.tensor([mine]), able, torch.tensor([mine]), mine_raw, None)
-    order = {"skill": torch.zeros((1, G), dtype=torch.long), "tgt": torch.full((1, G), -1),
+    order = {"skill": torch.zeros((1, G), dtype=torch.long) if skill is None else torch.tensor([skill]),
+             "tgt": torch.full((1, G), -1),
              "side": torch.full((1, G), -1), "born": torch.zeros((1, G))}
     fx = OR.Facts(rr, ctx, order)
     z = torch.zeros((1, G), dtype=torch.bool)
@@ -180,3 +181,88 @@ def test_second_enemy_walk():
     # finds 5's side on it taken by unit 1 and goes at 6
     assert PN.player("DH")(v)["target"][0].tolist() == [-1, 5, 6, 6]
     assert PN.player("DP")(v)["target"][0].tolist() == [-1, 4, 4, -1]
+
+
+def test_stage1e_options():
+    # the scene of test_second_enemy_walk: anvil 0 in melee with 4 (pinned); 5 runs at the line, 6 at unit 2 (inside its
+    # counter's reach); free units 1, 2, 3
+    units = [("mine", 0.0, 0.0, 0.0, 32, 10, 1, 0, 0.0),
+             ("mine", -60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", -40.0, 100.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 0.0, 12.0, 180.0, 32, 10, 1, 0, 0.0),
+             ("enemy", 0.0, 80.0, 180.0, 32, 10, 0, 0, -3.0),
+             ("enemy", 60.0, 45.0, 180.0, 32, 10, 0, 0, -3.0),
+             ("enemy", -40.0, 140.0, 180.0, 32, 10, 0, 1, -3.0)]
+    v = _tick(units)
+    # ~come_own on cause (a): unit 2 (6 comes at it within its counter's reach) no longer leaves for the pinned 4
+    p = PN.Teacher(default="config", wait2=True, co=True)
+    p(v)
+    assert p(v)["target"][0].tolist() == [-1, 4, -1, -1]
+    p = PN.Teacher(default="config", wait2=True)
+    p(v)
+    assert p(v)["target"][0].tolist() == [-1, 4, 4, -1]
+    # the two-tick wait read off the rows' ticks in melee: 4 two ticks in melee -> struck at once, one tick -> not
+    v.fx.mt = torch.tensor([[0, 0, 0, 0, 2, 0, 0, 0]])
+    assert PN.Teacher(default="config", wait2=True, wait_mt=True)(v)["target"][0].tolist() == [-1, 4, 4, -1]
+    v.fx.mt = torch.tensor([[0, 0, 0, 0, 1, 0, 0, 0]])
+    assert PN.Teacher(default="config", wait2=True, wait_mt=True)(v)["target"][0].tolist() == [-1] * 4
+    # TIu: 5's and 6's nearest unit in their path is not the one fighting - no second enemy (TI's tight trigger has two)
+    assert not PN.second(v.fx, nearest_m=150.0)[0].any() and PN.second(v.fx, tight=True)[0][0, 5:7].all()
+    # back to the default: an attack that ended (attack, no target) gets counter with back, stays without it
+    vb = _tick(units, skill=[SC.HOLD, SC.ATTACK, SC.ATTACK, SC.HOLD])
+    out = PN.Teacher(default="config", wait2=True, back=True)(vb)
+    assert out["skill"][0].tolist() == [SC.COUNTER] * 4
+    out = PN.Teacher(default="config", wait2=True)(vb)
+    assert out["skill"][0].tolist() == [SC.COUNTER, SC.ATTACK, SC.ATTACK, SC.COUNTER]
+    assert out["target"][0].tolist() == [-1] * 4
+
+
+def test_nearest_unit_trigger():
+    # anvil 0 in melee with 3 (pinned, f 12); 4 runs at the anvil from 60 m - the anvil is the nearest unit in its path;
+    # free units 1, 2 80 m to the sides
+    units = [("mine", 0.0, 0.0, 0.0, 32, 10, 1, 0, 0.0),
+             ("mine", -80.0, 0.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 80.0, 0.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 0.0, 12.0, 180.0, 32, 10, 1, 0, 0.0),
+             ("enemy", 0.0, 60.0, 180.0, 32, 10, 0, 0, -3.0)]
+    v = _tick(units)
+    e, u = PN.second(v.fx, nearest_m=150.0)
+    assert e[0].tolist() == [False, False, False, False, True] and int(u[0, 4]) == 0
+    assert not PN.second(v.fx, nearest_m=40.0)[0].any(), "gap(e, u) within second_m"
+    out = PN.player("TIu")(v)
+    assert out["target"][0].tolist() == [-1, 4, -1]           # one interceptor (the first of two equally near)
+    t = PN.player("TEACH")                                     # the config's teacher: TIu with back and co
+    assert t.nearest and t.tight and t.back and t.co and not t.wait_mt and t.second_m == 150.0
+
+
+def test_ticks_in_melee():
+    from net.matchup import duel as DU
+    from net.stage0 import battle as BA
+    from net.tactic.exam_pin import pilot_specs
+    from sim.params import load
+    P = load()
+    sp = pilot_specs(4, 0)[:2]
+    st, card = DU.build([BA.NAME] * len(sp), BA.unit_battles(sp), "cpu", P, per_side=BA.PER_SIDE,
+                        maps=[s["map"] for s in sp])
+    side = BA.TacticSide(PN.player("K"))
+    side.start(st, P, "cpu", card, None)
+    raw = TR.Seer(P).raw(st)
+    side.tick(st, raw)
+    tac = side.tac
+    assert int(tac.mt.abs().sum()) == 0, "0 at tick 0 (nobody in melee)"
+    j = int(side.mine[0].nonzero()[0, 0])                       # a unit of mine (a row of its group)
+    lord = int((st.u["lord"][0] & (st.u["side"][0] == 1)).nonzero()[0, 0])
+    m = raw.clone()
+    m[0, j, TR.I["m"]] = 1.0
+    m[0, lord, TR.I["m"]] = 1.0                                 # (the lord has no row: hidden)
+    for k in (1, 2):
+        side.tick(st, m)
+        assert int(tac.mt[0, j]) == k and int(tac.mt[0, lord]) == 0
+    side.tick(st, raw)
+    assert int(tac.mt[0, j]) == 0, "m off -> 0"
+    side.tick(st, m)
+    assert int(tac.mt[0, j]) == 1
+    g = side.groups0
+    tac.apply(g, g.on, torch.zeros_like(g.on), side._raw(raw))   # a fresh parcel
+    assert int(tac.mt.abs().sum()) == 0

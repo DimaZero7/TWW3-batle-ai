@@ -68,13 +68,19 @@ def coming_at(fx):
     return at, torch.where(at.any(1), gu.argmin(1), torch.full_like(fx.slot, -1))
 
 
-def second(fx, tight=False):
+def second(fx, tight=False, nearest_m=None):
     """([R, e] e is a second enemy, [R, e] the row of its unit u, -1 none): valid, not in melee, and it comes at a
     standing unit u of mine (orders.comes) that is in melee, or (not tight: the loose trigger) that another standing
     enemy coming at it nearer (edge gap) than e also comes at; u the nearest such unit to e. tight: u in melee only -
     the case the game probe meetfar measured (the loose one is true before any melee in an advancing line). Whether a unit of mine already holds an attack order on e
-    is the walk's (Teacher: count 0)."""
-    at, _ = coming_at(fx)
+    is the walk's (Teacher: count 0). nearest_m (TIu, review_attack_v22 A.1): instead - the NEAREST standing unit of
+    mine that e comes at (coming_at) is in melee and within nearest_m of e edge to edge; u that unit."""
+    at, cu = coming_at(fx)
+    if nearest_m is not None:
+        cuc = cu.clamp(min=0)
+        g_u = fx.gap.gather(1, cuc[:, None, :])[:, 0, :]                            # [R, e] gap(u(e), e)
+        e = (cu >= 0) & fx.m.gather(1, cuc) & (g_u <= float(nearest_m)) & fx.valid & ~fx.m
+        return e, torch.where(e, cu, torch.full_like(cu, -1))
     gu = torch.where(at, fx.gap, torch.full_like(fx.gap, OR.INF))                   # [R, u, e]
     q = at & fx.m[:, :, None] if tight else at & (fx.m[:, :, None] | (gu > gu.amin(2, keepdim=True)))
     gq = torch.where(q, fx.gap, torch.full_like(fx.gap, OR.INF))
@@ -136,7 +142,8 @@ class Teacher:
     name = "T"
 
     def __init__(self, melee_row=True, recall=False, dumb=None, counter=False, wait2=False, near=True, speed=True,
-                 sign=False, second_m=None, first=None, default=None, restrict=None, tight=False):
+                 sign=False, second_m=None, first=None, default=None, restrict=None, tight=False, nearest=False,
+                 back=False, co=False, wait_mt=False):
         # dumb: None (T), "reach" (D), "d35" (D35); counter: my units under 'hold' get 'counter' (TC). The four rules
         # where T differs from A1 (the ablation; T's own rule first): wait2 - e pinned at this tick and the one before
         # (A1's memory: by the Tacticians' row and the battle's slot); near False - free(i) without 'no standing enemy
@@ -146,10 +153,15 @@ class Teacher:
         # with both causes - None the nearest target of either, "pin" a pinned target first, "second" a second enemy
         # first; tight - cause (b)'s trigger 'u in melee' only (second()); default "config": my units left under
         # 'hold' without a target get the level's default skill (config orders.default_skill; counter=True is the same with 'counter' fixed); restrict (D only): "coming" - only an
-        # enemy that comes at one of my units (DH), "nobody" - only one that comes at none (DP)
+        # enemy that comes at one of my units (DH), "nobody" - only one that comes at none (DP); nearest - cause (b)'s
+        # trigger of TIu (second(nearest_m=second_m)); back - a unit whose attack ended (attack, no target) gets the
+        # default skill too, as one left under 'hold' (config orders.back_default); co - cause (a) only for a unit no
+        # enemy comes at within its counter's reach (come_own: it meets its own; config orders.pin_come_own);
+        # wait_mt - the two-tick wait read off the rows' ticks in melee (fx.mt >= 2), not the player's memory
         self.melee_row, self.recall, self.dumb, self.counter = melee_row, recall, dumb, counter
         self.wait2, self.near, self.speed, self.sign = wait2, near, speed, sign
         self.second_m, self.first, self.restrict, self.tight = second_m, first, restrict, tight
+        self.nearest, self.back, self.co, self.wait_mt = nearest, back, co, wait_mt
         self.prev_pin = None
         self.idle = SC.COUNTER if counter else None
         if default == "config":
@@ -164,6 +176,8 @@ class Teacher:
         pin = pinned(fx, self.speed)
         if not self.wait2:
             return pin
+        if self.wait_mt:
+            return pin & (fx.mt >= 2)
         N = int(fx.slot.max()) + 1 if fx.slot.numel() else 1
         n = int(v.idx.max()) + 1
         if self.prev_pin is None or self.prev_pin.shape[0] < n or self.prev_pin.shape[1] < N:
@@ -215,9 +229,10 @@ class Teacher:
             self.n_recall = getattr(self, "n_recall", 0) + int(rec.sum())
         sec_e = sec_u = free_b = None
         if self.second_m is not None:
-            sec_e, sec_u = second(fx, self.tight)
+            sec_e, sec_u = second(fx, self.tight, float(self.second_m) if self.nearest else None)
             free_b = free & ~come_own(fx)
         come_u = coming_at(fx)[1] if self.restrict is not None else None
+        elig_a = elig & ~come_own(fx) if self.co else elig                # (cause (a)'s own eligible units)
         cause = torch.zeros_like(skill)
         u_of = torch.full_like(tgt, -1)
         for g in range(G):
@@ -235,8 +250,9 @@ class Teacher:
                 sd = self._side(fx)                                                  # [R, G, K]
                 same = sd == sd[:, g:g + 1, :]
                 d = fx.g_dist + torch.arange(G, device=d_dev(fx))[None, :, None] * 1e-4      # (ties by slot)
-                best = torch.where(same & elig[:, :, None], d, torch.full_like(d, OR.INF)).amin(1)
-                cand = pin & op & (fx.g_dist[:, g] <= reach) & (d[:, g] <= best) & elig[:, g:g + 1]
+                ea = elig & elig_a
+                best = torch.where(same & ea[:, :, None], d, torch.full_like(d, OR.INF)).amin(1)
+                cand = pin & op & (fx.g_dist[:, g] <= reach) & (d[:, g] <= best) & ea[:, g:g + 1]
                 if sec_e is not None:
                     # cause (b): an unheld second enemy (no unit of mine holds an attack on it - one interceptor an
                     # enemy), g the nearest interceptor to it (free, no enemy coming at itself) within second_m
@@ -281,7 +297,7 @@ class Teacher:
             skill[:, g] = torch.where(hold, torch.full_like(skill[:, g], SC.HOLD), skill[:, g])
             tgt[:, g] = torch.where(hold, torch.full_like(tgt[:, g], -1), tgt[:, g])
         if self.idle is not None:
-            idle = fx.able & (skill == SC.HOLD) & (tgt < 0)
+            idle = fx.able & (tgt < 0) & ((skill == SC.HOLD) | ((skill == SC.ATTACK) & self.back))
             skill = torch.where(idle, torch.full_like(skill, self.idle), skill)
         self.last_tags = {"cause": cause, "u": u_of, "cell": cell(fx, tgt)}
         return _out(v, fr, skill, tgt, side)
@@ -405,6 +421,44 @@ PLAYERS = {"K": Keep, "T": Teacher, "D": lambda: Teacher(dumb="reach"), "D35": l
 
 def _second_m():
     return float(OR.c_orders()["second_m"])
+
+
+# stage 1e (tmp/tactic_slice/review_attack_v22.md A.1-A.6): the bases and their options as named players - a base, then
+# '_back' (back to the default after an attack ends), '_co' (cause (a) only for a unit nothing comes at), 'm' at the end
+# (the two-tick wait read off fx.mt); TIu - cause (b) only when the nearest unit of mine e comes at is the one in melee,
+# within second_m; Dc - D over the default skill
+_BASES = {"TCw": dict(default="config", wait2=True),
+          "TI": dict(default="config", wait2=True, second="tight"),
+          "TIu": dict(default="config", wait2=True, second="nearest"),
+          "Dc": dict(default="config", dumb="reach")}
+
+
+def _variant(base, back=False, co=False, mt=False):
+    o = dict(_BASES[base])
+    sec = o.pop("second", None)
+    if sec is not None:
+        o.update(second_m=_second_m(), tight=True, nearest=sec == "nearest")
+    return Teacher(**o, back=back, co=co, wait_mt=mt)
+
+
+for _b in _BASES:
+    for _bk in (False, True):
+        for _co in (False, True):
+            for _m in (False, True):
+                _n = _b + ("_back" if _bk else "") + ("_co" if _co else "") + ("m" if _m else "")
+                if _n not in PLAYERS:
+                    PLAYERS[_n] = (lambda b=_b, bk=_bk, co=_co, m=_m: _variant(b, bk, co, m))
+
+
+def _teach():
+    """TEACH: the first drill's teacher as the config sets it - orders.teach {base, mt}, orders.back_default,
+    orders.pin_come_own."""
+    c = OR.c_orders()
+    t = c["teach"]
+    return _variant(t["base"], bool(c.get("back_default", False)), bool(c.get("pin_come_own", False)), bool(t["mt"]))
+
+
+PLAYERS["TEACH"] = _teach
 HYGIENE_OFF = ("T_nohyg",)
 
 

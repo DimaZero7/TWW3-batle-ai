@@ -53,6 +53,9 @@ class Tacticians:
         self.tgt = torch.full((R, N), -1, dtype=torch.long, device=device)
         self.side = torch.full((R, N), -1, dtype=torch.long, device=device)       # (orders.SIDES; -1 none)
         self.born = torch.zeros((R, N), device=device)
+        # mt: ticks in melee of every unit (by the battle's slot) as this row's level saw it - consecutive ticks up to this
+        # one with a row and its m on (no row or m off: 0); 0 before the first tick, reset by a fresh parcel
+        self.mt = torch.zeros((R, N), dtype=torch.long, device=device)
         self.clock = 0.0
         self.cnt = {}
         self.view = None                       # (the last tick's orders.View and the new orders: the drill's measures)
@@ -124,6 +127,7 @@ class Tacticians:
         self.tgt = torch.where(fresh[:, None], torch.full_like(self.tgt, -1), self.tgt)
         self.side = torch.where(fresh[:, None], torch.full_like(self.side, -1), self.side)
         self.born = torch.where(fresh[:, None], torch.zeros_like(self.born), self.born)
+        self.mt = torch.where(fresh[:, None], torch.zeros_like(self.mt), self.mt)
         idx = t.nonzero()[:, 0]
         return self.parcel(idx), idx
 
@@ -249,6 +253,14 @@ class Tacticians:
             order["tgt"] = torch.where(out_me, torch.full_like(order["tgt"], -1), order["tgt"])
             self._count("striker_routed", idx, out_me & (order["tgt"] >= -1))
         fx = OR.Facts(rr, ctx, order)
+        # ticks in melee (self.mt): this tick counts; the rows read it as fx.mt [r, K]
+        seen_m = torch.zeros((r, self.N + 1), dtype=torch.bool, device=self.dev)     # (column N: the empty rows)
+        on_m = rr["mask"] & (rr["rows"][..., RW.RI["m"]] > 0.5)
+        seen_m.scatter_(1, torch.where(rr["slot"] >= 0, rr["slot"], self.N), on_m)
+        seen_m = seen_m[:, :self.N]
+        mt = torch.where(seen_m, self.mt[idx] + 1, torch.zeros_like(self.mt[idx]))
+        self.mt[idx] = mt
+        fx.mt = torch.where(rr["mask"], mt.gather(1, rr["slot"].clamp(min=0)), torch.zeros_like(rr["slot"]))
         cause = U.Seq(tiles, my.shape[1]).causes(ctx.prev, ctx.able)
         hole = not bool(tcfg()["orders"]["hole_fits"])
         must = cause["first"] | cause["zone"] | (cause["hole"] if hole else torch.zeros_like(cause["hole"]))

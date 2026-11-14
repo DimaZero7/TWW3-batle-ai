@@ -301,6 +301,8 @@ class PinWatch(Watch):
     order_log       a row a closed order (ORDER_LOG; the measures' caller reads it)"""
     SERIES_S = 5
     CAUSES = ("none", "pin", "second", "other")
+    ADV_S = (0, 60)          # advance_{w}: my standing units' mean shift from deployment along my centroid -> the
+    # enemy's (at the start), m, at the battle's first contact + w s (NaN: no contact / the battle over before)
     ORDER_LOG = ("b", "slot", "sec", "target", "cause", "u", "cell", "trade60", "loss60", "reached", "first",
                  "intercepted", "final")
     INTERCEPT_M = 10.0
@@ -344,6 +346,15 @@ class PinWatch(Watch):
         self.f_utouch, self.f_first = zb(), zb()
         self.tick_seen = -1
         self.order_log = []
+        # the line's advance: my centroid -> the enemy's at the start, a unit vector [B]
+        u = st.u
+        w1, w2 = self.mine.float(), self.foe.float()
+        k1, k2 = w1.sum(1).clamp(min=1), w2.sum(1).clamp(min=1)
+        vx = (u["x"] * w2).sum(1) / k2 - (u["x"] * w1).sum(1) / k1
+        vz = (u["z"] * w2).sum(1) / k2 - (u["z"] * w1).sum(1) / k1
+        n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
+        self.fwd = (vx / n, vz / n)
+        self.adv = {w: torch.full((B,), float("nan"), device=dev) for w in self.ADV_S}
         for c in self.CAUSES:
             for k in ("orders", "reached", "first", "intercepted", "o60_n", "o60_sum", "loss60_sum"):
                 self.ev[f"cause_{c}_{k}"] = z.clone()
@@ -356,6 +367,14 @@ class PinWatch(Watch):
         for s in (1, 2):
             self.routs[s] += (new & (u["side"] == s)).float().sum(1)
         self.r_prev = u["r"].clone()
+        t = float(sec + 1)
+        for w in self.ADV_S:
+            due = torch.isfinite(self.t_contact) & (self.t_contact + w == t) & torch.isnan(self.adv[w])
+            if bool(due.any()):
+                ok = self.mine & ~u["r"] & (u["men"] > 0) & ~u["gone"]
+                sh = (u["x"] - self.x0) * self.fwd[0][:, None] + (u["z"] - self.z0) * self.fwd[1][:, None]
+                m = (sh * ok).sum(1) / ok.float().sum(1).clamp(min=1)
+                self.adv[w] = torch.where(due, m, self.adv[w])
         hp = hp_trade(u, self.lord)
         self.hp_last = hp if self.hp_last is None else torch.where(live, hp, self.hp_last)
         if sec % self.SERIES_S == 0:
@@ -542,6 +561,8 @@ class PinWatch(Watch):
             self._order_close(self.st, self.o_pend.clone(), final=True)
         m["hp_trade"] = hp_trade(u, self.lord)             # (at the end of the play, as the pilot's: tmp/tactic_slice/pilot)
         m["routs_own"], m["routs_enemy"] = self.routs[1], self.routs[2]
+        for w in self.ADV_S:
+            m[f"advance_{w}"] = self.adv[w]
         ser = torch.stack(self.series, 1)
         T = int(limit) // self.SERIES_S + 1                 # (a play that ended early: its last value kept to the limit)
         if ser.shape[1] < T:

@@ -79,6 +79,9 @@ class Facts:
         self.rr, self.ctx, self.order = rr, ctx, order
         self.mask = rr["mask"]
         self.slot = rr["slot"]
+        # mt [R, K]: each row's ticks in melee (lower.Tacticians keeps it in the level's seat and sets it here; a tick
+        # built by hand: 0, or set it)
+        self.mt = rr.get("mt", torch.zeros_like(self.slot))
         who = rr["who"]
         self.s, self.f = x[..., RI["right"]] * pos, x[..., RI["forward"]] * pos
         self.b = torch.rad2deg(torch.atan2(x[..., RI["front_sin"]], x[..., RI["front_cos"]]))   # (the zone's axes)
