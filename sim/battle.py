@@ -322,6 +322,13 @@ def step(st, orders, params=None, dt=None):
         tgt_away = ~touch.gather(2, ti_a).squeeze(2) & (pw["gap"].gather(2, ti_a).squeeze(2) >= leave_m)
         fighting = (touch & standing[:, None, :]).any(2)
         who = (u["men0"] > 1) | bool(cal["contact"].get("attack_leave_lord"))
+        if cal["contact"].get("attack_leave_melee") and "order_s" in u:
+            # Only an attack order given in melee is a leave (contact.attack_leave_melee; sim/config/sim.json
+            # contact.attack_leave_melee_why; reverse/notes/melee_turn.md 2.2-2.5: the exit's 'do not strike' state is
+            # set by a new order, for the enemies touching the unit then): a unit caught on its way under an attack
+            # order given out of melee (its order clock started at the window) fights whoever strikes it and walks on
+            # to its target (retarget_walk below).
+            who = who & (u["order_s"] < float(R.get("melee_breakoff_secs", 0.0)))
         leaving = leaving | ((kind == O.ATTACK) & (tgt >= 0) & tgt_away & fighting & (u["range"] <= 0)
                              & who & (leave_m > 0))
     # --- the skirmish mode (skirmish.py; sim/config/sim.json skirmish): a shooter with the mode on runs, over its order
@@ -437,7 +444,16 @@ def step(st, orders, params=None, dt=None):
         ti0 = tgt.clamp(min=0)
         chasing = (engaged & (kind == O.ATTACK) & (tgt >= 0) & leaving.gather(1, ti0)
                    & touch.gather(2, ti0[:, :, None]).squeeze(2))
-    speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
+        if cal["contact"].get("chase_walk") and cal["contact"].get("retarget_walk"):
+            # The chase of a walker (contact.chase_walk; sim/config/sim.json contact.chase_walk_why): an enemy in contact
+            # that walks on to its own attack's target (retarget_walk below: not a leave, it fights on) is followed the
+            # same way - the men's free fight keeps its target while that one moves slower than the man's walk
+            # (reverse/notes/hold_rate.md 2.2, 14307f80c) - so the attacker stays on it instead of falling behind.
+            on_t = touch.gather(2, ti0[:, :, None]).squeeze(2)
+            walks_on = (engaged & ~leaving & (kind == O.ATTACK) & (tgt >= 0) & ~on_t & (u["men0"] > 1)
+                        & (u["range"] <= 0))
+            chasing = chasing | (engaged & (kind == O.ATTACK) & (tgt >= 0) & walks_on.gather(1, ti0) & on_t)
+    speed =torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     # --- innate effects (attributes, passives, game-fired timed passives: sim/config/effects.json): their
     # stats and rule flags hold for this step ---
     innate = effects.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
@@ -581,6 +597,16 @@ def step(st, orders, params=None, dt=None):
         parts = {}                           # (kills.wound_hp: melee.strikes fills the HP a hit on an unwounded man)
     # (parts only with the comb or kills.wound_hp: a hook in place of melee.strikes - the fighters lab - keeps the old
     # call)
+    if (cal["melee"].get("answer_free") or {}).get("on") and "afw" in u:
+        # (melee.answer_free) the pairs where a unit on its way answers the enemy that struck it: begun when that enemy
+        # strikes it while it is on its way, held while they touch - its men keep their free fight's target when the
+        # unit reaches its own (reverse/notes/hold_rate.md 2.2: an action lives while its target is valid and in reach)
+        fw = melee.free_way(u, strike, cal["melee"])
+        not_t = u["order_target"][:, :, None] != torch.arange(N, device=st.device)[None, None, :]
+        begin_fw = fw[:, :, None] & not_t & strike.transpose(1, 2) & pw["enemy"]
+        afw = u["afw"].view(st.B, N, N)
+        u["afw"] = torch.where(begin_fw | ((afw > 0) & touch), torch.ones_like(afw), torch.zeros_like(afw)).reshape(
+            st.B, N * N)
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire,
                                                      late=late, **({"parts": parts} if parts is not None else {}))
     if big_on:

@@ -525,6 +525,24 @@ def cycle_rate(p, interval, hit, hp_man, single_j, recv, cyc):
     return base * busy * unbroken
 
 
+def free_way(u, contact, cal):
+    """[B, N] formations on their way (melee.answer_free): under an attack order on a unit they do not strike now (no man
+    busy with the target), melee units; the rest False."""
+    ot = u["order_target"]
+    hits_t = contact.gather(2, ot.clamp(min=0)[:, :, None]).squeeze(2)
+    return ((u["order_kind"] == O.ATTACK) & (ot >= 0) & ~hits_t & (u["men0"] > 1) & (u["range"] <= 0))
+
+
+def answering(u, contact, cal):
+    """[B, i, j] i answers j's blows with men out of its way (melee.answer_free): the pair's latch u["afw"] (battle.py),
+    else i on its way now and j not its target."""
+    if "afw" in u:
+        n = contact.shape[1]
+        return u["afw"].view(contact.shape[0], n, n) > 0
+    not_t = u["order_target"][:, :, None] != torch.arange(contact.shape[2], device=contact.device)[None, None, :]
+    return free_way(u, contact, cal)[:, :, None] & not_t
+
+
 def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None, parts=None):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
@@ -898,6 +916,15 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         on_held = held_g.gather(2, side_of.clamp(min=0)) & (side_of >= 0)
         cap_ans = torch.where(on_held, torch.zeros_like(F), F_pre.transpose(1, 2))
         F = torch.where(newer, torch.minimum(F, cap_ans), F)
+    on_way = answering(u, contact, cal) if (cal.get("answer_free") or {}).get("on") else None
+    if on_way is not None:
+        # The answer of a unit on its way (melee.answer_free; sim/config/sim.json melee.answer_free_why): a formation
+        # under an attack order on another unit it does not touch has no man busy - its order feeds targets from the
+        # target unit only (reverse/notes/hold_rate.md 2.2) - so every man of it that a striker j's swing touches is
+        # ordered to attack j (melee_wrap.md 5: 0x143080ca0 -> 0x143074dcc): it answers j with at least j's steady men
+        # striking it (F before the opening wave), past its side's length (its men turn out of the formation's face).
+        ans = on_way & contact & ~single_i & ~single_j
+        F = torch.where(ans, torch.maximum(F, torch.minimum(F_pre.transpose(1, 2), men_i)), F)
     own =torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
@@ -940,6 +967,12 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
         _, newer_t = newcomers(u, contact, pw, float(params.dt))
         round_done = (u["contact_s"][:, :, None] >= u["interval"][:, :, None])
         turned = newer_t.transpose(1, 2) & round_done & ~single_i & ~single_j
+        sector = torch.where(turned, torch.zeros_like(sector), sector)
+    if on_way is not None and (cal.get("answer_free") or {}).get("turn", 1) and "contact_s" in u:
+        # (melee.answer_free turn) the touched men of a unit on its way turn to the striker: after the striker's first
+        # interval its blows on them come from their front (melee_wrap.md 5; the turn's speed is not in the notes)
+        round_i = u["contact_s"][:, :, None] >= u["interval"][:, :, None]
+        turned = on_way.transpose(1, 2) & round_i & ~single_i & ~single_j
         sector = torch.where(turned, torch.zeros_like(sector), sector)
     routing_j = u["r"][:, None, :]
     sector = torch.where(routing_j, torch.full_like(sector, 2), sector)

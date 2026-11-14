@@ -582,6 +582,9 @@ PAIRS = {
     # (here row: the unit i, column: the enemy j)
     "cl_t": "the step's end time enemy j joined unit i's combat list (0: not in it; morale.combat_list - the game's "
             "list of the fight's outcome, 0x142f5a040)",
+    # (here row: the unit i, column: the enemy j)
+    "afw": "1 while unit i answers enemy j with men turned out of its way (melee.answer_free: j struck it while it "
+           "was on its way to another attack target; held while the pair stays in contact); 0 otherwise",
     # (31.10.2026, the Pusbags: sim/vortex.py; here row: the vortex's owner p, column: the enemy j) the men of p
     # who died k steps ago next to j - their vortices strike after the vortex's delay (k = round(delay / dt), at most
     # vortex.QUEUE)
