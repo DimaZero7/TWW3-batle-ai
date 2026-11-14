@@ -14,7 +14,7 @@ or width taken away is no new order (the game keeps the one in force). KEEP send
     gate.per_minute(mask)     [B] new orders a unit a minute of its live seconds (mask [B, N]: whose)
 
 The thresholds: MOVE_M - game/vision's 'a new order' (events.ORDER_M, the person's ~1 a minute); FACE_DEG - four of the
-game's 64 facing sectors (net/unit/train.FACE_CHANGE_DEG); WIDTH_M - one file. Not yet from a probe: the probe 'a turn
+game's 64 facing sectors; WIDTH_M - one file. Not yet from a probe: the probe 'a turn
 when the course changes' (tmp/critique/method_learn.md V1) will set them.
 """
 import torch

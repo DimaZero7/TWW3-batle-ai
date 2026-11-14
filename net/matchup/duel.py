@@ -29,7 +29,7 @@ from net.tactic import decide as DC
 from net.tactic import parcel as PC
 from net.tactic import raw as TR
 from sim import scripts as opponents, reward
-from net.unit import train as UT
+from net.unit import ckpt as UT
 
 _MAPS = {}
 

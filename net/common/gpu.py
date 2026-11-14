@@ -2,7 +2,8 @@
 build/gpu-train.lock exists (polled every 30 s), then holds it (its label and start time) until it ends, also on
 failure and on SIGTERM (docker stop); a job started within 60 s of a release (build/gpu-train.released) waits those
 60 s out first, so the jobs already waiting go before it. The tactician's train.lock(device, label) takes it on CUDA
-only (the operative's and the strategist's training too).
+only (the operative's and the strategist's training too). Duty(device, duty): the GPU busy at most that share of the
+time (--gpu-duty of the trainings and exams).
 """
 import contextlib
 import os
@@ -77,3 +78,27 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
             signal.signal(signal.SIGTERM, old)
         if _HELD.pop(path, None) is not None:     # (not when _stop freed it: it may be another job's by now)
             _free(path, released, label)
+
+
+class Duty:
+    """Keep the GPU busy at most `duty` of the time (the user may play on it): after each piece of work, sync and sleep
+    (1 - duty) / duty of its length (--gpu-duty)."""
+
+    def __init__(self, device, duty=1.0):
+        import torch
+        self.cuda = torch.device(device).type == "cuda"
+        self.duty = duty
+        self.t0 = time.time()
+        self.slept = 0.0
+
+    def start(self):
+        self.t0 = time.time()
+
+    def end(self):
+        if self.cuda:
+            import torch
+            torch.cuda.synchronize()
+        if self.cuda and self.duty < 1.0:
+            s = (time.time() - self.t0) * (1 - self.duty) / self.duty
+            time.sleep(s)
+            self.slept += s

@@ -452,12 +452,12 @@ def roles_of_state(st):
 @torch.no_grad()
 class GpuShare:
     """The GPU busy at most `share` of the time (the user's game mode, CLAUDE.md rule 11: --gpu-duty 0.45): after each
-    piece of work (a second of battle, a training step) sleep (1 - share) / share of its length (unit/train.Duty, timed
+    piece of work (a second of battle, a training step) sleep (1 - share) / share of its length (common/gpu.Duty, timed
     piece by piece)."""
 
     def __init__(self, device, share):
-        from net.unit import train as UT
-        self.inner = UT.Duty(device, share)
+        from net.common.gpu import Duty
+        self.inner = Duty(device, share)
 
     def end(self):
         self.inner.end()

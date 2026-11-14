@@ -313,7 +313,7 @@ class Setup:
         self.limit = torch.tensor([float(c["go"]["hold_limit_s"]) if base(s["case"]) == "go" and s["command"] == "hold"
                                    else float(c[base(s["case"])]["limit_s"]) for s in sp], device=device)
         self.side = torch.ones(B, dtype=torch.long, device=device)
-        from net.unit import train as UT
+        from net.unit import ckpt as UT
         self.card = UT.cards(self.st, device).float()
 
 

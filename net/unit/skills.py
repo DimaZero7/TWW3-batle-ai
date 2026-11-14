@@ -311,7 +311,7 @@ def main(argv=None):
     ap.add_argument("--out", default=None)
     ap.add_argument("--gpu-duty", type=float, default=1.0, help="the GPU busy at most this share of the time")
     a = ap.parse_args(argv)
-    from net.unit.train import Duty
+    from net.common.gpu import Duty
     from sim.params import load
     P = load()
     res = {}

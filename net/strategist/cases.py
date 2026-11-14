@@ -182,7 +182,7 @@ class Pre:
     task 'attack', case [B], limit [B], side [B]."""
 
     def __init__(self, sp, P, device):
-        from net.unit import train as UT
+        from net.unit import ckpt as UT
         c = cfg()["cases"]
         self.sp, self.P, self.device = sp, P, device
         self.st0 = scenario.build([army(s) for s in sp], P, device=device, per_side=H)

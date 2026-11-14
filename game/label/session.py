@@ -52,7 +52,7 @@ from net.tactic import raw as TR
 from net.tactic import teacher as TTC
 from net.tactic import uzone as U
 from sim import reward
-from net.unit import train as UT
+from net.unit import ckpt as UT
 
 LEVELS = ("operative", "tactic", "strategist")
 _MAP_IDS = {}

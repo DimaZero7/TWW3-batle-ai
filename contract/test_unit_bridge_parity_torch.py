@@ -17,7 +17,7 @@ from sim import battle, movement, scenario, terrain  # noqa: E402
 from sim.params import load  # noqa: E402
 from sim.state import FATIGUE_LEVELS  # noqa: E402
 from sim import scripts as opponents  # noqa: E402
-from net.unit import train as T  # noqa: E402
+from net.unit import ckpt as T  # noqa: E402
 from net.unit import view as V  # noqa: E402
 from net.unit import zmap as Z  # noqa: E402
 

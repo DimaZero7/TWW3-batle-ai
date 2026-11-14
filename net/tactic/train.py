@@ -24,7 +24,7 @@ from net.tactic import env as EN
 from net.tactic import exam1 as EX
 from net.tactic import teacher as TC
 from net.common import ppo
-from net.unit import train as UT
+from net.common.gpu import Duty
 from net.tactic.ckpt import KIND, restore, save, unit_network  # noqa: F401 (re-exported)
 
 
@@ -150,7 +150,7 @@ def main(argv=None):
     if a.teach_updates is not None:
         teach_from = done
     unit_net = unit_network(dev)
-    duty = UT.Duty(dev, a.gpu_duty)
+    duty = Duty(dev, a.gpu_duty)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     gen = torch.Generator().manual_seed(a.seed + 1000 * done + 17)

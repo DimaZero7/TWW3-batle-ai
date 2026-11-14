@@ -49,7 +49,7 @@ def collect(seeds, seconds, every, parcels, device, gen):
     from sim import battle, scenario
     from sim.params import load
     from sim import scripts as opponents
-    from net.unit import train as T
+    from net.unit import ckpt as T
     P = load()
     arenas = [generate.battle(s, armies="v3") for s in seeds]
     armies = [scenario.from_arena(a, "attack" if i % 2 == 0 else "defend") for i, a in enumerate(arenas)]

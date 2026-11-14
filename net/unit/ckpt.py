@@ -4,6 +4,7 @@
     frozen(path, device)  the network for decisions only (eval, no gradients)
     save(path, net, critic, opt, cfg, updates)
     cards(st, device)     [B, N, passport.SIZE] the units' cards (net/cards/passport.py)
+    viewer_ok(st, bi, ii) [R] the network's units still deciding
     views(raws, d_idx, b_idx, i_idx, card, area, cfg, ...)   the network's input of the samples from the raw states
                           (view.raw per decision); the forward pass: net(v, order, v["cell_m"]) -> net.sample -> decode.to_orders
 """
@@ -20,6 +21,12 @@ KIND = "unit_v1"
 
 def cards(st, device):
     return torch.from_numpy(np.stack([passport.table(r) for r in st.keys])).to(device)
+
+
+def viewer_ok(st, bi, ii):
+    """[R] the network's units still deciding: alive, not gone, not routing (a router's orders are ignored)."""
+    u = st.u
+    return (u["men"][bi, ii] > 0) & ~u["gone"][bi, ii] & ~u["r"][bi, ii]
 
 
 def history(raws, d, T=V.T):

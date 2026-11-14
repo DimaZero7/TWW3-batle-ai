@@ -26,7 +26,7 @@ from net.tactic import rows as RW  # noqa: E402
 from net.tactic import windows as W  # noqa: E402
 from net.tactic import zone as ZN  # noqa: E402
 from sim import scripts as opponents  # noqa: E402
-from net.unit import train as T  # noqa: E402
+from net.unit import ckpt as T  # noqa: E402
 
 P = load()
 EMP = ["wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh_dlc04_emp_inf_flagellants_0",

@@ -28,7 +28,7 @@ from net.strategist import cases as CS  # noqa: E402
 from net.tactic import decide as DC  # noqa: E402
 from net.tactic import raw as TR  # noqa: E402
 from net.unit import net as Nt  # noqa: E402
-from net.unit import train as UT  # noqa: E402
+from net.unit import ckpt as UT  # noqa: E402
 
 P = TP.P
 SECONDS = 40           # the operative at 0, 15, 30; the tacticians every 5 s

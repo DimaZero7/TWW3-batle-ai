@@ -31,7 +31,7 @@ from net.operative.groups import grid
 from net.common import cadence
 from net.unit import decode as Dc
 from net.unit import net as Nt
-from net.unit import train as UT
+from net.unit import ckpt as UT
 from net.unit import view as V
 
 UNIT_CFG = {"cell_m": 8.0, "bounds": None}

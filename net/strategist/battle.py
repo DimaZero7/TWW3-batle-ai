@@ -202,7 +202,7 @@ def play(pre, out, inp, unit_net, op_net=None, op_mode="formula", tactic_net=Non
     steps = round(1.0 / P.dt)
     spacing = P.sim["formation"]["spacing_m"]
     errs = DP.errors(st, pre.own, groups.member, pre.mine_zone, spacing) + out["plan"]["no_cell"]
-    from net.unit import train as UT
+    from net.unit import ckpt as UT
     order = torch.zeros((B, len(DC.VERBS) + len(DC.PACES)), device=dev)
     order[torch.arange(B, device=dev), out["plan"]["verb"]] = 1.0
     order[torch.arange(B, device=dev), len(DC.VERBS) + out["plan"]["pace"]] = 1.0

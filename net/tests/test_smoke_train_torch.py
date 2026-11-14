@@ -1,6 +1,6 @@
-"""One training step a level (the smoke test of net): a short batch of the level's own battles with a fresh network, one
-update that changes its weights, the checkpoint saved and read back through <level>/ckpt.py (the bridge's way in) with
-the same weights. Needs torch (the container, CPU); the levels above the unit run the frozen unit network
+"""One training step a level with a network (the smoke test of net): a short batch of the level's own battles with a
+fresh network, one update that changes its weights, the checkpoint saved and read back through <level>/ckpt.py (the
+bridge's way in) with the same weights. Needs torch (the container, CPU); the levels run the frozen unit network
 (net/config/tactic.json train.unit_ckpt -> weights/unit/..., net/weights.json)."""
 import pytest
 
@@ -28,17 +28,6 @@ def _same(a, b):
 def unit_net():
     from net.tactic import ckpt as TK
     return TK.unit_network("cpu")
-
-
-def test_the_unit_level_trains_a_step(tmp_path):
-    from net.unit import ckpt as UC
-    from net.unit import train as T
-    log, same = T.main(["--drill", "hold", "--battles", "6", "--seconds", "20", "--updates", "1",
-                        "--minibatch", "256", "--out", str(tmp_path)])
-    assert len(log) == 1 and log[0]["samples"] > 0 and same            # (main: the checkpoint's output bit for bit)
-    net, _, ck = UC.restore(tmp_path / "latest.pt")
-    assert ck["kind"] == UC.KIND and ck["updates"] == 1 and not ck["padded"]
-    assert not any(p.requires_grad for p in UC.frozen(tmp_path / "latest.pt").parameters())
 
 
 def test_the_tactician_trains_a_step(tmp_path, monkeypatch, unit_net):

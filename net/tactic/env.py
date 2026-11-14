@@ -1,5 +1,5 @@
 """The tactician's battle in the simulator: the tactician decides every decide_s (5 s) in slot order, the frozen unit
-network (unit.train.restore) carries its frames out, one decision a second with the game's latency and the leash.
+network (unit.ckpt.restore) carries its frames out, one decision a second with the game's latency and the leash.
 
     play(setup, ...)  one batch played to its end. Who decides: a TacticNet (sampling, or its best), or the teacher's
                       formula (teacher.drive: the exam's yardstick). Stored per tactician's decision: the tactician's raw
@@ -35,7 +35,7 @@ from net.common import cadence
 from sim import reward
 from net.unit import decode as Dc
 from net.unit import net as Nt
-from net.unit import train as UT
+from net.unit import ckpt as UT
 from net.unit import view as V
 
 UNIT_CFG = {"cell_m": 8.0, "bounds": None}

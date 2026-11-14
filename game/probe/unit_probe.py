@@ -323,8 +323,8 @@ def reissue_battles():
     return out
 
 
-# the counter plan (13.11; the counter-charge: net/unit/branch.py's moment - the enemy within its charge distance 30 m
-# + 4 s of its run - from the simulator): fearless clanrats (no shields, 30 m) charge at a run from COUNTER_GAP m (front
+# the counter plan (13.11; the counter-charge: the moment the enemy is within its charge distance 30 m + 4 s of its
+# run - from the simulator): fearless clanrats (no shields, 30 m) charge at a run from COUNTER_GAP m (front
 # to front, 'both') our Empire spearmen / swordsmen (30 m), who hold (braced, never ordered) or counter-charge (an attack
 # at a run) when the gap is X m: the order's time from the clanrats' run on a held unit (the width plan's runs,
 # build/charge-probe/runs/20261109-123515: off at ~1.8 s, then ~3.85 m/s front to front) - the gap at the order is

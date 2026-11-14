@@ -16,7 +16,7 @@ from sim import scenario, terrain  # noqa: E402
 from net.tactic import decide as DC  # noqa: E402
 from net.tactic import raw as TR  # noqa: E402
 from net.tactic import rows as RW  # noqa: E402
-from net.unit import train as T  # noqa: E402
+from net.unit import ckpt as T  # noqa: E402
 
 P = TP.P
 

@@ -38,8 +38,8 @@ def _mean(v):
 
 
 def _duty(a):
-    """--gpu-duty: the GPU busy at most this share of the time (net/unit/train.Duty)."""
-    from net.unit.train import Duty
+    """--gpu-duty: the GPU busy at most this share of the time (net/common/gpu.Duty)."""
+    from net.common.gpu import Duty
     return Duty(a.device, a.gpu_duty)
 
 

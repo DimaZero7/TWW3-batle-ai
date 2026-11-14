@@ -19,11 +19,12 @@
 `drills.py`; перенос — `duel.py`, 32 × 900 с против `ai_game`). Противники — `sim/scripts.py`, счёт — `sim/reward.py`.
 Числа — `config/*.json`, у каждого `_why`. Мосту — `<уровень>/ckpt.py`: веса и вход сети без кода обучения.
 
-Учить: `DOCK_NAME=agent-x bash ops/dock.sh net.<уровень>.train --device cuda --minutes 30 --out tmp/net/<уровень>/<прогон>`
-(отряд: `--drill mix --map all`). Экзамен: `net.unit.exam_*`, `net.tactic.exam1`, `net.operative.exam`, `net.strategist.exam`
-(`--ckpt ...`; без него — формула). Замок видеокарты `build/gpu-train.lock` — `common/gpu.py`. Удачный прогон — в
-`weights/` (вне git) и строкой в `weights.json` (путь, sha256, откуда, числа экзамена). Образ `snake-ai-trainer`.
+Учить (тактик, оперативник, стратег): `DOCK_NAME=agent-x bash ops/dock.sh net.<уровень>.train --device cuda --minutes 30
+--out tmp/net/<уровень>/<прогон>`. Экзамен: `net.unit.exam_u2 general` (скрипт отряда парно против «стоять»),
+`net.tactic.exam1`, `net.operative.exam`, `net.strategist.exam` (`--ckpt ...`; без него — формула). Замок видеокарты
+`build/gpu-train.lock` и доля занятости `Duty` — `common/gpu.py`. Удачный прогон — в `weights/` (вне git) и строкой в
+`weights.json` (путь, sha256, откуда, числа экзамена). Образ `snake-ai-trainer`.
 
-Тесты (меры учений + «шаг обучения проходит», `tests/test_smoke_train_torch.py`), ~30 мин на ЦП: `bash ops/dock.sh pytest -q net/tests`.
+Тесты (меры учений + «шаг обучения проходит» для уровней с сетью, `tests/test_smoke_train_torch.py`), на ЦП: `bash ops/dock.sh pytest -q net/tests`.
 
 Протокол учения — `METHOD.md` (рецепт навыка: слова, две меры, генератор, экзамен скриптами до учёбы и сетью после).
