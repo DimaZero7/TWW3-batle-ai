@@ -559,6 +559,9 @@ FACTION = _Faction({key: faction for key, _, faction in UNITS.values()})
 SYG = "wh_main_character_abilities_stand_your_ground"
 FOE_SEEKER = "wh_main_character_abilities_foe_seeker"
 WIDTH_M = 30
+# (the fill plan) the parked fillers: x +-FILLER_X (Skaven +, Empire -: the parked lords' column, sim side 700 m), z from
+# FILLER_Z0 every FILLER_DZ m - 185+ m from the counterfar lanes (|x| <= 495)
+FILLER_X, FILLER_Z0, FILLER_DZ = 700.0, -250.0, 100.0
 LANE_DX = 240          # lanes this far apart across x (the General's auras reach 35-40 m)
 GAP_M = 80
 SETTLE_MS = 4000
@@ -573,7 +576,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
-              "counterfar", "intercept", "tight", "walkout", "standk")
+              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -1915,6 +1918,11 @@ def layout(specs):
     sides = {EMP: [], SKV: []}
     side_of = {EMP: "own", SKV: "enemy"}
     lanes, used_lords = [], set()
+    # (the fill plan, game/probe/unit_probe.py) a pseudo-lane {"filler": {short: n, ...}}: n units of that short name
+    # parked far from every lane (FILLER_X, z from FILLER_Z0 every FILLER_DZ m), never ordered - more men on the field
+    # without changing any lane (the engine's step: tmp/tick_audit)
+    fillers = [s["filler"] for s in specs if s.get("filler")]
+    specs = [s for s in specs if not s.get("filler")]
 
     def add(short, k, tag="", abilities=None):
         key, men, faction = UNITS[short]
@@ -1975,6 +1983,15 @@ def layout(specs):
             if row["lord"].get("at_m"):       # front to front -> centre to centre
                 row["lord"]["at_m"] = round(row["lord"]["at_m"] + (row["a_depth"] + row["t_depth"]) / 2, 1)
         lanes.append(row)
+    fill_park = []
+    for f in fillers:
+        for short, count in f.items():
+            fac = UNITS[short][2]
+            for j in range(int(count)):
+                name = add(short, j + 1, "fill")
+                fill_park.append({"name": name, "x": FILLER_X if fac == SKV else -FILLER_X,
+                                  "z": FILLER_Z0 + FILLER_DZ * len([p for p in fill_park if (p["x"] > 0) == (fac == SKV)]),
+                                  "bearing": 0, "width": WIDTH_M})
     base = nn_scenario.load_arena()
     armies = {}
     for faction, units in sides.items():
@@ -1983,7 +2000,7 @@ def layout(specs):
         armies[side_of[faction]] = {"faction": faction, "units": [
             {"slot": "lord", "key": key, "men": 1, "general": True, "forward": -80, "lateral": 0, "width": 5}] + units}
     park = [{"name": f"{side_of[f]}_lord", "x": (-700 if f == EMP else 700), "z": -400, "bearing": 0, "width": 5}
-            for f, lord in LORDS.items() if lord not in used_lords]
+            for f, lord in LORDS.items() if lord not in used_lords] + fill_park
     arena = {k: v for k, v in base.items() if k not in ("faction", "units", "description")}
     arena.update(name="charge_probe", gap_m=400, defend_radius_m=150, sides=armies)
     maps = {s["map"] for s in specs if s.get("map")}
@@ -2103,8 +2120,8 @@ def run_config(plan, index):
         # target's morale every 0.5 s (mem_morale: the effects, the sides its enemies struck from, the fight's outcome)
         # (its 'clock' lane - the two Generals 100 m apart - is polled densely: the morale rows ride on that poll)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=110, mem_morale=True)
-    if plan == "counterfar":
-        # (game/probe/unit_probe.py, the meetfar probe's part 1) health every 0.25 s; the men from memory every 0.1 s
+    if plan in ("counterfar", "fill"):
+        # (game/probe/unit_probe.py, the meetfar probe's part 1; fill: the same battle with parked fillers) health every 0.25 s; the men from memory every 0.1 s
         # from 60 m (centres) to 5 s after the contact (the charge's clock, the formation's depth at contact)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=5, men_near_m=60)
     if plan == "intercept":
@@ -2114,8 +2131,8 @@ def run_config(plan, index):
         # mem_morale_ours; the 'clock' lane keeps the poll going, as in flank2v1)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=30, men_near_m=110, mem_morale=True,
                       mem_extras=True)
-    if plan == "tight":
-        # (game/probe/unit_probe.py, the night probes' tight) health every 0.25 s; the men of all four units from memory
+    if plan in ("tight", "tight01"):
+        # (game/probe/unit_probe.py, the night probes' tight; tight01 its lanes under the 0.1 s step's men count) health every 0.25 s; the men of all four units from memory
         # every 0.1 s while B and E1 (centres) are within 105 m - the last ~20 s of the approach - and every 0.5 s after
         # the contact (men_after_s 0: the 245 s fights would make the dense polls the battle's cost); the morale of E1,
         # A and B every 0.5 s (the clock lane keeps the poll going) - tmp/night_probes/design.md 1.2
@@ -2124,8 +2141,8 @@ def run_config(plan, index):
     if plan == "walkout":
         # (the night probes' walkout) as tight, without the extras (a group's lanes have none): design.md 2.1
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True)
-    if plan == "standk":
-        # (the night probes' standk) health every 0.25 s; the men from memory every 0.1 s from 60 m (centres) to 11 s
+    if plan in ("standk", "standk01"):
+        # (the night probes' standk; standk01 its lanes under the 0.1 s step's men count) health every 0.25 s; the men from memory every 0.1 s from 60 m (centres) to 11 s
         # after the contact, every 0.5 s to the lane's end (reverse/notes/charge_impact.md 7.1's request: 10 s, + 1 s -
         # the first HP drop comes 0.3-1 s after the first melee flag, so the first 10 s on that clock stay dense)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=11, men_near_m=60)

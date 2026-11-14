@@ -1492,7 +1492,10 @@ function M.main(bm, config, globals)
     end
 
     local function initialise()
-        emit('loaded')
+        -- tick_ms: the engine's step, chosen once at the battle's setup (bm:model_tick_time_ms; tmp/tick_reverse: 200 ms
+        -- above 5000 men, else 100; the launcher's -TickMs sets it on the command line)
+        local ok_t, tick = pcall(function() return bm:model_tick_time_ms() end)
+        emit('loaded', {tick_ms = ok_t and tick or nil})
         local reason = battle.unsupported_reason(bm)
         if reason then
             emit('skipped', {reason = reason})

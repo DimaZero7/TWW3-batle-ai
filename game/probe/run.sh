@@ -14,10 +14,11 @@ else guard_take "probe $*" || exit 1; trap guard_release EXIT; fi
 export BAI_GRAPHICS="${BAI_GRAPHICS:-low}"
 mkdir -p tmp/probe
 mem=(--mem); [ -n "$NOMEM" ] && mem=()
+speed=(); [ -n "$SPEED" ] && speed=(--speed "$SPEED")    # SPEED=3: the battle's speed (bridge.build --speed; default 20)
 for plan in "$@"; do
   if guard_human; then echo "the user plays: stop"; break; fi
   echo "=== $plan $(date +%T)"
-  "$PY" -m bridge.build charge-probe --probe-plan "$plan" --probe-battle "${BATTLE:-1}" "${mem[@]}" --deadline 900 \
+  "$PY" -m bridge.build charge-probe --probe-plan "$plan" --probe-battle "${BATTLE:-1}" "${mem[@]}" "${speed[@]}" --deadline 900 \
     > "tmp/probe/$plan.build.log" 2>&1 || { echo "build failed $plan (tmp/probe/$plan.build.log)"; continue; }
   if [ -n "$DRY" ]; then echo "dry: built (tmp/probe/$plan.build.log); launch.ps1 not run"; continue; fi
   powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/launch.ps1 -Target charge-probe \

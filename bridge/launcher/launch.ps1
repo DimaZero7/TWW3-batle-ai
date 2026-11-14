@@ -35,7 +35,13 @@ param(
     # sees the end of the battle; then the usual cleanup (bridge/launcher/watch.ps1 uses it).
     [int]$LingerSeconds = 0,
     # A graphics preset for this run only (bridge/launcher/preferences.ps1); empty: the user's own.
-    [ValidateSet('', 'ultra', 'ultrafull', 'low')][string]$Graphics = ''
+    [ValidateSet('', 'ultra', 'ultrafull', 'low')][string]$Graphics = '',
+    # The engine's step for this run (ms a tick): the console command set_model_tick_time_ms on the game's command
+    # line (reverse/notes/tick_step.md; the retail game accepts it, probe of 14.11); 0 - off, the engine chooses
+    # (100 ms, 200 above 5000 men). -TickPlacement 'first' puts it before game_startup_mode, 'last' after the mod list.
+    # Also the environment variables BAI_TICK_MS / BAI_TICK_PLACEMENT.
+    [int]$TickMs = 0,
+    [ValidateSet('first', 'last')][string]$TickPlacement = 'first'
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Graphics -and $env:BAI_GRAPHICS) { $Graphics = $env:BAI_GRAPHICS }
@@ -189,6 +195,13 @@ if (Test-Path -LiteralPath $eventLog) { $offset = (Get-Item -LiteralPath $eventL
 $reader = New-JsonlReader -Offset $offset
 $started = Get-Date
 $arguments = 'game_startup_mode battle ' + $manifest.scenario + '; ' + (Split-Path -Leaf $modList) + ';'
+if ($TickMs -le 0 -and $env:BAI_TICK_MS) { $TickMs = [int]$env:BAI_TICK_MS }
+if ($env:BAI_TICK_PLACEMENT -in @('first', 'last')) { $TickPlacement = $env:BAI_TICK_PLACEMENT }
+if ($TickMs -gt 0) {
+    $tickCommand = 'set_model_tick_time_ms ' + $TickMs + ';'
+    if ($TickPlacement -eq 'first') { $arguments = $tickCommand + ' ' + $arguments } else { $arguments = $arguments + ' ' + $tickCommand }
+    Write-Output ('Engine step requested: ' + $tickCommand + ' (' + $TickPlacement + ')')
+}
 $process = Start-Process -FilePath $exe -WorkingDirectory $game -ArgumentList $arguments -PassThru
 @{pid = $process.Id; started_utc = $started.ToUniversalTime().ToString('o'); target = $Target; build = $manifest.build;
   pack_sha256 = $manifest.pack_sha256; log_offset = $offset; stale_log_bytes = $staleBytes; arguments = $arguments;

@@ -24,7 +24,8 @@ battle time a tick; "tick" = the world's counter (world +0x98, `mem/entities.md`
    At 200 ms all of these last twice as long in seconds (the recount: 0.4 s instead of 0.5 s).
 4. Checked on recordings without the game (5.3): fatigue, the morale timers and the recount period behave as read.
 5. A script can read the step: `bm:model_tick_time_ms()`. A command `set_model_tick_time_ms <ms>` exists and is
-   registered like `game_startup_mode`; whether the retail game accepts it on the command line is not checked.
+   registered like `game_startup_mode`; the retail game accepts it on the command line (checked in the game the same
+   night, 5.4): the launcher's option `-TickMs`.
 
 ## 1. Function map
 | what | exe 15.10 | exe 03.11 |
@@ -77,8 +78,9 @@ else                                                                   -> 100
 ### 2.4 The command and the getter
 - `set_model_tick_time_ms <tick time ms>` (`14134890c`): parses an integer, writes it to the step, sets the override
   byte — [I]. Registered by the same constructor and with the same type and flag (0, 0) as `game_startup_mode`
-  (`140146890`), which our launcher passes on the retail command line — [I]; that the game accepts it there — [INF],
-  not run. The override lives until a campaign is started; `game_startup_mode battle` starts none.
+  (`140146890`), which our launcher passes on the retail command line — [I]; the game accepts it there, placed before
+  `game_startup_mode` — measured (5.4). The override lives until a campaign is started; `game_startup_mode battle`
+  starts none.
 - Lua: `bm:model_tick_time_ms()` returns the step — [I]. No Lua setter: the strings `model_tick` give only this
   getter, the command and a benchmark statistic `model_tick_time`.
 - No preference is read by the chooser. Unit size changes the men total, nothing else.
@@ -179,9 +181,17 @@ every 0.4 s at 200 ms and 0.3 s at 100 ms (`probe_sample`), the morale object fr
 - Not in these recordings: the unit event timers of section 4 (no missiles, no artillery in the lanes), riders, the
   attack window, the 3- and 8-tick rules as such.
 
+### 5.4 In the game, the same night (`game/probe/evidence/standk_game.json` keys `tick_cmd`, `step01`, `filler`; `tight_game.json` key `step01`)
+- The command works: last night's battle `standk` 1 (38 units, 5042 men) with `set_model_tick_time_ms 100;` before
+  `game_startup_mode` ran at 100 ms (the getter 100, the memory polls 100 ms a tick); a battle of 22 units / 2802 men
+  with `… 200;` ran at 200 ms. The getter agreed with the polls in every battle where it was logged.
+- The extra joiners follow the step, not the crowd: both-charge joiners a lane 24.9 in the 38-unit battle forced to
+  100 ms, 23.5 in the 20-unit battles at 100 ms, 36.2–37.6 in the 38-unit battles at 200 ms.
+- The tactical answer of the probe `tight` is the same at both steps (tight − pinE1 at 120 s: −0.021 ± 0.007 at
+  100 ms, −0.018 ± 0.006 at 200 ms, 10 battles each); unit-level losses of holding units agree.
+
 ## 6. Not found
 - What the two counts include (2.3) — the functions are virtualized in both exes.
-- Whether the retail game takes `set_model_tick_time_ms` from the command line (2.4).
 - The reload countdown; the start values of the surprise and after-rally timers; how many ticks a frame runs (the
   frame-to-tick loop was not traced — the audit covers its result).
 - Why more men join at 200 ms (5.1). By the code the candidates are: a man moves twice the way between two touch
@@ -196,9 +206,8 @@ every 0.4 s at 200 ms and 0.3 s at 100 ms (`probe_sample`), the morale object fr
 2. What count 1 includes: load-and-quit battles around the line — 5000 against 5001 men of infantry; riders below
    5000 whose horses would put the total above; single entities and artillery crews; more than 80 small units for
    count 2.
-3. The command: one battle of 5042 men with `set_model_tick_time_ms 100;` on the launcher's line — the getter must
-   return 100 and `loaded` come at model_ms 100. If it works, the unit event timers of section 4 are right again too
-   (they were computed for 100).
+3. Done (5.4): the command works. With it a battle above the line can be forced to 100 ms — the unit event timers of
+   section 4 are then right again too (they were computed for 100) — and a small one to 200 ms.
 4. The event timers of section 4 at 200 ms: one missile lane in a 5042-man battle with `--mem` — "under fire" must
    stay 150 ticks = 30 s after the last hit.
 

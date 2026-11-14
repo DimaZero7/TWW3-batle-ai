@@ -696,6 +696,47 @@ def standk_battles():
     return out
 
 
+# The engine's step (tmp/tick_audit, 15.11): every battle of 5042 men (36-38 units) ran at 0.2 s a tick, every one of
+# 4202 men or fewer at 0.1 s. Plan 'fill': counterfar battle 1 (spearmen, 15 lanes, 4202 men, 0.1 s on 14.11 morning)
+# and FILL_UNITS parked far, never ordered (cp.layout's 'filler' pseudo-lane): 3 clanrats_0 (Skaven, 160 men) and 3
+# Empire spearmen (120: the Skaven side holds 19 units with them, the army's 20 with the lord would be untried) - 38
+# units and 5042 men, the night's numbers, with no lane changed. Plans 'tight01' / 'standk01': the night's lanes in
+# battles under the threshold (<= 22 units, ~2800 men, as the 14.11 intercept battles): tight01 - battle i keeps night
+# battle i's cell (TG_CELLS 1-10), 5 lanes hold, tight x 2, pinE1 x 2 on TG01_PLACES (400+ m apart, as F2_PLACES) and
+# the clock; standk01 - each night standk battle's 18 lanes split in two battles of 9 on SK01_PLACES (10 battles).
+FILL_UNITS = {COUNTER_T: 3, "spear": 3}
+TG01_KINDS = ("hold", "tight", "pinE1", "tight", "pinE1")
+TG01_PLACES = F2_PLACES
+SK01_PLACES = tuple((float(x), z) for z in (-450.0, -50.0, 350.0) for x in (-400, 0, 400))
+
+
+def fill_battles():
+    """The fill plan's battle (comment above FILL_UNITS)."""
+    return [counterfar_battles()[0] + [{"filler": dict(FILL_UNITS)}]]
+
+
+def tight01_battles():
+    """The tight01 plan's 10 battles (comment above FILL_UNITS): night tight battles 1-10 with 5 lanes each."""
+    out = []
+    for i, night in enumerate(tight_battles(TG_CELLS[:10]), 1):
+        lanes = [l for l in night if l["kind"] != "clock"]
+        by = {}
+        for l in lanes:
+            by.setdefault(l["kind"], l)
+        keep = [dict(by[k]) for k in cp.rotate(list(TG01_KINDS), i - 1)]
+        out.append([dict(l, place=p) for l, p in zip(keep, TG01_PLACES)] + [_clock(TG_MAX_S)])
+    return out
+
+
+def standk01_battles():
+    """The standk01 plan's 10 battles: each night standk battle in two halves of 9 lanes (comment above FILL_UNITS)."""
+    out = []
+    for night in standk_battles():
+        for half in (night[:9], night[9:]):
+            out.append([dict(l, place=p) for l, p in zip(half, SK01_PLACES)])
+    return out
+
+
 def _fwd(b):
     r = math.radians(b)
     return math.sin(r), math.cos(r)
@@ -868,6 +909,12 @@ def battles(plan):
         return walkout_battles()
     if plan == "standk":
         return standk_battles()
+    if plan == "fill":
+        return fill_battles()
+    if plan == "tight01":
+        return tight01_battles()
+    if plan == "standk01":
+        return standk01_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -2355,9 +2402,10 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
     """The counterfar / intercept lanes measured: source 'game' (the runs, with the memory numbers), 'twin' (the
     simulator on the runs' recorded starts, `copies` a lane) or 'layout' (the simulator on the plan's own places, before
     any game run)."""
+    fam = MF_FAMILY.get(plan, plan)
     measure = {"counterfar": counterfar_measure, "standk": counterfar_measure, "intercept": intercept_measure,
-               "tight": lambda ln: intercept_measure(ln, TG_WINDOWS)}[plan]
-    mem = {"counterfar": counterfar_mem, "standk": counterfar_mem, "intercept": intercept_mem, "tight": tight_mem}[plan]
+               "tight": lambda ln: intercept_measure(ln, TG_WINDOWS)}[fam]
+    mem = {"counterfar": counterfar_mem, "standk": counterfar_mem, "intercept": intercept_mem, "tight": tight_mem}[fam]
     if source == "game":
         rows = []
         for d in runs:
@@ -2378,14 +2426,15 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
     else:
         lanes = []
         # (counterfar: both defenders; intercept: both sides of B; tight: every cell; standk: templates A and B)
-        which = {"tight": range(1, len(TG_CELLS) + 1), "standk": (1, SK_ORDER.index("B") + 1)}.get(plan, range(1, 3))
+        which = {"tight": range(1, len(TG_CELLS) + 1), "standk": (1, SK_ORDER.index("B") + 1),
+                 "tight01": range(1, 11), "standk01": (1, 2, 5, 6), "fill": (1,)}.get(plan, range(1, 3))
         for i in which:
             config, _, _ = cp.run_config(plan, i)
             seen = set()
             for l in config["lanes"]:
                 if l["kind"] == "clock":
                     continue
-                if plan in ("tight", "standk"):
+                if fam in ("tight", "standk"):
                     # (the twin runs each lane alone: a battle's repeated kinds are one lane, `copies` times)
                     if l["kind"] in seen:
                         continue
@@ -2496,6 +2545,10 @@ def tight_mem(run_dir, lanes, rows):
     return rows
 
 
+# the plans measured as another plan's family (the same lanes in other battles)
+MF_FAMILY = {"tight01": "tight", "standk01": "standk", "fill": "counterfar"}
+
+
 def mf_summary(rows, keys):
     """{kind: {field: [mean, standard error of the mean, n] for numbers (booleans as shares); {value: count} for texts}}."""
     out = {}
@@ -2565,17 +2618,18 @@ def _mf_cell(v):
 def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", out=None):
     """Prints the counterfar / intercept table per kind (game | twin on the same recorded starts with sim) and the pairs
     against the hold lanes; writes build/charge-probe/<plan>_<source>.json (not in Git)."""
-    keys = {"intercept": IC_KEY, "tight": TG_KEY}.get(plan, CF_KEY)
+    fam = MF_FAMILY.get(plan, plan)
+    keys = {"intercept": IC_KEY, "tight": TG_KEY}.get(fam, CF_KEY)
     rows = _mf_lanes(plan, source, runs, copies=copies, device=device)
     table = mf_summary(rows, keys)
     pair_keys = {"intercept": ("trade_30", "trade_60", "trade_120", "own_0_60", "own_0_120", "en_0_60", "en_0_120"),
-                 "tight": TG_PAIR_KEY}.get(plan, ("trade_10", "trade_30", "trade_60", "a_0_60", "tg_0_60"))
+                 "tight": TG_PAIR_KEY}.get(fam, ("trade_10", "trade_30", "trade_60", "a_0_60", "tg_0_60"))
     result = {"plan": plan, "source": source, "runs": [str(r) for r in runs], "lanes": rows, "summary": table}
 
     def pairs(rs):
-        if plan == "intercept":
+        if fam == "intercept":
             return mf_paired(rs, "hold", pair_keys)
-        return tight_paired(rs) if plan == "tight" else None
+        return tight_paired(rs) if fam == "tight" else None
     if pairs(rows) is not None:
         result["paired"] = pairs(rows)
     twin_table = None
@@ -2597,7 +2651,7 @@ def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", o
             cells.append(f"{f} {c}")
         print(f"  {kind} (n {r['n']}): " + "; ".join(cells))
     for name, pt in (("paired", result.get("paired")), ("twin paired", (result.get("twin") or {}).get("paired"))):
-        if pt and plan == "tight":
+        if pt and fam == "tight":
             for cut, sub in pt.items():
                 for base, tab in sub.items():
                     print(f"== {name} {cut} (minus {base})")
@@ -3211,7 +3265,7 @@ def main(argv=None):
     parser.add_argument("--flank2v1", choices=("game", "layout"),
                         help="the flank2v1 plan's table: 'game' the runs (+ the twin on their starts with --sim), "
                              "'layout' the twin on the plan's own places (no game run needed)")
-    for plan in ("counterfar", "intercept", "tight", "walkout", "standk"):
+    for plan in ("counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01"):
         parser.add_argument(f"--{plan}", choices=("game", "layout"),
                             help=f"the {plan} probe's table (meetfar, night probes): 'game' the runs (+ the twin on "
                                  "their starts with --sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
@@ -3221,7 +3275,7 @@ def main(argv=None):
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "walkout"]
         walkout_report(runs, source=args.walkout, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
         return 0
-    for plan in ("counterfar", "intercept", "tight", "standk"):
+    for plan in ("counterfar", "intercept", "tight", "standk", "fill", "tight01", "standk01"):
         if getattr(args, plan):
             runs = args.runs or [d for d in cp.runs() if _plan_of(d) == plan]
             mf_report(plan, runs, source=getattr(args, plan), sim=args.sim, copies=args.copies, device=args.device,

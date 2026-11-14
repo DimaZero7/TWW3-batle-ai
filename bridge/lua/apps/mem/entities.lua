@@ -8,7 +8,8 @@
 --                     reads the battle unit (i_unit) of the script unit the probe binds
 --         dir_table   the game's table of facing vectors (x, z floats) by a man's facing number (uint16)
 --   layout i_unit     the script's unit object -> the battle unit;  u_battle  battle unit -> battle;  b_world  battle ->
---                     battle world;  w_tick  the world's simulation tick counter (uint32; a tick is 0.1 s)
+--                     battle world;  w_tick  the world's simulation tick counter (uint32; a tick is bm:model_tick_time_ms() ms: 100, or 200 in a
+--                     battle of more than 5000 men - reverse/notes/tick_step.md)
 --          u_men      the battle unit's vector of men (capacity, size, data: pointers)
 --          m_unit     a man -> his battle unit;  m_live  flags byte (bit 0x10: in the battle, alive)
 --          m_pos, m_vel   feet (x, y up, z) and velocity (x, y, z), floats;  m_face  facing number (uint16)
