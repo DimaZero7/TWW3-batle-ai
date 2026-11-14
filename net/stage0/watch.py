@@ -292,8 +292,17 @@ class PinWatch(Watch):
                     order to 60 s on (or to the next order): (target's health lost x its cost - the striker's) / the mean
                     of the two costs
     fc_{cat}_{n,n30,s30,n60,s60}   first contacts of my units with enemy units by who charged (FC_CATS: _contacts) and
-                    the pair's trade summed 30 / 60 s on"""
+                    the pair's trade summed 30 / 60 s on
+    cause_{c}_{orders,reached,intercepted,first,o60_n,o60_sum,loss60_sum}   the attack orders by the cause the player
+                    tagged them with (CAUSES; its last_tags {cause, u, cell} [r, G] of the tick's new orders, tactic/pin.py
+                    Teacher; untagged: none): given, reached, intercepted, reached before the target touched the unit u
+                    it came at (the tag's u), and from the order to 60 s on (or to the next order; the play's end for
+                    the last ones) the pair's trade and the striker's own health lost (share)
+    order_log       a row a closed order (ORDER_LOG; the measures' caller reads it)"""
     SERIES_S = 5
+    CAUSES = ("none", "pin", "second", "other")
+    ORDER_LOG = ("b", "slot", "sec", "target", "cause", "u", "cell", "trade60", "loss60", "reached", "first",
+                 "intercepted", "final")
     INTERCEPT_M = 10.0
     FC_CATS = ("mine_charging", "enemy_onto_standing", "both_moving", "neither")
     MOVING_MS = 1.0          # (the first contacts' split: 'charging' = moving over this the second before, m/s)
@@ -328,6 +337,16 @@ class PinWatch(Watch):
             for w in ("n", "n30", "s30", "n60", "s60"):
                 self.ev[f"fc_{c}_{w}"] = z.clone()
         self.v_prev = torch.zeros((B, N), device=dev)
+        # (the orders by the player's tags: cause, the unit u its second enemy came at, the target's cell)
+        zl = lambda v: torch.full((B, N), v, dtype=torch.long, device=dev)      # noqa: E731
+        self.tag_now = {"cause": zl(0), "u": zl(-1), "cell": zl(-1)}
+        self.o_tag = {k: v.clone() for k, v in self.tag_now.items()}
+        self.f_utouch, self.f_first = zb(), zb()
+        self.tick_seen = -1
+        self.order_log = []
+        for c in self.CAUSES:
+            for k in ("orders", "reached", "first", "intercepted", "o60_n", "o60_sum", "loss60_sum"):
+                self.ev[f"cause_{c}_{k}"] = z.clone()
 
     def __call__(self, sec, st):
         super().__call__(sec, st)
@@ -390,17 +409,34 @@ class PinWatch(Watch):
         for k, name in enumerate(self.FC_CATS):
             self.ev[f"fc_{name}_n"] += (new & (self.fc_cat == k)).flatten(1).float().sum(1)
 
-    def _order_close(self, st, which):
+    def _order_close(self, st, which, final=False):
         """The pending orders which [B, N] evaluated: the striker and its target's trade since the order (as the first
-        contacts'), summed by intercepted or not."""
+        contacts'), summed by intercepted or not (final: the orders still pending at the play's end - only the cause
+        sums and the log), and by the player's cause; the striker's own health lost since the order; a row of
+        order_log each (ORDER_LOG)."""
         u = st.u
         hp = self._hpf(u)
         ht = hp.gather(1, self.o_tg)
         tr = ((self.o_ht - ht) * self.o_ct - (self.o_hi - hp) * self.o_ci) / ((self.o_ci + self.o_ct) / 2).clamp(min=1e-6)
-        for flag, k in ((self.o_int, "inter"), (~self.o_int, "clean")):
-            d = which & flag
-            self.ev[f"order60_{k}_n"] += d.float().sum(1)
-            self.ev[f"order60_{k}_sum"] += (tr * d).sum(1)
+        if not final:
+            for flag, k in ((self.o_int, "inter"), (~self.o_int, "clean")):
+                d = which & flag
+                self.ev[f"order60_{k}_n"] += d.float().sum(1)
+                self.ev[f"order60_{k}_sum"] += (tr * d).sum(1)
+        loss = self.o_hi - hp
+        for c, name in enumerate(self.CAUSES):
+            d = which & (self.o_tag["cause"] == c)
+            self.ev[f"cause_{name}_o60_n"] += d.float().sum(1)
+            self.ev[f"cause_{name}_o60_sum"] += (tr * d).sum(1)
+            self.ev[f"cause_{name}_loss60_sum"] += (loss * d).sum(1)
+        b, n = which.nonzero(as_tuple=True)
+        if b.numel():
+            sec = self.o_t0[b, n]
+            cols = [b.float(), n.float(), sec, self.o_tg[b, n].float()] + [self.o_tag[k][b, n].float() for k in
+                                                                            ("cause", "u", "cell")]
+            cols += [tr[b, n], loss[b, n], self.f_reach[b, n].float(), self.f_first[b, n].float(),
+                     self.o_int[b, n].float(), torch.full_like(sec, float(final))]
+            self.order_log += torch.stack(cols, 1).cpu().tolist()
         self.o_pend &= ~which
 
     def _events(self, st, tac, live, sec=0):
@@ -411,8 +447,25 @@ class PinWatch(Watch):
         att = o["on"] & (o["skill"] == 2) & (o["tgt"] >= 0) & self.mine & live[:, None]      # (scripts.ATTACK)
         t = o["tgt"].clamp(min=0)
         fresh = att & ((o["tgt"] != self.cur_t) | (o["born"] != self.cur_born))
+        # the player's tags of the attack orders its last tick gave (Teacher.last_tags [r, G] in my-slot order)
+        tags = getattr(tac.player, "last_tags", None)
+        if tags is not None and tac.view is not None and tac.ticks != self.tick_seen:
+            self.tick_seen = tac.ticks
+            v = tac.view
+            na = v["new_attack"] & (v["my"] >= 0)
+            rr, gg = na.nonzero(as_tuple=True)
+            if rr.numel():
+                bb, nn = v["bi"][rr], v["my"][rr, gg]
+                for k in self.tag_now:
+                    self.tag_now[k][bb, nn] = tags[k][rr, gg].long()
         # the orders' trade: 60 s after the order, or when another order replaces it
         self._order_close(st, self.o_pend & (fresh | (float(sec) - self.o_t0 >= 60.0)))
+        for k in self.tag_now:
+            self.o_tag[k] = torch.where(fresh, self.tag_now[k], self.o_tag[k])
+            self.tag_now[k] = torch.where(fresh, torch.full_like(self.tag_now[k], -1 if k != "cause" else 0),
+                                          self.tag_now[k])
+        for c, name in enumerate(self.CAUSES):
+            self.ev[f"cause_{name}_orders"] += (fresh & (self.o_tag["cause"] == c)).float().sum(1)
         if bool(fresh.any()):
             hp = self._hpf(u)
             dd = torch.sqrt((u["x"][:, :, None] - u["x"][:, None, :]) ** 2 + (u["z"][:, :, None] - u["z"][:, None, :]) ** 2)
@@ -425,7 +478,8 @@ class PinWatch(Watch):
             self.o_d0 = torch.where(fresh[..., None], dd, self.o_d0)
             self.o_pend |= fresh
             self.o_int &= ~fresh
-        for f in (self.f_reach, self.f_inter, self.f_lost, self.f_gone, self.f_routed, self.f_res):
+        for f in (self.f_reach, self.f_inter, self.f_lost, self.f_gone, self.f_routed, self.f_res, self.f_utouch,
+                  self.f_first):
             f &= ~fresh
         self.ev["attack_orders"] += fresh.float().sum(1)
         self.cur_t = torch.where(att, o["tgt"], torch.full_like(self.cur_t, -1))
@@ -450,9 +504,23 @@ class PinWatch(Watch):
             near = nw_i & (dj < self.o_d0.gather(2, t[..., None])[..., 0])
             self.ev["inter_nearer"] += near.float().sum(1)
             self.o_int |= nw_i & self.o_pend
+        cz = self.o_tag["cause"]
+        for c, name in enumerate(self.CAUSES):
+            self.ev[f"cause_{name}_intercepted"] += (icp & ~self.f_inter & (cz == c)).float().sum(1)
         self._flag(self.f_inter, icp, "intercepted")
         self._flag(self.f_lost, before & g(standing) & (others <= 0) & ~t_touch, "pin_lost")
         self._flag(self.f_gone, before & ~g(standing), "gone_before")
+        # the target touched the unit u it came at (the tag's u) before the striker reached it
+        uu = self.o_tag["u"]
+        has_u = uu >= 0
+        tu =touch[torch.arange(B, device=self.dev)[:, None], t, uu.clamp(min=0)] & has_u
+        self.f_utouch |= before & tu
+        nw_r = att & t_touch & ~self.f_reach
+        first = nw_r & has_u & ~self.f_utouch
+        self.f_first |= first
+        for c, name in enumerate(self.CAUSES):
+            self.ev[f"cause_{name}_reached"] += (nw_r & (cz == c)).float().sum(1)
+            self.ev[f"cause_{name}_first"] += (first & (cz == c)).float().sum(1)
         self._flag(self.f_reach, att & t_touch, "reached")
         self.f_routed |= att & g(u["r"])
         it = self.chain.units.intended
@@ -470,6 +538,8 @@ class PinWatch(Watch):
     def measures(self, limit, winner=None):
         m = super().measures(limit, winner)
         u = self.st.u
+        if hasattr(self, "o_pend") and bool(self.o_pend.any()):
+            self._order_close(self.st, self.o_pend.clone(), final=True)
         m["hp_trade"] = hp_trade(u, self.lord)             # (at the end of the play, as the pilot's: tmp/tactic_slice/pilot)
         m["routs_own"], m["routs_enemy"] = self.routs[1], self.routs[2]
         ser = torch.stack(self.series, 1)

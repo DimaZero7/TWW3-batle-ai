@@ -118,3 +118,54 @@ def test_teacher_walk_and_masks():
     # not free, enemy 6 within 8 m of it): 1 and 3 at enemy 5, unit 2 finds its side taken
     out = PN.player("D")(v)
     assert out["target"][0].tolist() == [-1, 5, -1, 5, -1]
+
+
+def test_second_enemy_walk():
+    # cause (b) 'take the second one': slot 0 the anvil in melee with enemy 4 (pinned); enemy 5 runs south at the line
+    # (80 m out), enemy 6 runs at unit 2 (25 m from it: inside its own counter's reach); free units 1 (-60, 10), 2
+    # (60, 10), 3 (-40, 100); enemy 7 routs
+    units = [("mine", 0.0, 0.0, 0.0, 32, 10, 1, 0, 0.0),
+             ("mine", -60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", -40.0, 100.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 0.0, 12.0, 180.0, 32, 10, 1, 0, 0.0),
+             ("enemy", 0.0, 80.0, 180.0, 32, 10, 0, 0, -3.0),
+             ("enemy", 60.0, 45.0, 180.0, 32, 10, 0, 0, -3.0),
+             ("enemy", -40.0, 140.0, 180.0, 32, 10, 0, 1, -3.0)]
+    v = _tick(units)
+    fx = v.fx
+    cm = OR.comes(fx)[0]
+    assert cm[0, 5] and cm[2, 6] and not cm[0, 4] and not cm[3, 5], "the rule of coming on the level's rows"
+    e, u = PN.second(fx)
+    # 5 and 6 both come at the anvil in melee; 4 is in melee, 7 routs
+    assert e[0].tolist() == [False] * 5 + [True, True, False]
+    gq = [float(fx.gap[0, k, 5]) for k in (0, 2)]
+    assert int(u[0, 5]) == (0 if gq[0] <= gq[1] else 2)     # the nearest unit of mine 5 is second at
+    assert PN.come_own(fx)[0].tolist() == [False, False, True, False]
+    # the first tick (no pin yet under the two-tick wait): unit 3 is the nearest interceptor to 5; unit 1 is not the
+    # nearest to 5 or 6 (unit 3 is); unit 2 meets its own (6) under counter; one interceptor an enemy
+    p = PN.Teacher(default="config", wait2=True, second_m=150.0)
+    out = p(v)
+    assert out["target"][0].tolist() == [-1, -1, -1, 5]
+    assert out["skill"][0].tolist() == [SC.COUNTER, SC.COUNTER, SC.COUNTER, SC.ATTACK]
+    assert p.last_tags["cause"][0].tolist() == [0, 0, 0, 2] and int(p.last_tags["u"][0, 3]) == int(u[0, 5])
+    assert p.last_tags["cell"][0, 3] // 5 != 0, "5 is not pinned"
+    skill, tgt, side, change, cnt = OR.masks(v, out, p.allow)
+    assert tgt[0].tolist() == [-1, -1, -1, 5] and float(cnt["rejected"].sum()) == 0
+    assert float(cnt["melee_blocked"].sum()) == 1                   # (the anvil's counter waits: no order in melee)
+    # out of the interceptor's reach: nothing
+    assert PN.Teacher(default="config", wait2=True, second_m=30.0)(v)["target"][0].tolist() == [-1] * 4
+    # the second tick: 4 pinned on two ticks - a pinned target first gives units 1 and 2 (one a side) 4, unit 3 still 5
+    p = PN.Teacher(default="config", wait2=True, second_m=150.0, first="pin")
+    p(v)
+    out = p(v)
+    assert out["target"][0].tolist() == [-1, 4, 4, 5]
+    assert p.last_tags["cause"][0].tolist() == [0, 1, 1, 2]
+    # a second enemy first: unit 1 is still not the nearest to 5 or 6, so the same
+    p = PN.Teacher(default="config", wait2=True, second_m=150.0, first="second")
+    p(v)
+    assert p(v)["target"][0].tolist() == [-1, 4, 4, 5]
+    # DH / DP: D restricted to enemies that come at one of my units / at none (4 pinned comes at nobody); in DH unit 3
+    # finds 5's side on it taken by unit 1 and goes at 6
+    assert PN.player("DH")(v)["target"][0].tolist() == [-1, 5, 6, 6]
+    assert PN.player("DP")(v)["target"][0].tolist() == [-1, 4, 4, -1]

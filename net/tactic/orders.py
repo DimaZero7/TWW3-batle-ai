@@ -43,6 +43,29 @@ def c_orders():
     return cfg()["orders"]
 
 
+def default_skill():
+    """The skill (unit/scripts.SKILLS index) a player built on the level's default hands a unit it leaves without an
+    attack order (config orders.default_skill)."""
+    return SC.SKILLS.index(str(c_orders().get("default_skill", "hold")))
+
+
+def comes(fx):
+    """[R, i, j] row j comes at row i - the unit script's rule of coming (scripts.Facts.comes, the same code) on the
+    level's rows: place, velocity and facing in the zone's axes (a rotation of the world's: the rule's dot product and
+    its angle to the front are the same), the flags m and mv. Cached on fx."""
+    if getattr(fx, "_comes", None) is None:
+        from net.unit import view as V
+        x = fx.rr["rows"]
+        raw = torch.zeros(x.shape[:2] + (len(V.RAW),), device=x.device)
+        for k, v in (("x", fx.s), ("z", fx.f), ("vx", fx.vs), ("vz", fx.vf), ("b", fx.b),
+                     ("m", x[..., RW.RI["m"]]), ("mv", x[..., RW.RI["mv"]])):
+            raw[..., V.I[k]] = v
+        f = SC.Facts.__new__(SC.Facts)              # (only its raw: comes() reads nothing else)
+        f.raw = raw
+        fx._comes = f.comes() & fx.mask[:, :, None] & fx.mask[:, None, :]
+    return fx._comes
+
+
 class Facts:
     """The level's facts at a tick (module doc). Rows k of rr [R, K]; my units g in slot order [R, G] (ctx.rows: their
     row). order {skill, tgt, side} [R, G] the orders in force (tgt: the battle's slot)."""
