@@ -92,6 +92,8 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
                 python -m game.probe.unit_probe --tight game [runs] [--sim]    | --tight layout
                 python -m game.probe.unit_probe --walkout game [runs] [--sim]  | --walkout layout
                 python -m game.probe.unit_probe --standk game [runs] [--sim]   | --standk layout
+  behind2   the behind lane on other geometries (BH2_* below; 15.11 night): the anvil 24 / 36 m wide, a half-size joiner,
+            two joiners at once (behind + beside), lanes read to 480 s - 16 battles; --behind2 game [runs] [--sim] | layout
 
 All the units are fearless (but the t_morale targets); every lane's rows carry the morale fields with the active phases (fx)
 and the unit card's values (cs: leadership, speed, melee attack / defence, weapon and missile damage).
@@ -808,6 +810,76 @@ def own_battles(n=OWN_BATTLES):
     return out
 
 
+# Plan 'behind2' (15.11 night; the melee core v2's open rules, tmp/melee_core/v2/critic_review.md 7): the behind lane on
+# other geometries. E, A, B as in 'behind' (A held, B's centre BH_BACK m straight behind A's, attacks E at a run TG_PIN_S
+# after A's first melee flag); 'h<w>' the same with B never ordered. Kinds: 'b24' / 'b36' (and 'h24' / 'h36') the anvil
+# 24 / 36 m wide against E's 30 (A's centre kept TG_GAP + its half depth from E's front, B's centre 20 m behind it); 'half'
+# B with half its men killed at placement (kill_number_of_men 0.5: 60 men on the same 30 m front - the entry's damage, the
+# probe's only way to a smaller unit of one template); 'two' two joiners at once - B straight behind and C (swordsmen, an
+# extra keeping its morale) on A's line BH_DX m aside, both attacking at TG_PIN_S (the extra's go_melee_s); 'side' B on A's
+# line BH_DX m aside alone (the behind plan's side); 'b30L' / 'h30L' read to 480 s (fight_s BH2_LONG_S + 5; A and B
+# fearless there: the hold's anvil is nearly destroyed by 330-360 s at the game's loss rate, a rout would end the read); lower priority
+# (battles 15-16): 'bnear' B's front 1 m behind A's back, 'b40' B 40 m behind, 'att' / 'att_h' A attacks E at a walk at the
+# go (B behind at 8 s / never ordered). Battles: 1-6 BH2_P, 7-12 BH2_Q, 13-14 BH2_L, 15-16 BH2_X, each kind list rotated
+# over BH_PLACES by the battle, the side of the beside units mirrored between battles; <= 22 units with the clock's lords.
+BH2_P = ("h24", "b24", "h36", "b36", "h30", "b30")
+BH2_Q = ("h30", "b30", "half", "two", "side", "two")
+BH2_L = ("h30L", "b30L") * 3
+BH2_X = ("h30", "b30", "bnear", "b40", "att", "att_h")
+BH2_BLOCKS = ((BH2_P, 6), (BH2_Q, 6), (BH2_L, 2), (BH2_X, 2))
+BH2_LONG_S = 480
+BH2_HALF = 0.5
+# kind: (anvil width, back (None: 'near'), beside, hold, half, two, long, A attacks)
+BH2_KINDS = {"h24": (24, 20, 0, 1, 0, 0, 0, 0), "b24": (24, 20, 0, 0, 0, 0, 0, 0),
+             "h36": (36, 20, 0, 1, 0, 0, 0, 0), "b36": (36, 20, 0, 0, 0, 0, 0, 0),
+             "h30": (30, 20, 0, 1, 0, 0, 0, 0), "b30": (30, 20, 0, 0, 0, 0, 0, 0),
+             "half": (30, 20, 0, 0, 1, 0, 0, 0), "two": (30, 20, 0, 0, 0, 1, 0, 0), "side": (30, 0, 1, 0, 0, 0, 0, 0),
+             "h30L": (30, 20, 0, 1, 0, 0, 1, 0), "b30L": (30, 20, 0, 0, 0, 0, 1, 0),
+             "bnear": (30, None, 0, 0, 0, 0, 0, 0), "b40": (30, 40, 0, 0, 0, 0, 0, 0),
+             "att": (30, 20, 0, 0, 0, 0, 0, 1), "att_h": (30, 20, 0, 1, 0, 0, 0, 1)}
+# the hold kind each kind is read against (the pairs, the relief)
+BH2_BASE = {"b24": "h24", "b36": "h36", "b30": "h30", "half": "h30", "two": "h30", "side": "h30", "b30L": "h30L",
+            "bnear": "h30", "b40": "h30", "att": "att_h"}
+
+
+def behind2_battles():
+    """The behind2 plan's 16 battles (comment above BH2_P)."""
+    ed = cp.depth(*cp.UNITS[TG_E][:2], cp.WIDTH_M)
+    bd = cp.depth(*cp.UNITS[TG_B][:2], cp.WIDTH_M)
+    out, i = [], 0
+    for kinds, n in BH2_BLOCKS:
+        for _ in range(n):
+            i += 1
+            s = 1 if i % 2 else -1
+            lanes, long_ = [], False
+            for kind, place in zip(cp.rotate(list(kinds), i - 1), BH_PLACES):
+                aw, back, beside, hold, half, two, long, att = BH2_KINDS[kind]
+                ad = cp.depth(*cp.UNITS[TG_A][:2], aw)
+                if back is None:
+                    back = round((ad + bd) / 2 + 1.0, 1)
+                dx = s * BH_DX if beside else 0.0
+                fight, mx = (BH2_LONG_S + 5, BH2_LONG_S + 80) if long else (TG_FIGHT_S, TG_MAX_S)
+                long_ |= bool(long)
+                adz = round(ed / 2 + TG_GAP + ad / 2, 1)
+                # (the long lanes: A and B fearless - the hold's anvil is about destroyed by 330-360 s, a rout before
+                # would end the read)
+                extras = [{"short": TG_A, "dx": 0.0, "dz": adz, "b": 180.0, "width": aw, "morale": not long,
+                           **({"attack": True} if att else {})}]
+                if two:
+                    extras.append({"short": TG_B, "dx": s * BH_DX, "dz": adz, "b": 180.0, "width": cp.WIDTH_M,
+                                   "morale": True, "go_melee_s": TG_PIN_S})
+                extra = {} if hold else {"a_go_melee_s": TG_PIN_S, "a_go_melee_of": "e1"}
+                if half:
+                    extra["damage"] = {"a": {"method": "kill", "share": BH2_HALF}}
+                lanes.append(cp.lane(TG_B, TG_E, "hold" if hold else "attack_run", "hold",
+                                     gap_m=round(TG_GAP + ad / 2 + back - bd / 2, 1), fight_s=fight, max_s=mx,
+                                     answer=False, kind=kind, a_dx=dx, b_side="right" if s > 0 else "left", back=back,
+                                     anvil_w=aw, extras=extras, t_attack_extra="run", a_morale=not long,
+                                     mem_morale_ours=True, morale_rows=True, place=place, **extra))
+            out.append(lanes + [_clock(BH2_LONG_S + 80 if long_ else TG_MAX_S)])
+    return out
+
+
 def _fwd(b):
     r = math.radians(b)
     return math.sin(r), math.cos(r)
@@ -990,6 +1062,8 @@ def battles(plan):
         return behind_battles()
     if plan == "own":
         return own_battles()
+    if plan == "behind2":
+        return behind2_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -2480,9 +2554,9 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
     fam = MF_FAMILY.get(plan, plan)
     measure = {"counterfar": counterfar_measure, "standk": counterfar_measure, "intercept": intercept_measure,
                "tight": lambda ln: intercept_measure(ln, TG_WINDOWS), "behind": behind_measure,
-               "own": own_measure}[fam]
+               "own": own_measure, "behind2": behind2_measure}[fam]
     mem = {"counterfar": counterfar_mem, "standk": counterfar_mem, "intercept": intercept_mem, "tight": tight_mem,
-           "behind": behind_mem, "own": own_mem}[fam]
+           "behind": behind_mem, "own": own_mem, "behind2": behind_mem}[fam]
     if source == "game":
         rows = []
         for d in runs:
@@ -2505,20 +2579,23 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
         # (counterfar: both defenders; intercept: both sides of B; tight: every cell; standk: templates A and B)
         which = {"tight": range(1, len(TG_CELLS) + 1), "standk": (1, SK_ORDER.index("B") + 1),
                  "tight01": range(1, 11), "standk01": (1, 2, 5, 6), "fill": (1,), "behind": range(1, BH_BATTLES + 1),
-                 "own": range(1, OWN_BATTLES + 1)}.get(plan, range(1, 3))
+                 "own": range(1, OWN_BATTLES + 1), "behind2": (1, 2, 7, 8, 13, 14, 15, 16)}.get(plan, range(1, 3))
         for i in which:
             config, _, _ = cp.run_config(plan, i)
             seen = set()
             for l in config["lanes"]:
                 if l["kind"] == "clock":
                     continue
-                if fam in ("tight", "standk", "behind", "own"):
+                if fam in ("tight", "standk", "behind", "own", "behind2"):
                     # (the twin runs each lane alone: a battle's repeated kinds are one lane, `copies` times)
                     if l["kind"] in seen:
                         continue
                     seen.add(l["kind"])
                 a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] + l["gap_m"] + l["a_depth"] / 2, "b": 180.0,
                      "men": cp.UNITS[cp.SHORT[l["a_key"]]][1]}
+                if (l.get("damage") or {}).get("a", {}).get("method") == "kill":
+                    # (the behind2 plan's half B) kill_number_of_men(floor(men x share)) at placement
+                    a["men"] -= math.floor(a["men"] * l["damage"]["a"]["share"])
                 tg = {"x": l["x"], "z": l["z"] - l["t_depth"] / 2, "b": 0.0, "men": cp.UNITS[cp.SHORT[l["t_key"]]][1]}
                 lanes.append({"run": "layout", "plan": plan, "battle": i, "spec": l, "samples": [(0.0, a, tg, None)],
                               "men": [], "contacts": {}, "end": {"t": l["max_s"] * 1000}, "abilities": [], "phases": []})
@@ -2653,7 +2730,8 @@ def behind_measure(lane):
     t, R = _roles(lane)
     W = cp.WIDTH_M
     a_short = spec["extras"][0]["short"]
-    dims = {"A": (W, cp.depth(*cp.UNITS[a_short][:2], W)), "B": (spec["a_width"], spec["a_depth"]),
+    aw = spec["extras"][0].get("width", W)
+    dims = {"A": (aw, cp.depth(*cp.UNITS[a_short][:2], aw)), "B": (spec["a_width"], spec["a_depth"]),
             "E1": (spec["t_width"], spec["t_depth"])}
     out = {"kind": spec["kind"], "side": spec.get("b_side"), "run": lane.get("run"), "back": spec.get("back"),
            "a_dx": spec.get("a_dx")}
@@ -2676,16 +2754,17 @@ def behind_measure(lane):
     i_c = int(np.searchsorted(t, c0 - 1e-6))
     r0 = float(t[max(i_c - 1, 0)])
     h0, lost = {}, {}
+    wins = BH_WINDOWS + ((BH2_LONG_S,) if spec.get("fight_s", 0) >= BH2_LONG_S else ())
     for r in ("A", "B", "E1"):
         hp = R[r]["hp"]
         if not np.isfinite(hp).any():
             continue
         h0[r] = float(hp[np.isfinite(hp)][0])
-        for hi in BH_WINDOWS:
+        for hi in wins:
             v = cp.at(t, hp, r0) - cp.at(t, hp, c0 + hi)
             lost[(r, hi)] = v if np.isfinite(v) else None
             out[f"{'E' if r == 'E1' else r}_0_{hi}"] = None if lost[(r, hi)] is None else v / h0[r]
-    for hi in BH_WINDOWS:
+    for hi in wins:
         own = [lost.get(("A", hi)), lost.get(("B", hi))]
         en = lost.get(("E1", hi))
         out[f"own_0_{hi}"] = sum(own) / (h0["A"] + h0["B"]) if None not in own and "B" in h0 else None
@@ -2695,7 +2774,7 @@ def behind_measure(lane):
     for r in ("A", "B"):
         rt, routs, _, _ = _episodes(t, R[r]["r"], np.zeros(len(t)))
         out[f"{r}_rout_s"] = None if rt is None else rt - c0
-    for hi in BH_WINDOWS:
+    for hi in wins:
         out[f"clean_{hi}"] = all(out.get(f"{r}_rout_s") is None or out[f"{r}_rout_s"] >= hi for r in ("A", "B"))
     ref = og if og is not None else (first["A"] + TG_PIN_S if first["A"] is not None else None)
     if ref is not None:
@@ -2900,6 +2979,56 @@ BH_KEY = tuple(dict.fromkeys(
        "A_sw_before_1", "A_sw_after_1", "A_sw_before_5", "A_sw_after_5")))
 BH_PAIR_KEY = tuple(f"trade_{hi}" for hi in BH_WINDOWS) + ("A_0_60", "A_0_120", "B_0_60", "B_0_120", "E_0_60", "E_0_120")
 OWN_KEY = TG_KEY + ("e2_side_of_B", "B_60_after_touch", "e2_on_B_list", "e2_on_B_list_s")
+BH2_WINDOWS = BH_WINDOWS + (BH2_LONG_S,)
+BH2_KEY = tuple(dict.fromkeys(BH_KEY + ("anvil_w", "B_men0", "C_men0", "m_C", "c_go_after_A_s")
+                              + tuple(f"{s}_0_{hi}" for hi in BH2_WINDOWS for s in ("A", "B", "C", "E", "own", "en"))
+                              + tuple(f"trade_{hi}" for hi in BH2_WINDOWS) + ("C_rout_s",)))
+BH2_PAIR_KEY = tuple(f"trade_{hi}" for hi in BH2_WINDOWS) + tuple(f"{s}_0_{hi}" for hi in (60, 120, 240, BH2_LONG_S)
+                                                                     for s in ("A", "B", "E"))
+
+
+def behind2_measure(lane):
+    """The behind2 plan's lane: behind_measure's numbers (to 480 s on the long lanes), the anvil's width, B's men at the go,
+    and with a second joiner C (the 'two' lanes: the second extra) its first melee flag, its order (e_go) after A's flag,
+    its losses, ours = A + B + C and the trade over the same windows."""
+    out = behind_measure(lane)
+    spec = lane["spec"]
+    out["anvil_w"] = spec["extras"][0].get("width", cp.WIDTH_M)
+    t, R = _roles(lane)
+    b0 = next((x[1] for x in lane["samples"] if x[1] and x[1].get("men") is not None), None)
+    out["B_men0"] = None if b0 is None else float(b0["men"])
+    if len(spec.get("extras") or []) < 2 or out.get("c0") is None:
+        return out
+    ex = {round(tt, 3): (r or []) for tt, r in lane.get("extras") or []}
+    rc = [(ex.get(round(tt, 3)) or [None, None])[1] if len(ex.get(round(tt, 3)) or []) > 1 else None for tt in t]
+    C = {k: np.array([np.nan if (r or {}).get(k) is None else float(r[k]) for r in rc]) for k in ("hp", "m", "r", "men")}
+    c0 = out["c0"]
+    fc = _first(t, np.nan_to_num(C["m"]) > 0)
+    out["m_C"] = None if fc is None else fc - c0
+    cm = C["men"][np.isfinite(C["men"])]
+    out["C_men0"] = float(cm[0]) if len(cm) else None
+    go = next((p for p in lane.get("phases", []) if p["phase"] == "e_go"), None)
+    fa = None if out.get("m_A") is None else c0 + out["m_A"]
+    out["c_go_after_A_s"] = None if go is None or fa is None else go["t"] / 1000 - fa
+    rt, _, _, _ = _episodes(t, C["r"], np.zeros(len(t)))
+    out["C_rout_s"] = None if rt is None else rt - c0
+    i_c = int(np.searchsorted(t, c0 - 1e-6))
+    r0 = float(t[max(i_c - 1, 0)])
+    hp = C["hp"]
+    if not np.isfinite(hp).any():
+        return out
+    h0c = float(hp[np.isfinite(hp)][0])
+    h0 = {r: float(R[r]["hp"][np.isfinite(R[r]["hp"])][0]) for r in ("A", "B")}
+    for hi in BH2_WINDOWS:
+        v = cp.at(t, hp, r0) - cp.at(t, hp, c0 + hi)
+        if not np.isfinite(v) or out.get(f"A_0_{hi}") is None or out.get(f"B_0_{hi}") is None:
+            continue
+        out[f"C_0_{hi}"] = v / h0c
+        own = (out[f"A_0_{hi}"] * h0["A"] + out[f"B_0_{hi}"] * h0["B"] + v) / (h0["A"] + h0["B"] + h0c)
+        out[f"own_0_{hi}"] = own
+        if out.get(f"en_0_{hi}") is not None:
+            out[f"trade_{hi}"] = out[f"en_0_{hi}"] - own
+    return out
 
 
 def own_paired(rows):
@@ -2985,11 +3114,11 @@ def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", o
     """Prints the counterfar / intercept table per kind (game | twin on the same recorded starts with sim) and the pairs
     against the hold lanes; writes build/charge-probe/<plan>_<source>.json (not in Git)."""
     fam = MF_FAMILY.get(plan, plan)
-    keys = {"intercept": IC_KEY, "tight": TG_KEY, "behind": BH_KEY, "own": OWN_KEY}.get(fam, CF_KEY)
+    keys = {"intercept": IC_KEY, "tight": TG_KEY, "behind": BH_KEY, "own": OWN_KEY, "behind2": BH2_KEY}.get(fam, CF_KEY)
     rows = _mf_lanes(plan, source, runs, copies=copies, device=device)
     table = mf_summary(rows, keys)
     pair_keys = {"intercept": ("trade_30", "trade_60", "trade_120", "own_0_60", "own_0_120", "en_0_60", "en_0_120"),
-                 "tight": TG_PAIR_KEY, "behind": BH_PAIR_KEY}.get(fam, ("trade_10", "trade_30", "trade_60", "a_0_60",
+                 "tight": TG_PAIR_KEY, "behind": BH_PAIR_KEY, "behind2": BH2_PAIR_KEY}.get(fam, ("trade_10", "trade_30", "trade_60", "a_0_60",
                                                                        "tg_0_60"))
     result = {"plan": plan, "source": source, "runs": [str(r) for r in runs], "lanes": rows, "summary": table}
 
@@ -2998,6 +3127,8 @@ def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", o
             return mf_paired(rs, "hold", pair_keys)
         if fam == "behind":
             return {"all": {"behind_hold": mf_paired(rs, "behind_hold", pair_keys, sim_within=True)}}
+        if fam == "behind2":
+            return {"all": {"hold": mf_paired(rs, BH2_BASE.get, pair_keys, sim_within=True)}}
         if fam == "own":
             return own_paired(rs)
         return tight_paired(rs) if fam == "tight" else None
@@ -3022,7 +3153,7 @@ def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", o
             cells.append(f"{f} {c}")
         print(f"  {kind} (n {r['n']}): " + "; ".join(cells))
     for name, pt in (("paired", result.get("paired")), ("twin paired", (result.get("twin") or {}).get("paired"))):
-        if pt and fam in ("tight", "behind", "own"):
+        if pt and fam in ("tight", "behind", "own", "behind2"):
             for cut, sub in pt.items():
                 for base, tab in sub.items():
                     print(f"== {name} {cut} (minus {base})")
@@ -3637,7 +3768,7 @@ def main(argv=None):
                         help="the flank2v1 plan's table: 'game' the runs (+ the twin on their starts with --sim), "
                              "'layout' the twin on the plan's own places (no game run needed)")
     for plan in ("counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01",
-                 "behind", "own"):
+                 "behind", "own", "behind2"):
         parser.add_argument(f"--{plan}", choices=("game", "layout"),
                             help=f"the {plan} probe's table (meetfar, night probes): 'game' the runs (+ the twin on "
                                  "their starts with --sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
@@ -3647,7 +3778,7 @@ def main(argv=None):
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "walkout"]
         walkout_report(runs, source=args.walkout, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
         return 0
-    for plan in ("counterfar", "intercept", "tight", "standk", "fill", "tight01", "standk01", "behind", "own"):
+    for plan in ("counterfar", "intercept", "tight", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2"):
         if getattr(args, plan):
             runs = args.runs or [d for d in cp.runs() if _plan_of(d) == plan]
             mf_report(plan, runs, source=getattr(args, plan), sim=args.sim, copies=args.copies, device=args.device,

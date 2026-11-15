@@ -110,7 +110,8 @@
 -- lane.a_go_melee_s seconds (why 'melee'), or - lane.a_go_closest - once that distance grew 2 m past its least or the
 -- target is in melee before a_go_m was reached (why 'closest'; probe_phase 'a_go' {why, d, of}); lane.a_go_melee_of
 -- ('e1' the first extra, 't' the lane's target; the tight plan) names whose melee flag starts that clock instead of the
--- order's target's. lane.a_morale and an extra's
+-- order's target's. An extra with e.go_melee_s (the behind2 plan's second joiner) attacks the lane's target at a run
+-- (e.walk: at a walk) once the first extra has been in melee that long (probe_phase 'e_go' {n}). lane.a_morale and an extra's
 -- e.morale: that unit keeps its morale (not fearless). lane.contact_a_only: the lane's
 -- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
 -- attacker's row carries dd (CCO DamageDealt); lane.dd_rows 'both' (the pusbags plan): the target's row too.
@@ -871,6 +872,23 @@ function M.main(bm, config, globals)
                     end
                     emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0, why = go_why,
                         d = go_d and round(go_d, 1) or nil, of = lane.a_go_melee_of})
+                end
+                -- (e.go_melee_s, the behind2 plan's second joiner) an extra attacks the lane's target at a run (e.walk: at
+                -- a walk) once the first extra has been in melee that long; once (probe_phase 'e_go' {n: the extra's index})
+                if lane.extras and lane.extras[1] then
+                    for i, e in ipairs(lane.extras) do
+                        if e.go_melee_s and not e.go_done then
+                            if not lane.e1_melee_ms then
+                                local e1 = state.units[lane.extras[1].name]
+                                if read(function() return e1.unit:is_in_melee() end) then lane.e1_melee_ms = now end
+                            end
+                            if lane.e1_melee_ms and now - lane.e1_melee_ms >= e.go_melee_s * 1000 then
+                                e.go_done = true
+                                attack(lane, state.units[e.name], lane.t, e.walk == true)
+                                emit('probe_phase', {lane = lane.name, phase = 'e_go', n = i, t = now - lane.t0})
+                            end
+                        end
+                    end
                 end
                 if lane.mode == 'shoot' and lane.reorder_s and now - (lane.reorder_ms or lane.t0) >= lane.reorder_s * 1000 then
                     -- (the cover plan) a shooter not firing gets its ranged attack again every reorder_s: a target hidden

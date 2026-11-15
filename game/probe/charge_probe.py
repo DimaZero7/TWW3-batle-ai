@@ -576,7 +576,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
-              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own")
+              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2119,7 +2119,8 @@ def run_config(plan, index):
         # the hammer's and the target's men every 0.5 s (the sparse polls: their places, the charge's clock) and the
         # target's morale every 0.5 s (mem_morale: the effects, the sides its enemies struck from, the fight's outcome)
         # (its 'clock' lane - the two Generals 100 m apart - is polled densely: the morale rows ride on that poll)
-        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=110, mem_morale=True)
+        # (15.11 night: the anvil's men too - mem_extras -, for who strikes whom by place, as the behind plan's rows)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=110, mem_morale=True, mem_extras=True)
     if plan in ("counterfar", "fill"):
         # (game/probe/unit_probe.py, the meetfar probe's part 1; fill: the same battle with parked fillers) health every 0.25 s; the men from memory every 0.1 s
         # from 60 m (centres) to 5 s after the contact (the charge's clock, the formation's depth at contact)
@@ -2131,7 +2132,7 @@ def run_config(plan, index):
         # mem_morale_ours; the 'clock' lane keeps the poll going, as in flank2v1)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=30, men_near_m=110, mem_morale=True,
                       mem_extras=True)
-    if plan in ("tight", "tight01", "behind", "own"):
+    if plan in ("tight", "tight01", "behind", "own", "behind2"):
         # (game/probe/unit_probe.py, the night probes' tight; tight01 its lanes under the 0.1 s step's men count) health every 0.25 s; the men of all four units from memory
         # every 0.1 s while B and E1 (centres) are within 105 m - the last ~20 s of the approach - and every 0.5 s after
         # the contact (men_after_s 0: the 245 s fights would make the dense polls the battle's cost); the morale of E1,
@@ -2859,6 +2860,18 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 Ej = int(slot[f"e{j}"][b])
                 if Ej >= 0 and e.get("attack"):
                     kind[b, Ej], target[b, Ej], run_[b, Ej] = O.ATTACK, T, False
+                # (e.go_melee_s, the behind2 plan's second joiner; entries/charge_probe.lua) at a run once the first
+                # extra has been in melee that long
+                E1_ = int(slot["e1"][b])
+                if Ej >= 0 and e.get("go_melee_s") is not None and E1_ >= 0:
+                    eg = st_["go_s"][b]
+                    if bool(u["m"][b, E1_]) and eg.get("e1_melee") is None:
+                        eg["e1_melee"] = t - params.dt
+                    if eg.get("e1_melee") is not None and t - eg["e1_melee"] >= e["go_melee_s"] - 1e-6:
+                        if eg.get(f"e_go{j}") is None:
+                            eg[f"e_go{j}"] = t
+                            st_["phases"][b].append({"phase": "e_go", "n": j, "t": t * 1000})
+                        kind[b, Ej], target[b, Ej], run_[b, Ej] = O.ATTACK, T, not e.get("walk")
             if sp.get("t_attack_extra") and int(slot["e1"][b]) >= 0:
                 # the walkpass plan's 'busy': the target attacks the first extra at a walk from the go
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), sp.get("t_attack_extra") == "run"
