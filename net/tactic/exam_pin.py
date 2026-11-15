@@ -25,10 +25,18 @@ tactic/pin.py through the tactic level (stage0/battle.play_tactic, watch.PinWatc
               recorder (tactic/tags.Record: the labeller TEACH built under its own name, asked on the same view), then
               the pilot's battles with shuffled slots (specs.shuffle_slots) by TEACH (recorded) and C; <out dir>/
               check.json. --vision A1:<seed>,N1:<seed>,G:<battle>: records for game.vision (<out dir>/vision/<name>/)
+    exam      stage 3, the exam before training (design section 5; review C, D, I): --set G (config drills.attack.sets.G:
+              1,024 fresh general battles on the trained sizes + 256 on the held ones, slots shuffled) or S (the scenes'
+              set S, as `scenes --check --scene-set S` plays it) - each of --players (C,TEACH,TEACH:taught) through
+              HoleWatch (the first contact of each strike, my line's widest hole every 5 s), TEACH recorded
+              (tags.Record: S's cause scenes = those with a full-weight label); <out dir>/<set>_<player>.json, then
+              exam_table: B5, B8, B11, events, by script and size (G) / by family (S), the strikes' contact sides, the
+              hole 30 s after each strike against C's at the same second; <out dir>/exam_<set>.json
 A player's name: a key of pin.PLAYERS, optionally with ':holes' (config orders.hole_fits off - the old rule, a frame on a
 hole must move), ':line' (orders.zone_fit off - a line zone on the units' middle), ':norout' (orders.end_on_rout off),
-':nocap' (orders.cap_all off), ':mt' (orders.teach.mt on) and ':noreach' (orders.teach.come_reach_m null: TEACH with
-come_own's reach the counter's). "Two errors" = paired().
+':nocap' (orders.cap_all off), ':mt' (orders.teach.mt on), ':noreach' (orders.teach.come_reach_m null: TEACH with
+come_own's reach the counter's) and ':taught' (orders.teach.no_through on: TEACH giving only the attack orders the loss
+carries at full weight, review I.2). "Two errors" = paired().
 
     DOCK_NAME=agent-t2 DOCK_CPUS=8 DOCK_MEM=6g bash ops/dock.sh net.tactic.exam_pin players --players K,C --sim 1925110 \
         --ref K=tmp/tactic_slice/v2/stage1e/r/p_K.json@1925110 --out tmp/attack/s2/p.json
@@ -114,6 +122,8 @@ def _variant(name):
         o["teach"] = {**o["teach"], "mt": True}
     if "noreach" in opts:
         o["teach"] = {**o["teach"], "come_reach_m": None}
+    if "taught" in opts:
+        o["teach"] = {**o["teach"], "no_through": True}
     return base, saved
 
 
@@ -509,6 +519,237 @@ class SceneWatch(W.PinWatch):
         self.c_done |= new
 
 
+def line_holes(w, st, hole_m=50.0):
+    """([B] the widest lateral gap between my standing units - all depths, across the start's axis my centroid -> the
+    enemy's; 0 under two units -, [B] the number of gaps over hole_m) for a PinWatch w (branches.FWatch's measure)."""
+    from sim import geometry
+    u = st.u
+    front, _ = geometry.dims(u, w.spacing)
+    ok = w.mine & ~u["r"] & (u["men"] > 0) & ~u["gone"]
+    fx_, fz_ = w.fwd
+    s = u["x"] * fz_[:, None] - u["z"] * fx_[:, None]
+    big = 1e9
+    lo = torch.where(ok, s - front / 2, torch.full_like(s, big))
+    hi = torch.where(ok, s + front / 2, torch.full_like(s, -big))
+    lo, order = lo.sort(1)
+    reach = hi.gather(1, order).cummax(1).values
+    gaps = torch.where(lo[:, 1:] < big / 2, lo[:, 1:] - reach[:, :-1], torch.full_like(lo[:, 1:], -big))
+    g = gaps.amax(1).clamp(min=0.0)
+    return torch.where(ok.sum(1) >= 2, g, torch.zeros_like(g)), (gaps > hole_m).float().sum(1)
+
+
+class HoleWatch(SceneWatch):
+    """SceneWatch + my line's widest hole (line_holes) every SERIES_S s from second 0: hole_series [T][B]."""
+
+    def _init(self, st):
+        super()._init(st)
+        self.hole_series = []
+
+    def __call__(self, sec, st):
+        super().__call__(sec, st)
+        if sec % self.SERIES_S == 0:
+            self.hole_series.append(line_holes(self, st)[0].tolist())
+
+
+def g_set():
+    """(specs, torch seeds, chunk) of set G (module doc; config drills.attack.sets.G)."""
+    c = scfg()["drills"]["attack"]["sets"]["G"]
+    lim = int(c["limit"])
+    sp = SP.drill_generals(int(c["n"]), SP.seeded(int(c["seed"])), sizes=c["sizes"], limit=lim)
+    sp += SP.drill_generals(int(c["n_held"]), SP.seeded(int(c["held_seed"])), sizes=c["sizes_held"], limit=lim)
+    ch = int(c["chunk"])
+    return sp, [int(c["tseed"]) + k for k in range((len(sp) + ch - 1) // ch)], ch
+
+
+def s_set(chunk=256):
+    """(specs, torch seeds, chunk) of set S as `scenes --check --scene-set S` plays it (TSEED + 200 + k)."""
+    from net.tactic import scenes as SN
+    sp = SN.set_specs("S")
+    return sp, [TSEED + 200 + k for k in range((len(sp) + chunk - 1) // chunk)], chunk
+
+
+def watched_run(name, specs, seeds, chunk, a, P, scene=False, record=False):
+    """The player's file (run_player) through HoleWatch with full / by_limit batches, + contacts (b, my slot, target,
+    second, side), holes {b: series} and, with record, rec (tags.Record's labels and counts: TEACH built under its own
+    name, the labeller the same)."""
+    from net.tactic import tags as TG
+    ex = {"contacts": [], "holes": {}, "rec": {"cnt": {}, "labels": []}}
+
+    def make():
+        return TG.Record(build_under(name), build_under(name))
+
+    def look(ii, watch, side):
+        hs = list(zip(*watch.hole_series))
+        for b in range(min(len(ii), len(hs))):
+            ex["holes"][ii[b]] = [round(x, 2) for x in hs[b]]
+        ex["contacts"] += [(ii[b], i, t, s, sd) for b, i, t, s, sd in watch.contacts if b < len(ii)]
+        if record:
+            rec = side.player
+            for b, c in rec.cnt.items():
+                if b < len(ii):
+                    ex["rec"]["cnt"][ii[b]] = c
+            ex["rec"]["labels"] += [{**x, "b": ii[x["b"]]} for x in rec.labels if x["b"] < len(ii)]
+    kw = {"battles": BA.scene_battles, "enemy": BA.SceneEnemy} if scene else {}
+    res = run_player(name, specs, seeds, chunk, a, P, make=make if record else None, on_chunk=look,
+                     watch_cls=HoleWatch, full=True, by_limit=True, **kw)
+    res.update(contacts=ex["contacts"], holes={str(b): v for b, v in ex["holes"].items()},
+               recipes=[s.get("recipe", "G") for s in specs])
+    if record:
+        res["rec"] = ex["rec"]
+    return res
+
+
+def _strike_rows(d):
+    """[(b, my slot, target, second)] of a player file's attack orders (order_log)."""
+    ci = {k: i for i, k in enumerate(d["order_log_cols"])}
+    return [(int(r[ci["b"]]), int(r[ci["slot"]]), int(r[ci["target"]]), float(r[ci["sec"]])) for r in d["order_log"]]
+
+
+def strike_sides(d):
+    """{(b, slot, target, sec): side} - each strike's first contact (1 front, 2 flank, 3 rear; absent: none)."""
+    by = {}
+    for b, i, t, s, sd in d.get("contacts", []):
+        by.setdefault((int(b), int(i), int(t)), []).append((int(s), int(sd)))
+    out = {}
+    for b, i, t, s in _strike_rows(d):
+        c = [x for x in by.get((b, i, t), []) if x[0] >= s]
+        if c:
+            out[(b, i, t, s)] = min(c)[1]
+    return out
+
+
+def side_shares(d, sel=None):
+    S = None if sel is None else set(sel)
+    rows = [r for r in _strike_rows(d) if S is None or r[0] in S]
+    sd = strike_sides(d)
+    n = max(len(rows), 1)
+    out = {"strikes": len(rows)}
+    for k, v in (("front", 1), ("flank", 2), ("rear", 3)):
+        out[k] = round(sum(1 for r in rows if sd.get(r) == v) / n, 4)
+    out["no_contact"] = round(sum(1 for r in rows if r not in sd) / n, 4)
+    return out
+
+
+def holes_after(d, dc, sel=None, after=30):
+    """My line's widest hole `after` s after each strike of d against dc's at the same second (paired by strike), all
+    and by the strike's contact side."""
+    S = None if sel is None else set(sel)
+    hd, hc = d.get("holes", {}), dc.get("holes", {})
+    sd = strike_sides(d)
+    pairs = {"all": ([], [])}
+    for r in _strike_rows(d):
+        b, s = r[0], r[3]
+        if S is not None and b not in S:
+            continue
+        x, y = hd.get(str(b)), hc.get(str(b))
+        k = int(round((s + after) / W.PinWatch.SERIES_S))
+        if not x or not y or k >= min(len(x), len(y)):
+            continue
+        for lab in ("all", {1: "front", 2: "flank", 3: "rear"}.get(sd.get(r), "no_contact")):
+            pairs.setdefault(lab, ([], []))
+            pairs[lab][0].append(x[k])
+            pairs[lab][1].append(y[k])
+    return {lab: {"mean": _mean(a), "mean_C": _mean(c), "diff": paired(a, c)} for lab, (a, c) in pairs.items()}
+
+
+def full_label_battles(d):
+    return sorted({x["b"] for x in d.get("rec", {}).get("labels", []) if not x["dc_label"] and not x["dropped"]})
+
+
+def exam(a, P, D):
+    """`exam_pin exam --set G|S` (module doc): the players' files, then exam_table."""
+    sname = a.set
+    specs, seeds, chunk = g_set() if sname == "G" else s_set(a.chunk)
+    for name in a.players.split(","):
+        f = D / f"{sname}_{name.replace(':', '@')}.json"
+        if f.exists():
+            print(json.dumps({"exam": sname, "player": name, "kept": str(f)}), flush=True)
+            continue
+        res = watched_run(name, specs, seeds, chunk, a, P, scene=sname == "S", record=name == "TEACH")
+        f.write_text(json.dumps(res), encoding="utf-8")
+    return exam_table(D, sname)
+
+
+def exam_table(D, sname):
+    """The stage-3 table of set sname from <D>/<set>_<player>.json (module doc)."""
+    names = [n for n in ("C", "TEACH", "TEACH:taught") if (D / f"{sname}_{n.replace(':', '@')}.json").exists()]
+    files = {n: str(D / f"{sname}_{n.replace(':', '@')}.json") for n in names}
+    pairs = [p for p in ("TEACH-C", "TEACH:taught-C", "TEACH:taught-TEACH") if all(x in names for x in p.split("-", 1))]
+    res = table(files, "C", pairs)
+    pl = {n: json.loads(Path(f).read_text(encoding="utf-8")) for n, f in files.items()}
+    meta = pl["C"]["meta"]
+    B = len(meta)
+    anchor = pl["C"]["per_battle"]["t_contact"]
+    R = {n: reads(d, anchor) for n, d in pl.items()}
+    grp = []
+    if sname == "G":
+        held = set(scfg()["drills"]["attack"]["sets"]["G"]["sizes_held"])
+        grp += [("trained sizes", [b for b in range(B) if meta[b]["n"] not in held]),
+                ("held sizes", [b for b in range(B) if meta[b]["n"] in held])]
+    else:
+        rc = pl["C"]["recipes"]
+        cause = set(full_label_battles(pl["TEACH"])) if "TEACH" in pl else set()
+        grp += [("cause scenes", sorted(cause)), ("no-cause scenes", [b for b in range(B) if b not in cause])]
+        grp += [(f"family {r}", [b for b in range(B) if rc[b] == r]) for r in dict.fromkeys(rc)]
+        grp += [(f"family {r}, cause scenes", [b for b in range(B) if rc[b] == r and b in cause])
+                for r in dict.fromkeys(rc)]
+    out = {"set": sname, "battles": B, "players": res["players"], "pairs": res["pairs"], "by_group": res["by_group"]}
+    for p in pairs:
+        x, y = p.split("-", 1)
+        g = out["by_group"].setdefault(f"{x} - {y}", {})
+        for lab, sel in grp:
+            if sel:
+                g[lab] = {k: paired(R[x][k], R[y][k], sel) for k in ("iii", "i", "ii")}
+                g[lab]["orders"] = paired(pl[x]["per_battle"]["game_orders_min"], pl[y]["per_battle"]["game_orders_min"],
+                                          sel)
+    # B5
+    tc = out["pairs"].get("TEACH - C", {}).get("iii")
+    bg = out["by_group"].get("TEACH - C", {})
+    if sname == "G":
+        subs = {k: bg[k]["iii"] for k in list(SCRIPTS) + [f"{lo}-{hi} units" for lo, hi in SIZES] if k in bg}
+        out["B5"] = {"rule": "TEACH - C at (iii) above two errors on G; above zero against each script and in both size "
+                             "classes (read: the point above zero; the two-error band printed)",
+                     "all": tc, "subs": subs,
+                     "passed": bool(tc and tc["diff"] > tc["two_errors"] and all(v and v["diff"] > 0 for v in subs.values())),
+                     "subs_band_above_zero": {k: bool(v and v["diff"] - v["two_errors"] > 0) for k, v in subs.items()}}
+    else:
+        cs = bg.get("cause scenes", {}).get("iii")
+        out["B5"] = {"rule": "TEACH - C at (iii) above two errors on S's cause scenes (a full-weight teacher order)",
+                     "cause_scenes": cs, "passed": bool(cs and cs["diff"] > cs["two_errors"])}
+    pr = out["players"]
+    out["B8"] = {n: pr[n].get("game_orders_min") for n in pr}
+    out["B8"]["rule"] = "TEACH <= 1.2 a unit-minute (METHOD's mark; printed - cannot fail today)"
+    out["B8"]["passed"] = bool(pr.get("TEACH", {}).get("game_orders_min", 9) <= 1.2)
+    c = pr["C"]
+    out["B11_C_before"] = {k: c.get(k) for k in ("iii_end", "i_anchor300", "ii_own300", "hp_trade", "trade",
+                                                 "game_orders_min", "routs_own", "routs_enemy", "t_contact")}
+    out["events"] = {n: {k: pr[n].get(k) for k in ("attacks_battle", "reached_share", "intercepted_share",
+                                                   "pin_lost_share", "within10_of_contact", "before_contact")}
+                     for n in pr}
+    sel_all = [None] + ([sorted(full_label_battles(pl["TEACH"]))] if sname == "S" and "TEACH" in pl else [])
+    out["contact_sides"] = {n: {"all": side_shares(pl[n])} for n in pl if n != "C"}
+    out["holes_30s"] = {n: {"all": holes_after(pl[n], pl["C"])} for n in pl if n != "C"}
+    if len(sel_all) > 1:
+        for n in out["contact_sides"]:
+            out["contact_sides"][n]["cause scenes"] = side_shares(pl[n], sel_all[1])
+            out["holes_30s"][n]["cause scenes"] = holes_after(pl[n], pl["C"], sel_all[1])
+    if sname == "S":
+        rc = pl["C"]["recipes"]
+        for n in out["contact_sides"]:
+            out["contact_sides"][n]["by_family"] = {r: side_shares(pl[n], [b for b in range(B) if rc[b] == r])
+                                                    for r in dict.fromkeys(rc)}
+    (D / f"exam_{sname}.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+    print_exam(out)
+    return out
+
+
+def print_exam(out):
+    print(f"\n## exam before, set {out['set']} ({out['battles']} battles)")
+    print_table({"anchor": "C", "players": out["players"], "pairs": out["pairs"], "by_group": out["by_group"]})
+    for k in ("B5", "B8", "B11_C_before", "events", "contact_sides", "holes_30s"):
+        print(f"{k}: {json.dumps(out[k])}")
+
+
 def men_of(s):
     """The men of a scene at its start, both sides with lords."""
     from net.tactic import scenes as SN
@@ -870,7 +1111,7 @@ def set_check(a, P, D):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=("players", "table", "labeller", "scenes"))
+    ap.add_argument("what", choices=("players", "table", "labeller", "scenes", "exam"))
     ap.add_argument("--check", action="store_true", help="scenes: the checks of stage 2c's slice")
     ap.add_argument("--vision", default="", help="scenes: A1:<seed>,N1:<seed>,G:<battle> records for game.vision")
     ap.add_argument("--n-scenes", type=int, default=256)
@@ -881,7 +1122,7 @@ def main(argv=None):
     ap.add_argument("--set-seed", type=int, default=0, help="scenes --check --scene-set S: another seed (mending draws)")
     ap.add_argument("--no-g", action="store_true", help="scenes --check: the scenes only (no shuffled pilot battles)")
     ap.add_argument("--chunk", type=int, default=256)
-    ap.add_argument("--set", default="pilot", choices=("pilot",))
+    ap.add_argument("--set", default="pilot", choices=("pilot", "G", "S"), help="players: pilot; exam: G or S")
     ap.add_argument("--players", default="K,C")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--n", type=int, default=256)
@@ -916,6 +1157,11 @@ def main(argv=None):
             (set_check if a.scene_set == "S" else scenes_check)(a, P, D)
         if a.vision:
             scenes_vision(a, P, D)
+        return
+    elif a.what == "exam":
+        if a.players == "K,C":
+            a.players = "C,TEACH,TEACH:taught"
+        exam(a, P, out.parent)
         return
     elif a.what == "labeller":
         extra["labeller"] = labeller(a, P, stem, refs)

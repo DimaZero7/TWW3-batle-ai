@@ -9,7 +9,8 @@ input only; the tagger may read the simulator's state too (View.sim: n9L, my lor
     tick(v, lab, teacher)  {per unit-tick [r, G]: head_free, attack (the label: a new attack order), k (its row), trivial,
                    dropped (the tick's own label or state inside a band), dc_label (an attack label of weight 0:
                    through_own, own enemy beyond the reach, its key in a band), kinds {name: [r, G]} (KINDS), tags of
-                   the attack labels {near2, near2_at_i, mt, fresh, late, through_own, dist, side}; dc_keys [r, G, K]}
+                   the attack labels {near2, near2_at_i, mt, fresh, late, through_own, dist, side}; dc_keys [r, G, K];
+                   kind_keys {n2w, n4, n5: [r, G, K]} - the enemies that make the kind (branches' kind picks)}
 KINDS     taught keep: n2 (an unheld enemy within 150 m comes at another unit of mine not in melee, and a nearer enemy
           also comes at it), n7 (a cause target in reach, but a standing enemy within STICK_M of g or one of its own
           coming within come_own's reach), n9 (an enemy within reach two ticks in melee but not pinned); don't-care keys:
@@ -183,7 +184,8 @@ def tick(v, lab, teacher):
     dck &= ~onehot
     return {"head_free": head, "attack": att & head, "k": k, "trivial": trivial & head & ~att, "dropped": drop & head,
             "dc_label": dc_label & head, "kinds": {n: x & head & ~att for n, x in kinds.items()}, "tags": tags,
-            "dc_keys": dck & head[..., None], "band_keys": key_band & ~onehot & head[..., None]}
+            "dc_keys": dck & head[..., None], "band_keys": key_band & ~onehot & head[..., None],
+            "kind_keys": {"n2w": n2wk, "n4": n4k, "n5": n5k}}
 
 
 class Record:

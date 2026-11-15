@@ -3,24 +3,32 @@ D): states of a teacher's run, each replayed whole-batch from its fork with one 
 Branch), read by the judge (plain health, watch.hp_trade) at the fork + 60 / 120 / 300 s and at the end, paired by state.
 
     record   the base (--base, a player of pin.PLAYERS) through Recorder (the base unchanged; every tick: the pinned enemies
-             by the base's own pinned() with their ticks in melee mt, and my free units) on a set of specs (--set pilot:
-             exam_pin.pilot_set, its chunks' torch seeds); ASSERTS the file against --ref (exam_pin.check_ref); writes
-             <out>/asis.json, rec.json and the states of both picks:
+             by the base's own pinned() with their ticks in melee mt, and my free units; with --kind-picks the kinds'
+             candidates of tags.tick too) on a set of specs (--set pilot: exam_pin.pilot_set, its chunks' torch seeds;
+             G: the first 768 battles of exam_pin.g_set - its trained sizes -, S: exam_pin.s_set's scenes; G and S in
+             exam_pin.watched_run's full / by_limit batches); ASSERTS the file against --ref (exam_pin.check_ref);
+             writes <out>/asis.json, rec.json and the states of the picks:
                1f    the battle's first cause (a) order (stage 1f's pick); fork = the first tick of the unbroken run of
                      'e pinned and i free' that ends at the order
                new   among cause (a) orders whose fork <= the battle's end - WINDOW_S (the judge does not see the orders
                      after that: the count is written): in even battles of the set the first order whose pin waited
                      (mt(e) >= 3 at the order: late), in odd ones the first order of any kind; none of the wanted kind -
                      the other
+               n2w, n4, n5  (--kind-picks; review C, I.3 - stage 1f's near-miss pick by kind) the first head-free keep
+                     of my unit i of that kind, not in a band (KindRecorder), fork <= the end - WINDOW_S; e the nearest
+                     enemy making the kind (tags.tick kind_keys), d its centre distance, alone (no taught kind, not n1 /
+                     n6 on that unit-tick: the table splits by it)
              --states-ref: ASSERTS the 1f pick equals that file's set A (stage 1f's states.json)
-    branch   --pick 1f|new --kinds keep,teach,now: one replay a kind (teach - 'attack e' at the teacher's tick, keep - no
+    branch   --pick 1f|new|n2w|n4|n5 --kinds keep,teach,now: one replay a kind (teach - 'attack e' at the teacher's tick, keep - no
              order to i, now - at the fork; masks: i closed to the base's orders and e to other strikers for WINDOW_S);
              each state's flag near2 (an unheld enemy - valid, mt 0, no attack order of mine on it, not e - comes at
              (orders.comes) a unit of mine in melee touching e (scripts.TOUCH_M, as stage 1f), or at i, edge gap within
              orders.near2_m) and near2_at_i (it comes at i itself), read at the fork tick; the fork's own measures
              (FWatch). ASSERTS every battle without a state, and every battle before its fork tick, equals asis;
              --branch-ref <dir>: ASSERTS the replay's series equal <dir>/A_<kind>.json's (stage 1f's files)
-    table    the pairs teach - keep, now - keep, now - teach by state at 60 / 120 / 300 / 750 s, by near2, size, script
+    table    the pairs teach - keep, now - keep, now - teach by state at 60 / 120 / 300 / 750 s, by near2, size, script,
+             YES by script and near2_at_i, S's families (and A1 + A3 pooled), n4's distance bands, the first contact
+             side of i on e in the x branch, the widest hole in my line 30 s after the fork (x against y)
     all      record, then every branch not yet written, then the table
 
     DOCK_NAME=agent-t2 DOCK_CPUS=8 DOCK_MEM=6g bash ops/dock.sh net.tactic.branches all --base TIu_back_co --pick 1f \
@@ -40,7 +48,6 @@ from net.tactic import orders as OR
 from net.tactic import pin as PN
 from net.tactic import replay as RP
 from net.unit import scripts as SC
-from sim import geometry
 
 WINDOW_S = 300.0          # the branch holds its choice this long after the fork (the judge's window)
 HOLE_M = 50.0             # (the fork's watch: a gap in my line wider than this)
@@ -69,6 +76,46 @@ class Recorder(RP.Branch):
         for r, b in enumerate(v.idx.tolist()):
             self.pin.setdefault(b, {})[now] = {x: int(m) for x, m in zip(ps[r], mts[r]) if x >= 0}
             self.free.setdefault(b, {})[now] = [x for x in fs[r] if x >= 0]
+        return out
+
+
+KIND_PICKS = ("n2w", "n4", "n5")
+ALONE_NOT = ("n1", "n6")  # (a kind state 'alone': no taught kind, not n6 - masked in the loss -, not n1 - the cause early)
+
+
+class KindRecorder(Recorder):
+    """Recorder + by battle and kind of KIND_PICKS the tick's best candidate {sec: (i, e, d, alone)}: a head-free keep of
+    mine of that kind, not in a band (tags.tick on the base's own output); e the nearest enemy of the kind's keys (d its
+    centre distance); alone - the unit-tick has no taught kind (tags.TAUGHT) and none of ALONE_NOT (a candidate alone
+    is taken before one that is not, at the same tick)."""
+
+    def __init__(self, base):
+        super().__init__(base)
+        self.cand = {}
+
+    def __call__(self, v):
+        from net.tactic import tags as TG
+        out = super().__call__(v)
+        T = TG.tick(v, out, self.base)
+        fx = v.fx
+        now = int(round(float(v.now)))
+        rows = v.idx.tolist()
+        ks = T["kinds"]
+        for n in KIND_PICKS:
+            other = torch.stack([ks[m] for m in TG.TAUGHT + ALONE_NOT], 0).any(0)
+            ok = ks[n] & ~T["dropped"]
+            if not bool(ok.any()):
+                continue
+            key = T["kind_keys"][n] & fx.valid[:, None, :]
+            d = torch.where(key, fx.g_dist, torch.full_like(fx.g_dist, OR.INF))
+            dm, kk = d.min(2)
+            for r, g in (ok & torch.isfinite(dm)).nonzero().tolist():
+                b = rows[r]
+                c = self.cand.setdefault(b, {}).setdefault(n, {})
+                x = (int(fx.my[r, g]), int(fx.slot[r, int(kk[r, g])]), round(float(dm[r, g]), 2),
+                     not bool(other[r, g]))
+                if now not in c or (x[3], -x[2]) > (c[now][3], -c[now][2]):
+                    c[now] = x
         return out
 
 
@@ -113,7 +160,7 @@ class Track:
         self.has = self.fI >= 0
         nan = lambda: torch.full((B,), float("nan"), device=dev)                    # noqa: E731
         self.fm = {k: nan() for k in ("hpi0", "hpe0", "hpi60", "hpe60", "hpi120", "hpe120", "t_eu", "t_ie",
-                                      "t_att", "att_tgt", "gap30", "holes30")}
+                                      "t_att", "att_tgt", "gap30", "holes30", "side_ie")}
         self.fm["att_e"] = torch.zeros(B, device=dev)
 
     def step(self, w, sec, st):
@@ -138,6 +185,7 @@ class Track:
         self.fm["t_eu"] = torch.where(teu, t, self.fm["t_eu"])
         tie = on & touch[ar, I, E] & torch.isnan(self.fm["t_ie"])
         self.fm["t_ie"] = torch.where(tie, t, self.fm["t_ie"])
+        self.fm["side_ie"] = torch.where(tie, hs[ar, E, I].float(), self.fm["side_ie"])   # (exam_pin.SceneWatch's read)
         o = w.chain.tac.orders_of()
         att = on & o["on"][ar, I] & (o["skill"][ar, I] == SC.ATTACK) & (o["tgt"][ar, I] >= 0)
         first = att & torch.isnan(self.fm["t_att"])
@@ -173,19 +221,7 @@ class FWatch(W.PinWatch):
             tr.step(self, sec, st)
 
     def holes(self, st):
-        u = st.u
-        front, _ = geometry.dims(u, self.spacing)
-        ok = self.mine & ~u["r"] & (u["men"] > 0) & ~u["gone"]
-        fx_, fz_ = self.fwd
-        s = u["x"] * fz_[:, None] - u["z"] * fx_[:, None]
-        big = 1e9
-        lo = torch.where(ok, s - front / 2, torch.full_like(s, big))
-        hi = torch.where(ok, s + front / 2, torch.full_like(s, -big))
-        lo, order = lo.sort(1)
-        reach = hi.gather(1, order).cummax(1).values
-        gaps = torch.where(lo[:, 1:] < big / 2, lo[:, 1:] - reach[:, :-1], torch.full_like(lo[:, 1:], -big))
-        g = gaps.amax(1).clamp(min=0.0)
-        return torch.where(ok.sum(1) >= 2, g, torch.zeros_like(g)), (gaps > HOLE_M).float().sum(1)
+        return EP.line_holes(self, st, HOLE_M)
 
 
 # ------------------------------------------------------------------ one run
@@ -193,7 +229,7 @@ def _local(plan, ii):
     return {k: plan[b] for k, b in enumerate(ii) if b in plan}
 
 
-def play(name, make, plans, specs, seeds, chunk, a, P):
+def play(name, make, plans, specs, seeds, chunk, a, P, **kw):
     """(the player file of exam_pin.run_player, fork measures {plan name: {b: dict}}, the wrappers by chunk
     [(ii, player)]): make(local plan) the wrapper of a chunk; plans {name: global plan} the plans FWatch measures."""
     fm, wraps = {n: {} for n in plans}, []
@@ -208,7 +244,8 @@ def play(name, make, plans, specs, seeds, chunk, a, P):
     res = EP.run_player(name, specs, seeds, chunk, a, P, make=lambda ii: make(_local(plans.get("plan", {}), ii)),
                         on_chunk=look, chunk_args=True,
                         watch_cls=lambda P_, g, chain, ii: FWatch(P_, g, chain=chain,
-                                                                  plans={n: _local(p, ii) for n, p in plans.items()}))
+                                                                  plans={n: _local(p, ii) for n, p in plans.items()}),
+                        **kw)
     return res, fm, wraps
 
 
@@ -272,19 +309,44 @@ def pick_new(out, pins, frees, ends):
 
 
 # ------------------------------------------------------------------ the commands
+G_N = 768                 # (set G's branch test: its first 768 battles - three chunks of the trained sizes)
+
+
 def _set(a):
-    if a.set != "pilot":
-        raise ValueError(a.set)
-    return EP.pilot_set(a.n, range(a.seeds), a.limit)
+    """(specs, seeds, chunk, play kwargs) of --set (module doc)."""
+    from net.stage0 import battle as BA
+    if a.set == "pilot":
+        return (*EP.pilot_set(a.n, range(a.seeds), a.limit), {})
+    if a.set == "G":
+        sp, seeds, ch = EP.g_set()
+        held = EP.scfg()["drills"]["attack"]["sets"]["G"]["sizes_held"]
+        assert G_N % ch == 0 and all(x["n"] not in held for x in EP.meta_of(sp[:G_N]))
+        return sp[:G_N], seeds[:G_N // ch], ch, {"full": True, "by_limit": True}
+    if a.set == "S":
+        sp, seeds, ch = EP.s_set()
+        return sp, seeds, ch, {"full": True, "by_limit": True, "battles": BA.scene_battles, "enemy": BA.SceneEnemy}
+    raise ValueError(a.set)
 
 
 def _ints(d):
     return {int(b): x for b, x in d.items()}
 
 
+def pick_kind(cand, ends, n):
+    """{b: state} of kind n (module doc) from KindRecorder's candidates."""
+    S = {}
+    for b, c in cand.items():
+        ts = sorted(t for t in c.get(n, {}) if t <= ends[b] - WINDOW_S)
+        if ts:
+            i, e, d, alone = c[n][ts[0]]
+            S[b] = {"t": ts[0], "i": i, "e": e, "u": -1, "to": ts[0], "lag": 0, "d": d, "late": False, "alone": alone}
+    return S
+
+
 def record(a, P, D):
-    specs, seeds, chunk = _set(a)
-    out, _, wraps = play(a.base, lambda pl: Recorder(a.base), {}, specs, seeds, chunk, a, P)
+    specs, seeds, chunk, kw = _set(a)
+    rec = KindRecorder if a.kind_picks else Recorder
+    out, _, wraps = play(a.base, lambda pl: rec(a.base), {}, specs, seeds, chunk, a, P, **kw)
     refs = dict(x.split("=", 1) for x in a.ref.split(",") if x)
     out["selfcheck"] = EP.check_ref(a.base, out, refs[a.base], a.sim) if a.base in refs else {"compared": False,
                                                                                                "why": "no --ref"}
@@ -294,11 +356,19 @@ def record(a, P, D):
     s1f = pick_1f(out, pins, frees)
     snew, cnt = pick_new(out, pins, frees, ends)
     out["base"] = a.base
+    out["recipes"] = [s.get("recipe", a.set) for s in specs]
+    sts = {"1f": s1f, "new": snew, "new_counts": cnt, "window_s": WINDOW_S}
+    if a.kind_picks:
+        cand = _glob(wraps, "cand")
+        for n in KIND_PICKS:
+            sts[n] = pick_kind(cand, ends, n)
+        sts["kind_counts"] = {n: len(sts[n]) for n in KIND_PICKS}
+        sts["kind_battles_any_tick"] = {n: sum(1 for c in cand.values() if c.get(n)) for n in KIND_PICKS}
     (D / "asis.json").write_text(json.dumps(out), encoding="utf-8")
     (D / "rec.json").write_text(json.dumps({"pins": pins, "free": frees}), encoding="utf-8")
-    (D / "states.json").write_text(json.dumps({"1f": s1f, "new": snew, "new_counts": cnt,
-                                               "window_s": WINDOW_S}), encoding="utf-8")
-    print(json.dumps({"states_1f": len(s1f), **{f"new_{k}": v for k, v in cnt.items()}}), flush=True)
+    (D / "states.json").write_text(json.dumps(sts), encoding="utf-8")
+    print(json.dumps({"states_1f": len(s1f), **{f"new_{k}": v for k, v in cnt.items()},
+                      **sts.get("kind_counts", {}), "any_tick": sts.get("kind_battles_any_tick")}), flush=True)
     if a.states_ref:
         ref = _ints(json.loads(Path(a.states_ref).read_text(encoding="utf-8"))["A"])
         keys = ("t", "i", "e", "to", "lag", "ok_at_order", "pinned_before")
@@ -310,19 +380,22 @@ def record(a, P, D):
 
 
 def branch(a, P, D, pick, kind):
-    specs, seeds, chunk = _set(a)
+    specs, seeds, chunk, kw = _set(a)
     S = _ints(json.loads((D / "states.json").read_text(encoding="utf-8"))[pick])
+    if not S:
+        print(json.dumps({"pick": pick, "kind": kind, "states": 0, "replay": "none"}), flush=True)
+        return
     asis = json.loads((D / "asis.json").read_text(encoding="utf-8"))
     plan = {}
     for b, x in S.items():
-        st = {"t": x["t"], "i": x["i"], "e": x["e"], "u": -1, "cause": 1}
+        st = {"t": x["t"], "i": x["i"], "e": x["e"], "u": -1, "cause": 1 if pick in ("1f", "new") else 3}
         if kind == "teach":
             st.update(kind="at", at=x["to"])
         else:
             st["kind"] = kind
         plan[b] = st
     out, fm, wraps = play(asis["base"], lambda pl: FlagBranch(asis["base"], pl, WINDOW_S, masks=True),
-                          {"plan": plan}, specs, seeds, chunk, a, P)
+                          {"plan": plan}, specs, seeds, chunk, a, P, **kw)
     nb = len(out["hp_series"])
     diff_free = [b for b in range(nb) if b not in plan and not EP.same(out["hp_series"][b], asis["hp_series"][b])]
     diff_pre = [b for b in plan if not EP.same(out["hp_series"][b][:plan[b]["t"] // STEP],
@@ -415,16 +488,46 @@ def table(D, picks=("1f", "new")):
                    ("late", lambda b: S[b]["late"]), ("2-4 units", lambda b: meta[b]["n"] <= 4),
                    ("5-8 units", lambda b: meta[b]["n"] > 4)]
                   + [(en, lambda b, en=en: meta[b]["enemy"] == en) for en in EP.SCRIPTS])
+        yes = lambda b: flag.get(b, {}).get("near2") is True                                     # noqa: E731
+        groups += [(f"  YES, {en}", lambda b, en=en: yes(b) and meta[b]["enemy"] == en) for en in EP.SCRIPTS]
+        groups += [("  YES, not near2_at_i", lambda b: yes(b) and not flag.get(b, {}).get("near2_at_i"))]
+        rc = asis.get("recipes") or []
+        fams = [r for r in dict.fromkeys(rc) if r not in (None, "G", "pilot")]
+        no = lambda b: flag.get(b, {}).get("near2") is False                                     # noqa: E731
+        groups += [(f"family {r}", lambda b, r=r: rc[b] == r) for r in fams]
+        groups += [(f"family {r}, NO", lambda b, r=r: rc[b] == r and no(b)) for r in fams]
+        if "A1" in fams or "A3" in fams:
+            groups += [("A1 + A3", lambda b: rc[b] in ("A1", "A3")), ("A1 + A3, NO", lambda b: rc[b] in ("A1", "A3")
+                                                                       and no(b))]
+        if any("alone" in v for v in S.values()):
+            groups += [("kind alone", lambda b: S[b].get("alone") is True),
+                       ("with a taught kind or n1 / n6", lambda b: S[b].get("alone") is False)]
+        if any("d" in v for v in S.values()):
+            groups += [(f"d {lo}-{hi} m", lambda b, lo=lo, hi=hi: lo <= S[b].get("d", -1) < hi)
+                       for lo, hi in ((0, 170), (170, 200), (200, 240.01))]
         res[pick] = {}
         for x, y in (("teach", "keep"), ("now", "keep"), ("now", "teach")):
             if x not in files or y not in files:
                 continue
             lines.append(f"   {x} - {y}: reads at fork + 60 / 120 / 300 s | 750 s")
-            for lab, g in groups:
+            fx_ = _ints(files[x].get("fm", {}))
+            fy_ = _ints(files[y].get("fm", {}))
+            sides = {b: {1: "front", 2: "flank", 3: "rear"}.get(int(v["side_ie"]) if v.get("side_ie") == v.get("side_ie")
+                                                                and v.get("side_ie") is not None else -1, "no contact")
+                     for b, v in fx_.items()}
+            g2 = groups + [(f"  {x}: i met e on its {sd}", lambda b, sd=sd: sides.get(b) == sd)
+                           for sd in ("front", "flank", "rear", "no contact")]
+            for lab, g in g2:
                 SS = {b: v for b, v in S.items() if g(b)}
                 cells = [pd(files[x], files[y], SS, w) for w in READS]
                 res[pick][f"{x}-{y}:{lab.strip()}"] = [[round(c[0], 4), round(c[1], 4), c[2]] for c in cells]
                 lines.append(f"     {lab} (n {len(SS)}): " + " | ".join(f(c) for c in cells))
+            hx = [fx_[b]["gap30"] for b in S if b in fx_ and b in fy_]
+            hy = [fy_[b]["gap30"] for b in S if b in fx_ and b in fy_]
+            hd = ms([p - q for p, q in zip(hx, hy)])
+            res[pick][f"{x}-{y}:hole30"] = {"x": ms(hx)[0], "y": ms(hy)[0], "diff": [hd[0], hd[1], hd[2]]}
+            lines.append(f"     widest hole in my line at fork + 30 s, m: {x} {ms(hx)[0]:.1f}, {y} {ms(hy)[0]:.1f}, "
+                         f"{x} - {y} {f(hd)} ({hd[2]})")
     txt = "\n".join(lines)
     print(txt, flush=True)
     (D / "table.txt").write_text(txt, encoding="utf-8")
@@ -435,7 +538,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("what", choices=("record", "branch", "table", "all"))
     ap.add_argument("--base", default="TEACH")
-    ap.add_argument("--set", default="pilot", choices=("pilot",))
+    ap.add_argument("--set", default="pilot", choices=("pilot", "G", "S"))
+    ap.add_argument("--kind-picks", action="store_true", help="record: the kinds' picks n2w, n4, n5 too")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--n", type=int, default=256)
     ap.add_argument("--limit", type=int, default=750)
@@ -460,6 +564,9 @@ def main(argv=None):
     if a.what in ("branch", "all"):
         for pick in picks:
             for kind in kinds:
+                if (pick in KIND_PICKS and kind == "teach") or (pick not in KIND_PICKS and kind == "now"
+                                                                and a.what == "all"):
+                    continue                    # (a kind's state has no teacher order; 'now' of 1f / new: branch only)
                 if a.what == "branch" or not (D / f"{pick}_{kind}.json").exists():
                     t1 = time.time()
                     branch(a, P, D, pick, kind)

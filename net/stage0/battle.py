@@ -361,13 +361,16 @@ class TacticSide(UnitSide):
     as before); seed - the order latency's own generator (lower.Units.gen; None: torch's default one); worn [B] - each
     battle's worn starts {mine, theirs: [share | None]} (scene_battles' units carry men = ceil(men0 x share); here each
     worn unit's hp_abs = hp0 x share and hp = share, its men asserted - review_attack_v23 G.2; morale and fatigue stay
-    fresh). At start: the men of each battle, both sides with lords, at most config step.men_max (the 100 ms step)."""
+    fresh). fearless [B] - each battle's {mine, theirs: [bool]} (tactic/lanes' copies of the game's lanes): those units
+    get leadership and morale + 1e4 at start, as charge_probe.sim_lanes makes its twin fearless. At start: the men of
+    each battle, both sides with lords, at most config step.men_max (the 100 ms step)."""
 
-    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None, worn=None):
+    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None, worn=None, fearless=None):
         from net.unit import scripts as SC
         super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False)
         self.player, self.hygiene = player, hygiene
         self.zones, self.seed, self.worn = zones, seed, worn
+        self.fearless = fearless
 
     def start(self, st, P, device, card, unit_net):
         from net.operative import lower as LW
@@ -383,6 +386,13 @@ class TacticSide(UnitSide):
         assert float(u["men"].sum(1).max()) <= men_max, f"a battle over {men_max} men: the engine's step is 200 ms there"
         if self.worn is not None:
             self._wear(u)
+        if self.fearless is not None:
+            for b, fl in enumerate(self.fearless):
+                for side, base in (("mine", 1), ("theirs", PER_SIDE + 1)):
+                    for j, on in enumerate((fl or {}).get(side) or []):
+                        if on:
+                            u["leadership"][b, base + j] += 1e4
+                            u["morale"][b, base + j] += 1e4
         self.mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0)
         self.tac = LW.Tacticians(B, N, 1, device, player=self.player, hygiene=self.hygiene)
         g = GR.Groups.empty(B, N, 1, device)
@@ -539,9 +549,11 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
             torch.manual_seed(seed)
         zones = [s.get("zone") for s in batch]
         worn = [s.get("worn") for s in batch]
+        fear = [s.get("fearless") for s in batch]
         mine = TacticSide(player(ii) if chunk_args else player(), hygiene=hygiene,
                           zones=zones if any(z is not None for z in zones) else None, seed=seed,
-                          worn=worn if any(w is not None for w in worn) else None)
+                          worn=worn if any(w is not None for w in worn) else None,
+                          fearless=fear if any(f is not None for f in fear) else None)
         foe = Scripts([s["enemy"] for s in batch], device) if enemy is None else enemy(batch, device)
         wk = {"ii": ii} if chunk_args else {}
         watch = (watch_cls or W.Watch)(P, cfg()["general"], chain=mine, **wk)

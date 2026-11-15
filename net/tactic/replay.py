@@ -144,7 +144,7 @@ class Branch:
                     continue
             out["skill"][r, g] = SC.ATTACK
             out["target"][r, g] = tg
-            tags = self.base.last_tags
+            tags = getattr(self.base, "last_tags", None)          # (a base without tags: tactic/lanes' C)
             if tags is not None:
                 tags["cause"][r, g] = int(st.get("cause", 3))
                 tags["u"][r, g] = int(st.get("u", -1)) if int(st.get("cause", 3)) == 2 else -1
