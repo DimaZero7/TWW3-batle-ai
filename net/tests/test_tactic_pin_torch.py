@@ -7,6 +7,9 @@ counts what its name says.
     the walk        on a hand-built tick: pin.pinned, orders.Facts.free, the teacher's cand(i) (one striker a side, the
                     nearest of its side class), the code's masks (no new order to a unit in melee; the cap of two and one
                     a side) and the counts they report
+    the labeller    on hand-built ticks: TEACH's options - pinned at touch 8 m, come_own on enemies out of melee and with
+                    a reach as a number, the way through a unit of mine (pin.through_own) - each changes the label it
+                    names and nothing else
 """
 import math
 
@@ -252,7 +255,56 @@ def test_nearest_unit_trigger():
     p.shut = {"units": torch.zeros((1, 5), dtype=torch.bool), "targets": torch.tensor([[False, False, False, False, True]])}
     assert p(v)["target"][0].tolist() == [-1, -1, -1]
     t = PN.player("TEACH")                                     # the config's teacher: 'strike the pinned one' (TCw)
-    assert t.second_m is None and t.wait2 and t.back and t.co and not t.wait_mt   # with back and co; no cause (b)
+    assert t.second_m is None and t.wait2 and t.back and t.co and t.wait_mt   # with back and co; no cause (b)
+    # the labeller's options read by TEACH only (config orders.teach): touch 8 m, come_own on enemies out of melee and
+    # within 60 m (the game probe own); no through rule (the probe behind: a don't-care tag instead)
+    assert t.touch == 8.0 and t.come_free and not t.no_through and t.come_reach == 60.0
+    assert PN.player("TCw_back_co").touch is None and not PN.player("TCw_back_co").come_free
+
+
+def test_labeller_options():
+    # anvil 0 in melee with 3 (f 16: edge gap 6 m - pinned at 8 m, not at 4); free units 1 (-60, 10) and 2 (60, 10) on
+    # its two sides; enemy 4 fights somewhere (its m on) and runs at unit 2 (edge gap 20 m: within its counter's reach)
+    units = [("mine", 0.0, 0.0, 0.0, 32, 10, 1, 0, 0.0),
+             ("mine", -60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 0.0, 16.0, 180.0, 32, 10, 1, 0, 0.0),
+             ("enemy", 60.0, 40.0, 180.0, 32, 10, 1, 0, -2.0)]
+    v = _tick(units)
+    v.fx.mt = torch.tensor([[1, 0, 0, 2, 2]])
+    assert PN.pinned(v.fx)[0].tolist() == [False] * 5, "4 m: the 6 m gap does not touch"
+    assert PN.pinned(v.fx, touch=8.0)[0].tolist() == [False, False, False, True, False], "8 m: 3 pinned; 4 runs"
+    T = lambda **k: PN.Teacher(default="config", wait2=True, wait_mt=True, co=True, **k)       # noqa: E731
+    assert T()(v)["target"][0].tolist() == [-1, -1, -1]
+    assert T(touch=8.0)(v)["target"][0].tolist() == [-1, 3, -1], "unit 2 meets the fighting 4 coming at it"
+    # come_own on enemies out of melee only: 4 fights, so unit 2 is free for the pinned 3 too
+    assert PN.come_own(v.fx)[0].tolist() == [False, False, True]
+    assert PN.come_own(v.fx, free=True)[0].tolist() == [False, False, False]
+    assert T(touch=8.0, come_free=True)(v)["target"][0].tolist() == [-1, 3, 3]
+    # come_own's reach as a number: an enemy (5) out of melee runs at unit 1 from an edge gap of 55 m - beyond the
+    # counter's 30 m (the passport's run is 0 here), within 60 m
+    v = _tick(units + [("enemy", -60.0, 75.0, 180.0, 32, 10, 0, 0, -2.0)])
+    v.fx.mt = torch.tensor([[1, 0, 0, 2, 2, 0]])
+    assert PN.come_own(v.fx, free=True)[0].tolist() == [False, False, False]
+    assert PN.come_own(v.fx, free=True, reach_m=60.0)[0].tolist() == [False, True, False]
+    assert T(touch=8.0, come_free=True, come_reach=60.0)(v)["target"][0].tolist() == [-1, -1, 3]
+    # the way through a unit of mine: unit 1 straight behind the anvil (its way to 3's centre crosses the anvil's
+    # rectangle before 3's), unit 2 beside (its way meets 3's rectangle first)
+    units = [("mine", 0.0, 0.0, 0.0, 32, 10, 1, 0, 0.0),
+             ("mine", 0.0, -60.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 0.0, 12.0, 180.0, 32, 10, 1, 0, 0.0)]
+    v = _tick(units)
+    v.fx.mt = torch.tensor([[1, 0, 0, 2]])
+    thr = PN.through_own(v.fx)[0]
+    assert bool(thr[1, 3]) and not bool(thr[2, 3]) and not bool(thr[0, 3])
+    assert T()(v)["target"][0].tolist() == [-1, 3, 3]
+    assert T(no_through=True)(v)["target"][0].tolist() == [-1, -1, 3], "unit 1 is not free for 3: taught keep"
+    # the tag through_own: crossing and under 15 m across the anvil's facing - straight behind tagged; 20 m aside
+    # (its way still crosses the anvil's 32 m front) not tagged
+    assert bool(PN.through_tag(v.fx, 15.0)[0, 1, 3]) and not bool(PN.through_tag(v.fx, 15.0)[0, 2, 3])
+    v = _tick([units[0], ("mine", 20.0, -60.0, 0.0, 32, 10, 0, 0, 0.0)] + units[2:])
+    assert bool(PN.through_own(v.fx)[0, 1, 3]) and not bool(PN.through_tag(v.fx, 15.0)[0, 1, 3])
 
 
 def test_ticks_in_melee():

@@ -356,18 +356,24 @@ class TacticSide(UnitSide):
     lower.Tacticians.apply, no operative; every 5 s the level's tick with the player (tactic/pin.py) and
     lower.Units.write, every second the unit's script. The level's own per-tick measures (self.acc [B]):
     unpinned_attacks (attack orders on an enemy not pinned by pin.pinned at the order), two_on_side (enemies with more
-    strikers than the cap, or two on one side, after a tick)."""
+    strikers than the cap, or two on one side, after a tick). zones [B] - each battle's zone from its spec ({cx, cz,
+    heading, line, rows, cols, worst}: specs.drill_general's, zfit.zone_for on the spec's slot order; None - found here
+    as before); seed - the order latency's own generator (lower.Units.gen; None: torch's default one)."""
 
-    def __init__(self, player, hygiene=True, unit_level=None):
+    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None):
         from net.unit import scripts as SC
         super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False)
         self.player, self.hygiene = player, hygiene
+        self.zones, self.seed = zones, seed
 
     def start(self, st, P, device, card, unit_net):
         from net.operative import lower as LW
         from net.tactic import cfg as tcfg
         from net.tactic import zfit
         super().start(st, P, device, card, unit_net)
+        if self.seed is not None:
+            self.units.gen = torch.Generator(device=device).manual_seed(int(self.seed))
+        self.bounds = P.map_half
         u = st.u
         B, N = st.B, st.N
         self.mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0)
@@ -382,6 +388,13 @@ class TacticSide(UnitSide):
         fit = bool(tcfg()["orders"]["zone_fit"])
         x, z, b = u["x"].cpu(), u["z"].cpu(), u["b"].cpu()
         for k in range(B):
+            zn = self.zones[k] if (self.zones is not None and self.zones[k] is not None and fit) else None
+            if zn is not None:
+                g.cx[k, 0], g.cz[k, 0], g.heading[k, 0], g.line[k, 0] = zn["cx"], zn["cz"], zn["heading"], bool(zn["line"])
+                rows.append(zn["rows"])
+                cols.append(zn["cols"])
+                self.worst.append(zn["worst"])
+                continue
             sl = self.mine[k].nonzero()[:, 0].tolist()
             pl = [(float(x[k, i]), float(z[k, i])) for i in sl]
             course = float(b[k, sl[0]]) if sl else 0.0
@@ -413,7 +426,7 @@ class TacticSide(UnitSide):
             on = self.groups0.on
             self.tac.apply(self.groups0, on, torch.zeros_like(on), raw)
             self.tac.shape(*self.shape0)
-        self.tac.tick(raw, self.setup.card, None, now=float(st.t.float().max()))
+        self.tac.tick(raw, self.setup.card, self.bounds, now=float(st.t.float().max()))
         self.units.write(self.tac)
         self._measure()
 
@@ -473,23 +486,44 @@ class TacticSide(UnitSide):
         self.acc["two_on_side"].index_add_(0, bi, over)
 
 
-def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None, watch_cls=None):
+def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None, watch_cls=None, seeds=None,
+                full=False, by_limit=False, on_chunk=None, chunk_args=False):
     """(measures {name: [B]}, stats) of stage 0's general battles of the unit level (play_units' battles and enemies)
     with my side through the tactic level (TacticSide) under player() - a factory of a fresh player of tactic/pin.py
-    each batch (its memory starts anew); watch_cls - a watch.Watch subclass (watch.PinWatch for the drill's events)."""
+    each batch (its memory starts anew); watch_cls - a watch.Watch subclass (watch.PinWatch for the drill's events).
+    seeds - an int (chunk k: seed + k) or a list (chunk k: seeds[k]): torch.manual_seed and the order latency's own
+    generator (TacticSide seed) at the start of each chunk; None - neither (the caller's global state, as before).
+    full - every batch padded to a full chunk on a compiled step (one shape; else to a multiple of PAD); by_limit -
+    the specs chunked in the order of their limits (a batch runs to the longest limit in it); a spec's end_s - its
+    battle ends there (duel.play end_s: the watch's reads stop, no winner). on_chunk(ii, watch, side) after each chunk:
+    ii the specs' indices of its battles 0..len(ii)-1 (the padding after them), its watch and TacticSide - their logs
+    and the player. chunk_args: player(ii) and watch_cls(P, general, chain=, ii=) get the chunk's indices. A spec's zone
+    (specs.drill_general) goes to TacticSide."""
     assert all(s["enemy"] != "chain" for s in specs), "the unit level's general battles: script enemies only"
     parts, total = {}, {"battles": 0, "wall_s": 0.0}
-    for a in range(0, len(specs), chunk):
-        ii = list(range(a, min(a + chunk, len(specs))))
-        pad = _pad(len(ii), device, compile)
+    order = list(range(len(specs)))
+    if by_limit:
+        order.sort(key=lambda i: int(specs[i]["limit"]))
+    compiled = torch.device(device).type == "cuda" if compile is None else bool(compile)
+    for ci, a in enumerate(range(0, len(specs), chunk)):
+        ii = order[a:a + chunk]
+        pad = (chunk - len(ii)) if (full and compiled) else _pad(len(ii), device, compile)
         batch = [specs[i] for i in ii] + [copy.deepcopy(specs[ii[k % len(ii)]]) for k in range(pad)]
-        mine = TacticSide(player(), hygiene=hygiene)
+        seed = None if seeds is None else (int(seeds) + ci if isinstance(seeds, int) else int(seeds[ci]))
+        if seed is not None:
+            torch.manual_seed(seed)
+        zones = [s.get("zone") for s in batch]
+        mine = TacticSide(player(ii) if chunk_args else player(), hygiene=hygiene,
+                          zones=zones if any(z is not None for z in zones) else None, seed=seed)
         enemy = Scripts([s["enemy"] for s in batch], device)
-        watch = (watch_cls or W.Watch)(P, cfg()["general"], chain=mine)
+        wk = {"ii": ii} if chunk_args else {}
+        watch = (watch_cls or W.Watch)(P, cfg()["general"], chain=mine, **wk)
         limit = max(int(s["limit"]) for s in batch)
+        ends = [s.get("end_s") for s in batch]
+        end_s = None if all(e is None for e in ends) else [float(limit if e is None else min(e, limit)) for e in ends]
         rd, stt = DU.play([NAME] * len(batch), unit_battles(batch), {1: mine, 2: enemy}, None, P, device,
                           limit_s=limit, per_side=PER_SIDE, watch=watch, maps=[s["map"] for s in batch],
-                          compile=compile)
+                          compile=compile, end_s=end_s)
         m = watch.measures(limit, rd["winner"])
         for name, v in mine.tac.counts().items():
             m[name] = v
@@ -504,22 +538,31 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
                 parts.setdefault(k, {}).update({i: x for i, x in zip(ii, v.tolist()[:len(ii)])})
         total["battles"] += stt["battles"]
         total["wall_s"] += stt["wall_s"]
+        if on_chunk is not None:
+            on_chunk(ii, watch, mine)
     m = {}
     for k, v in parts.items():
         vals = [v[i] for i in range(len(specs))]
+        if vals and isinstance(vals[0], list):           # (series of batches of other limits: the last value kept)
+            T = max(len(x) for x in vals)
+            vals = [x + x[-1:] * (T - len(x)) for x in vals]
         m[k] = torch.tensor(vals)
     total["wall_s"] = round(total["wall_s"], 1)
     return m, total
 
 
 def unit_battles(specs):
-    """The battles of specs for play_units: my units in rows across my zone (specs.rows, as the enemy's; centred), the
-    enemy at its places, each lord lord_back_m behind its side."""
+    """The battles of specs for play_units: my units in rows across my zone (specs.rows, as the enemy's; centred; a
+    spec's perm - slot i stands at the rows' place perm[i], specs.drill_general's shuffled slots), the enemy at its
+    places, each lord lord_back_m behind its side."""
     from net.stage0 import specs as SP
     out = []
     for s in specs:
         mz, ez = s["mine_zone"], s["enemy_zone"]
-        mine = [_unit(k, *p) for k, p in zip(s["mine"], SP.rows(mz, len(s["mine"])))]
+        pl = SP.rows(mz, len(s["mine"]))
+        if s.get("perm") is not None:
+            pl = [pl[p] for p in s["perm"]]
+        mine = [_unit(k, *p) for k, p in zip(s["mine"], pl)]
         theirs = [_unit(k, *p) for k, p in zip(s["theirs"], s["places_theirs"])]
         l1 = _unit(cfg()["lords"][s["fac"][1]], *_lord_place(mz, [(u["x"], u["z"]) for u in mine]), general=True)
         l2 = _unit(cfg()["lords"][s["fac"][2]], *_lord_place(ez, [(u["x"], u["z"]) for u in theirs]), general=True)

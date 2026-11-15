@@ -46,14 +46,15 @@ class Cadence:
                              f"(steps of {dt} s: the orders must land before the next decision)")
         return whole, frac
 
-    def delays(self, dt, B, device):
+    def delays(self, dt, B, device, generator=None):
         """[B] long: the step of this decision at which each battle's new orders land. Random only when
-        the latency is not a whole number of steps (torch's default generator: CUDA-graph safe)."""
+        the latency is not a whole number of steps (torch's default generator: CUDA-graph safe; generator - a
+        torch.Generator of the caller's instead, so no other draw moves this one)."""
         import torch                       # (the rest of the module works without torch: the .venv tests)
         whole, frac = self.delay(dt)
         if frac == 0:
             return torch.full((B,), whole, dtype=torch.long, device=device)
-        return whole + (torch.rand(B, device=device) < frac).long()
+        return whole + (torch.rand(B, device=device, generator=generator) < frac).long()
 
     def lands(self, dt, j, ids, decision):
         """[B] bool: whether a decision's orders land at its step j - delays() drawn by a hash of (battle id,

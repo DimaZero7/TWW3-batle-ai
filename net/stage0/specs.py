@@ -13,6 +13,9 @@ A spec is a dict:
     places_theirs [(x, z, b)] per unit of theirs
     reserve     [index into mine] the units of the reserve (o03; a behaviour may name them in a general battle)
     limit       the battle's length, s
+    perm, zone  drill_general only (battle.play_tactic): my slot i stands at specs.rows' place perm[i]; the zone of my
+                group on that slot order (tactic/zfit.zone_for - torch, imported there only)
+    end_s       optional: the battle ends at this second (battle.play_tactic; the batch may run longer)
 """
 import math
 import random
@@ -44,16 +47,22 @@ def gold(keys):
     return sum(cost(k) for k in keys)
 
 
-def army(rnd, fac, n):
-    return [rnd.choice(cfg()["roster"][fac]) for _ in range(n)]
+def army(rnd, fac, n, roster=None):
+    """n units of fac drawn from the stage's roster (roster: a filter - a callable key -> bool - or a set of keys kept;
+    None: all)."""
+    keys = cfg()["roster"][fac]
+    if roster is not None:
+        keys = [k for k in keys if (roster(k) if callable(roster) else k in roster)]
+        assert keys, f"the roster filter leaves no unit of {fac}"
+    return [rnd.choice(keys) for _ in range(n)]
 
 
-def matched(rnd, fac, n, target, tol=None, tries=600):
+def matched(rnd, fac, n, target, tol=None, tries=600, roster=None):
     """n units of fac whose gold is within tol of target (config general gold_tol); none in tries - the nearest."""
     tol = float(cfg()["general"]["gold_tol"]) if tol is None else tol
     best, bd = None, float("inf")
     for _ in range(tries):
-        a = army(rnd, fac, n)
+        a = army(rnd, fac, n, roster)
         d = abs(gold(a) - target) / target
         if d <= tol:
             return a
@@ -112,14 +121,14 @@ def _size(rnd):
     return rnd.randint(int(lo), int(hi))
 
 
-def _sides(rnd, n_mine, n_theirs=None, fac=None):
+def _sides(rnd, n_mine, n_theirs=None, fac=None, roster=None):
     f1 = fac[0] if fac else rnd.choice(FACS)
     f2 = fac[1] if fac else rnd.choice(FACS)
     tol = float(cfg()["general"]["gold_tol"])
     best, bd = None, float("inf")
     for _ in range(30):                         # (no enemy of that gold - e.g. 2 greatswords against slaves: my army anew)
-        mine = army(rnd, f1, n_mine)
-        theirs = matched(rnd, f2, n_theirs or n_mine, gold(mine), tries=200)
+        mine = army(rnd, f1, n_mine, roster)
+        theirs = matched(rnd, f2, n_theirs or n_mine, gold(mine), tries=200, roster=roster)
         d = abs(gold(theirs) - gold(mine)) / gold(mine)
         if d <= tol:
             return f1, f2, mine, theirs
@@ -151,6 +160,47 @@ def general(rnd, enemy=None, mp=None, n=None):
 
 def generals(n, rnd, **kw):
     return [general(rnd, **kw) for _ in range(n)]
+
+
+def drill_general(rnd, pairs=None, roster=None, sizes=None, enemies=None, mp=None, limit=None, shuffle=True,
+                  tries=50):
+    """One general battle of a drill (design_attack_v23 section 4, review G.1): as general(), with the faction pairs
+    [(f1, f2)] drawn from (None: each side at random), the roster filter (army()), my army's size drawn from sizes
+    (None: the stage's), the enemy script from enemies {name: weight} (None: the stage's without 'chain', as
+    exam_pin.pilot_specs redraws it); shuffle - which unit stands in which place of specs.rows is drawn (perm: slot i
+    at place perm[i]) BEFORE the zone, and the zone (tactic/zfit.zone_for on the places in slot order, the zone's
+    course) travels in the spec (zone) for battle.TacticSide; a shuffle whose zone moves a first frame more than
+    reissue.MOVE_M is drawn again (tries), then asserted."""
+    from net.common import reissue
+    from net.tactic import zfit
+    g = cfg()["general"]
+    n = int(rnd.choice(list(sizes))) if sizes else _size(rnd)
+    fac = tuple(rnd.choice(list(pairs))) if pairs else None
+    f1, f2, mine, theirs = _sides(rnd, n, fac=fac, roster=roster)
+    mp = mp or _pick(rnd, g["maps"])
+    east = rnd.random() < float(g["zone_east"])
+    if enemies is None:
+        enemies = {k: v for k, v in g["enemies"].items() if k != "chain"}
+    enemy = _pick(rnd, enemies)
+    sp = _base(rnd, "general", f1, f2, mine, theirs, mp, east, enemy, limit or g["limit_s"])
+    places = rows(sp["mine_zone"], n)
+    course = float(sp["mine_zone"]["b"])
+    perm = list(range(n))
+    zn = None
+    for _ in range(tries if shuffle else 1):
+        if shuffle:
+            rnd.shuffle(perm)
+        zn = zfit.zone_for([places[p][:2] for p in perm], course)
+        if zn is not None and zn["worst"] <= reissue.MOVE_M:
+            break
+    assert zn is not None and zn["worst"] <= reissue.MOVE_M, f"no slot order of {n} whose zone keeps the first frames"
+    sp["perm"] = perm
+    sp["zone"] = {k: (float(v) if isinstance(v, float) else v) for k, v in zn.items()}
+    return sp
+
+
+def drill_generals(n, rnd, **kw):
+    return [drill_general(rnd, **kw) for _ in range(n)]
 
 
 def c01(rnd, enemy=None):

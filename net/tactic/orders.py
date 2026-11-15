@@ -233,6 +233,11 @@ class View:
     now: float              # battle seconds
     idx: torch.Tensor       # [r] the Tacticians' rows
     hygiene: bool = True
+    # what a recorder stores (design_attack_v23 section 6): the level's raw state of the rows' battles [r, N, RAW] as
+    # the level got it (my lord hidden), the passport cards [r, N, 69], the battle's bounds; None where not given
+    raw: object = None
+    card: object = None
+    bounds: object = None
 
     def frames(self, must=None):
         """frame_walk with this tick's frames in force and masks (must: another set of units forced)."""

@@ -43,6 +43,9 @@ the rows and the orders in force); the code's masks (orders.masks) stand over al
     'hold' without a target config orders.default_skill; K, T, D, D35, TCw, C keep their own fixed skill. Every Teacher
     keeps last_tags {cause (0 none, 1 cause (a), 2 cause (b), 3 a dumb player's), u (the battle's slot of the unit a
     cause (b) target came at), cell (cell())} [r, G] of its last tick (watch.PinWatch's measures by cause)
+    TEACH            the drill's teacher and labeller (config orders.teach): its base, the wait read off fx.mt, and the
+                 labeller's options of tmp/tactic_slice/review_attack_v23 G.5 - pinned()'s touch, come_own()'s free /
+                 reach_m, through_own() (no_through); every other player keeps 4 m, the counter's reach, no through rule
     Teacher.shut     the branch test's two masks (tactic/replay.py), set by a wrapper before each call: None, or {units,
                  targets} [r, S] bool by the view's rows and the battle's slots - my units closed to every attack order of
                  the walk (they keep the order in force; the default fill still applies) and enemies closed as targets, so
@@ -57,10 +60,11 @@ D35_M = SC.CHARGE_M + 5.0            # D35: 'meet at ~35 m' (scripts.py: the cou
 RECALL_M = 30.0                      # T_recall: farther than this from its target (design section 6, a setting)
 
 
-def pinned(fx, speed=True):
-    """[R, K] (module doc); speed False: without the speed rule on e (A1's)."""
+def pinned(fx, speed=True, touch=None):
+    """[R, K] (module doc); speed False: without the speed rule on e (A1's); touch - the edge gap of 'touches', m (None:
+    scripts.TOUCH_M, 4 m - every player but TEACH and every measure column: cell, unpinned_attacks)."""
     hold = fx.mine & ~fx.r & fx.m                                                   # [R, K] my units in melee
-    touch = hold[:, :, None] & (fx.gap <= SC.TOUCH_M)                               # [R, a, e]
+    touch = hold[:, :, None] & (fx.gap <= (SC.TOUCH_M if touch is None else float(touch)))     # [R, a, e]
     slow = (fx.speed < SC.APPROACH_MS) if speed else torch.ones_like(fx.valid)
     return fx.valid & fx.m & slow & touch.any(1)
 
@@ -93,12 +97,79 @@ def second(fx, tight=False, nearest_m=None):
     return e, torch.where(e, gq.argmin(1), torch.full_like(fx.slot, -1))
 
 
-def come_own(fx):
+def come_own(fx, free=False, reach_m=None):
     """[R, G] a standing enemy comes at my unit g within the unit script's counter reach (scripts.CHARGE_M + its run x
-    LEAD_S, edge to edge): the one its own 'counter' meets."""
+    LEAD_S, edge to edge): the one its own 'counter' meets. free: only enemies out of melee (their m off - mt 0: the
+    game sets 'moving' for 3-10 % of a fighting unit's seconds, review_attack_v22 G); reach_m: the reach grows to this
+    edge gap, m, where the counter's is shorter (review_attack_v23 A.2; None: the counter's)."""
     cm = OR.comes(fx).gather(1, fx.g_row[:, :, None].expand(-1, -1, fx.K))                # [R, G, e]
     reach = SC.CHARGE_M + fx.run * SC.LEAD_S
-    return (cm & (fx.enemy & ~fx.r)[:, None, :] & (fx.g_gap <= reach[:, None, :])).any(2)
+    if reach_m is not None:
+        reach = reach.clamp(min=float(reach_m))
+    foe = fx.enemy & ~fx.r
+    if free:
+        foe = foe & ~fx.m
+    return (cm & foe[:, None, :] & (fx.g_gap <= reach[:, None, :])).any(2)
+
+
+def through_tag(fx, lateral_m=None):
+    """[R, G, K] the tag through_own of an attack label (review_attack_v23 A.1 by the game probe behind,
+    game/probe/evidence/behind_game.json): the straight way from g to k crosses a standing unit a of mine
+    (through_own) and g's offset across a's facing from a's centre is under lateral_m (config orders.through_tag_m):
+    straight behind - a don't-care label; the staggered place (15 m aside) and beyond - a full one."""
+    m = float(OR.c_orders()["through_tag_m"]) if lateral_m is None else float(lateral_m)
+    hit = through_own(fx, per_unit=True)                                           # [R, G, K, A]
+    s0, f0 = fx.s.gather(1, fx.g_row), fx.f.gather(1, fx.g_row)                    # [R, G]
+    th = torch.deg2rad(fx.b)[:, None, :]                                           # [R, 1, A]
+    off = (s0[:, :, None] - fx.s[:, None, :]) * torch.cos(th) - (f0[:, :, None] - fx.f[:, None, :]) * torch.sin(th)
+    return (hit & (off.abs() < m)[:, :, None, :]).any(3)
+
+
+def through_own(fx, eps=1e-3, per_unit=False):
+    """[R, G, K] the straight way from my unit g's centre to row k's centre crosses a standing unit of mine (not g; in
+    melee or not; not routing) before it enters k's rectangle: the segment meets that unit's rectangle (the level's
+    place, facing, front x depth - orders.Facts) at a parameter below the one where it enters k's (an anvil whose box
+    overlaps k's does not count from the side), and g's centre is not inside it (review_attack_v23 A.1). per_unit:
+    [R, G, K, A] by the crossed unit's row a."""
+    R, G, K = fx.R, fx.G, fx.K
+    s0, f0 = fx.s.gather(1, fx.g_row), fx.f.gather(1, fx.g_row)                     # [R, G]
+    ds, df = fx.s[:, None, :] - s0[:, :, None], fx.f[:, None, :] - f0[:, :, None]    # [R, G, K] the way to k
+
+    def enter(cs, cf, b, fr, dp, a0s, a0f, das, daf):
+        """(t_in, t_out) of the segment a0 + t da against the rectangles (broadcast)."""
+        th = torch.deg2rad(b)
+        c, sn = torch.cos(th), torch.sin(th)
+        ps, pf = a0s - cs, a0f - cf
+        lo, hi = None, None
+        for ax_s, ax_f, h in ((c, -sn, fr / 2), (sn, c, dp / 2)):          # across (front), along the facing (depth)
+            p = ps * ax_s + pf * ax_f
+            d = das * ax_s + daf * ax_f
+            small = d.abs() < 1e-9
+            dd = torch.where(small, torch.ones_like(d), d)
+            t1, t2 = (-h - p) / dd, (h - p) / dd
+            a = torch.where(small, torch.where(p.abs() <= h, torch.full_like(p, -OR.INF), torch.full_like(p, OR.INF)),
+                            torch.minimum(t1, t2))
+            z = torch.where(small, torch.where(p.abs() <= h, torch.full_like(p, OR.INF), torch.full_like(p, -OR.INF)),
+                            torch.maximum(t1, t2))
+            lo = a if lo is None else torch.maximum(lo, a)
+            hi = z if hi is None else torch.minimum(hi, z)
+        return lo, hi
+    # the way's entry into k's own rectangle
+    te, _ = enter(fx.s[:, None, :], fx.f[:, None, :], fx.b[:, None, :], fx.front[:, None, :], fx.depth[:, None, :],
+                  s0[:, :, None], f0[:, :, None], ds, df)
+    te = te.clamp(0.0, 1.0)                                                        # [R, G, K]
+    # each unit a of mine against each way (g, k): [R, G, K, A]
+    X = lambda t: t[:, None, None, :]                                              # noqa: E731
+    lo, hi = enter(X(fx.s), X(fx.f), X(fx.b), X(fx.front), X(fx.depth), s0[:, :, None, None], f0[:, :, None, None],
+                   ds[..., None], df[..., None])
+    hit = (lo <= hi) & (hi >= 0.0) & (lo <= 1.0)
+    inside = (lo < 0.0) & (hi > 0.0)                                               # g's centre inside a
+    standing = fx.mine & ~fx.r
+    self_g = torch.zeros((R, G, K), dtype=torch.bool, device=fx.s.device)
+    self_g.scatter_(2, fx.g_row[..., None], True)                                  # [R, G, A] a is g itself
+    ok_a = X(standing) & ~self_g[:, :, None, :]
+    cross = hit & ~inside & ok_a & (lo.clamp(min=0.0) < te[..., None] - eps) & fx.mask[:, None, :, None]
+    return cross if per_unit else cross.any(3)
 
 
 CELL_M = (35.0, 60.0, 100.0, 150.0)       # (cell: e's edge distance from my nearest standing unit, the bins' edges)
@@ -148,7 +219,7 @@ class Teacher:
 
     def __init__(self, melee_row=True, recall=False, dumb=None, counter=False, wait2=False, near=True, speed=True,
                  sign=False, second_m=None, first=None, default=None, restrict=None, tight=False, nearest=False,
-                 back=False, co=False, wait_mt=False):
+                 back=False, co=False, wait_mt=False, touch=None, come_free=False, come_reach=None, no_through=False):
         # dumb: None (T), "reach" (D), "d35" (D35); counter: my units under 'hold' get 'counter' (TC). The four rules
         # where T differs from A1 (the ablation; T's own rule first): wait2 - e pinned at this tick and the one before
         # (A1's memory: by the Tacticians' row and the battle's slot); near False - free(i) without 'no standing enemy
@@ -162,11 +233,16 @@ class Teacher:
         # trigger of TIu (second(nearest_m=second_m)); back - a unit whose attack ended (attack, no target) gets the
         # default skill too, as one left under 'hold' (config orders.back_default); co - cause (a) only for a unit no
         # enemy comes at within its counter's reach (come_own: it meets its own; config orders.pin_come_own);
-        # wait_mt - the two-tick wait read off the rows' ticks in melee (fx.mt >= 2), not the player's memory
+        # wait_mt - the two-tick wait read off the rows' ticks in melee (fx.mt >= 2), not the player's memory. The
+        # labeller's options (TEACH reads them from config orders.teach; every other player keeps the defaults): touch -
+        # pinned()'s edge gap, m (None: scripts.TOUCH_M); come_free / come_reach - come_own()'s free / reach_m;
+        # no_through - a unit is not free for a target when its straight way to it crosses a standing unit of mine
+        # (through_own()): not eligible for that target, nor counted as the nearest of its side for it
         self.melee_row, self.recall, self.dumb, self.counter = melee_row, recall, dumb, counter
         self.wait2, self.near, self.speed, self.sign = wait2, near, speed, sign
         self.second_m, self.first, self.restrict, self.tight = second_m, first, restrict, tight
         self.nearest, self.back, self.co, self.wait_mt = nearest, back, co, wait_mt
+        self.touch, self.come_free, self.come_reach, self.no_through = touch, come_free, come_reach, no_through
         self.prev_pin = None
         self.idle = SC.COUNTER if counter else None
         if default == "config":
@@ -190,7 +266,7 @@ class Teacher:
 
     def _pinned(self, v):
         fx = v.fx
-        pin = pinned(fx, self.speed)
+        pin = pinned(fx, self.speed, self.touch)
         if not self.wait2:
             return pin
         if self.wait_mt:
@@ -248,9 +324,10 @@ class Teacher:
         sec_e = sec_u = free_b = None
         if self.second_m is not None:
             sec_e, sec_u = second(fx, self.tight, float(self.second_m) if self.nearest else None)
-            free_b = free & ~come_own(fx)
+            free_b = free & ~come_own(fx, self.come_free, self.come_reach)
         come_u = coming_at(fx)[1] if self.restrict is not None else None
-        elig_a = elig & ~come_own(fx) if self.co else elig                # (cause (a)'s own eligible units)
+        elig_a = elig & ~come_own(fx, self.come_free, self.come_reach) if self.co else elig   # (cause (a)'s own eligible)
+        thr = through_own(fx) if self.no_through else None               # [R, G, K] (cause (a) only)
         cause = torch.zeros_like(skill)
         u_of = torch.full_like(tgt, -1)
         for g in range(G):
@@ -269,8 +346,9 @@ class Teacher:
                 same = sd == sd[:, g:g + 1, :]
                 d = fx.g_dist + torch.arange(G, device=d_dev(fx))[None, :, None] * 1e-4      # (ties by slot)
                 ea = elig & elig_a
-                best = torch.where(same & ea[:, :, None], d, torch.full_like(d, OR.INF)).amin(1)
-                cand = pin & op & (fx.g_dist[:, g] <= reach) & (d[:, g] <= best) & ea[:, g:g + 1]
+                eak = ea[:, :, None] if thr is None else ea[:, :, None] & ~thr                  # [R, G, 1 | K]
+                best = torch.where(same & eak, d, torch.full_like(d, OR.INF)).amin(1)
+                cand = pin & op & (fx.g_dist[:, g] <= reach) & (d[:, g] <= best) & eak[:, g]
                 if sec_e is not None:
                     # cause (b): an unheld second enemy (no unit of mine holds an attack on it - one interceptor an
                     # enemy), g the nearest interceptor to it (free, no enemy coming at itself) within second_m
@@ -451,12 +529,12 @@ _BASES = {"TCw": dict(default="config", wait2=True),
           "Dc": dict(default="config", dumb="reach")}
 
 
-def _variant(base, back=False, co=False, mt=False):
+def _variant(base, back=False, co=False, mt=False, **opts):
     o = dict(_BASES[base])
     sec = o.pop("second", None)
     if sec is not None:
         o.update(second_m=_second_m(), tight=True, nearest=sec == "nearest")
-    return Teacher(**o, back=back, co=co, wait_mt=mt)
+    return Teacher(**o, back=back, co=co, wait_mt=mt, **opts)
 
 
 for _b in _BASES:
@@ -468,12 +546,21 @@ for _b in _BASES:
                     PLAYERS[_n] = (lambda b=_b, bk=_bk, co=_co, m=_m: _variant(b, bk, co, m))
 
 
+def teach_opts():
+    """The labeller's options of TEACH from config orders.teach (Teacher's touch, come_free, come_reach, no_through)."""
+    t = OR.c_orders()["teach"]
+    reach = t.get("come_reach_m")
+    return {"touch": t.get("touch_m"), "come_free": bool(t.get("come_own_free", False)),
+            "come_reach": None if reach is None else float(reach), "no_through": bool(t.get("no_through", False))}
+
+
 def _teach():
-    """TEACH: the first drill's teacher as the config sets it - orders.teach {base, mt}, orders.back_default,
-    orders.pin_come_own."""
+    """TEACH: the first drill's teacher as the config sets it - orders.teach {base, mt, the labeller's options:
+    teach_opts}, orders.back_default, orders.pin_come_own."""
     c = OR.c_orders()
     t = c["teach"]
-    return _variant(t["base"], bool(c.get("back_default", False)), bool(c.get("pin_come_own", False)), bool(t["mt"]))
+    return _variant(t["base"], bool(c.get("back_default", False)), bool(c.get("pin_come_own", False)), bool(t["mt"]),
+                    **teach_opts())
 
 
 PLAYERS["TEACH"] = _teach

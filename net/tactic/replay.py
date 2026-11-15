@@ -47,7 +47,7 @@ class Branch:
             self._cache = {"fx": fx}
         if k not in self._cache:
             sb = self.base
-            self._cache[k] = (PN.pinned(fx) if k == "pin" else
+            self._cache[k] = (PN.pinned(fx, touch=getattr(sb, "touch", None)) if k == "pin" else
                               PN.second(fx, sb.tight, float(sb.second_m) if sb.nearest else None)[0])
         return self._cache[k]
 

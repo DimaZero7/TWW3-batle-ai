@@ -23,7 +23,10 @@ sim/evidence/diag_g49/unit_base.md "Заметки для старших уро�
                 walk, the code's masks (no new order in melee, two strikers an enemy, one a side)
     zfit.py     the group's zone by its formation: the first frames where the units stand ('keep' = 'hold')
     pin.py      drill T0-2 'pin and strike': pinned(e) and the players K, T (the teacher), D, A1, references
-    exam_pin.py the drill's runs: the players through the level on general battles, paired by battle
+    exam_pin.py the drill's runs: the players through the level on general battles, paired by battle; the judge's
+                three reads; the labeller's proving run
+    replay.py   the branch test's wrapper player (a branch held for one unit from a fork tick)
+    branches.py the branch test: the states' picks, the flag near2, the replays teach / keep / now, their table
 
 The bridge's side: bridge/companion/tactic_input.py (the same input from the bridge's documents).
 The numbers: net/config/tactic.json.

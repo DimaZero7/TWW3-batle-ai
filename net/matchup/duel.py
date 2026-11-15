@@ -181,10 +181,10 @@ def build(name, battles, device, P, per_side=20, maps=None):
 
 @torch.no_grad()
 def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, duty=None, per_side=20, watch=None,
-         maps=None, compile=None):
+         maps=None, compile=None, end_s=None):
     """sides {1: Chain | Script, 2: ...}; battles [{1: units, 2: units}]; watch(sec, st) after every second (a
-    reading of its own); maps - build's; compile - battle.stepper's (None: compiled on CUDA). Returns (readings,
-    stats)."""
+    reading of its own); maps - build's; compile - battle.stepper's (None: compiled on CUDA); end_s [B] - each
+    battle's own end, s (over from then: st.done, no winner; None: limit_s for all). Returns (readings, stats)."""
     from sim.params import load
     P = P or load()
     st, card = build(name, battles, device, P, per_side, maps=maps)
@@ -204,6 +204,8 @@ def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, dut
     winner = torch.zeros(B, dtype=torch.long, device=device)
     t_end = torch.full((B,), float(limit), device=device)
     contact = torch.full((B,), -1.0, device=device)
+    if end_s is not None:
+        end_t = torch.as_tensor(end_s, dtype=torch.float32, device=device)
     t0 = time.time()
     sec = 0
     # the chain's habits (the bridge agent's base in the game, 07.11): in its area, the way walked, the shooters firing,
@@ -237,6 +239,8 @@ def play(name, battles, sides, unit_net, P=None, device="cpu", limit_s=None, dut
             gone2 = (out | (side != 2)).all(1)
             new = ~over & (gone1 | gone2)
             winner = torch.where(new, torch.where(gone2 & ~gone1, 1, torch.where(gone1 & ~gone2, 2, 0)), winner)
+            if end_s is not None:
+                new = new | (~over & (st.t.float() >= end_t))
             t_end = torch.where(new, st.t.float(), t_end)
             over = over | new
             fight = (u["m"] & (side > 0)).any(1)

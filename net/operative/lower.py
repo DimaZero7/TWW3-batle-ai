@@ -176,7 +176,7 @@ class Tacticians:
         if idx.numel() == 0:
             return
         if self.player is not None:
-            return self._tick_player(raw, card, idx, now)
+            return self._tick_player(raw, card, idx, now, bounds)
         tiles = self._keep(raw, idx)
         p = self.parcel(idx)
         my = DC.my_slots(p)                                                   # [r, Gm]
@@ -215,9 +215,10 @@ class Tacticians:
         v = v.float()
         self.cnt[name][idx] += v.sum(1) if v.dim() > 1 else v
 
-    def _tick_player(self, raw, card, idx, now):
+    def _tick_player(self, raw, card, idx, now, bounds=None):
         """A tick with a player (module doc of tactic/orders.py): the causes and the exempt, the player's output, the
-        code's masks, then the frames and the orders written back per slot."""
+        code's masks, then the frames and the orders written back per slot. The View carries the rows' raw, card and
+        bounds as given (a recorder's; None where the caller has none)."""
         from net.tactic import orders as OR
         tiles = self._keep(raw, idx)
         p = self.parcel(idx)
@@ -267,7 +268,8 @@ class Tacticians:
         melee = fx.g_m
         exempt = fx.striking | (melee if self.hygiene else torch.zeros_like(melee))
         must = must & ~exempt
-        view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene)
+        view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene, raw=S,
+                       card=None if card is None else card[self.bi[idx]], bounds=bounds)
         out = self.player(view)
         skill, tgt, side, change, cnt = OR.masks(view, out, getattr(self.player, "allow", (0, 2)))
         self.fell += float(out["fell"].sum())
@@ -657,7 +659,7 @@ class Units:
         if self.gate is not None:
             intended = self.gate.apply(intended, mine)
         self.intended = intended
-        return self.cad.delays(P.dt, B, st.device)
+        return self.cad.delays(P.dt, B, st.device, getattr(self, "gen", None))
 
     def orders(self, st, j, lands, script):
         now_in = lands <= j
