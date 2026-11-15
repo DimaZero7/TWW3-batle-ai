@@ -238,6 +238,7 @@ class View:
     raw: object = None
     card: object = None
     bounds: object = None
+    sim: object = None      # the simulator's state (a tagger's, never a labeller's; None on the bridge)
 
     def frames(self, must=None):
         """frame_walk with this tick's frames in force and masks (must: another set of units forced)."""

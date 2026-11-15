@@ -358,13 +358,16 @@ class TacticSide(UnitSide):
     unpinned_attacks (attack orders on an enemy not pinned by pin.pinned at the order), two_on_side (enemies with more
     strikers than the cap, or two on one side, after a tick). zones [B] - each battle's zone from its spec ({cx, cz,
     heading, line, rows, cols, worst}: specs.drill_general's, zfit.zone_for on the spec's slot order; None - found here
-    as before); seed - the order latency's own generator (lower.Units.gen; None: torch's default one)."""
+    as before); seed - the order latency's own generator (lower.Units.gen; None: torch's default one); worn [B] - each
+    battle's worn starts {mine, theirs: [share | None]} (scene_battles' units carry men = ceil(men0 x share); here each
+    worn unit's hp_abs = hp0 x share and hp = share, its men asserted - review_attack_v23 G.2; morale and fatigue stay
+    fresh). At start: the men of each battle, both sides with lords, at most config step.men_max (the 100 ms step)."""
 
-    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None):
+    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None, worn=None):
         from net.unit import scripts as SC
         super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False)
         self.player, self.hygiene = player, hygiene
-        self.zones, self.seed = zones, seed
+        self.zones, self.seed, self.worn = zones, seed, worn
 
     def start(self, st, P, device, card, unit_net):
         from net.operative import lower as LW
@@ -376,6 +379,10 @@ class TacticSide(UnitSide):
         self.bounds = P.map_half
         u = st.u
         B, N = st.B, st.N
+        men_max = int(cfg()["step"]["men_max"])
+        assert float(u["men"].sum(1).max()) <= men_max, f"a battle over {men_max} men: the engine's step is 200 ms there"
+        if self.worn is not None:
+            self._wear(u)
         self.mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0)
         self.tac = LW.Tacticians(B, N, 1, device, player=self.player, hygiene=self.hygiene)
         g = GR.Groups.empty(B, N, 1, device)
@@ -413,6 +420,21 @@ class TacticSide(UnitSide):
         self.applied = False
         self.acc = {k: torch.zeros(B, device=device) for k in ("unpinned_attacks", "two_on_side")}
 
+    def _wear(self, u):
+        """The worn starts (class doc): my units at slots 1.., theirs at PER_SIDE + 1.. (scene_battles' order)."""
+        for b, w in enumerate(self.worn):
+            if w is None:
+                continue
+            for side, base in (("mine", 1), ("theirs", PER_SIDE + 1)):
+                for j, share in enumerate(w.get(side) or []):
+                    if share is None:
+                        continue
+                    i = base + j
+                    want = math.ceil(float(u["men0"][b, i]) * share)
+                    assert int(u["men"][b, i]) == want, (b, i, float(u["men"][b, i]), want)
+                    u["hp_abs"][b, i] = u["hp0"][b, i] * share
+                    u["hp"][b, i] = share
+
     def _raw(self, raw):
         r = raw.clone()
         a = TR.I["alive"]
@@ -426,7 +448,7 @@ class TacticSide(UnitSide):
             on = self.groups0.on
             self.tac.apply(self.groups0, on, torch.zeros_like(on), raw)
             self.tac.shape(*self.shape0)
-        self.tac.tick(raw, self.setup.card, self.bounds, now=float(st.t.float().max()))
+        self.tac.tick(raw, self.setup.card, self.bounds, now=float(st.t.float().max()), sim=st)
         self.units.write(self.tac)
         self._measure()
 
@@ -487,7 +509,7 @@ class TacticSide(UnitSide):
 
 
 def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None, watch_cls=None, seeds=None,
-                full=False, by_limit=False, on_chunk=None, chunk_args=False):
+                full=False, by_limit=False, on_chunk=None, chunk_args=False, battles=None, enemy=None):
     """(measures {name: [B]}, stats) of stage 0's general battles of the unit level (play_units' battles and enemies)
     with my side through the tactic level (TacticSide) under player() - a factory of a fresh player of tactic/pin.py
     each batch (its memory starts anew); watch_cls - a watch.Watch subclass (watch.PinWatch for the drill's events).
@@ -498,8 +520,11 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
     battle ends there (duel.play end_s: the watch's reads stop, no winner). on_chunk(ii, watch, side) after each chunk:
     ii the specs' indices of its battles 0..len(ii)-1 (the padding after them), its watch and TacticSide - their logs
     and the player. chunk_args: player(ii) and watch_cls(P, general, chain=, ii=) get the chunk's indices. A spec's zone
-    (specs.drill_general) goes to TacticSide."""
+    (specs.drill_general, tactic/scenes) and worn starts go to TacticSide. battles(batch) - the battles of a batch
+    (None: unit_battles; scene_battles for tactic/scenes' specs), enemy(batch, device) - its enemy side (None: Scripts
+    of the specs' scripts; SceneEnemy for scenes)."""
     assert all(s["enemy"] != "chain" for s in specs), "the unit level's general battles: script enemies only"
+    assert all(len(s["mine"]) <= PER_SIDE - 1 and len(s["theirs"]) <= PER_SIDE - 1 for s in specs), "<= 8 units a side"
     parts, total = {}, {"battles": 0, "wall_s": 0.0}
     order = list(range(len(specs)))
     if by_limit:
@@ -513,15 +538,17 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
         if seed is not None:
             torch.manual_seed(seed)
         zones = [s.get("zone") for s in batch]
+        worn = [s.get("worn") for s in batch]
         mine = TacticSide(player(ii) if chunk_args else player(), hygiene=hygiene,
-                          zones=zones if any(z is not None for z in zones) else None, seed=seed)
-        enemy = Scripts([s["enemy"] for s in batch], device)
+                          zones=zones if any(z is not None for z in zones) else None, seed=seed,
+                          worn=worn if any(w is not None for w in worn) else None)
+        foe = Scripts([s["enemy"] for s in batch], device) if enemy is None else enemy(batch, device)
         wk = {"ii": ii} if chunk_args else {}
         watch = (watch_cls or W.Watch)(P, cfg()["general"], chain=mine, **wk)
         limit = max(int(s["limit"]) for s in batch)
         ends = [s.get("end_s") for s in batch]
         end_s = None if all(e is None for e in ends) else [float(limit if e is None else min(e, limit)) for e in ends]
-        rd, stt = DU.play([NAME] * len(batch), unit_battles(batch), {1: mine, 2: enemy}, None, P, device,
+        rd, stt = DU.play([NAME] * len(batch), (battles or unit_battles)(batch), {1: mine, 2: foe}, None, P, device,
                           limit_s=limit, per_side=PER_SIDE, watch=watch, maps=[s["map"] for s in batch],
                           compile=compile, end_s=end_s)
         m = watch.measures(limit, rd["winner"])
@@ -549,6 +576,105 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
         m[k] = torch.tensor(vals)
     total["wall_s"] = round(total["wall_s"], 1)
     return m, total
+
+
+def scene_battles(specs):
+    """The battles of tactic/scenes' specs: every unit at the spec's place (places_mine, places_theirs), a worn unit
+    with men = ceil(men0 x share) (sim/scenario: hp_abs follows; TacticSide sets hp and checks), the lords at the
+    spec's lords."""
+    from net.tactic import scenes as SC
+    out = []
+    for s in specs:
+        side = {}
+        for k, (keys, places, worn) in ((1, (s["mine"], s["places_mine"], s["worn"]["mine"])),
+                                         (2, (s["theirs"], s["places_theirs"], s["worn"]["theirs"]))):
+            us = []
+            for key, p, w in zip(keys, places, worn):
+                u = _unit(key, *p)
+                if w is not None:
+                    u["men"] = math.ceil(SC._men0(key) * w)
+                us.append(u)
+            lord = _unit(cfg()["lords"][s["fac"][k]], *s["lords"][k], general=True)
+            side[k] = [lord] + us
+        out.append({1: side[1], 2: side[2], "factions": dict(s["factions"])})
+    return out
+
+
+class SceneEnemy(DU.Script):
+    """The enemy of tactic/scenes' specs, each unit by its plan (plan_theirs; slots PER_SIDE + 1.., my unit k at slot
+    1 + k): at - attack my unit k (it routs, dies or leaves: nearest; with stay - hold where it is); nearest; point - move to (x, z) and stand there
+    (with a waypoint (wx, wz): there first, until within WAYPOINT_M);
+    halt - attack k until the edge gap to the nearest standing unit of the other side (its lord out) is gap m or less,
+    then stand (for the rest of the battle: the halt must not end next to a unit it passes); from_s - stand
+    until that second first; script - the battle script name (sim/scripts) gives its orders; run - at a run, else a
+    walk. The lord and units without a plan hold."""
+    KINDS = ("hold", "at", "nearest", "point", "halt", "script")
+    WAYPOINT_M = 15.0          # (a waypoint is passed within this, m: a unit's half depth and the step's slack)
+
+    def __init__(self, specs, device):
+        from sim.params import load
+        self.side = 2
+        self.spacing = load().sim["formation"]["spacing_m"]
+        B, N = len(specs), 2 * PER_SIDE
+        f = lambda v, dt=torch.float32: torch.full((B, N), v, dtype=dt, device=device)      # noqa: E731
+        self.kind, self.k, self.run = f(0, torch.long), f(-1, torch.long), f(False, torch.bool)
+        self.x, self.z, self.gap, self.from_s = f(0.0), f(0.0), f(0.0), f(0.0)
+        self.wx, self.wz, self.wp = f(0.0), f(0.0), f(False, torch.bool)
+        for b, s in enumerate(specs):
+            for j, p in enumerate(s["plan_theirs"]):
+                i = PER_SIDE + 1 + j
+                self.kind[b, i] = self.KINDS.index(p["kind"])
+                self.k[b, i] = 1 + int(p["k"]) if p.get("k") is not None else -1
+                self.run[b, i] = bool(p.get("run", True))
+                self.x[b, i], self.z[b, i] = float(p.get("x", 0.0)), float(p.get("z", 0.0))
+                self.gap[b, i], self.from_s[b, i] = float(p.get("gap", 0.0)), float(p.get("from_s", 0.0))
+                if p.get("wx") is not None:
+                    self.wx[b, i], self.wz[b, i], self.wp[b, i] = float(p["wx"]), float(p["wz"]), True
+        self.halted = f(False, torch.bool)
+        self.stay = f(False, torch.bool)
+        for b, s in enumerate(specs):
+            for j, p in enumerate(s["plan_theirs"]):
+                self.stay[b, PER_SIDE + 1 + j] = bool(p.get("stay", False))
+        self.scripts = {}
+        for b, s in enumerate(specs):
+            for j, p in enumerate(s["plan_theirs"]):
+                if p["kind"] == "script":
+                    m = self.scripts.setdefault(p["name"], f(False, torch.bool))
+                    m[b, PER_SIDE + 1 + j] = True
+
+    def orders(self, st, j):
+        from sim import geometry
+        from sim import scripts as opponents
+        u = st.u
+        tk = self.k.clamp(min=0)
+        gone = u["r"] | (u["men"] <= 0) | u["gone"]
+        t_ok = (self.k >= 0) & ~gone.gather(1, tk)
+        if bool((self.kind == 4).any()):
+            front, depth = geometry.dims(u, self.spacing)
+            other = (u["side"] > 0) & (u["side"] != self.side) & ~u["lord"] & ~gone              # [B, N]
+            gp = geometry.rect_gap(u["x"], u["z"], u["b"], front, depth)
+            g = torch.where(other[:, None, :], gp, torch.full_like(gp, float("inf"))).amin(2)
+            self.halted |= (self.kind == 4) & t_ok & (g <= self.gap)
+        att = (self.kind == 1) | ((self.kind == 4) & ~self.halted)
+        o = O.hold(st.B, st.N, st.device)
+        a = O.hold(st.B, st.N, st.device)
+        a.kind[:] = O.ATTACK
+        a.target = tk
+        o = O.merge(o, a, att & t_ok)
+        o = O.merge(o, opponents.nearest(st), (self.kind == 2) | (att & ~t_ok & ~self.stay))
+        mv = O.hold(st.B, st.N, st.device)
+        mv.kind[:] = O.MOVE
+        self.wp &= torch.sqrt((u["x"] - self.wx) ** 2 + (u["z"] - self.wz) ** 2) > self.WAYPOINT_M
+        mv.x, mv.z = torch.where(self.wp, self.wx, self.x), torch.where(self.wp, self.wz, self.z)
+        o = O.merge(o, mv, self.kind == 3)
+        for name, m in self.scripts.items():
+            o = O.merge(o, getattr(opponents, name)(st), m)
+        o.run = torch.where(self.kind > 0, self.run, o.run)
+        t = st.t.float()
+        wait = (t[:, None] if t.dim() else t) < self.from_s
+        o = O.merge(o, O.hold(st.B, st.N, st.device), wait | (self.kind == 0) | (self.halted & (self.kind == 4)))
+        lord = u["lord"] & (u["side"] == self.side)
+        return O.merge(o, O.hold(st.B, st.N, st.device), lord)
 
 
 def unit_battles(specs):

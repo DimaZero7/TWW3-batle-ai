@@ -10,6 +10,8 @@ counts what its name says.
     the labeller    on hand-built ticks: TEACH's options - pinned at touch 8 m, come_own on enemies out of melee and with
                     a reach as a number, the way through a unit of mine (pin.through_own) - each changes the label it
                     names and nothing else
+    the scenes      tactic/scenes' yield on a small draw: A1 scenes hold a teacher's order, N1 twins that run past none;
+                    every other recipe draws within its bands, at most 8 units a side
 """
 import math
 
@@ -257,8 +259,8 @@ def test_nearest_unit_trigger():
     t = PN.player("TEACH")                                     # the config's teacher: 'strike the pinned one' (TCw)
     assert t.second_m is None and t.wait2 and t.back and t.co and t.wait_mt   # with back and co; no cause (b)
     # the labeller's options read by TEACH only (config orders.teach): touch 8 m, come_own on enemies out of melee and
-    # within 60 m (the game probe own); no through rule (the probe behind: a don't-care tag instead)
-    assert t.touch == 8.0 and t.come_free and not t.no_through and t.come_reach == 60.0
+    # within 150 m (the game probe own, review J); no through rule (the probe behind: a don't-care tag instead)
+    assert t.touch == 8.0 and t.come_free and not t.no_through and t.come_reach == 150.0
     assert PN.player("TCw_back_co").touch is None and not PN.player("TCw_back_co").come_free
 
 
@@ -337,3 +339,30 @@ def test_ticks_in_melee():
     g = side.groups0
     tac.apply(g, g.on, torch.zeros_like(g.on), side._raw(raw))   # a fresh parcel
     assert int(tac.mt.abs().sum()) == 0
+
+
+def test_scene_yields():
+    # the generator's yield on a small draw (tactic/scenes): A1 scenes, played by TEACH through the level and the unit
+    # script, hold a teacher's attack order; their N1 twins whose enemy runs past (plan point) hold none; the first
+    # frames lie where the units stand (the layout's snap)
+    from types import SimpleNamespace
+    from net.tactic import exam_pin as EP
+    from net.tactic import scenes as SN
+    from sim.params import load
+    a1 = SN.scenes("A1", 4, 310000)
+    n1 = [s for s in SN.scenes("N1", 24, 310000) if s["n1_plan"] == "point"][:4]
+    assert len(n1) == 4 and SN.check_bands(a1 + n1) > 0
+    sp = a1 + n1
+    for s in sp:
+        s["limit"] = 200
+    res, got = EP.record_run("TEACH", sp, [2100], len(sp), SimpleNamespace(device="cpu", sim=""), load(), scene=True)
+    has = {x["b"] for x in got["labels"]}
+    assert sum(1 for b in range(4) if b in has) >= 3, got["labels"]
+    assert not any(b in has for b in range(4, 8)), got["labels"]
+    assert max(d for d, _ in got["first"].values()) <= reissue.MOVE_M
+    # every other recipe draws within its bands and within 8 units a side (generated, not played: its yields are the
+    # exam's - exam_pin scenes --check --scene-set S)
+    other = [SN.make(r, 910000 + i) for r in ("A2", "A3", "A4", "A5", "A6", "A4L", "A5L", "N2", "E1", "E2", "E3")
+             for i in range(2)]
+    assert SN.check_bands(other) > 0
+    assert all(len(s["mine"]) <= 8 and len(s["theirs"]) <= 8 for s in other)

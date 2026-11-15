@@ -20,6 +20,11 @@ tactic/pin.py through the tactic level (stage0/battle.play_tactic, watch.PinWatc
               and the other not (by the battle's first contact, the pin's age, the army's size) - then the labeller
               played (or read from --ref under its name); the rule's numbers: labeller - driver at 750 s within +-0.006
               and its two-error band holds 0, orders a unit-minute within +-0.01
+    scenes    --check: stage 2c's first slice (design section 4 checks 1, 2, 3, 5, 9, 10, 12, 13): --n-scenes A1 scenes
+              (tactic/scenes, seeds from config drills.attack.seeds) and their N1 twins played by TEACH with the
+              recorder (tactic/tags.Record: the labeller TEACH built under its own name, asked on the same view), then
+              the pilot's battles with shuffled slots (specs.shuffle_slots) by TEACH (recorded) and C; <out dir>/
+              check.json. --vision A1:<seed>,N1:<seed>,G:<battle>: records for game.vision (<out dir>/vision/<name>/)
 A player's name: a key of pin.PLAYERS, optionally with ':holes' (config orders.hole_fits off - the old rule, a frame on a
 hole must move), ':line' (orders.zone_fit off - a line zone on the units' middle), ':norout' (orders.end_on_rout off),
 ':nocap' (orders.cap_all off), ':mt' (orders.teach.mt on) and ':noreach' (orders.teach.come_reach_m null: TEACH with
@@ -121,11 +126,11 @@ def meta_of(specs):
     return [{"enemy": x["enemy"], "n": len(x["mine"]), "n_theirs": len(x["theirs"])} for x in specs]
 
 
-def run_player(name, specs, seeds, chunk, a, P, make=None, on_chunk=None, watch_cls=None, chunk_args=False):
+def run_player(name, specs, seeds, chunk, a, P, make=None, on_chunk=None, watch_cls=None, chunk_args=False, **play):
     """The player's file (module doc) on specs, chunk k under torch seed seeds[k]; make() - the player factory (None:
     pin.player of the name's base); on_chunk(ii, watch, side) - the caller's look at each chunk after it; watch_cls -
     a watch.PinWatch subclass; chunk_args - make(ii) and watch_cls(..., ii=) get the chunk's spec indices
-    (battle.play_tactic)."""
+    (battle.play_tactic); play - more of play_tactic's arguments (battles, enemy, full, by_limit)."""
     base, saved = _variant(name)
     log = []
 
@@ -138,7 +143,8 @@ def run_player(name, specs, seeds, chunk, a, P, make=None, on_chunk=None, watch_
         m, st = BA.play_tactic(specs, make or (lambda: PN.player(base)), P, a.device,
                                hygiene=base not in PN.HYGIENE_OFF, chunk=chunk,
                                compile=None if a.device.startswith("cuda") else False,
-                               watch_cls=watch_cls or W.PinWatch, seeds=seeds, on_chunk=keep, chunk_args=chunk_args)
+                               watch_cls=watch_cls or W.PinWatch, seeds=seeds, on_chunk=keep, chunk_args=chunk_args,
+                               **play)
         print(json.dumps({"player": name, "battles": len(specs), "wall_s": st["wall_s"],
                           "min": round((time.time() - t0) / 60, 1),
                           **{k: round(float(m[k][torch.isfinite(m[k])].mean()), 4) for k in MEANS if k in m}}),
@@ -460,9 +466,421 @@ def labeller(a, P, stem, refs):
             "rule": "|diff| <= 0.006, the two-error band holds 0, orders within +-0.01 a unit-minute", "passed": ok}
 
 
+# ------------------------------------------------------------------ the scenes (stage 2c's first slice: A1, N1, G)
+def build_under(name):
+    """A player under its OWN name's options laid on the plain config (never a driver's variant in force)."""
+    o = tcfg()["orders"]
+    outer = {**o, "teach": dict(o["teach"])}
+    base, saved = _variant(name)
+    try:
+        return PN.player(base)
+    finally:
+        _restore(saved)
+        o.update(outer)
+
+
+class SceneWatch(W.PinWatch):
+    """PinWatch + each attack order's first contact with its target: the side of the target the contact began on
+    (sim hit_sec: 1 front, 2 flank, 3 rear) - contacts (b, my slot, target slot, second, side)."""
+
+    def _init(self, st):
+        super()._init(st)
+        self.c_tgt = torch.full((self.B, self.N), -1, dtype=torch.long, device=self.dev)
+        self.c_done = torch.zeros((self.B, self.N), dtype=torch.bool, device=self.dev)
+        self.contacts = []
+
+    def __call__(self, sec, st):
+        super().__call__(sec, st)
+        tac = getattr(self.chain, "tac", None)
+        if tac is None:
+            return
+        o = tac.orders_of()
+        att = o["on"] & (o["skill"] == 2) & (o["tgt"] >= 0) & self.mine
+        t = torch.where(att, o["tgt"], torch.full_like(o["tgt"], -1))
+        self.c_done &= t == self.c_tgt
+        self.c_tgt = t
+        hs = st.u["hit_sec"].view(self.B, self.N, self.N)
+        tc = t.clamp(min=0)
+        sd = hs.gather(1, tc[:, None, :])[:, 0, :]                                    # hs[b, t, i]: the side of t
+        back = hs.gather(2, tc[..., None])[..., 0]                                    # hs[b, i, t]: i touched by t
+        new = att & ~self.c_done & ((sd > 0) | (back > 0)) & ~st.done[:, None]
+        for b, i in new.nonzero().tolist():
+            self.contacts.append((b, i, int(t[b, i]), int(sec), int(sd[b, i])))
+        self.c_done |= new
+
+
+def men_of(s):
+    """The men of a scene at its start, both sides with lords."""
+    from net.tactic import scenes as SN
+    m = sum(SN._men0(scfg()["lords"][s["fac"][k]]) for k in (1, 2))
+    for side in ("mine", "theirs"):
+        for key, w in zip(s[side], s["worn"][side]):
+            m += SN._men0(key) if w is None else math.ceil(SN._men0(key) * w)
+    return m
+
+
+def scene_specs(n, seed0):
+    from net.tactic import scenes as SN
+    a1 = SN.scenes("A1", n, seed0)
+    n1 = SN.scenes("N1", n, seed0)
+    return a1, n1
+
+
+def shuffled_pilot(n, seeds, limit):
+    sp, ts, chunk = pilot_set(n, seeds, limit)
+    base = int(scfg()["drills"]["attack"]["seeds"]["pilot_shuffle"])
+    for i, x in enumerate(sp):
+        SP.shuffle_slots(x, random.Random(base + i))
+    return sp, ts, chunk
+
+
+def _spearman(a, b):
+    import numpy as np
+    if len(a) < 2:
+        return None
+    ra, rb = np.argsort(np.argsort(a)), np.argsort(np.argsort(b))
+    if ra.std() == 0 or rb.std() == 0:
+        return None
+    return float(np.corrcoef(ra, rb)[0, 1])
+
+
+def slot_rank(specs):
+    """The mean over battles of the rank correlation of my slot index with the place along the row (zone axes)."""
+    v = []
+    for s in specs:
+        if s.get("places_mine"):
+            pl = s["places_mine"]
+        else:
+            pl = SP.rows(s["mine_zone"], len(s["mine"]))
+            if s.get("perm") is not None:
+                pl = [pl[p] for p in s["perm"]]
+        x = [SP.local(s["mine_zone"], p[0], p[1])[0] for p in pl]
+        r = _spearman(list(range(len(x))), x)
+        if r is not None:
+            v.append(r)
+    return round(sum(v) / max(len(v), 1), 4), len(v)
+
+
+def record_run(name, specs, seeds, chunk, a, P, scene=False):
+    """(the player's file, its recorder's counts / labels / first frames by spec, contacts): TEACH drives with the
+    labeller TEACH (built under its own name) asked on the same view (tags.Record)."""
+    from net.tactic import tags as TG
+    got = {"cnt": {}, "labels": [], "first": {}, "contacts": []}
+
+    def make():
+        return TG.Record(build_under(name), build_under(name))
+
+    def look(ii, watch, side):
+        rec = side.player
+        for b, c in rec.cnt.items():
+            if b < len(ii):
+                got["cnt"][ii[b]] = c
+        got["labels"] += [{**x, "b": ii[x["b"]]} for x in rec.labels if x["b"] < len(ii)]
+        got["first"].update({ii[b]: x for b, x in rec.first.items() if b < len(ii)})
+        got["contacts"] += [(ii[b], i, t, s, sd) for b, i, t, s, sd in watch.contacts if b < len(ii)]
+    kw = {"battles": BA.scene_battles, "enemy": BA.SceneEnemy} if scene else {}
+    res = run_player(name, specs, seeds, chunk, a, P, make=make, on_chunk=look, watch_cls=SceneWatch, full=True,
+                     by_limit=True, **kw)
+    return res, got
+
+
+def kinds_table(got, sel):
+    from net.tactic import tags as TG
+    cols = TG.Record.COUNTS
+    tot = [0] * len(cols)
+    for b in sel:
+        for j, x in enumerate(got["cnt"].get(b, [0] * len(cols))):
+            tot[j] += x
+    t = dict(zip(cols, tot))
+    keep = max(t["keep"], 1)
+    out = {"head_free": t["head_free"], "attack_labels": t["attack"], "keeps": t["keep"],
+           "trivial_keep_share": round(t["trivial"] / keep, 4), "dropped_share_of_head_free":
+           round(t["dropped"] / max(t["head_free"], 1), 4), "taught_keep_share": round(t["taught"] / keep, 4),
+           "keep_with_dc_key_share": round(t["dc_key_keep"] / keep, 4),
+           "band_key_keep_share": round(t["band_key_keep"] / keep, 4),
+           "attack_labels_dc_share": round(t["dc_label"] / max(t["attack"], 1), 4)}
+    out["kinds_share_of_keeps"] = {k: round(t[k] / keep, 4) for k in TG.KINDS}
+    return out
+
+
+def label_marks(got, sel):
+    """Checks 3, 9 (sides), 13 over the attack labels of the battles sel."""
+    S = set(sel)
+    L = [x for x in got["labels"] if x["b"] in S]
+    first = {}
+    for x in sorted(L, key=lambda x: (x["sec"], x["slot"])):
+        first.setdefault(x["b"], x)
+    lr = [x["side"] for x in L if x["side"] in (1, 2)]
+    n = max(len(L), 1)
+    return {"attack_labels": len(L), "scenes_with_label": len(first),
+            "first_state_no_share": round(sum(1 for x in first.values() if not x["near2"]) / max(len(first), 1), 4),
+            "left_share_of_left_right": round(sum(1 for s in lr if s == 1) / max(len(lr), 1), 4),
+            "axis_share": round(sum(1 for x in L if x["side"] == 0) / n, 4),
+            "through_own_share": round(sum(x["through_own"] for x in L) / n, 4),
+            "near2_at_i_share": round(sum(x["near2_at_i"] for x in L) / n, 4),
+            "near2_share": round(sum(x["near2"] for x in L) / n, 4),
+            "late_share": round(sum(x["late"] for x in L) / n, 4),
+            "dc_label_share": round(sum(x["dc_label"] for x in L) / n, 4)}
+
+
+def contact_sides(got, sel):
+    S = set(sel)
+    c = [x for x in got["contacts"] if x[0] in S]
+    n = max(len(c), 1)
+    return {"contacts": len(c), **{k: round(sum(1 for x in c if x[4] == v) / n, 4)
+                                   for k, v in (("front", 1), ("flank", 2), ("rear", 3), ("unknown", 0))}}
+
+
+def scenes_check(a, P, D):
+    """`exam_pin scenes --check` of this slice (design section 4 checks 1, 2, 3, 5, 9, 10, 12, 13)."""
+    from net.tactic import scenes as SN
+    ck = scfg()["drills"]["attack"]["checks"]
+    t0 = time.time()
+    a1, n1 = scene_specs(a.n_scenes, int(scfg()["drills"]["attack"]["seeds"][a.seeds_key]))
+    gen_s = round(time.time() - t0, 1)
+    nvals = SN.check_bands(a1 + n1)
+    specs = a1 + n1
+    chunk = a.chunk
+    seeds = [TSEED + 100 + k for k in range((len(specs) + chunk - 1) // chunk)]
+    res, got = record_run("TEACH", specs, seeds, chunk, a, P, scene=True)
+    (D / "scenes_TEACH.json").write_text(json.dumps({**res, "rec": got, "specs_meta": [
+        {k: s.get(k) for k in ("recipe", "seed", "roles", "n1_plan", "axes", "map", "east", "plan_theirs")}
+        for s in specs]}),
+        encoding="utf-8")
+    nA = len(a1)
+    iA, iN = list(range(nA)), list(range(nA, len(specs)))
+    has = {x["b"] for x in got["labels"]}
+    fr = got["first"]
+    bad = [b for b in range(len(specs)) if b not in fr or fr[b][0] > ck["frame_m"] or fr[b][1] > ck["frame_deg"]]
+    out = {"generated": {"A1": nA, "N1": len(iN), "seconds": gen_s, "values_checked": nvals,
+                         "n1_plans": {k: sum(1 for s in n1 if s["n1_plan"] == k) for k in ("point", "halt")}},
+           "c1_men_max": max(men_of(s) for s in specs), "c1_men_rule": "asserted at start (TacticSide, step.men_max)",
+           "c1_first_frame_worst": [round(max(fr[b][0] for b in fr), 3), round(max(fr[b][1] for b in fr), 3)],
+           "c1_dropped_share": round(len(bad) / len(specs), 4),
+           "c2_yield_A1": round(sum(1 for b in iA if b in has) / nA, 4),
+           "c2_yield_N1_none": round(sum(1 for b in iN if b not in has) / len(iN), 4),
+           "c2_N1_with_order_by_plan": {k: sum(1 for j, b in enumerate(iN) if b in has and n1[j]["n1_plan"] == k)
+                                        for k in ("point", "halt")},
+           "c2_N1_halt_by_gap": {f"{lo}-{hi}": [sum(1 for j, b in enumerate(iN) if n1[j]["n1_plan"] == "halt"
+                                                       and lo <= n1[j]["plan_theirs"][0]["gap"] < hi and b in has),
+                                                   sum(1 for j in range(len(iN)) if n1[j]["n1_plan"] == "halt"
+                                                       and lo <= n1[j]["plan_theirs"][0]["gap"] < hi)]
+                                 for lo, hi in ((20, 30), (30, 40), (40, 50), (50, 60.01))},
+           "A1": {**label_marks(got, iA), "contacts": contact_sides(got, iA), "kinds": kinds_table(got, iA)},
+           "N1": {**label_marks(got, iN), "contacts": contact_sides(got, iN), "kinds": kinds_table(got, iN)},
+           "c9_slot_rank": {"A1": slot_rank(a1), "N1": slot_rank(n1)}, "c10": "asserted (scenes.check_bands)"}
+    if a.no_g:
+        (D / "check_scenes.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        print(json.dumps(out, indent=1), flush=True)
+        return out
+    # G: the pilot's 768 with shuffled slots - TEACH (recorded) and C (check 12)
+    gsp, gseeds, gchunk = shuffled_pilot(a.n, range(a.seeds), a.limit)
+    out["c9_slot_rank"]["G"] = slot_rank(gsp)
+    rT, gT = record_run("TEACH", gsp, gseeds, gchunk, a, P)
+    rC = run_player("C", gsp, gseeds, gchunk, a, P)
+    (D / "g_TEACH.json").write_text(json.dumps({**rT, "rec": gT}), encoding="utf-8")
+    (D / "g_C.json").write_text(json.dumps(rC), encoding="utf-8")
+    iG = list(range(len(gsp)))
+    out["G"] = {**label_marks(gT, iG), "contacts": contact_sides(gT, iG), "kinds": kinds_table(gT, iG)}
+    d = paired(rT["per_battle"]["hp_trade"], rC["per_battle"]["hp_trade"])
+    ref = (0.0646, 0.0077)
+    e = math.sqrt(d["two_errors"] ** 2 + ref[1] ** 2)
+    out["c12_teach_minus_c_shuffled"] = {**d, "unshuffled": list(ref), "difference": round(d["diff"] - ref[0], 4),
+                                         "two_errors_of_difference": round(e, 4),
+                                         "passed": abs(d["diff"] - ref[0]) <= e}
+    out["minutes"] = round((time.time() - t0) / 60, 1)
+    (D / "check.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+    print(json.dumps(out, indent=1), flush=True)
+    return out
+
+
+def scenes_vision(a, P, D):
+    """Records for game.vision (game/vision/README.md: record.sim_frame every second -> record.from_sim ->
+    vision.render): --vision A1:<seed>,N1:<seed>,G:<the shuffled pilot's battle>; each played alone on this device,
+    TEACH driving; <D>/vision/<name>/ gets the strip, the text, orders.json (the order log) and spec.json."""
+    from game import vision
+    from game.vision import record as RC
+    from net.tactic import scenes as SN
+    want = [x.split(":") for x in a.vision.split(",") if x]
+    gsp = None
+    for kind, ident in want:
+        if kind == "G":
+            if gsp is None:
+                gsp = shuffled_pilot(a.n, range(a.seeds), a.limit)[0]
+            sp, scene = [gsp[int(ident)]], False
+            seeds = [TSEED + int(ident) // a.n]
+        else:
+            sp, scene = [SN.make(kind, int(ident))], True
+            seeds = [TSEED + 100]
+        frames = []
+
+        class VisWatch(SceneWatch):
+            def __call__(self, sec, st):
+                super().__call__(sec, st)
+                if not bool(st.done[0]):
+                    frames.append(RC.sim_frame(st, 0))
+        kw = {"battles": BA.scene_battles, "enemy": BA.SceneEnemy} if scene else {}
+        res = run_player("TEACH", sp, seeds, 1, a, P, make=lambda: build_under("TEACH"), watch_cls=VisWatch, **kw)
+        nm = f"{kind}_{ident}"
+        outd = D / "vision" / nm
+        bt = RC.from_sim(frames, list(range(len(frames))), map_name=None, name=nm)
+        r = vision.render(bt, outd)
+        (outd / "orders.json").write_text(json.dumps({"cols": res["order_log_cols"], "rows": res["order_log"]}),
+                                          encoding="utf-8")
+        (outd / "spec.json").write_text(json.dumps(sp[0], default=str), encoding="utf-8")
+        ci = {k: i for i, k in enumerate(res["order_log_cols"])}
+        first = min((r_[ci["sec"]] for r_ in res["order_log"]), default=None)
+        print(json.dumps({"vision": str(outd), "first_attack_order_s": first, "t_contact": res["per_battle"]["t_contact"],
+                          **r.get("tokens", {})}), flush=True)
+
+
+def _rate(xs):
+    xs = list(xs)
+    return round(sum(xs) / max(len(xs), 1), 4)
+
+
+def mix_of(yields, cnt, cause, easy):
+    """The recipe shares of a training round, set once from S's yields (design section 4): the cause recipes in S's
+    proportions, the twins (N1, N2, A4L, A5L) as one block in S's proportions, its mass k such that the scenes without
+    an order are half of all but E1-E3 - (sum_cause w nc + k sum_twin w nc) / (C + k T) = 0.5; infeasible when the
+    twins' own no-cause rate is under one half."""
+    nc = {r: (1.0 - y) if r in cause else y for r, y in yields.items() if r not in easy}
+    tw = [r for r in nc if r not in cause]
+    C, T = sum(cnt[r] for r in cause if r in nc), sum(cnt[r] for r in tw)
+    a_c = sum(cnt[r] * nc[r] for r in cause if r in nc)
+    a_t = sum(cnt[r] * nc[r] for r in tw) / max(T, 1)
+    if a_t <= 0.5:
+        return {"feasible": False, "twin_nocause_rate": round(a_t, 4), "cause_nocause_rate": round(a_c / max(C, 1), 4)}
+    k = (0.5 * C - a_c) / ((a_t - 0.5) * T)
+    mix = {r: cnt[r] for r in cause if r in nc}
+    mix.update({r: k * cnt[r] for r in tw})
+    sm = sum(mix.values())
+    return {"feasible": True, "shares": {r: round(v / sm, 4) for r, v in mix.items()},
+            "nocause_expected": round(sum(mix[r] * nc[r] for r in mix) / sm, 4)}
+
+
+def set_check(a, P, D):
+    """`exam_pin scenes --check --set S`: design section 4 checks 1-10, 13 on set S (one TEACH run, recorded), with
+    review B / C / E / G / I; sets H, V and one training round's draw generated and band-checked, not played; check 12
+    is slice 1's (r/check.json). Every recipe's kinds table and contact sides. <out dir>/check_S.json."""
+    from net.tactic import scenes as SN
+    ck = scfg()["drills"]["attack"]["checks"]
+    quota = scfg()["drills"]["attack"]["quota"]
+    t0 = time.time()
+    only = [x for x in a.only.split(",") if x]
+    specs = SN.set_specs("S", seed0=a.set_seed or None, counts={r: a.per for r in only} if only else None)
+    gen_s = round(time.time() - t0, 1)
+    nvals = SN.check_bands(specs)
+    t1 = time.time()
+    if only:
+        H, V, R = [], [], []
+        nH = nV = nR = 0
+    else:
+        H = SN.held_specs()
+        nH = SN.check_bands(H)
+        V = SN.set_specs("V")
+        nV = SN.check_bands(V)
+    rnd_n = int(scfg()["drills"]["attack"]["sets"]["round"]["scenes"])
+    cnt = scfg()["drills"]["attack"]["sets"]["S"]["counts"]
+    tot = sum(cnt.values())
+    if not only:
+        rcounts = {k: max(1, round(v * rnd_n / tot)) for k, v in cnt.items()}
+        R = SN.set_specs("round", counts=rcounts)
+        nR = SN.check_bands(R)
+    gen2 = round(time.time() - t1, 1)
+    chunk = a.chunk
+    seeds = [TSEED + 200 + k for k in range((len(specs) + chunk - 1) // chunk)]
+    res, got = record_run("TEACH", specs, seeds, chunk, a, P, scene=True)
+    (D / "S_TEACH.json").write_text(json.dumps({**res, "rec": got, "specs_meta": [
+        {k: x.get(k) for k in ("recipe", "seed", "roles", "n1_plan", "a6", "a2_mode", "twin_of", "end_s", "limit",
+                               "axes", "map", "east")} for x in specs]}), encoding="utf-8")
+    recs = list(dict.fromkeys(x["recipe"] for x in specs))
+    by = {r: [i for i, x in enumerate(specs) if x["recipe"] == r] for r in recs}
+    full = [x for x in got["labels"] if not x["dc_label"] and not x["dropped"]]
+    has = {x["b"] for x in full}                       # (ruling 2: a cause scene holds a FULL-WEIGHT attack label)
+    fr = got["first"]
+    bad = [b for b in range(len(specs)) if b not in fr or fr[b][0] > ck["frame_m"] or fr[b][1] > ck["frame_deg"]]
+    first = {}
+    for x in sorted(full, key=lambda x: (x["sec"], x["slot"])):
+        first.setdefault(x["b"], x)
+    cause = ("A1", "A2", "A3", "A4", "A5", "A6")
+    twins = ("N1", "N2", "A4L", "A5L")
+    easy = ("E1", "E2", "E3")
+    out = {"generated": {"S": len(specs), "seconds": gen_s, "values": nvals, "H": len(H), "H_values": nH, "V": len(V),
+                         "V_values": nV, "round": len(R), "round_values": nR, "seconds_H_V_round": gen2},
+           "c1_men_max": max(men_of(x) for x in specs), "c1_first_frame_worst":
+               [round(max(fr[b][0] for b in fr), 3), round(max(fr[b][1] for b in fr), 3)],
+           "c1_dropped_share": round(len(bad) / len(specs), 4), "c10": "asserted (S, H, V, round)"}
+    out["c2_yield"] = {r: (_rate(b in has for b in by[r]) if r in cause else _rate(b not in has for b in by[r]))
+                       for r in recs}
+    out["c2_yield_kind"] = {r: ("with an order" if r in cause else "without an order") for r in recs}
+    non_e = [b for r in recs if r not in easy for b in by[r]]
+    out["c2_nocause_share"] = _rate(b not in has for b in non_e)
+    out["c3_first_state_no"] = {r: _rate(not first[b]["near2"] for b in by[r] if b in first) for r in recs}
+    out["c3_no_states_S"] = sum(1 for b in first if not first[b]["near2"])
+    out["c3_yes_states_S"] = sum(1 for b in first if first[b]["near2"])
+    if "N2" in by:
+        bases = {}
+        for b in by["N2"]:
+            t = specs[b].get("twin_of", ("?",))[0]
+            bases.setdefault(t, [0, 0])
+            bases[t][0] += b not in has
+            bases[t][1] += 1
+        out["c2_N2_by_base_without_order"] = bases
+    L = got["labels"]
+    rec_of = {b: specs[b]["recipe"] for b in range(len(specs))}
+    out["c4_late"] = {"S": _rate(x["late"] for x in L),
+                      **{r: _rate(x["late"] for x in L if rec_of[x["b"]] == r) for r in ("A4", "A5")}}
+    kt = kinds_table(got, list(range(len(specs))))
+    out["c5_kinds_S"] = {k: kt["kinds_share_of_keeps"][k] for k in quota}
+    out["c5_quota"] = quota
+    multi = [x for x in L if len(specs[x["b"]]["theirs"]) >= 2]
+    out["c6_pointer_not_nearest"] = _rate(not x["nearest_e"] for x in multi)
+    out["c7_split_attack_labels"] = {"through_own": _rate(x["through_own"] for x in L),
+                                     "threshold_band_key": _rate(x["dc_label"] and not x["through_own"] for x in L),
+                                     "dropped_tick_band": _rate(x["dropped"] for x in L),
+                                     "any": _rate(x["dropped"] or x["dc_label"] for x in L)}
+    out["c7_split_keeps"] = {"band_key": kt["band_key_keep_share"], "dropped_tick_band":
+                             kt["dropped_share_of_head_free"], "any_dc_key": kt["keep_with_dc_key_share"],
+                             **{k: kt["kinds_share_of_keeps"][k] for k in ("n1", "n2w", "n3", "n4", "n5", "n6", "n9L")}}
+    hk = [got["cnt"][b] for b in got["cnt"]]
+    from net.tactic import tags as TG
+    ci = {k: i for i, k in enumerate(TG.Record.COUNTS)}
+    nk = sum(c_[ci["hp_keep_n"]] for c_ in hk)
+    out["c8_health"] = {"labels_hp_target": _rate(x["hp_e"] for x in L), "labels_hp_pinning": _rate(x["hp_pin"] for x in L),
+                        "taught_keeps_hp_key": round(sum(c_[ci["hp_e_keep"]] for c_ in hk) / max(nk, 1), 4),
+                        "taught_keeps_hp_pinning": round(sum(c_[ci["hp_pin_keep"]] for c_ in hk) / max(nk, 1), 4),
+                        "taught_keeps_n": nk}
+    lr = [x["side"] for x in L if x["side"] in (1, 2)]
+    out["c9"] = {"left_share": _rate(sd == 1 for sd in lr), "slot_rank": slot_rank(specs)}
+    out["c12"] = "slice 1 (tmp/tactic_slice/v23/stage2c/r/check.json): TEACH - C shuffled +0.0610 +- 0.0082, passed"
+    out["c13"] = {"through_own": _rate(x["through_own"] for x in L), "near2_at_i": _rate(x["near2_at_i"] for x in L)}
+    out["by_recipe"] = {r: {**label_marks(got, by[r]), "contacts": contact_sides(got, by[r]),
+                            "kinds": kinds_table(got, by[r]), "scenes": len(by[r])} for r in recs}
+    # the recipe shares of a training round, set once from the yields: the cause recipes and the late twins in S's
+    # proportions, the N1 / N2 block scaled so that the no-cause scenes are half of all but E1-E3
+    if not only:
+        out["mix"] = mix_of(out["c2_yield"], cnt, cause, easy)
+    out["minutes"] = round((time.time() - t0) / 60, 1)
+    (D / ("check_S.json" if not only else "check_" + "_".join(only) + ".json")).write_text(
+        json.dumps(out, indent=1), encoding="utf-8")
+    print(json.dumps(out, indent=1), flush=True)
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=("players", "table", "labeller"))
+    ap.add_argument("what", choices=("players", "table", "labeller", "scenes"))
+    ap.add_argument("--check", action="store_true", help="scenes: the checks of stage 2c's slice")
+    ap.add_argument("--vision", default="", help="scenes: A1:<seed>,N1:<seed>,G:<battle> records for game.vision")
+    ap.add_argument("--n-scenes", type=int, default=256)
+    ap.add_argument("--seeds-key", default="a1", help="scenes: the seeds of config drills.attack.seeds")
+    ap.add_argument("--scene-set", default="", help="scenes --check: S - the whole generator on set S (stage 2c)")
+    ap.add_argument("--only", default="", help="scenes --check --scene-set S: these recipes only, --per each (mending)")
+    ap.add_argument("--per", type=int, default=128)
+    ap.add_argument("--set-seed", type=int, default=0, help="scenes --check --scene-set S: another seed (mending draws)")
+    ap.add_argument("--no-g", action="store_true", help="scenes --check: the scenes only (no shuffled pilot battles)")
+    ap.add_argument("--chunk", type=int, default=256)
     ap.add_argument("--set", default="pilot", choices=("pilot",))
     ap.add_argument("--players", default="K,C")
     ap.add_argument("--seeds", type=int, default=3)
@@ -492,6 +910,13 @@ def main(argv=None):
             if name in refs:
                 res["selfcheck"] = check_ref(name, res, refs[name], a.sim)
             stem(name).write_text(json.dumps(res), encoding="utf-8")
+    elif a.what == "scenes":
+        D = out.parent
+        if a.check:
+            (set_check if a.scene_set == "S" else scenes_check)(a, P, D)
+        if a.vision:
+            scenes_vision(a, P, D)
+        return
     elif a.what == "labeller":
         extra["labeller"] = labeller(a, P, stem, refs)
         print(json.dumps(extra["labeller"]), flush=True)

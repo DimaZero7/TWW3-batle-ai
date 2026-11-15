@@ -171,8 +171,6 @@ def drill_general(rnd, pairs=None, roster=None, sizes=None, enemies=None, mp=Non
     at place perm[i]) BEFORE the zone, and the zone (tactic/zfit.zone_for on the places in slot order, the zone's
     course) travels in the spec (zone) for battle.TacticSide; a shuffle whose zone moves a first frame more than
     reissue.MOVE_M is drawn again (tries), then asserted."""
-    from net.common import reissue
-    from net.tactic import zfit
     g = cfg()["general"]
     n = int(rnd.choice(list(sizes))) if sizes else _size(rnd)
     fac = tuple(rnd.choice(list(pairs))) if pairs else None
@@ -183,11 +181,21 @@ def drill_general(rnd, pairs=None, roster=None, sizes=None, enemies=None, mp=Non
         enemies = {k: v for k, v in g["enemies"].items() if k != "chain"}
     enemy = _pick(rnd, enemies)
     sp = _base(rnd, "general", f1, f2, mine, theirs, mp, east, enemy, limit or g["limit_s"])
+    return shuffle_slots(sp, rnd, tries if shuffle else 1, shuffle)
+
+
+def shuffle_slots(sp, rnd, tries=50, shuffle=True):
+    """A general battle's spec with its slots shuffled (drill_general's rule): perm - slot i at specs.rows' place
+    perm[i], drawn BEFORE the zone; zone - tactic/zfit.zone_for on the places in slot order, the zone's course; a perm
+    whose zone moves a first frame more than reissue.MOVE_M drawn again (tries), then asserted. Changes sp; returns it."""
+    from net.common import reissue
+    from net.tactic import zfit
+    n = len(sp["mine"])
     places = rows(sp["mine_zone"], n)
     course = float(sp["mine_zone"]["b"])
     perm = list(range(n))
     zn = None
-    for _ in range(tries if shuffle else 1):
+    for _ in range(tries):
         if shuffle:
             rnd.shuffle(perm)
         zn = zfit.zone_for([places[p][:2] for p in perm], course)

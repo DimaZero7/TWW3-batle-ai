@@ -65,13 +65,14 @@ def augment(units, rnd, aug=None):
 
 
 def description(name, units, attacker=None):
-    """The simulator's army description of one battle."""
+    """The simulator's army description of one battle (a unit's men when it has them: a worn start)."""
     att = int(cfg()["attacker"] if attacker is None else attacker)
     sides = {}
     for s in (1, 2):
         sides[s] = {"faction": (units.get("factions") or {}).get(s) or faction(name, s),
                     "units": [{"key": u["key"], "x": u["x"], "z": u["z"], "b": u["b"], "general": u["general"],
-                               "width": u["width"]} for u in units[s]]}
+                               "width": u["width"], **({"men": u["men"]} if u.get("men") is not None else {})}
+                              for u in units[s]]}
     return {"attacker": att, "sides": sides}
 
 

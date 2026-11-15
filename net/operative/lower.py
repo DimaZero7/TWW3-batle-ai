@@ -167,7 +167,7 @@ class Tacticians:
         self.tmask[idx] = tiles.mask
         return tiles
 
-    def tick(self, raw, card, bounds=None, now=None):
+    def tick(self, raw, card, bounds=None, now=None, sim=None):
         """The tacticians' decision (every 5 s): the frames of the active rows (per slot); with a player also the orders
         (now: the battle's second; None - this level's own clock, decide_s a tick)."""
         now = self.clock if now is None else float(now)
@@ -176,7 +176,7 @@ class Tacticians:
         if idx.numel() == 0:
             return
         if self.player is not None:
-            return self._tick_player(raw, card, idx, now, bounds)
+            return self._tick_player(raw, card, idx, now, bounds, sim)
         tiles = self._keep(raw, idx)
         p = self.parcel(idx)
         my = DC.my_slots(p)                                                   # [r, Gm]
@@ -215,7 +215,7 @@ class Tacticians:
         v = v.float()
         self.cnt[name][idx] += v.sum(1) if v.dim() > 1 else v
 
-    def _tick_player(self, raw, card, idx, now, bounds=None):
+    def _tick_player(self, raw, card, idx, now, bounds=None, sim=None):
         """A tick with a player (module doc of tactic/orders.py): the causes and the exempt, the player's output, the
         code's masks, then the frames and the orders written back per slot. The View carries the rows' raw, card and
         bounds as given (a recorder's; None where the caller has none)."""
@@ -269,7 +269,7 @@ class Tacticians:
         exempt = fx.striking | (melee if self.hygiene else torch.zeros_like(melee))
         must = must & ~exempt
         view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene, raw=S,
-                       card=None if card is None else card[self.bi[idx]], bounds=bounds)
+                       card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim)
         out = self.player(view)
         skill, tgt, side, change, cnt = OR.masks(view, out, getattr(self.player, "allow", (0, 2)))
         self.fell += float(out["fell"].sum())
