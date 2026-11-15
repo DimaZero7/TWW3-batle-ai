@@ -94,6 +94,9 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
                 python -m game.probe.unit_probe --standk game [runs] [--sim]   | --standk layout
   behind2   the behind lane on other geometries (BH2_* below; 15.11 night): the anvil 24 / 36 m wide, a half-size joiner,
             two joiners at once (behind + beside), lanes read to 480 s - 16 battles; --behind2 game [runs] [--sim] | layout
+  turn      at once or in turn (TURN_* below; 15-16.11 night): an enemy stronger than our anvil, every unit with its
+            morale; the free unit strikes 8 s after the anvil's contact (now), only once the anvil routs (turn), or
+            is absent (solo); two strengths, lanes to 480 s - 16 battles; --turn game [runs] [--sim] | layout
 
 All the units are fearless (but the t_morale targets); every lane's rows carry the morale fields with the active phases (fx)
 and the unit card's values (cs: leadership, speed, melee attack / defence, weapon and missile damage).
@@ -880,6 +883,75 @@ def behind2_battles():
     return out
 
 
+# Plan 'turn' (15-16.11 night; tmp/tactic_slice/review_attack_v23.md L: "at once or in turn against an enemy that beats
+# the anvil"). Every unit keeps its morale (none fearless but the parked lords). A lane: E (Skaven, TURN_E[strength])
+# attacks our anvil A (TURN_A, an extra, never ordered) at a run from TG_GAP m (front to front); our free unit B (TURN_B)
+# stands on A's line TURN_DX m aside (centres), facing the enemy's side. Kinds: 'now_<s>' B attacks E at a run TG_PIN_S
+# after A's first melee flag (the drill's teacher); 'turn_<s>' B is not ordered while A fights; 'solo_<s>' no B (A is the
+# lane's attacker, never ordered, and E attacks it at a run: target mode 'both'). In now and turn, once A routs (routing,
+# shattered or dead: lane.t_go_rout_of / a_go_rout_of 'e1'), E is ordered to attack B at a run and in turn B to attack E,
+# the target's order first (in 'now' too: an attack order on the enemy a unit touches zeroes that enemy's break-off
+# timer, reverse/notes/melee_turn.md 2.5 - E fights B on; without it E would chase the routed A and give B its back); in
+# solo E's order on A stands (the chase). A lane ends TURN_S after its contact, or 'quiet': a side out (each of its units
+# routing, shattered or dead) and no melee flag in the lane for TURN_QUIET_S. Battle i: now and turn of both strengths and
+# one solo (s on odd battles, m on even) rotated over TURN_PLACES by i - 1 - one row along x, 400 m apart: routers flee
+# along z (ours +z, E -z), not across another lane -, every B of a battle on one side, mirrored between battles; the two
+# lords parked below the row between its lines of flight (TURN_LORDS, a 'clock' lane never ordered). 14 + 2 units, about
+# 1,900 men: the 100 ms engine step. No memory rows (losses, routs and rallies are the unit rows).
+TURN_A, TURN_B = "spear", "swords"
+TURN_E = {"s": "wh2_main_skv_inf_stormvermin_1", "m": "wh2_main_skv_inf_clanrats_1"}
+TURN_E_WHY = "chosen with the HEAD twin before the game (game/probe/evidence/turn_game.json strength_choice)"
+TURN_DX, TURN_S, TURN_QUIET_S, TURN_MAX_S = 90.0, 480, 30, 600
+TURN_PLACES = tuple((float(x), -100.0) for x in (-800, -400, 0, 400, 800))
+# (battles 17-24: the game clamps a unit's place to |x| <= ~763 on this map - in battles 1-16 the lanes at x +-800 stood at
+# +-762 and a B placed outward, at +-890, stood inside its A: those lanes are dropped by turn_measure's 'b_inside';
+# the added battles use places a B always fits)
+TURN_PLACES2 = tuple((float(x), -100.0) for x in (-640, -320, 0, 320, 640))
+TURN_PLACES2_FROM = 17
+TURN_LORDS = ((-600.0, -960.0), (600.0, -960.0))       # the General's and the Warlord's centres
+TURN_BATTLES = 24
+TURN_WINDOWS = (120, 240, 300, 480)
+
+
+def turn_kinds(i):
+    """The turn plan's kinds of battle i (1-based): now and turn of both strengths, one solo."""
+    return ["now_s", "turn_s", "now_m", "turn_m", "solo_s" if i % 2 else "solo_m"]
+
+
+def turn_battles(n=TURN_BATTLES, e=None):
+    """The turn plan's battles (comment above TURN_*): 5 lanes and the lords' lane a battle; e: {strength: E's key}."""
+    e = dict(TURN_E, **(e or {}))
+    W = cp.WIDTH_M
+    ad, bd = cp.depth(*cp.UNITS[TURN_A][:2], W), cp.depth(*cp.UNITS[TURN_B][:2], W)
+    (gx, gz), (wx, wz) = TURN_LORDS
+    lords = cp.lane("general", "warlord", "hold", "hold", gap_m=round(abs(wx - gx)), fight_s=TURN_MAX_S,
+                    max_s=TURN_MAX_S, answer=False, kind="clock", a_at={"x": gx, "z": gz, "b": 0.0},
+                    t_at={"x": wx, "z": wz, "b": 0.0}, place=(wx, wz))
+    out = []
+    for i in range(1, n + 1):
+        s = 1 if i % 2 else -1
+        lanes = []
+        places = TURN_PLACES2 if i >= TURN_PLACES2_FROM else TURN_PLACES
+        for kind, place in zip(cp.rotate(turn_kinds(i), i - 1), places):
+            what, st = kind.split("_")
+            ek = e[st]
+            ed = cp.depth(*cp.UNITS[ek][:2], W)
+            common = dict(fight_s=TURN_S, max_s=TURN_MAX_S, answer=False, kind=kind, strength=st, t_morale=True,
+                          at_rout="none", after_rout_s=10 ** 4, a_morale=True, quiet_end_s=TURN_QUIET_S,
+                          morale_rows=True, place=place)
+            if what == "solo":
+                lanes.append(cp.lane(TURN_A, ek, "hold", "both", gap_m=TG_GAP, a_dx=0.0, **common))
+                continue
+            anvil = {"short": TURN_A, "dx": 0.0, "dz": round(ed / 2 + TG_GAP + ad / 2, 1), "b": 180.0, "width": W,
+                     "morale": True}
+            extra = ({"a_go_melee_s": TG_PIN_S, "a_go_melee_of": "e1"} if what == "now" else {"a_go_rout_of": "e1"})
+            lanes.append(cp.lane(TURN_B, ek, "attack_run", "hold", gap_m=round(TG_GAP + (ad - bd) / 2, 1),
+                                 a_dx=s * TURN_DX, b_side="right" if s > 0 else "left", extras=[anvil],
+                                 t_attack_extra="run", t_go_rout_of="e1", **common, **extra))
+        out.append(lanes + [dict(lords)])
+    return out
+
+
 def _fwd(b):
     r = math.radians(b)
     return math.sin(r), math.cos(r)
@@ -1064,6 +1136,8 @@ def battles(plan):
         return own_battles()
     if plan == "behind2":
         return behind2_battles()
+    if plan == "turn":
+        return turn_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -2554,9 +2628,9 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
     fam = MF_FAMILY.get(plan, plan)
     measure = {"counterfar": counterfar_measure, "standk": counterfar_measure, "intercept": intercept_measure,
                "tight": lambda ln: intercept_measure(ln, TG_WINDOWS), "behind": behind_measure,
-               "own": own_measure, "behind2": behind2_measure}[fam]
+               "own": own_measure, "behind2": behind2_measure, "turn": turn_measure}[fam]
     mem = {"counterfar": counterfar_mem, "standk": counterfar_mem, "intercept": intercept_mem, "tight": tight_mem,
-           "behind": behind_mem, "own": own_mem, "behind2": behind_mem}[fam]
+           "behind": behind_mem, "own": own_mem, "behind2": behind_mem, "turn": lambda d, lanes, rows: rows}[fam]
     if source == "game":
         rows = []
         for d in runs:
@@ -2579,14 +2653,15 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
         # (counterfar: both defenders; intercept: both sides of B; tight: every cell; standk: templates A and B)
         which = {"tight": range(1, len(TG_CELLS) + 1), "standk": (1, SK_ORDER.index("B") + 1),
                  "tight01": range(1, 11), "standk01": (1, 2, 5, 6), "fill": (1,), "behind": range(1, BH_BATTLES + 1),
-                 "own": range(1, OWN_BATTLES + 1), "behind2": (1, 2, 7, 8, 13, 14, 15, 16)}.get(plan, range(1, 3))
+                 "own": range(1, OWN_BATTLES + 1), "behind2": (1, 2, 7, 8, 13, 14, 15, 16),
+                 "turn": (1, 2, 3, 4)}.get(plan, range(1, 3))
         for i in which:
             config, _, _ = cp.run_config(plan, i)
             seen = set()
             for l in config["lanes"]:
                 if l["kind"] == "clock":
                     continue
-                if fam in ("tight", "standk", "behind", "own", "behind2"):
+                if fam in ("tight", "standk", "behind", "own", "behind2", "turn"):
                     # (the twin runs each lane alone: a battle's repeated kinds are one lane, `copies` times)
                     if l["kind"] in seen:
                         continue
@@ -3164,6 +3239,244 @@ def mf_report(plan, runs=(), source="game", sim=False, copies=8, device="cpu", o
             for kind, r in pt.items():
                 print(f"  {kind}: " + "; ".join(f"{f} {_mf_cell(v)}" for f, v in r.items()))
     out = Path(out) if out else cp.ROOT / f"{plan}_{source}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
+# ---------------------------------------------------------------- the turn probe (TURN_*: at once or in turn)
+
+TURN_ROUT_SHARE = 0.5          # the gold form's routing surcharge (sim/reward.py Weights.rout_share)
+
+
+def _turn_rows(lane):
+    """(t, {role: {key: array}}) of a turn lane: A the anvil (the first extra; solo: the lane's attacker), B the free unit
+    (the attacker), E the target; sh shattered (the game's sh, the twin's s), 1 / 0, nan where the row is missing."""
+    t = _t(lane)
+    s = lane["samples"]
+    solo = lane["spec"]["kind"].startswith("solo")
+    rows = {"E": [x[2] for x in s]}
+    if solo:
+        rows["A"] = [x[1] for x in s]
+    else:
+        rows["B"] = [x[1] for x in s]
+        ex = {round(tt, 3): (r or [None])[0] for tt, r in lane.get("extras") or []}
+        rows["A"] = [ex.get(round(tt, 3)) for tt in t]
+    out = {}
+    for role, rs in rows.items():
+        d = {k: np.array([np.nan if (r or {}).get(k) is None else float(r[k]) for r in rs])
+             for k in ("hp", "m", "r", "men", "x", "z")}
+        d["sh"] = np.array([np.nan if not r else float(bool(r.get("sh") or r.get("s"))) for r in rs])
+        out[role] = d
+    return t, out
+
+
+def _turn_cost(lane, role):
+    sp = lane["spec"]
+    key = sp["t_key"] if role == "E" else (cp.UNITS[TURN_B][0] if role == "B" else cp.UNITS[TURN_A][0])
+    return float(cp.passport(key)["multiplayer_cost"])
+
+
+def turn_measure(lane):
+    """The turn plan's lane (TURN_*): c0 the lane's first melee flag (A's or E's); the lane's end (the game's last sample;
+    the twin, which runs on: the entry's rule - c0 + TURN_S, or a side out with no melee flag for TURN_QUIET_S); each
+    unit's share of its starting health lost from the sample before c0 to c0 + w (w of TURN_WINDOWS; a window past the end
+    reads the end) and to the end; the gold share (sim/reward.py lost_now with its worst so far: dead, shattered or gone
+    1, routing + rout_share of the rest); trade = (E's share x E's cost - the sum of ours) / the mean of the two sides'
+    cost (net/stage0/watch.py hp_trade; gtrade the gold form); each unit's first rout, first rally (the end of a rout not
+    shattered), routs, shattered (s from c0); B's order and E's turn onto B (s from c0); E's loss at A's rout."""
+    sp = lane["spec"]
+    kind = sp["kind"]
+    t, R = _turn_rows(lane)
+    out = {"kind": kind, "strength": sp.get("strength"), "what": kind.split("_")[0], "side": sp.get("b_side"),
+           "run": lane.get("run"), "e_key": sp.get("t_key")}
+    if "B" in R:
+        # (battles 1-16: a B placed beyond the map's |x| ~763 stood inside its A - the lane is no turn / now lane)
+        bx, ax = R["B"]["x"][np.isfinite(R["B"]["x"])], R["A"]["x"][np.isfinite(R["A"]["x"])]
+        out["b_inside"] = bool(len(bx) and len(ax) and abs(bx[0] - ax[0]) < 40.0)
+    first = [v for v in (_first(t, np.nan_to_num(R[r]["m"]) > 0) for r in ("A", "E")) if v is not None]
+    if not first:
+        return out
+    c0 = min(first)
+    out["c0"] = c0
+    i_c = int(np.searchsorted(t, c0 - 1e-6))
+    r0 = float(t[max(i_c - 1, 0)])
+    # the end (the entry's rule on the rows; the game's lanes end there themselves)
+    roles = list(R)
+    ours = [r for r in roles if r != "E"]
+
+    def out_at(r):
+        d = R[r]
+        return (np.nan_to_num(d["r"]) > 0) | (np.nan_to_num(d["sh"]) > 0) | (np.nan_to_num(d["men"], nan=1.0) <= 0)
+    any_m = np.zeros(len(t), bool)
+    for r in roles:
+        any_m |= np.nan_to_num(R[r]["m"]) > 0
+    side_out = np.logical_and.reduce([out_at(r) for r in ours]) | out_at("E")
+    end = min(float(t[-1]), c0 + TURN_S)
+    last_m = c0
+    for k in range(i_c, len(t)):
+        if t[k] > end:
+            break
+        if any_m[k]:
+            last_m = float(t[k])
+        if side_out[k] and t[k] - last_m >= TURN_QUIET_S - 1e-6:
+            end = float(t[k])
+            break
+    out["end_s"] = end - c0
+    out["end_why"] = (lane.get("end") or {}).get("why") if lane.get("end") else None
+    h0, cost = {}, {}
+    upto = t <= end + 1e-6
+    for r in roles:
+        hp = R[r]["hp"]
+        ok = np.isfinite(hp)
+        if not ok.any():
+            continue
+        h0[r] = float(hp[ok][0])
+        cost[r] = _turn_cost(lane, r)
+        hpl = np.where(ok, hp, np.nan)
+        # (the gold share: worst so far; a unit gone - no row after it had one - is lost whole)
+        seen = np.maximum.accumulate(ok)
+        lost = np.clip(1 - np.nan_to_num(hpl, nan=np.nan) / h0[r], 0, 1)
+        dead = (np.nan_to_num(R[r]["sh"]) > 0) | (np.nan_to_num(R[r]["men"], nan=1.0) <= 0) | (seen & ~ok)
+        g = np.where(dead, 1.0, np.nan_to_num(lost) + (1 - np.nan_to_num(lost)) * TURN_ROUT_SHARE
+                     * (np.nan_to_num(R[r]["r"]) > 0))
+        gw = np.maximum.accumulate(np.where(t >= r0 - 1e-6, g, 0.0))
+        hp_r0 = cp.at(t[ok], hp[ok], r0)
+        for w in TURN_WINDOWS + ("end",):
+            tt = end if w == "end" else min(c0 + w, end)
+            k = ok & (t <= tt + 1e-6)
+            v = float(hp[k][-1]) if k.any() else np.nan
+            out[f"{r}_{w}"] = (hp_r0 - v) / h0[r] if np.isfinite(v) else None
+            kk = np.flatnonzero(t <= tt + 1e-6)
+            out[f"{r}g_{w}"] = float(gw[kk[-1]]) if len(kk) else None
+        rt, n_r, _, sh_t = _episodes(t[upto], R[r]["r"][upto], R[r]["sh"][upto])
+        out[f"{r}_rout_s"] = None if rt is None else rt - c0
+        out[f"{r}_routs"] = n_r
+        out[f"{r}_shatter_s"] = None if sh_t is None else sh_t - c0
+        rr = np.nan_to_num(R[r]["r"][upto]) > 0
+        ends = np.flatnonzero(~rr[1:] & rr[:-1]) + 1
+        shu = np.nan_to_num(R[r]["sh"][upto]) > 0
+        ral = [float(t[upto][e]) for e in ends if not shu[e]]
+        out[f"{r}_rally_s"] = ral[0] - c0 if ral else None
+    for w in TURN_WINDOWS + ("end",):
+        for form, sfx in (("trade", ""), ("gtrade", "g")):
+            vals = {r: out.get(f"{r}{sfx}_{w}") for r in cost}
+            if "E" not in vals or any(v is None for v in vals.values()):
+                continue
+            c_ours = sum(cost[r] for r in ours if r in cost)
+            out[f"{form}_{w}"] = ((vals["E"] * cost["E"] - sum(vals[r] * cost[r] for r in ours if r in cost))
+                                  / ((cost["E"] + c_ours) / 2))
+    ph = {p["phase"]: p["t"] / 1000 for p in lane.get("phases", []) if p.get("phase") in ("a_go", "t_go", "e1_rout")}
+    for k_ in ("a_go", "t_go", "e1_rout"):
+        out[f"{k_}_s"] = ph[k_] - c0 if k_ in ph else None
+    if out.get("A_rout_s") is not None:
+        ta = c0 + out["A_rout_s"]
+        hp = R["E"]["hp"]
+        ok = np.isfinite(hp)
+        if ok.any() and "E" in h0:
+            out["E_at_A_rout"] = (cp.at(t[ok], hp[ok], r0) - cp.at(t[ok], hp[ok], ta)) / h0["E"]
+        if "B" in R:
+            hb = R["B"]["hp"]
+            okb = np.isfinite(hb)
+            if okb.any():
+                out["B_at_A_rout"] = (cp.at(t[okb], hb[okb], r0) - cp.at(t[okb], hb[okb], ta)) / h0["B"]
+    # (B's first melee flag after c0: its fight's start)
+    if "B" in R:
+        fb = _first(t, np.nan_to_num(R["B"]["m"]) > 0, c0)
+        out["B_m_s"] = None if fb is None else fb - c0
+    # (the farthest any unit got from its lane's place: the lanes' contamination check)
+    px, pz = sp.get("x", 0.0), sp.get("z", 0.0)
+    for r in roles:
+        d = np.hypot(R[r]["x"] - px, R[r]["z"] - pz)
+        d = d[upto & np.isfinite(d)]
+        out[f"{r}_far_m"] = float(d.max()) if len(d) else None
+    return out
+
+
+TURN_KEY = tuple(dict.fromkeys(
+    ("c0", "end_s", "a_go_s", "t_go_s", "e1_rout_s", "B_m_s", "E_at_A_rout", "B_at_A_rout")
+    + tuple(f"{r}{g}_{w}" for w in TURN_WINDOWS + ("end",) for r in ("A", "B", "E") for g in ("", "g"))
+    + tuple(f"{f}_{w}" for w in TURN_WINDOWS + ("end",) for f in ("trade", "gtrade"))
+    + tuple(f"{r}_{k}" for r in ("A", "B", "E") for k in ("rout_s", "rally_s", "routs", "shatter_s", "far_m"))))
+TURN_READ = ("trade_300", "trade_end", "gtrade_300", "gtrade_end", "A_rout_s", "E_rout_s", "B_rout_s", "A_300", "B_300",
+             "E_300", "A_end", "B_end", "E_end")
+
+
+def _ms(v):
+    v = [float(x) for x in v if x is not None and np.isfinite(float(x))]
+    if not v:
+        return [None, None, 0]
+    return [float(np.mean(v)), float(np.std(v, ddof=1) / math.sqrt(len(v))) if len(v) > 1 else None, len(v)]
+
+
+def turn_tables(rows):
+    """{strength: {'kinds': {kind: {field: [mean, se, n]}}, 'now-turn': {field: [d, se, n_now, n_turn]} (unpaired: the
+    difference of the means, se = the root of the squares), 'now-turn paired': {field: [mean, se, n]} (by battle: a
+    battle has one now and one turn lane of a strength, on different places - the game's runs only)}}; the shares of
+    lanes where a unit routed beside. Lanes whose B stood inside its A (b_inside) are left out."""
+    rows = [r for r in rows if not r.get("b_inside")]
+    out = {}
+    for st in ("s", "m"):
+        rs = [r for r in rows if r.get("strength") == st]
+        if not rs:
+            continue
+        kinds = {}
+        for kind in dict.fromkeys(r["kind"] for r in rs):
+            kr = [r for r in rs if r["kind"] == kind]
+            row = {"n": len(kr)}
+            for f in TURN_KEY:
+                vals = [r.get(f) for r in kr if isinstance(r.get(f), (int, float))]
+                if vals:
+                    row[f] = _ms(vals)
+            for r_ in ("A", "B", "E"):
+                if any(f"{r_}_routs" in r for r in kr):
+                    row[f"{r_}_routed"] = _ms([float((r.get(f"{r_}_routs") or 0) > 0) for r in kr])
+            kinds[kind] = row
+        now = [r for r in rs if r["what"] == "now"]
+        turn = [r for r in rs if r["what"] == "turn"]
+        d, dp = {}, {}
+        for f in TURN_READ + ("trade_120", "trade_240", "trade_480", "gtrade_120", "gtrade_240", "gtrade_480"):
+            a, b = _ms([r.get(f) for r in now]), _ms([r.get(f) for r in turn])
+            if a[0] is not None and b[0] is not None:
+                d[f] = [a[0] - b[0], math.sqrt((a[1] or 0) ** 2 + (b[1] or 0) ** 2), a[2], b[2]]
+            pairs = []
+            for r in now:
+                if r.get("run") == "sim":
+                    continue
+                m = [x for x in turn if x.get("run") == r.get("run") and x.get("battle") == r.get("battle")]
+                if len(m) == 1 and r.get(f) is not None and m[0].get(f) is not None:
+                    pairs.append(float(r[f]) - float(m[0][f]))
+            if pairs:
+                dp[f] = _ms(pairs)
+        out[st] = {"kinds": kinds, "now-turn": d, **({"now-turn paired": dp} if dp else {})}
+    return out
+
+
+def turn_report(runs=(), source="game", sim=False, copies=8, device="cpu", out=None):
+    """Prints the turn plan's tables (the game | the twin on the same recorded starts with sim; source 'layout': the
+    twin on the plan's own places) and writes build/charge-probe/turn_<source>.json (not in Git)."""
+    rows = _mf_lanes("turn", source, runs, copies=copies, device=device)
+    result = {"plan": "turn", "source": source, "runs": [str(r) for r in runs], "lanes": rows, "tables": turn_tables(rows)}
+    if sim and source == "game":
+        trows = _mf_lanes("turn", "twin", runs, copies=copies, device=device)
+        result["twin"] = {"lanes": trows, "tables": turn_tables(trows)}
+    for name, tab in (("", result["tables"]), ("twin ", (result.get("twin") or {}).get("tables"))):
+        if not tab:
+            continue
+        for st, T in tab.items():
+            print(f"== turn {name}{source if not name else 'twin'} strength {st}: mean±se(n) over lanes")
+            for kind, r in T["kinds"].items():
+                print(f"  {kind} (n {r['n']}): " + "; ".join(f"{f} {_mf_cell(r[f])}" for f in
+                                                          TURN_READ + ("A_rally_s", "E_rally_s", "A_routed", "B_routed",
+                                                                       "E_routed", "E_at_A_rout", "a_go_s", "t_go_s",
+                                                                       "end_s") if f in r and r[f][0] is not None))
+            print("  now - turn: " + "; ".join(f"{f} {v[0]:+.4f}±{v[1]:.4f}({v[2]}/{v[3]})" for f, v in
+                                                T["now-turn"].items()))
+            if T.get("now-turn paired"):
+                print("  now - turn paired by battle: " + "; ".join(f"{f} {_mf_cell(v)}" for f, v in
+                                                                      T["now-turn paired"].items()))
+    out = Path(out) if out else cp.ROOT / f"turn_{source}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
     print(out)
@@ -3768,12 +4081,16 @@ def main(argv=None):
                         help="the flank2v1 plan's table: 'game' the runs (+ the twin on their starts with --sim), "
                              "'layout' the twin on the plan's own places (no game run needed)")
     for plan in ("counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01",
-                 "behind", "own", "behind2"):
+                 "behind", "own", "behind2", "turn"):
         parser.add_argument(f"--{plan}", choices=("game", "layout"),
                             help=f"the {plan} probe's table (meetfar, night probes): 'game' the runs (+ the twin on "
                                  "their starts with --sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
+    if args.turn:
+        runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "turn"]
+        turn_report(runs, source=args.turn, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
+        return 0
     if args.walkout:
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "walkout"]
         walkout_report(runs, source=args.walkout, sim=args.sim, copies=args.copies, device=args.device, out=args.out)

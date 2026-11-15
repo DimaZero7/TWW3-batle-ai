@@ -111,7 +111,12 @@
 -- target is in melee before a_go_m was reached (why 'closest'; probe_phase 'a_go' {why, d, of}); lane.a_go_melee_of
 -- ('e1' the first extra, 't' the lane's target; the tight plan) names whose melee flag starts that clock instead of the
 -- order's target's. An extra with e.go_melee_s (the behind2 plan's second joiner) attacks the lane's target at a run
--- (e.walk: at a walk) once the first extra has been in melee that long (probe_phase 'e_go' {n}). lane.a_morale and an extra's
+-- (e.walk: at a walk) once the first extra has been in melee that long (probe_phase 'e_go' {n}). lane.a_go_rout_of 'e1'
+-- (the turn plan) holds the order until the first extra routs (routing, shattered or dead: probe_phase 'e1_rout'; why
+-- 'rout'); lane.t_go_rout_of 'e1': then the target attacks the attacker at a run, once (probe_phase 't_go'), before the
+-- attacker's order. lane.quiet_end_s (the turn plan): after the contact the lane ends ('quiet') once a side is out (each
+-- of its units - the attacker and the extras, or the target - routing, shattered or dead) and none of the lane's units
+-- has had a melee flag for that long. lane.a_morale and an extra's
 -- e.morale: that unit keeps its morale (not fearless). lane.contact_a_only: the lane's
 -- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
 -- attacker's row carries dd (CCO DamageDealt); lane.dd_rows 'both' (the pusbags plan): the target's row too.
@@ -834,6 +839,23 @@ function M.main(bm, config, globals)
                     for _, i in ipairs(M.due_casts(lane.casts, lane.cast_done, now - lane.t0)) do cast(lane, i, now) end
                 end
                 local go_why, go_d = nil, nil
+                -- (lane.a_go_rout_of / lane.t_go_rout_of 'e1', the turn plan) the first extra's rout - routing,
+                -- shattered or dead (probe_phase 'e1_rout') - fires the attacker's held order (why 'rout') and turns the
+                -- target onto the attacker at a run, once (probe_phase 't_go'): the target first, then the attacker
+                if (lane.a_go_rout_of == 'e1' or lane.t_go_rout_of == 'e1') and not lane.e1_rout_ms
+                        and lane.extras and lane.extras[1] then
+                    local e1 = state.units[lane.extras[1].name].unit
+                    if read(function() return e1:is_routing() end) or read(function() return e1:is_shattered() end)
+                            or beaten(e1) then
+                        lane.e1_rout_ms = now
+                        emit('probe_phase', {lane = lane.name, phase = 'e1_rout', t = now - lane.t0})
+                    end
+                end
+                if lane.t_go_rout_of == 'e1' and lane.e1_rout_ms and not lane.t_go_done then
+                    lane.t_go_done = true
+                    attack(lane, lane.t, lane.a, false)
+                    emit('probe_phase', {lane = lane.name, phase = 't_go', t = now - lane.t0})
+                end
                 if lane.a_pending then
                     -- (the busycharge plan) the attacker's order, held until a_go_s after the go; (the counterfar and
                     -- intercept plans) until its target is near, has been in melee a while, or is at its closest
@@ -848,7 +870,9 @@ function M.main(bm, config, globals)
                     local ck_m = gt_m
                     if ck ~= gt then ck_m = read(function() return ck.unit:is_in_melee() end) end
                     if ck_m and not lane.go_melee_ms then lane.go_melee_ms = now end
-                    if lane.a_go_s and now - lane.t0 >= lane.a_go_s * 1000 then
+                    if lane.a_go_rout_of == 'e1' and lane.e1_rout_ms then
+                        go_why = 'rout'
+                    elseif lane.a_go_s and now - lane.t0 >= lane.a_go_s * 1000 then
                         go_why = 'time'
                     elseif lane.a_go_m and go_d and go_d <= lane.a_go_m then
                         go_why = 'gap'
@@ -1094,7 +1118,26 @@ function M.main(bm, config, globals)
                 end
                 if lane.t2 then r.t2 = unit_row(lane.t2.unit) end
                 rows[#rows + 1] = r
-                if beaten(lane.a.unit) or beaten(lane.t.unit) then
+                if lane.quiet_end_s and lane.contact then
+                    -- (lane.quiet_end_s, the turn plan) the last melee flag of any of the lane's units, and whether a
+                    -- side is out (each of its units routing, shattered or dead): both, quiet_end_s long, end the lane
+                    local function out(u)
+                        return read(function() return u:is_routing() end) or read(function() return u:is_shattered() end)
+                            or beaten(u)
+                    end
+                    local any_m, ours_out = a_m or t_m, out(lane.a.unit)
+                    for _, e in ipairs(lane.extras or {}) do
+                        local u = state.units[e.name].unit
+                        if read(function() return u:is_in_melee() end) then any_m = true end
+                        ours_out = ours_out and out(u)
+                    end
+                    if any_m then lane.melee_last_ms = now end
+                    lane.side_out = ours_out or out(lane.t.unit)
+                end
+                if lane.quiet_end_s and lane.contact and lane.side_out
+                        and now - (lane.melee_last_ms or lane.contact) >= lane.quiet_end_s * 1000 then
+                    end_lane(lane, 'quiet')
+                elseif beaten(lane.a.unit) or beaten(lane.t.unit) then
                     end_lane(lane, 'dead')
                 elseif lane.rally_ms and lane.after_rally_s and now - lane.rally_ms >= lane.after_rally_s * 1000 then
                     end_lane(lane, 'after_rally')
@@ -1300,7 +1343,7 @@ function M.main(bm, config, globals)
                 orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
             end
             local m = lane.mode
-            if (lane.a_go_s or lane.a_go_m or lane.a_go_melee_s or lane.a_go_closest)
+            if (lane.a_go_s or lane.a_go_m or lane.a_go_melee_s or lane.a_go_closest or lane.a_go_rout_of)
                     and (m == 'attack_run' or m == 'attack_walk' or m == 'shoot' or m == 'attack_t2') then
                 lane.a_pending, m = true, nil
             end

@@ -576,7 +576,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
-              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2")
+              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2", "turn")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2139,6 +2139,10 @@ def run_config(plan, index):
         # A and B every 0.5 s (the clock lane keeps the poll going) - tmp/night_probes/design.md 1.2
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True,
                       mem_extras=True)
+    if plan == "turn":
+        # (game/probe/unit_probe.py, at once or in turn) health every 0.25 s; no soldier places, no memory (the measures
+        # are losses, routs and rallies: the unit rows)
+        config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=0)
     if plan == "walkout":
         # (the night probes' walkout) as tight, without the extras (a group's lanes have none): design.md 2.1
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True)
@@ -2619,8 +2623,17 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             # (the counterfar and intercept plans; entries/charge_probe.lua a_go_m / a_go_melee_s / a_go_closest) the
             # attacker's attack held until its order's target is within a_go_m (centres), has been in melee
             # a_go_melee_s, or (a_go_closest) its distance grew 2 m past its least or it is in melee
+            # (lane.a_go_rout_of / t_go_rout_of 'e1', the turn plan; entries/charge_probe.lua) the first extra's rout:
+            # routing, shattered or dead
+            E1r = int(slot["e1"][b])
+            if (sp.get("a_go_rout_of") == "e1" or sp.get("t_go_rout_of") == "e1") and E1r >= 0 \
+                    and st_["go_s"][b].get("e1_rout") is None \
+                    and (bool(u["r"][b, E1r]) or ("s" in u and bool(u["s"][b, E1r])) or float(u["men"][b, E1r]) <= 0):
+                st_["go_s"][b]["e1_rout"] = t
+                st_["phases"][b].append({"phase": "e1_rout", "t": t * 1000})
             held = False
-            if ((sp.get("a_go_m") is not None or sp.get("a_go_melee_s") is not None or sp.get("a_go_closest"))
+            if ((sp.get("a_go_m") is not None or sp.get("a_go_melee_s") is not None or sp.get("a_go_closest")
+                 or sp.get("a_go_rout_of"))
                     and mode[b] in ("attack_run", "attack_walk", "attack_t2") and st_["go"][b] is None):
                 G = int(slot["t2"][b]) if mode[b] == "attack_t2" else T
                 d_ = math.hypot(ax[b] - float(u["x"][b, G]), az[b] - float(u["z"][b, G]))
@@ -2633,7 +2646,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 if c_m and gs.get("melee") is None:
                     gs["melee"] = t - params.dt
                 why = None
-                if sp.get("a_go_m") is not None and d_ <= sp["a_go_m"]:
+                if sp.get("a_go_rout_of") == "e1" and gs.get("e1_rout") is not None:
+                    why = "rout"
+                elif sp.get("a_go_m") is not None and d_ <= sp["a_go_m"]:
                     why = "gap"
                 elif (sp.get("a_go_melee_s") is not None and gs.get("melee") is not None
                       and t - gs["melee"] >= sp["a_go_melee_s"] - 1e-6):
@@ -2875,6 +2890,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             if sp.get("t_attack_extra") and int(slot["e1"][b]) >= 0:
                 # the walkpass plan's 'busy': the target attacks the first extra at a walk from the go
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), sp.get("t_attack_extra") == "run"
+            if sp.get("t_go_rout_of") == "e1" and st_["go_s"][b].get("e1_rout") is not None:
+                # (the turn plan) the first extra routed: the target attacks the attacker at a run from then on
+                if st_["go_s"][b].get("t_go") is None:
+                    st_["go_s"][b]["t_go"] = t
+                    st_["phases"][b].append({"phase": "t_go", "t": t * 1000})
+                kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, True
             # the reengage plan (entries/charge_probe.lua): the attacker stands at +z facing the target at -z, so straight
             # back is +z for it and -z for the target
             if mode[b] == "reengage":
