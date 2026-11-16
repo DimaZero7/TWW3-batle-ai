@@ -45,16 +45,9 @@ from net.tactic import exam_pin as EP
 from net.tactic import heads as HD
 from net.tactic import orders as OR
 from net.tactic import pin as PN
-from net.tactic import rows as RW
 from net.tactic import tags as TG
+from net.tactic.cols import COLS, D2, PAIR_EXTRA, _D2, ingredients, row_cols  # noqa: F401 (one formula: cols.py)
 
-COLS = ("right", "forward", "v_right", "v_forward", "mt",
-        "d_coming_n", "d_coming_dist", "d_comes_at", "d_comes_at_melee", "d_gap_melee_still",
-        "pinned", "waited", "free_nc",
-        "d2_free_coming_n", "d2_free_coming_gap", "d2_gap_melee_nr")
-PAIR_EXTRA = ("near", "e_comes_at_g", "e_comes_at_other", "e_other_melee", "e_gap_my_melee",
-              "e2_free_comes_at_g", "e2_free_comes_gap")
-_D2 = (0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 13, 14)          # (C, D's coming columns, the gap 'in melee, not routing', D2's two)
 # input: (the row columns of COLS it reads, the pair columns of PAIR_EXTRA beside the 7) - review_attack_v23 M
 INPUTS = {"A": ((0, 1), ()), "B": ((0, 1, 2, 3), ()), "C": ((0, 1, 2, 3, 4), ()),
           "D": (tuple(range(10)), ()), "E": (tuple(range(10)), (1, 2, 3, 4)),
@@ -99,62 +92,6 @@ def nearest_eligible(fx, v, teacher, given):
     return near, e0
 
 
-def ingredients(fx):
-    """(review_attack_v23 M: the ingredients, never the teacher's verdicts - no threshold of the tactic teacher; the
-    only rule is orders.comes, the unit script's own fact of the lower level's input) ([R, K, 5] row columns, [R, G, K,
-    4] pair columns):
-      rows (mine and enemies alike; 'opposing' = the other side, routers not counted as coming): the count of opposing
-      units coming at the row (cap 3, / 3); the centre distance of the nearest of them (/ 240, 1 with none, capped at
-      1); the row comes at an opposing unit; one of those is in melee; the smallest edge gap to an opposing unit in
-      melee and not moving (the row's mv flag off) (/ 40, 1 beyond)
-      pairs (g, k): k comes at g; k comes at another unit of my group; one of those is in melee; the edge gap of k to my
-      nearest unit standing in melee (mine, in melee, mv off, not routing) (/ 40, 1 beyond)
-      D2 / E2 (review M, the first mend read): rows - the comers NOT in melee (count, smallest edge gap / 240) and the
-      edge gap to an opposing unit in melee and not routing; pairs - k, out of melee, comes at g, and its edge gap
-    -> (D's rows [R, K, 5], D2's rows [R, K, 3], pairs [R, G, K, 6])"""
-    R, G, K = fx.R, fx.G, fx.K
-    cm = OR.comes(fx)                                                              # [R, i, j] j comes at i
-    x = fx.rr["rows"]
-    mv = (x[..., RW.RI["mv"]] > 0.5) & fx.mask
-    own = fx.mask & ~fx.enemy
-    opp = (own[:, :, None] & fx.enemy[:, None, :]) | (fx.enemy[:, :, None] & own[:, None, :])
-    at = cm & opp & ~fx.r[:, None, :]                                              # [R, i, j] opposing j comes at i
-    n = at.float().sum(2).clamp(max=3.0) / 3.0
-    dn = torch.where(at, fx.dist, torch.full_like(fx.dist, OR.INF)).amin(2)
-    dn = torch.where(torch.isfinite(dn), (dn / 240.0).clamp(max=1.0), torch.ones_like(dn))
-    goes = (cm & opp).transpose(1, 2)                                              # [R, i, j] i comes at j
-    c3 = goes.any(2).float()
-    c4 = (goes & fx.m[:, None, :]).any(2).float()
-    still = fx.m & ~mv
-    gm = torch.where(opp & still[:, None, :], fx.gap, torch.full_like(fx.gap, OR.INF)).amin(2)
-    c5 = torch.where(torch.isfinite(gm), (gm / 40.0).clamp(0.0, 1.0), torch.ones_like(gm))
-    rows = torch.stack([n, dn, c3, c4, c5], -1) * fx.mask[..., None]
-    # D2 (review M, the first mend read): the comers NOT in melee - count (cap 3, / 3) and their smallest EDGE gap (/ 240,
-    # 1 with none); the smallest edge gap to an opposing unit in melee and not routing (/ 40, 1 beyond)
-    af = at & ~fx.m[:, None, :]
-    nf = af.float().sum(2).clamp(max=3.0) / 3.0
-    gf = torch.where(af, fx.gap, torch.full_like(fx.gap, OR.INF)).amin(2)
-    gf = torch.where(torch.isfinite(gf), (gf / 240.0).clamp(0.0, 1.0), torch.ones_like(gf))
-    gr = torch.where(opp & (fx.m & ~fx.r)[:, None, :], fx.gap, torch.full_like(fx.gap, OR.INF)).amin(2)
-    gr = torch.where(torch.isfinite(gr), (gr / 40.0).clamp(0.0, 1.0), torch.ones_like(gr))
-    rows2 = torch.stack([nf, gf, gr], -1) * fx.mask[..., None]
-    # pairs (g, k)
-    gi = fx.g_row[:, :, None].expand(R, G, K)
-    p1 = cm.gather(1, gi)                                                          # [R, G, K] k comes at g
-    mine = fx.mine & ~fx.r
-    other = mine[:, :, None].expand(R, K, G).clone()                               # [R, a, G] a is mine and not g
-    other.scatter_(1, fx.g_row[:, None, :], False)
-    oa = other.transpose(1, 2)                                                     # [R, G, a]
-    ca = cm & fx.enemy[:, None, :]                                                 # [R, a, k] enemy k comes at a
-    p2 = (oa[..., None] & ca[:, None]).any(2)                                      # [R, G, K]
-    p3 = (oa[..., None] & ca[:, None] & fx.m[:, None, :, None]).any(2)
-    stand = mine & fx.m & ~mv
-    gk = torch.where(stand[:, :, None], fx.gap, torch.full_like(fx.gap, OR.INF)).amin(1)          # [R, K]
-    gk = torch.where(torch.isfinite(gk), (gk / 40.0).clamp(0.0, 1.0), torch.ones_like(gk))
-    p5 = p1 & fx.enemy[:, None, :] & ~fx.r[:, None, :] & ~fx.m[:, None, :]          # k, out of melee, comes at g
-    g5 = torch.where(p5, (fx.g_gap / 240.0).clamp(0.0, 1.0), torch.ones_like(fx.g_gap))
-    pair = torch.stack([p1.float(), p2.float(), p3.float(), gk[:, None, :].expand(R, G, K), p5.float(), g5], -1)
-    return rows, rows2, pair
 
 
 def features(v, T, teacher, ana):
@@ -168,17 +105,13 @@ def features(v, T, teacher, ana):
     rows, mask = v.rr["rows"], v.rr["mask"]
     with torch.no_grad():
         card = ana(rows, mask)
-    RI = RW.RI
-    cap = float(OR.c_orders()["net"]["mt_cap"])
     pin = PN.pinned(fx, touch=getattr(teacher, "touch", None))
     near, e0 = nearest_eligible(fx, v, teacher, given)
     on = fx.my >= 0
     fnc = torch.zeros((R, K), device=dev)
     fnc.scatter_add_(1, fx.g_row, (e0 & on).float())
-    ing, ing2, pe = ingredients(fx)
-    cols = torch.cat([torch.stack([rows[..., RI["right"]], rows[..., RI["forward"]], rows[..., RI["v_right"]],
-                                   rows[..., RI["v_forward"]], fx.mt.clamp(max=int(cap)).float() / cap], -1), ing,
-                      torch.stack([pin.float(), (fx.mt >= 2).float(), fnc.clamp(max=1.0)], -1), ing2], -1) * mask[..., None]
+    _, _, pe = ingredients(fx)
+    cols = row_cols(fx, torch.stack([pin.float(), (fx.mt >= 2).float(), fnc.clamp(max=1.0)], -1))
     head = T["head_free"]
     kinds = torch.zeros((R, G), dtype=torch.int32, device=dev)
     for i, n in enumerate(TG.KINDS):

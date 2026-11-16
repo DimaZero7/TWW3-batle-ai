@@ -169,7 +169,8 @@ class Tacticians:
 
     def tick(self, raw, card, bounds=None, now=None, sim=None):
         """The tacticians' decision (every 5 s): the frames of the active rows (per slot); with a player also the orders
-        (now: the battle's second; None - this level's own clock, decide_s a tick)."""
+        (now: the battle's second; None - this level's own clock, decide_s a tick). raw, card and bounds go on the
+        player's View; for a player with needs_input also inputs.build with them and the areas of the frames in force."""
         now = self.clock if now is None else float(now)
         self.clock = now + float(tcfg()["decide_s"])
         idx = (self.active & self.mine.any(1)).nonzero()[:, 0]
@@ -231,7 +232,15 @@ class Tacticians:
         prev["on"] = self.fr_on[idx][k, s0] & on_my
         has_prev = bool(prev["on"].any())
         K = min(int(tcfg()["rows"]), self.N)
-        rr = RW.build(raw, card, p, tiles, rows=K)
+        inp = None
+        if getattr(self.player, "needs_input", False):
+            # a player reading the level's whole input (pin.NetPlayer): inputs.build with the battle's bounds and the
+            # personal areas of the frames in force, as the net path above; its rows are rows.build's (the same call)
+            areas = U.world(prev, tiles) if has_prev else None
+            inp = TIN.build(raw, card, p, tiles, areas, bounds=bounds, rows=K)
+            rr = inp
+        else:
+            rr = RW.build(raw, card, p, tiles, rows=K)
         ctx = DC.ctx_of(rr, p, tiles, prev if has_prev else None)
         order = {"skill": self.skill[idx][k, s0], "tgt": torch.where(on_my, self.tgt[idx][k, s0], -1),
                  "side": torch.where(on_my, self.side[idx][k, s0], -1), "born": self.born[idx][k, s0]}
@@ -269,7 +278,8 @@ class Tacticians:
         exempt = fx.striking | (melee if self.hygiene else torch.zeros_like(melee))
         must = must & ~exempt
         view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene, raw=S,
-                       card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim)
+                       card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim, inp=inp,
+                       command=self.order[idx])
         out = self.player(view)
         skill, tgt, side, change, cnt = OR.masks(view, out, getattr(self.player, "allow", (0, 2)))
         self.fell += float(out["fell"].sum())

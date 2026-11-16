@@ -353,7 +353,8 @@ class TacticSide(UnitSide):
     """My side of a general battle through the tactic level (tmp/tactic_slice/design_flank_v2.md section 4): one group
     = my units but the lord (his row hidden, holding), its zone by formation (tactic/zfit.zone_for; config
     tactic.json orders.zone_fit off - a line 1 x n on the units' middle, as the pilot) handed once at second 0 through
-    lower.Tacticians.apply, no operative; every 5 s the level's tick with the player (tactic/pin.py) and
+    lower.Tacticians.apply, no operative - all of it the one side wrapper tactic/side.Side (self.wrap; this class its
+    adapter to the simulator's state); every 5 s the level's tick with the player (tactic/pin.py) and
     lower.Units.write, every second the unit's script. The level's own per-tick measures (self.acc [B]):
     unpinned_attacks (attack orders on an enemy not pinned by pin.pinned at the order), two_on_side (enemies with more
     strikers than the cap, or two on one side, after a tick). zones [B] - each battle's zone from its spec ({cx, cz,
@@ -373,9 +374,7 @@ class TacticSide(UnitSide):
         self.fearless = fearless
 
     def start(self, st, P, device, card, unit_net):
-        from net.operative import lower as LW
-        from net.tactic import cfg as tcfg
-        from net.tactic import zfit
+        from net.tactic import side as TS
         super().start(st, P, device, card, unit_net)
         if self.seed is not None:
             self.units.gen = torch.Generator(device=device).manual_seed(int(self.seed))
@@ -394,40 +393,10 @@ class TacticSide(UnitSide):
                             u["leadership"][b, base + j] += 1e4
                             u["morale"][b, base + j] += 1e4
         self.mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0)
-        self.tac = LW.Tacticians(B, N, 1, device, player=self.player, hygiene=self.hygiene)
-        g = GR.Groups.empty(B, N, 1, device)
-        g.member = torch.where(self.mine, torch.zeros_like(g.member), g.member)
-        g.on[:, 0] = self.mine.any(1)
-        g.n0[:, 0] = self.mine.sum(1)
-        g.verb[:, 0] = DC.VERBS.index("hold")
-        rows, cols = [], []
-        self.worst = []
-        fit = bool(tcfg()["orders"]["zone_fit"])
-        x, z, b = u["x"].cpu(), u["z"].cpu(), u["b"].cpu()
-        for k in range(B):
-            zn = self.zones[k] if (self.zones is not None and self.zones[k] is not None and fit) else None
-            if zn is not None:
-                g.cx[k, 0], g.cz[k, 0], g.heading[k, 0], g.line[k, 0] = zn["cx"], zn["cz"], zn["heading"], bool(zn["line"])
-                rows.append(zn["rows"])
-                cols.append(zn["cols"])
-                self.worst.append(zn["worst"])
-                continue
-            sl = self.mine[k].nonzero()[:, 0].tolist()
-            pl = [(float(x[k, i]), float(z[k, i])) for i in sl]
-            course = float(b[k, sl[0]]) if sl else 0.0
-            zn = zfit.zone_for(pl, course) if (fit and pl) else None
-            if zn is None:
-                n = max(len(pl), 1)
-                mx = sum(p[0] for p in pl) / n if pl else 0.0
-                mz = sum(p[1] for p in pl) / n if pl else 0.0
-                zn = {"cx": mx, "cz": mz, "heading": course, "line": True, "rows": 1, "cols": n, "worst": float("nan")}
-            g.cx[k, 0], g.cz[k, 0], g.heading[k, 0], g.line[k, 0] = zn["cx"], zn["cz"], zn["heading"], bool(zn["line"])
-            rows.append(zn["rows"])
-            cols.append(zn["cols"])
-            self.worst.append(zn["worst"])
-        self.groups0 = g
-        self.shape0 = (torch.tensor(rows), torch.tensor(cols))
-        self.applied = False
+        # the level through the one side wrapper (tactic/side.py), shared with the bridge's companion
+        self.wrap = TS.Side(self.player, self.hygiene, device).start(u["x"], u["z"], u["b"], self.mine, self.hide,
+                                                                     self.zones)
+        self.tac, self.worst = self.wrap.tac, self.wrap.worst
         self.acc = {k: torch.zeros(B, device=device) for k in ("unpinned_attacks", "two_on_side")}
 
     def _wear(self, u):
@@ -445,20 +414,8 @@ class TacticSide(UnitSide):
                     u["hp_abs"][b, i] = u["hp0"][b, i] * share
                     u["hp"][b, i] = share
 
-    def _raw(self, raw):
-        r = raw.clone()
-        a = TR.I["alive"]
-        r[..., a] = torch.where(self.hide, torch.zeros_like(r[..., a]), r[..., a])
-        return r
-
     def tick(self, st, raw):
-        raw = self._raw(raw)
-        if not self.applied:
-            self.applied = True
-            on = self.groups0.on
-            self.tac.apply(self.groups0, on, torch.zeros_like(on), raw)
-            self.tac.shape(*self.shape0)
-        self.tac.tick(raw, self.setup.card, self.bounds, now=float(st.t.float().max()), sim=st)
+        self.wrap.tick(raw, self.setup.card, self.bounds, now=float(st.t.float().max()), sim=st)
         self.units.write(self.tac)
         self._measure()
 

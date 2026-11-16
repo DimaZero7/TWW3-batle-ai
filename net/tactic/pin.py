@@ -46,6 +46,8 @@ the rows and the orders in force); the code's masks (orders.masks) stand over al
     TEACH            the drill's teacher and labeller (config orders.teach): its base, the wait read off fx.mt, and the
                  labeller's options of tmp/tactic_slice/review_attack_v23 G.5 - pinned()'s touch, come_own()'s free /
                  reach_m, through_own() (no_through); every other player keeps 4 m, the counter's reach, no through rule
+    NetPlayer(net, greedy)  the network (tactic/heads.TacticNet2) as a player: its pointer's attacks, the default by
+                 orders.fill_default as TEACH's (class doc)
     Teacher.shut     the branch test's two masks (tactic/replay.py), set by a wrapper before each call: None, or {units,
                  targets} [r, S] bool by the view's rows and the battle's slots - my units closed to every attack order of
                  the walk (they keep the order in force; the default fill still applies) and enemies closed as targets, so
@@ -392,9 +394,7 @@ class Teacher:
             hold = go & v.must[:, g] & ~has                                        # forced, no candidate: hold
             skill[:, g] = torch.where(hold, torch.full_like(skill[:, g], SC.HOLD), skill[:, g])
             tgt[:, g] = torch.where(hold, torch.full_like(tgt[:, g], -1), tgt[:, g])
-        if self.idle is not None:
-            idle = fx.able & (tgt < 0) & ((skill == SC.HOLD) | ((skill == SC.ATTACK) & self.back))
-            skill = torch.where(idle, torch.full_like(skill, self.idle), skill)
+        skill = OR.fill_default(fx, skill, tgt, self.idle, self.back)
         self.last_tags = {"cause": cause, "u": u_of, "cell": cell(fx, tgt)}
         return _out(v, fr, skill, tgt, side)
 
@@ -490,9 +490,47 @@ class Counter:
 
     def __call__(self, v):
         fr = v.frames()
-        skill = torch.where(v.fx.able & (v.order["skill"] == SC.HOLD) & (v.order["tgt"] < 0),
-                            torch.full_like(v.order["skill"], SC.COUNTER), v.order["skill"])
-        return _out(v, fr, skill)
+        return _out(v, fr, OR.fill_default(v.fx, v.order["skill"], v.order["tgt"], SC.COUNTER))
+
+
+class NetPlayer:
+    """The network as a player of lower.Tacticians(player=) (design_attack_v23 section 6 item 5): training, exams and the
+    game run one path. net - a heads.TacticNet2; greedy - the pointer's argmax, else sampled. needs_input: the level
+    builds inputs.build for it (View.inp, View.command). A unit the pointer gives row k gets 'attack k' (its side
+    the one it stands on); every other order stays in force; then orders.fill_default with the level's default (config
+    orders.default_skill, orders.back_default) - as TEACH. allow = (hold, attack, the default): else orders.masks
+    rejects the fill. last_tags {cause 1 when the chosen target is pinned and waited by the labeller's facts (pinned()
+    at orders.teach.touch_m, fx.mt >= 2), else 3; u -1; cell} [r, G] - watch.PinWatch's measures by cause."""
+    name = "N"
+    needs_input = True
+
+    def __init__(self, net, greedy=True):
+        self.net, self.greedy = net, greedy
+        d = OR.default_skill()
+        self.idle = None if d == SC.HOLD else d
+        self.back = bool(OR.c_orders().get("back_default", False))
+        self.allow = (SC.HOLD, SC.ATTACK) + (() if self.idle is None else (self.idle,))
+        self.touch = teach_opts()["touch"]
+        self.last_tags = None
+        self.last = None
+
+    def __call__(self, v):
+        fx = v.fx
+        fr = v.frames()
+        with torch.no_grad():
+            o = self.net.act(v, greedy=self.greedy)
+        k = o["k"]
+        att = k >= 0
+        kc = k.clamp(min=0)
+        skill = torch.where(att, torch.full_like(v.order["skill"], SC.ATTACK), v.order["skill"])
+        tgt = torch.where(att, fx.slot_of_row(k), v.order["tgt"])
+        side = torch.where(att, fx.g_side.gather(2, kc[..., None])[..., 0], v.order["side"])
+        skill = OR.fill_default(fx, skill, tgt, self.idle, self.back)
+        cause = pinned(fx, touch=self.touch) & (fx.mt >= 2)
+        cause = torch.where(att, torch.where(cause.gather(1, kc), 1, 3), 0)
+        self.last_tags = {"cause": cause, "u": torch.full_like(tgt, -1), "cell": cell(fx, tgt)}
+        self.last = o
+        return _out(v, fr, skill, tgt, side)
 
 
 PLAYERS = {"K": Keep, "T": Teacher, "D": lambda: Teacher(dumb="reach"), "D35": lambda: Teacher(dumb="d35"),

@@ -5,7 +5,9 @@ state (net/tactic/raw.py through bridge/companion/tactic_input.py) in every colu
 the unit level's view.raw reads them from the simulator; the enemy's button seconds, which its row never shows), and
 the same input - rows, the three windows, the numbers - for the same parcels: on a flat field and on a captured map
 (the game in the map's coordinates, the simulator in the battle's turned frame; forest, shallow water, trunks, 'cannot
-stand', the field's edge). Needs torch (the container)."""
+stand', the field's edge). The level's side wrapper (tactic/side.py) with TEACH on both inputs of one battle through
+melee and a rout: the same orders in force, mt, the network's extra columns, pair numbers, masks, outputs and unit
+script orders (design_attack_v23 section 6 item 8). Needs torch (the container)."""
 import json
 import math
 
@@ -239,3 +241,179 @@ def test_the_bridge_gives_the_simulators_input_on_a_map_in_the_games_coordinates
     lit = {n: float(torch.cat([near[:, names.index(n)].flatten(), far[:, fl.index(n)].flatten()]).max())
            for n in ("trunks", "blocked", "shallow")}
     assert all(v > 0 for v in lit.values()), lit
+
+
+# ------------------------------------------------------------------ the level's side wrapper with TEACH on both sides
+def _from_game(x, z, place):
+    """The game's map coordinates -> the battle's frame (to_game's inverse)."""
+    if place is None:
+        return x, z
+    px, pz, deg = place
+    a = math.radians(deg)
+    dx, dz = x - px, z - pz
+    return dx * math.cos(a) - dz * math.sin(a), dx * math.sin(a) + dz * math.cos(a)
+
+
+class _Seat:
+    """One side's tactic level and unit script on its own raw state: tactic/side.Side with TEACH every 5 s, the unit
+    script (net/unit/scripts.Unit) every second on the frames and orders in force (as lower.Units: a 48 m box where each
+    unit stands before its first frame; pace any; its own last order)."""
+
+    def __init__(self, raw, card, bounds):
+        from net.tactic import pin as PN
+        from net.tactic import side as TS
+        from net.unit import scripts as SC
+        from sim import orders as O
+        self.card, self.bounds = card, bounds
+        x, z, b, mine, hide = TS.of_raw(raw, card)
+        self.mine = mine
+        self.side = TS.Side(PN.player("TEACH")).start(x, z, b, mine, hide)
+        self.unit = SC.Unit()
+        B, N = mine.shape
+        self.area = {"x": x.clone(), "z": z.clone(), "b": b.clone(), "front": torch.full((B, N), 48.0),
+                     "depth": torch.full((B, N), 48.0)}
+        self.last = O.hold(B, N)
+        self.last.kind[:] = O.KEEP
+        self.pace = torch.zeros((B, N), dtype=torch.long)
+
+    def tick(self, raw, now):
+        from net.tactic import heads as HD
+        from net.tactic import orders as OR
+        tac = self.side.tick(raw, self.card, self.bounds, now)
+        w = tac.areas()
+        on = w["on"]
+        for k in self.area:
+            self.area[k] = torch.where(on, w[k], self.area[k])
+        v = tac.view
+        fx, view = v["view"].fx, v["view"]
+        given = torch.where(v["new_attack"], fx.row_of_slot(v["tgt"]), torch.full_like(v["tgt"], -1))
+        x = HD.net_inputs(view)
+        wi = HD.walk_inputs(fx, given)
+        return {"own": OR.own(view.order, view.ctx.prev, fx, view.now), "mt": fx.mt, "cols": x["cols"],
+                "pair": wi["pair"], "slot": fx.slot, "head": HD.head_free(fx), "open": wi["open"],
+                "skill": v["skill"], "tgt": v["tgt"], "side": v["side"], "my": v["my"]}
+
+    def second(self, raw):
+        from net.unit import view as V
+        o = self.side.tac.orders_of()
+        raw_u = raw[..., :TR.BASE].clone()
+        raw_u[..., V.I["leash"]] = 0.0
+        mine = self.mine & (raw[..., TR.I["alive"]] > 0)
+        order = {"skill": torch.where(o["on"], o["skill"], torch.zeros_like(o["skill"])), "area": self.area,
+                 "target": torch.where(o["on"], o["tgt"], torch.full_like(o["tgt"], -1)), "pace": self.pace,
+                 "last": self.last}
+        self.last = self.unit.intend(raw_u, order, mine)
+        return self.last, mine
+
+
+def _same_ticks(a, b, names):
+    """{name: (equal unit-ticks, all)} of two ticks' masks and outputs (my-slot order; outputs: the target by name)."""
+    out = {}
+    for k in ("head", "skill", "side"):
+        out[k] = (int((a[k] == b[k]).sum()), a[k].numel())
+    out["open"] = (int((a["open"] == b["open"]).all(2).sum()), a["head"].numel())
+    nm = lambda t: [[names[i] if i >= 0 else "" for i in r] for r in t.tolist()]       # noqa: E731
+    ta, tb = nm(a["tgt"]), nm(b["tgt"])
+    out["target"] = (sum(x == y for ra, rb in zip(ta, tb) for x, y in zip(ra, rb)), a["tgt"].numel())
+    return out
+
+
+def run_seats(st, seconds, seer, place=None, terrain_path="flat", bounds=None):
+    """The battle played by the simulator's seat's unit-script orders (my side; the lord and the enemy under
+    'nearest'), the game's seat on the bridge's documents of the same seconds; returns the per-tick and per-second
+    comparisons and what the battle went through."""
+    from sim import orders as O
+    sim_seer = TR.Seer(P)
+    card = T.cards(st, "cpu")[:1]
+    seats, ticks, secs, seen = None, [], [], {"m": False, "r": False, "attacks": 0}
+    names = [f"u{i}" for i in range(st.N)]
+    mine_o, mine_m = None, None
+    for s in range(seconds):
+        for _ in range(round(1.0 / P.dt)):
+            o = opponents.nearest(st)
+            if mine_o is not None:
+                o = O.merge(o, mine_o, mine_m)
+            battle.step(st, o, P)
+        rs = sim_seer.raw(st)[:1]
+        rg = seer.raw(doc_of_sim(st, 0, 1000 * (s + 1), own=1, place=place, terrain_path=terrain_path))
+        if seats is None:
+            seats = (_Seat(rs, card, bounds), _Seat(rg, seer.card, bounds))
+        if s % 5 == 0:
+            a, b = seats[0].tick(rs, float(s)), seats[1].tick(rg, float(s))
+            for k in ("slot", "my"):
+                assert torch.equal(a[k], b[k]), (s, k)
+            ticks.append((s, a, b, _same_ticks(a, b, names)))
+            seen["attacks"] += int(((a["skill"] == 2) & (a["tgt"] >= 0)).sum())
+        (oa, ma), (ob, mb) = seats[0].second(rs), seats[1].second(rg)
+        assert torch.equal(ma, mb), s
+        secs.append((s, oa, ob, ma))
+        mine_o, mine_m = oa, ma
+        seen["m"] |= bool((rs[..., TR.I["m"]] > 0).any())
+        seen["r"] |= bool((rs[..., TR.I["r"]] > 0).any())
+    return ticks, secs, seen
+
+
+def _orders_same(oa, ob, m, place):
+    """[n] my units' unit-script orders equal: kind, target, run exactly; a move's point within 0.05 m and a facing
+    within 0.05 deg in the battle's frame."""
+    xg, zg = _from_game(ob.x, ob.z, place)
+    turn = place[2] if place else 0.0
+    face_b = torch.where(ob.face >= 0, torch.remainder(ob.face - turn, 360.0), ob.face)
+    dface = (torch.remainder(oa.face - face_b + 180.0, 360.0) - 180.0).abs()
+    moves = (oa.kind == 1) | (oa.kind == 3)
+    pt = ~moves | (((oa.x - xg).abs() <= 0.05) & ((oa.z - zg).abs() <= 0.05))
+    ok = (oa.kind == ob.kind) & (oa.target == ob.target) & (oa.run == ob.run) & pt
+    ok = ok & (((oa.face < 0) & (ob.face < 0)) | (dface <= 0.05))
+    return ok[m]
+
+
+def _read(ticks, secs, place):
+    eq = {}
+    for _, a, b, same in ticks:
+        for k, (n, t) in same.items():
+            x = eq.setdefault(k, [0, 0])
+            x[0] += n
+            x[1] += t
+    u = [_orders_same(oa, ob, m, place) for _, oa, ob, m in secs]
+    eq["unit_orders"] = [int(sum(int(x.sum()) for x in u)), int(sum(x.numel() for x in u))]
+    return eq
+
+
+def _gaps(ticks):
+    """{own, cols, pair: the largest |sim - game|}; mt equal at every tick."""
+    out = {"own": 0.0, "cols": 0.0, "pair": 0.0}
+    for s, a, b, _ in ticks:
+        for k in out:
+            if a[k].numel():
+                out[k] = max(out[k], float((a[k] - b[k]).abs().max()))
+        assert torch.equal(a["mt"], b["mt"]), (s, "mt")
+    return out
+
+
+def test_the_side_wrapper_with_teach_gives_the_same_orders_from_the_bridge(tmp_path):
+    """tmp/tactic_slice/design_attack_v23.md section 6 item 8: the side wrapper (tactic/side.py) with TEACH ticked on
+    the simulator's raw state and on the bridge's documents of the same battle (through melee and a rout) - equal
+    own(), mt, D2's columns, head-free and open masks, outputs (the target by the unit's name) and the unit script's
+    orders: exactly on the flat field; on the turned map in >= 0.99 of unit-ticks."""
+    torch.manual_seed(5)
+    st = scenario.build([skirmish()], P)
+    seer = TI.TacticSeer(allow_flat=True, params=P, own=1)
+    ticks, secs, seen = run_seats(st, 150, seer, bounds=st.bounds)
+    gaps, eq = _gaps(ticks), _read(ticks, secs, None)
+    print("flat", seen, gaps, eq)
+    assert seen["m"] and seen["r"], seen
+    assert all(v <= 2e-3 for v in gaps.values()), gaps
+    assert all(n == t for n, t in eq.values()), eq
+    # the turned map: the game in the map's coordinates
+    folder = write_map(tmp_path / "testmap")
+    mid = terrain.load_npz(folder / "heights.npz")
+    torch.manual_seed(6)
+    st = scenario.build([skirmish(gap=100.0)], P)
+    place = (150.0, 380.0, 35.0)
+    terrain.set_map(st, mid, place=tuple(torch.tensor([v]) for v in place))
+    seer = TI.TacticSeer(map_root=tmp_path, params=P, own=1)
+    ticks, secs, seen = run_seats(st, 120, seer, place=place, terrain_path="testmap")
+    gaps, eq = _gaps(ticks), _read(ticks, secs, place)
+    print("map", seen, gaps, eq)
+    assert seen["m"], seen
+    assert all(n >= 0.99 * t for n, t in eq.values()), eq

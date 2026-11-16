@@ -54,6 +54,48 @@ def test_the_tactician_trains_a_step(tmp_path, monkeypatch, unit_net):
     assert ck["kind"] == TK.KIND and ck["updates"] == 1 and _same(net, n2) and _same(critic, c2)
 
 
+def test_the_tactic_pointer_learns_a_step(tmp_path):
+    """Drill T0-2's network (tactic/heads.TacticNet2 as pin.NetPlayer) drives two short pilot battles through the side
+    wrapper, TEACH labels the same views (tags.Record); one update on those ticks with the walk fed with the
+    labeller's choices changes the weights; the tactic_v2 checkpoint reads back the same."""
+    from net.stage0 import battle as BA
+    from net.tactic import ckpt as TK
+    from net.tactic import exam_pin as EP
+    from net.tactic import heads as HD
+    from net.tactic import pin as PN
+    from net.tactic import tags as TG
+    torch.manual_seed(0)
+    net = HD.TacticNet2()
+    got, calls = [], []
+
+    def hook(v, lab, T):
+        calls.append(int(T["head_free"].sum()))
+        if bool(T["head_free"].any()):
+            got.append((v, T))
+
+    def make():
+        rec = TG.Record(PN.NetPlayer(net), PN.player("TEACH"), hook=hook)
+        rec.needs_input = True
+        return rec
+    BA.play_tactic(EP.pilot_specs(2, 0, limit=160), make, P, "cpu", chunk=2, compile=False)
+    assert got, calls
+    opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=1e-3)
+    before = _params(net)
+    total = 0.0
+    for v, T in got:
+        label = torch.where(T["attack"], T["k"], torch.full_like(T["k"], -1))
+        o = net.act(v, greedy=True, given=label)
+        w = (T["head_free"] & ~T["dropped"] & ~T["dc_label"]).float()
+        total = total + HD.loss(o["logits"], label, w, T["dc_keys"])[0]
+    opt.zero_grad()
+    total.backward()
+    opt.step()
+    assert _changed(before, net)
+    TK.save_v2(tmp_path / "t2.pt", net, opt, ["T0-2"])
+    n2, c2, ck = TK.restore(tmp_path / "t2.pt")
+    assert ck["kind"] == TK.KIND2 and c2 is None and ck["row_width"] == 185 and _same(net, n2)
+
+
 def test_the_operative_trains_a_step(tmp_path, unit_net):
     from net.operative import cases as CS
     from net.operative import cfg

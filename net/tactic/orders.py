@@ -50,6 +50,17 @@ def default_skill():
     return SC.SKILLS.index(str(c_orders().get("default_skill", "hold")))
 
 
+def fill_default(fx, skill, tgt, idle, back=False):
+    """[r, G] skill with the level's default idle (a unit/scripts.SKILLS index; None: no fill) handed to every able unit
+    of mine left without a target under 'hold' - and, with back, under an attack whose target ended (attack, no target:
+    config orders.back_default). One function for the teacher (pin.Teacher), the default player C (pin.Counter) and the
+    network's player (pin.NetPlayer)."""
+    if idle is None:
+        return skill
+    on = fx.able & (tgt < 0) & ((skill == SC.HOLD) | ((skill == SC.ATTACK) & back))
+    return torch.where(on, torch.full_like(skill, idle), skill)
+
+
 def comes(fx):
     """[R, i, j] row j comes at row i - the unit script's rule of coming (scripts.Facts.comes, the same code) on the
     level's rows: place, velocity and facing in the zone's axes (a rotation of the world's: the rule's dot product and
@@ -251,6 +262,10 @@ class View:
     card: object = None
     bounds: object = None
     sim: object = None      # the simulator's state (a tagger's, never a labeller's; None on the bridge)
+    # for a player with needs_input (pin.NetPlayer): inputs.build of the rows' groups (its rows are rr's) and the group's
+    # command [r, 7] (decide.order_vec: the operative's verb and pace); None for every other player
+    inp: object = None
+    command: object = None
 
     def frames(self, must=None):
         """frame_walk with this tick's frames in force and masks (must: another set of units forced)."""

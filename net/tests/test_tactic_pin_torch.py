@@ -342,8 +342,8 @@ def test_ticks_in_melee():
     assert int(tac.mt[0, j]) == 0, "m off -> 0"
     side.tick(st, m)
     assert int(tac.mt[0, j]) == 1
-    g = side.groups0
-    tac.apply(g, g.on, torch.zeros_like(g.on), side._raw(raw))   # a fresh parcel
+    g = side.wrap.groups0
+    tac.apply(g, g.on, torch.zeros_like(g.on), side.wrap.hidden(raw))   # a fresh parcel
     assert int(tac.mt.abs().sum()) == 0
 
 
@@ -425,3 +425,25 @@ def test_pointer_walk_loss_and_own():
     assert o[0, 0, 12:15].tolist() == [0.0, 0.0, 0.0] and o[0, 3, 12:15].tolist() == [0.0, 0.0, 0.0]
     assert o[0, 1, 12:15].tolist() == [0.0, 0.0, 1.0]
     assert [round(float(x), 4) for x in o[0, :, 15]] == [0.0, round(10 / 60, 4), 5.0, 0.0, 0.0]
+
+
+def test_kinds_n2w_and_n9_comer():
+    # review N: n2w (an unheld enemy within the reach, the nearest coming at another idle unit of mine) is don't-care,
+    # not taught; n9's key of an enemy that comes at g is don't-care whatever its melee flag
+    from net.tactic import tags as TG
+    keep = lambda G: {"skill": torch.full((1, G), SC.HOLD), "target": torch.full((1, G), -1)}     # noqa: E731
+    # n2w: enemy 2 runs south at my idle unit 1 (60, 10); unit 0 (-60, 60) is level with it (120 m), not come at
+    v = _tick([("mine", -60.0, 60.0, 0.0, 32, 10, 0, 0, 0.0),
+               ("mine", 60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+               ("enemy", 60.0, 60.0, 180.0, 32, 10, 0, 0, -3.0)])
+    T = TG.tick(v, keep(2), PN.player("TEACH"))
+    assert bool(T["kinds"]["n2w"][0, 0]) and "n2w" not in TG.TAUGHT and bool(T["dc_keys"][0, 0, 2])
+    # n9: enemy 2 two ticks in melee, not pinned (none of mine in melee), runs south at unit 0 (0, 0); unit 1 (200, 60)
+    # level with it: for 0 its key is don't-care and the tick no n9, for 1 the tick is n9 and the key taught
+    v = _tick([("mine", 0.0, 0.0, 0.0, 32, 10, 0, 0, 0.0),
+               ("mine", 200.0, 60.0, 0.0, 32, 10, 0, 0, 0.0),
+               ("enemy", 0.0, 60.0, 180.0, 32, 10, 1, 0, -3.0)])
+    v.fx.mt = torch.tensor([[0, 0, 2]])
+    T = TG.tick(v, keep(2), PN.player("TEACH"))
+    assert T["kinds"]["n9"][0].tolist() == [False, True] and "n9" in TG.TAUGHT
+    assert T["dc_keys"][0, :, 2].tolist() == [True, False]

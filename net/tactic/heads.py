@@ -24,13 +24,24 @@ order, one categorical over {null} + the rows open for it (null = keep the order
                          no maps
     ProbeNet             SmallEncoder + OrderPointer
     frozen_analysis()    'Анализ отряда' (185 -> 128) from weights/tactic/card8/card8.pt, frozen
-NOT here (stage 5): EncoderV2, TacticNet2, NetPlayer, side.py, ckpt v2.
+    net_inputs(v)        the network's inputs of a View beyond inputs.build (v.inp): the extra row columns cols [R, K,
+                         len(cols.D2)] (cols.row_cols, D2's list - review_attack_v23 M), own() [R, G, 16], g_row, g_on
+                         [R, G] (my unit g has its own row)
+    EncoderV2            decide.Encoder (the input, the summary, the council - untouched) + the extra columns beside each
+                         card through a layer from zero, my units' own() through a layer from zero added to their cards,
+                         both before the council
+    TacticNet2           EncoderV2 + OrderPointer. Frozen: 'Анализ отряда' and the squeeze (card8.pt); from zero: the
+                         maps' convolutions, the summary, the council, the new layers, the pointer - a fresh one keeps.
+                         act(v, greedy, given) - the live walk on a View (choose_orders); the network's player:
+                         pin.NetPlayer; the checkpoint: ckpt.save_v2 / restore (kind tactic_v2)
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from net.tactic import cfg
+from net.tactic import cols as CL
+from net.tactic import decide as DC
 from net.tactic import orders as OR
 from net.unit.net import NEG, Block
 
@@ -180,6 +191,70 @@ class ProbeNet(nn.Module):
         """[M, G, 1 + K] of a batch {card, cols, mask, own, g_row, g_on, pair, open}."""
         cards = self.enc(b["card"], b["cols"], b["mask"], b["own"], b["g_row"], b["g_on"])
         return self.ptr.logits_all(cards, b["own"], b["g_row"], b["pair"], b["open"])
+
+
+def d2_cols():
+    """The names of the network's extra row columns (cols.D2: one list) and their indices into cols.COLS."""
+    return CL.D2, tuple(CL.COLS.index(n) for n in CL.D2)
+
+
+def net_inputs(v):
+    """(module doc) {cols, own, g_row, g_on} of a View."""
+    fx = v.fx
+    _, idx = d2_cols()
+    cols = CL.row_cols(fx)[..., list(idx)]
+    own = OR.own(v.order, v.ctx.prev, fx, v.now)
+    g_on = (fx.my >= 0) & (fx.slot.gather(1, fx.g_row) == fx.my) & fx.mask.gather(1, fx.g_row)
+    return {"cols": cols, "own": own, "g_row": fx.g_row, "g_on": g_on}
+
+
+class EncoderV2(DC.Encoder):
+    """(module doc) forward(inp, order, cols, own, g_row, g_on) -> {cards, summary, mask, slot, map, own}."""
+
+    def __init__(self):
+        super().__init__()
+        W = int(cfg()["council"]["width"])
+        self.col_names = d2_cols()[0]
+        self.cols = nn.Linear(len(self.col_names), W)
+        self.own = nn.Linear(OWN, W)
+        for layer in (self.cols, self.own):
+            with torch.no_grad():
+                layer.weight.zero_()
+                layer.bias.zero_()
+
+    def forward(self, inp, order, cols, own, g_row, g_on):
+        o = self.inp(inp)
+        s = self.summary(torch.cat([o["map_vec"], o["numbers"], order], 1))
+        x = o["cards"] + self.cols(cols)
+        add = self.own(own) * g_on[..., None].float()                                   # [R, G, W]
+        x = x.scatter_add(1, g_row[..., None].expand(-1, -1, x.shape[-1]), add)
+        x = torch.where(o["mask"][..., None], x, torch.zeros((), device=x.device))
+        cards, sm = self.council(x, s, o["mask"])
+        return {"cards": cards, "summary": sm, "mask": o["mask"], "slot": o["slot"], "map": o["map_near"], "own": own}
+
+
+class TacticNet2(nn.Module):
+    """(module doc)"""
+
+    def __init__(self, card=True):
+        super().__init__()
+        self.enc = EncoderV2()
+        self.ptr = OrderPointer(int(cfg()["council"]["width"]))
+        if card:
+            self.enc.load_card()
+
+    def encode(self, v, x=None):
+        """The encoder on a View (v.inp, v.command); x - net_inputs(v) if already built."""
+        x = x or net_inputs(v)
+        return self.enc(v.inp, v.command, x["cols"], x["own"], x["g_row"], x["g_on"])
+
+    def act(self, v, greedy=True, given=None):
+        """choose_orders on a View: {k, fed, logits, head} (module doc); given [R, G] rows - the walk fed with them (the
+        teacher's choices: the update and the teacher-path read)."""
+        return choose_orders(self.encode(v), v.fx, self.ptr, given=given, greedy=greedy)
+
+    def frozen(self):
+        return list(self.enc.inp.analysis.parameters()) + list(self.enc.inp.squeeze.parameters())
 
 
 def frozen_analysis(device="cpu", path=None):

@@ -1,8 +1,10 @@
 """The tags of drill T0-2's labels and the kinds of its head-free unit-ticks (tmp/tactic_slice/design_attack_v23.md
-section 4 'Unit-ticks'; review_attack_v23 C binding: n1 don't-care; n2 as tested taught keep; n2 widened (n2w) taught
-keep by K; n4, n5 don't-care; n3 don't-care; n6 the coming enemy's own key don't-care, the pinned target of a unit with an own enemy coming within
-come_reach_m (150 m, review J) taught keep (n7); n7 taught
-keep; n9 taught keep; n9L don't-care; bands of config stage0.json drills.attack.bands). The labeller reads the level's
+section 4 'Unit-ticks'; review_attack_v23 C binding: n1 don't-care; n2 as tested taught keep; n2 widened (n2w)
+don't-care (review N: at the 240 m window now - keep is +0.0189 +- 0.0078; K's 'taught' was for the 150 m window); n4, n5
+don't-care; n3 don't-care; n6 the coming enemy's own key don't-care, the pinned target of a unit with an own enemy coming
+within come_reach_m (150 m, review J) taught keep (n7); n7 taught keep; n9 taught keep, the key of an enemy that comes at g
+don't-care whatever its melee flag (review M / N: n6's case with a lagging flag); n9L don't-care; bands of config
+stage0.json drills.attack.bands). The labeller reads the level's
 input only; the tagger may read the simulator's state too (View.sim: n9L, my lord's fight).
 
     head_free(g)   alive, not routing, not in melee, no attack order on a valid target, at least one open row
@@ -12,10 +14,11 @@ input only; the tagger may read the simulator's state too (View.sim: n9L, my lor
                    the attack labels {near2, near2_at_i, mt, fresh, late, through_own, dist, side}; dc_keys [r, G, K];
                    kind_keys {n2w, n4, n5: [r, G, K]} - the enemies that make the kind (branches' kind picks)}
 KINDS     taught keep: n2 (an unheld enemy within the reach comes at another unit of mine not in melee, and a nearer
-          enemy also comes at it), n2w (the same, the enemy being the nearest coming at my idle unit; review K), n7 (a
-          cause target in reach, but a standing enemy within STICK_M of g or one of its own coming within come_own's
-          reach), n9 (an enemy within reach two ticks in melee but not pinned); don't-care keys:
-          n1 (the cause but mt(e) = 1), n3 (a cause target the
+          enemy also comes at it), n7 (a cause target in reach, but a standing enemy within STICK_M of g or one of its
+          own coming within come_own's reach), n9 (an enemy within reach two ticks in melee but not pinned and not coming
+          at g); don't-care keys: n2w (as n2, the enemy being the nearest coming at my idle unit; review N: at the 240 m
+          window now - keep is +0.0189 +- 0.0078), n9's comers (an n9 enemy that comes at g, its melee flag on or off:
+          review M / N), n1 (the cause but mt(e) = 1), n3 (a cause target the
           teacher gave another unit or held back by the walk), n4 (a cause target kinds.n4_m away, beyond the reach's
           band), n5 (an unheld enemy
           within the reach that stands, goes elsewhere or chases a router), n6 (an unheld enemy comes at g within 150 m:
@@ -34,7 +37,7 @@ from net.tactic import rows as RW
 from net.unit import scripts as SC
 
 KINDS = ("n1", "n2", "n2w", "n3", "n4", "n5", "n6", "n7", "n9", "n9L", "nb")
-TAUGHT = ("n2", "n2w", "n7", "n9", "nb")      # (n2w taught keep: review_attack_v23 K, now - keep +0.0078 +- 0.0083 on G)
+TAUGHT = ("n2", "n7", "n9", "nb")      # (n2w don't-care as n5, review N: at the 240 m window now - keep is +0.0189 +- 0.0078)
 
 
 def _c():
@@ -111,9 +114,11 @@ def tick(v, lab, teacher):
     stands = fx.speed < SC.APPROACH_MS
     n5e = unheld & (stands | ~comes_any | ((fx.speed >= SC.APPROACH_MS) & router))
     n5k = far_ok & n5e[:, None, :] & ~n2k & ~n2wk
-    # n9: within reach, two ticks in melee, not pinned (nobody of mine standing in melee within the touch, or moving)
+    # n9: within reach, two ticks in melee, not pinned (nobody of mine standing in melee within the touch, or moving);
+    # an n9 enemy that comes at g: its key don't-care whatever its melee flag (review M / N - n6's case, the flag lagging)
     n9k = E & (fx.m & (mt >= 2) & ~pin)[:, None, :] & (dist <= reach)
-    n9 = n9k.any(2)
+    n9ck = n9k & cmg
+    n9 = (n9k & ~n9ck).any(2)
     # nb: the old cause (b) - an unheld enemy within reach of g comes at a unit of mine in melee
     at_m = (cm & hold_m0[:, :, None]).any(1)                                       # [R, K]
     nbk = far_ok & at_m[:, None, :]
@@ -133,10 +138,10 @@ def tick(v, lab, teacher):
         by_mine = (t_rows & mine_s[:, None, :]).any(2)
         n9Le = valid & fx.m & by_lord & ~by_mine
         n9Lk = E & n9Le[:, None, :] & (dist <= reach)
-        n9 = (n9k & ~n9Lk).any(2)
+        n9 = (n9k & ~n9ck & ~n9Lk).any(2)
     kinds.update(n1=n1k.any(2), n2=n2k.any(2), n2w=n2wk.any(2), n3=n3k.any(2), n4=n4k.any(2), n5=n5k.any(2),
                  n6=n6k.any(2), n7=n7, n9=n9, n9L=n9Lk.any(2), nb=nbk.any(2))
-    for t in (n1k, n3k, n4k, n5k, n6k, n9Lk):                                     # (n2w: taught, its key 'not the target')
+    for t in (n1k, n2wk, n3k, n4k, n5k, n6k, n9ck, n9Lk):                         # (n2w, n9's comers: review N)
         dck |= t
     # bands: keys, then the tick's own state
     hold_m = fx.mine & ~fx.r & fx.m

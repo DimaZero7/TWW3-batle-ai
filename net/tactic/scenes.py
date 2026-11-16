@@ -625,14 +625,31 @@ def _a3(rnd, held):
     return out
 
 
+def _beyond(rnd, which, key="beyond_m"):
+    """(a drawn centre distance, its least) beyond the reach and its band (review I.3 b, N): the band's top (config
+    bands.reach_m, around tactic.json orders.reach_m) + recipes.<which>.<key> drawn; the least (the check on the snapped
+    places) the band's top + the low end of recipes.<which>.beyond_m - as N1's bystanders."""
+    top = float(c()["bands"]["reach_m"][1])
+    r = c()["recipes"][which]
+    lo, hi = r[key]
+    return top + rnd.uniform(float(lo), float(hi)), top + float(r["beyond_m"][0])
+
+
+def _apart(out, least):
+    """The recipe's geometry re-checked on the snapped places: every two units of mine >= least apart (centres)."""
+    L = out["loc_roles"]
+    return all(math.hypot(L[i][0] - L[j][0], L[i][1] - L[j][1]) >= least
+               for i in range(len(L)) for j in range(i + 1, len(L)))
+
+
 def _a4(rnd, held, late=False):
     """A4 freed late: a row of 2-4 against as many `at` their opposites, the pairs uneven (cost ratio >= a4.ratio, the
     stronger side drawn) so that the fights end apart. late (A4L, review B 'the neighbour's fight is over or loose when
-    the unit frees'), the one fact changed: the pairs stand late.gap_m apart - beyond the reach - so a unit that frees
-    has no pinned enemy within reach."""
+    the unit frees'), the one fact changed: the pairs stand beyond the reach and its band apart (_beyond 'late') - so a
+    unit that frees has no pinned enemy within reach."""
     sp, f_row, shift, r = _common(rnd, held)
     n = rnd.randint(*r["a4"]["row"])
-    gap = rnd.uniform(*(r["late"]["gap_m"] if late else r["row_m"]))
+    gap, least = _beyond(rnd, "late") if late else (rnd.uniform(*r["row_m"]), 0.0)
     start, pace = draw(rnd, "start_m", held), draw(rnd, "pace", held)
     phi = _head_on(rnd, held, start, float(r["line_phi_max"]))
     mine, en = [], []
@@ -641,6 +658,8 @@ def _a4(rnd, held, late=False):
         mine.append(_mine(rnd, sp, p, "anvil", held, key=a))
         en.append(_enemy(rnd, sp, k, start, phi, held, pace, key=b))
     out = build(rnd, sp, mine, en, held)
+    if out is not None and late and not _apart(out, least):
+        return None
     if out is not None:
         out["limit"] = int(c()["limit_long_s"])
         out["axes"].update(start_m=start, pace=pace, shift_m=abs(shift))
@@ -649,10 +668,11 @@ def _a4(rnd, held, late=False):
 
 def _a5(rnd, held, late=False):
     """A5 uneven line: 4-8 against as many under `human` / `nearest`, mixed strengths (keys drawn freely). late (A5L):
-    as A4L - late.n units late.gap_m apart (beyond the reach), each against its own enemy `at` it."""
+    as A4L - late.a5_n units beyond the reach and its band apart (_beyond 'late' a5_beyond_m: 4 pairs fill the zone's
+    12 tiles), each against its own enemy `at` it."""
     sp, f_row, shift, r = _common(rnd, held)
     n = int(r["late"]["a5_n"]) if late else int(draw(rnd, "size_line", held))
-    gap = rnd.uniform(*(r["late"]["gap_m"] if late else r["a5"]["row_m"]))
+    gap, least = _beyond(rnd, "late", "a5_beyond_m") if late else (rnd.uniform(*r["a5"]["row_m"]), 0.0)
     start, pace = draw(rnd, "start_m", held), draw(rnd, "pace", held)
     name = rnd.choice(r["a5"]["scripts"])
     mine = [_mine(rnd, sp, p, "anvil", held) for p in _row(n, shift, f_row, gap)]
@@ -662,6 +682,8 @@ def _a5(rnd, held, late=False):
                 else {"kind": "script", "name": name, "run": pace == "run"})
         en.append(_enemy(rnd, sp, k, start, 0.0, held, pace, plan=plan))
     out = build(rnd, sp, mine, en, held)
+    if out is not None and late and not _apart(out, least):
+        return None
     if out is not None:
         out["limit"] = int(c()["limit_long_s"])
         out["axes"].update(start_m=start, pace=pace, shift_m=abs(shift), **({} if late else {"size_line": n}))
@@ -711,14 +733,16 @@ def _a6(rnd, held, variant=None):
 
 
 def _e2(rnd, held):
-    """E2 far: A1 with the free unit 180-240 m from the anvil (beyond the reach: one threshold)."""
+    """E2 far: A1 with the free unit beyond the reach and its band from the anvil (_beyond 'e2': one threshold)."""
     sp, f_row, shift, r = _common(rnd, held)
-    d = rnd.uniform(*r["e2"]["far_m"])
+    d, least = _beyond(rnd, "e2")
     side = rnd.choice((-1.0, 1.0))
     mine = [_mine(rnd, sp, (shift, f_row), "anvil", held), _mine(rnd, sp, (shift + side * d, f_row), "free", held)]
     start, pace = draw(rnd, "start_m", held), draw(rnd, "pace", held)
     en = [_enemy(rnd, sp, 0, start, _head_on(rnd, held, start), held, pace)]
     out = build(rnd, sp, mine, en, held)
+    if out is not None and not _apart(out, least):
+        return None
     if out is not None:
         out["axes"].update(start_m=start, pace=pace, shift_m=abs(shift))
     return out
