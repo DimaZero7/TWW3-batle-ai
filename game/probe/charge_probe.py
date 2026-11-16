@@ -576,7 +576,8 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 # the new units' plans (game/probe/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
-              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2", "turn")
+              "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2", "turn",
+              "duel", "roster")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2139,15 +2140,16 @@ def run_config(plan, index):
         # A and B every 0.5 s (the clock lane keeps the poll going) - tmp/night_probes/design.md 1.2
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True,
                       mem_extras=True)
-    if plan == "turn":
-        # (game/probe/unit_probe.py, at once or in turn) health every 0.25 s; no soldier places, no memory (the measures
-        # are losses, routs and rallies: the unit rows)
+    if plan in ("turn", "duel"):
+        # (game/probe/unit_probe.py, at once or in turn; the duel plan) health every 0.25 s; no soldier places, no memory
+        # (the measures are losses, routs and rallies: the unit rows)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=0)
     if plan == "walkout":
         # (the night probes' walkout) as tight, without the extras (a group's lanes have none): design.md 2.1
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True)
-    if plan in ("standk", "standk01"):
-        # (the night probes' standk; standk01 its lanes under the 0.1 s step's men count) health every 0.25 s; the men from memory every 0.1 s from 60 m (centres) to 11 s
+    if plan in ("standk", "standk01", "roster"):
+        # (the night probes' standk; standk01 its lanes under the 0.1 s step's men count; roster - unit_probe.py ROSTER_*,
+        # the stage-0 units without a standk01 row) health every 0.25 s; the men from memory every 0.1 s from 60 m (centres) to 11 s
         # after the contact, every 0.5 s to the lane's end (reverse/notes/charge_impact.md 7.1's request: 10 s, + 1 s -
         # the first HP drop comes 0.3-1 s after the first melee flag, so the first 10 s on that clock stay dense)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=11, men_near_m=60)
