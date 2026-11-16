@@ -577,7 +577,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
               "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2", "turn",
-              "duel", "roster", "behind3")
+              "duel", "roster", "behind3", "duel2")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2140,7 +2140,7 @@ def run_config(plan, index):
         # A and B every 0.5 s (the clock lane keeps the poll going) - tmp/night_probes/design.md 1.2
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True,
                       mem_extras=True)
-    if plan in ("turn", "duel"):
+    if plan in ("turn", "duel", "duel2"):
         # (game/probe/unit_probe.py, at once or in turn; the duel plan) health every 0.25 s; no soldier places, no memory
         # (the measures are losses, routs and rallies: the unit rows)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=0)

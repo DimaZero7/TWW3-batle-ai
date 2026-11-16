@@ -104,7 +104,10 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             attacks a standing Y at a run from 60 m, morale on, to a rout for good or 480 s - 24 battles of 10 lanes;
             --duel game [runs] [--sim] | layout (the clean loss rates, routs, the winner; duel_verdicts: the cards)
   roster    swings and the opening profile of the stage-0 units without a standk01 row (ROSTER_* below): 20 lanes at
-            30 m, 60 s, fearless, --mem - 2 battles; read by standk01's extraction (tmp/night_probes/standk/men.py)
+            30 m, 60 s, fearless, --mem - 2 battles (3-4: the same lanes of 240 s); read by standk01's extraction
+            (tmp/night_probes/standk/men.py)
+  duel2     attack on attack (DUEL2_* below; 16.11 night): the 12 blind pairs of the level, both units attack at a run
+            from 60 m, else as duel - 4 battles; --duel2 game [runs] [--sim] | layout (beside the level's predictions)
 
 All the units are fearless (but the t_morale targets); every lane's rows carry the morale fields with the active phases (fx)
 and the unit card's values (cs: leadership, speed, melee attack / defence, weapon and missile damage).
@@ -1116,6 +1119,33 @@ def duel_battles(n=DUEL_BATTLES):
     return out
 
 
+# Plan 'duel2' (16.11 night, the blind test of the swing law 'the level': tmp/melee_core/level/l17_blind.txt): attack on
+# attack - both units ordered to attack each other at a run at the go from DUEL_GAP m (target mode 'both'), else as
+# duel (morale on, DUEL_S / quiet end). The 12 blind pairs (Empire, Skaven), 3 lanes each: lane g = 12 rep + pair, battle
+# g // 10, place g % 10 (a pair's lanes on 3 places); the Empire unit is the 'a' unit (the +z side) when pair + rep is
+# even, else the Skaven one (sides mirrored). 4 battles (10, 10, 10, 6 lanes) + the parked lords. Kind 'a<>t'.
+DUEL2_PAIRS = (("swords", "clan1"), ("swords", "sv0"), ("spear0", "cspear0"), ("spear0", "slave"), ("spear1", "clan0"),
+               ("spear1", "sv1"), ("halb", "clan1"), ("halb", "sspear"), ("gs", "clan0"), ("gs", "sv1"),
+               ("gs", "cspear1"), ("swords", "slave"))
+DUEL2_REPS = 3
+DUEL2_BATTLES = -(-DUEL2_REPS * len(DUEL2_PAIRS) // len(DUEL_PLACES))
+
+
+def duel2_battles():
+    """The duel2 plan's battles (comment above DUEL2_PAIRS)."""
+    out = [[] for _ in range(DUEL2_BATTLES)]
+    for rep in range(DUEL2_REPS):
+        for p, (e, s) in enumerate(DUEL2_PAIRS):
+            g = rep * len(DUEL2_PAIRS) + p
+            x, y = (e, s) if (p + rep) % 2 == 0 else (s, e)
+            out[g // len(DUEL_PLACES)].append(
+                cp.lane(DUEL_KEY[x], DUEL_KEY[y], "attack_run", "both", gap_m=DUEL_GAP, fight_s=DUEL_S, max_s=DUEL_MAX_S,
+                        answer=False, kind=f"{x}<>{y}", t_morale=True, at_rout="none", after_rout_s=10 ** 4,
+                        a_morale=True, quiet_end_s=DUEL_QUIET_S, morale_rows=True,
+                        place=DUEL_PLACES[g % len(DUEL_PLACES)], rep=rep))
+    return [lanes + [_lords_lane(DUEL_LORDS, DUEL_MAX_S)] for lanes in out]
+
+
 # Plan 'roster' (16.11 night; tmp/melee_core/design_v2.md 6.2 item 6, critic_review.md 2 (c) and 7: "the roster battle
 # decides 8 of 13 units' profiles"): swings a file-second and the opening profile of the stage-0 infantry without a
 # standk01 row (spearmen_1, greatswords, clanrats_1, clanrat_spearmen_0 / _1, skavenslaves_0, skavenslave_spearmen_0,
@@ -1125,7 +1155,8 @@ def duel_battles(n=DUEL_BATTLES):
 # the Empire unit attacks a standing Skaven one, 'run_c30' both attack at a run (attack on attack). Each new Skaven unit
 # stands once (attacked by a measured Empire unit), attacks a held measured unit once and meets a new Empire unit attack
 # on attack once; each new Empire unit stands once (attacked by a measured Skaven unit) and attacks on attack three
-# times - 20 lanes, ROSTER_SPLIT into 2 battles of 10 on DUEL_PLACES, the lords parked as the duel's.
+# times - 20 lanes, ROSTER_SPLIT into 2 battles of 10 on DUEL_PLACES, the lords parked as the duel's (battles 3-4: the
+# same lanes of ROSTER_LONG_S).
 ROSTER_GAP, ROSTER_S = 30.0, 60
 ROSTER_LANES = (("spear1", "clan0", "run_hold"), ("gs", "sv1", "run_hold"), ("swords", "clan1", "stand_c30"),
                 ("halb", "cspear0", "stand_c30"), ("spear0", "cspear1", "stand_c30"), ("swords", "slave", "stand_c30"),
@@ -1138,18 +1169,22 @@ ROSTER_SPLIT = ((0, 2, 4, 6, 8, 10, 12, 14, 16, 18), (1, 3, 5, 7, 9, 11, 13, 15,
 ROSTER_NEW = ("spear1", "gs", "clan1", "cspear0", "cspear1", "slave", "sspear", "sv0")
 
 
+ROSTER_LONG_S = 240     # battles 3-4: battles 1-2's lanes run ROSTER_LONG_S (the late factor's re-read, 16.11 night)
+
+
 def roster_battles():
-    """The roster plan's 2 battles (comment above ROSTER_GAP)."""
+    """The roster plan's 4 battles (comment above ROSTER_GAP): 1-2 of ROSTER_S, 3-4 the same lanes of ROSTER_LONG_S."""
     out = []
-    for idx in ROSTER_SPLIT:
-        lanes = []
-        for j, place in zip(idx, DUEL_PLACES):
-            e, s, how = ROSTER_LANES[j]
-            mode, tmode = {"run_hold": ("hold", "both"), "stand_c30": ("attack_run", "hold"),
-                           "run_c30": ("attack_run", "both")}[how]
-            lanes.append(cp.lane(DUEL_KEY[e], DUEL_KEY[s], mode, tmode, gap_m=ROSTER_GAP, fight_s=ROSTER_S,
-                                 max_s=ROSTER_S + 40, answer=False, kind=f"{e}-{s}_{how}", place=place))
-        out.append(lanes + [_lords_lane(DUEL_LORDS, ROSTER_S + 40)])
+    for fight_s in (ROSTER_S, ROSTER_LONG_S):
+        for idx in ROSTER_SPLIT:
+            lanes = []
+            for j, place in zip(idx, DUEL_PLACES):
+                e, s, how = ROSTER_LANES[j]
+                mode, tmode = {"run_hold": ("hold", "both"), "stand_c30": ("attack_run", "hold"),
+                               "run_c30": ("attack_run", "both")}[how]
+                lanes.append(cp.lane(DUEL_KEY[e], DUEL_KEY[s], mode, tmode, gap_m=ROSTER_GAP, fight_s=fight_s,
+                                     max_s=fight_s + 40, answer=False, kind=f"{e}-{s}_{how}", place=place))
+            out.append(lanes + [_lords_lane(DUEL_LORDS, fight_s + 40)])
     return out
 
 
@@ -1345,6 +1380,8 @@ def battles(plan):
         return duel_battles()
     if plan == "roster":
         return roster_battles()
+    if plan == "duel2":
+        return duel2_battles()
     if plan == "losrange":
         flat = []
         for kind, shooter, target, gap, face in LOSRANGE_LANES:
@@ -2862,7 +2899,8 @@ def _mf_lanes(plan, source, runs=(), copies=8, device="cpu", params=None):
         which = {"tight": range(1, len(TG_CELLS) + 1), "standk": (1, SK_ORDER.index("B") + 1),
                  "tight01": range(1, 11), "standk01": (1, 2, 5, 6), "fill": (1,), "behind": range(1, BH_BATTLES + 1),
                  "own": range(1, OWN_BATTLES + 1), "behind2": (1, 2, 7, 8, 13, 14, 15, 16), "behind3": BH3_LAYOUT,
-                 "turn": (1, 2, 3, 4), "duel": range(1, len(DUEL_SKV) + 1)}.get(plan, range(1, 3))
+                 "turn": (1, 2, 3, 4), "duel": range(1, len(DUEL_SKV) + 1),
+                 "duel2": range(1, DUEL2_BATTLES + 1)}.get(plan, range(1, 3))
         for i in which:
             config, _, _ = cp.run_config(plan, i)
             seen = set()
@@ -3324,7 +3362,7 @@ def own_paired(rows):
 
 
 # the plans measured as another plan's family (the same lanes in other battles)
-MF_FAMILY = {"tight01": "tight", "standk01": "standk", "fill": "counterfar", "behind3": "behind2"}
+MF_FAMILY = {"tight01": "tight", "standk01": "standk", "fill": "counterfar", "behind3": "behind2", "duel2": "duel"}
 
 
 def mf_summary(rows, keys):
@@ -3718,7 +3756,7 @@ def duel_measure(lane):
     sp = lane["spec"]
     kind = sp["kind"]
     t, R = _duel_rows(lane)
-    xs, ys = kind.split(">")
+    xs, ys = kind.replace("<>", ">").split(">")
     out = {"kind": kind, "x": xs, "y": ys, "run": lane.get("run"), "rep": sp.get("rep"),
            "place": [sp.get("x"), sp.get("z")]}
     first = _first(t, (np.nan_to_num(R["a"]["m"]) > 0) | (np.nan_to_num(R["t"]["m"]) > 0))
@@ -3944,6 +3982,93 @@ def duel_report(runs=(), source="game", sim=False, copies=8, device="cpu", out=N
             print(f"  {kind} (n {r['n']}, {r['winner']}): " + "; ".join(f"{f} {_mf_cell(r[f])}" for f in show
                                                                          if f in r and r[f][0] is not None))
     out = Path(out) if out else cp.ROOT / f"duel_{source}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
+DUEL2_UNIT_FIELDS = ("rate", "60", "120", "240", "end", "rout_s", "routed", "rallied")
+
+
+def duel2_tables(rows):
+    """{'<emp>x<skv>': {'emp' / 'skv': {field: [mean, se, n]}, 'n', 'winner': {'emp' / 'skv' / 'none' / 'both': n}}}
+    over lanes, each lane's 'a' / 't' unit mapped to its faction (the pair's order in DUEL2_PAIRS)."""
+    out = {}
+    for e, s in DUEL2_PAIRS:
+        kr = [r for r in rows if r["kind"] in (f"{e}<>{s}", f"{s}<>{e}")]
+        row = {"n": len(kr), "emp": {}, "skv": {}, "winner": {}}
+        for side, tag in (("emp", e), ("skv", s)):
+            for f in DUEL2_UNIT_FIELDS:
+                vals = [r.get(f"{'a' if r['x'] == tag else 't'}_{f}") for r in kr]
+                vals = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                if vals:
+                    row[side][f] = _ms(vals)
+        for r in kr:
+            w = r.get("winner", "-")
+            w = {"a": "emp" if r["x"] == e else "skv", "t": "skv" if r["x"] == e else "emp"}.get(w, w)
+            row["winner"][w] = row["winner"].get(w, 0) + 1
+        out[f"{e}x{s}"] = row
+    return out
+
+
+def duel2_decision(game_tab, head_tab, pred, field="120"):
+    """The blind test's decision line (evidence/duel2_game.json): per (pair, unit) |ln(pred / game)| against
+    |ln(head / game)| of the field (the level predicted the loss at 120 s); 'holds' when the level is nearer in >= 16 of
+    24 and its mean |ln| is under HEAD's, 'fails' when nearer in < 12, else 'undecided'."""
+    cells, near, lp, lh = [], 0, [], []
+    for key, g in game_tab.items():
+        for side in ("emp", "skv"):
+            gv = (g[side].get(field) or [None])[0]
+            hv = ((head_tab.get(key) or {}).get(side, {}).get(field) or [None])[0]
+            pv = pred.get(key, {}).get(side)
+            c = {"pair": key, "unit": side, "game": g[side].get(field), "level": pv, "head": hv}
+            if gv and gv > 0 and pv and hv and hv > 0:
+                c["ln_level"], c["ln_head"] = abs(math.log(pv / gv)), abs(math.log(hv / gv))
+                c["level_nearer"] = c["ln_level"] < c["ln_head"]
+                near += c["level_nearer"]
+                lp.append(c["ln_level"])
+                lh.append(c["ln_head"])
+            cells.append(c)
+    n = len(lp)
+    ml, mh = (float(np.mean(lp)) if lp else None), (float(np.mean(lh)) if lh else None)
+    verdict = ("holds" if near >= 16 and ml is not None and ml < mh else "fails" if near < 12 else "undecided")
+    return {"field": field, "cells": cells, "n": n, "level_nearer": near, "mean_abs_ln_level": ml,
+            "mean_abs_ln_head": mh, "verdict": verdict}
+
+
+def duel2_pred(path=None):
+    """{'<emp>x<skv>': {'emp': loss at 120 s, 'skv': ...}} read from tmp/melee_core/level/l17_blind.txt as written."""
+    path = Path(path) if path else Path(__file__).resolve().parents[2] / "tmp" / "melee_core" / "level" / "l17_blind.txt"
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        parts = [x.strip() for x in line.split("|")]
+        if len(parts) == 3 and " x " in parts[0]:
+            e, s = (x.strip() for x in parts[0].split(" x "))
+            out[f"{e}x{s}"] = {"emp": float(parts[1]), "skv": float(parts[2])}
+    return out
+
+
+def duel2_report(runs=(), source="game", sim=False, copies=8, device="cpu", out=None, params=None):
+    """The duel2 plan's table by pair (game | the twin on the recorded starts with sim; 'layout' the twin on the plan's
+    places) beside the level's blind predictions; writes build/charge-probe/duel2_<source>.json."""
+    rows = _mf_lanes("duel2", source, runs, copies=copies, device=device, params=params)
+    pred = duel2_pred()
+    result = {"plan": "duel2", "source": source, "runs": [str(r) for r in runs], "lanes": rows,
+              "tables": duel2_tables(rows), "pred": pred}
+    if sim and source == "game":
+        trows = _mf_lanes("duel2", "twin", runs, copies=copies, device=device, params=params)
+        result["twin"] = {"lanes": trows, "tables": duel2_tables(trows)}
+        result["decision"] = duel2_decision(result["tables"], result["twin"]["tables"], pred)
+    for name, tab in (("", result["tables"]), ("twin ", (result.get("twin") or {}).get("tables"))):
+        if not tab:
+            continue
+        print(f"== duel2 {name}{source if not name else ''}: mean±se(n) over lanes; level = the blind loss at 120 s")
+        for key, r in tab.items():
+            for side in ("emp", "skv"):
+                print(f"  {key} {side} (n {r['n']}, {r['winner']}): level {pred.get(key, {}).get(side)}; "
+                      + "; ".join(f"{f} {_mf_cell(r[side][f])}" for f in DUEL2_UNIT_FIELDS if f in r[side]))
+    out = Path(out) if out else cp.ROOT / f"duel2_{source}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
     print(out)
@@ -4548,12 +4673,16 @@ def main(argv=None):
                         help="the flank2v1 plan's table: 'game' the runs (+ the twin on their starts with --sim), "
                              "'layout' the twin on the plan's own places (no game run needed)")
     for plan in ("counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01",
-                 "behind", "own", "behind2", "behind3", "turn", "duel"):
+                 "behind", "own", "behind2", "behind3", "turn", "duel", "duel2"):
         parser.add_argument(f"--{plan}", choices=("game", "layout"),
                             help=f"the {plan} probe's table (meetfar, night probes): 'game' the runs (+ the twin on "
                                  "their starts with --sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
+    if args.duel2:
+        runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "duel2"]
+        duel2_report(runs, source=args.duel2, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
+        return 0
     if args.duel:
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "duel"]
         duel_report(runs, source=args.duel, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
