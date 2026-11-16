@@ -1,6 +1,6 @@
 """The tags of drill T0-2's labels and the kinds of its head-free unit-ticks (tmp/tactic_slice/design_attack_v23.md
-section 4 'Unit-ticks'; review_attack_v23 C binding: n1 don't-care; n2 as tested taught keep; n2 widened, n4, n5
-don't-care; n3 don't-care; n6 the coming enemy's own key don't-care, the pinned target of a unit with an own enemy coming within
+section 4 'Unit-ticks'; review_attack_v23 C binding: n1 don't-care; n2 as tested taught keep; n2 widened (n2w) taught
+keep by K; n4, n5 don't-care; n3 don't-care; n6 the coming enemy's own key don't-care, the pinned target of a unit with an own enemy coming within
 come_reach_m (150 m, review J) taught keep (n7); n7 taught
 keep; n9 taught keep; n9L don't-care; bands of config stage0.json drills.attack.bands). The labeller reads the level's
 input only; the tagger may read the simulator's state too (View.sim: n9L, my lord's fight).
@@ -11,12 +11,14 @@ input only; the tagger may read the simulator's state too (View.sim: n9L, my lor
                    through_own, own enemy beyond the reach, its key in a band), kinds {name: [r, G]} (KINDS), tags of
                    the attack labels {near2, near2_at_i, mt, fresh, late, through_own, dist, side}; dc_keys [r, G, K];
                    kind_keys {n2w, n4, n5: [r, G, K]} - the enemies that make the kind (branches' kind picks)}
-KINDS     taught keep: n2 (an unheld enemy within 150 m comes at another unit of mine not in melee, and a nearer enemy
-          also comes at it), n7 (a cause target in reach, but a standing enemy within STICK_M of g or one of its own
-          coming within come_own's reach), n9 (an enemy within reach two ticks in melee but not pinned); don't-care keys:
-          n1 (the cause but mt(e) = 1), n2w (the enemy is the nearest coming at my idle unit), n3 (a cause target the
-          teacher gave another unit or held back by the walk), n4 (a cause target 170-240 m away), n5 (an unheld enemy
-          within 150 m that stands, goes elsewhere or chases a router), n6 (an unheld enemy comes at g within 150 m:
+KINDS     taught keep: n2 (an unheld enemy within the reach comes at another unit of mine not in melee, and a nearer
+          enemy also comes at it), n2w (the same, the enemy being the nearest coming at my idle unit; review K), n7 (a
+          cause target in reach, but a standing enemy within STICK_M of g or one of its own coming within come_own's
+          reach), n9 (an enemy within reach two ticks in melee but not pinned); don't-care keys:
+          n1 (the cause but mt(e) = 1), n3 (a cause target the
+          teacher gave another unit or held back by the walk), n4 (a cause target kinds.n4_m away, beyond the reach's
+          band), n5 (an unheld enemy
+          within the reach that stands, goes elsewhere or chases a router), n6 (an unheld enemy comes at g within 150 m:
           its own key), n9L (the enemy's only opponent is my lord); taught keep, its key 'not the
           target' (review B): nb - the old cause (b), an unheld enemy within reach coming at a unit of mine in melee
 Label tags beside: hp_e / hp_pin - the health share of the target and of the unit of mine pinning it (nearest in melee),
@@ -32,7 +34,7 @@ from net.tactic import rows as RW
 from net.unit import scripts as SC
 
 KINDS = ("n1", "n2", "n2w", "n3", "n4", "n5", "n6", "n7", "n9", "n9L", "nb")
-TAUGHT = ("n2", "n7", "n9", "nb")
+TAUGHT = ("n2", "n2w", "n7", "n9", "nb")      # (n2w taught keep: review_attack_v23 K, now - keep +0.0078 +- 0.0083 on G)
 
 
 def _c():
@@ -134,7 +136,7 @@ def tick(v, lab, teacher):
         n9 = (n9k & ~n9Lk).any(2)
     kinds.update(n1=n1k.any(2), n2=n2k.any(2), n2w=n2wk.any(2), n3=n3k.any(2), n4=n4k.any(2), n5=n5k.any(2),
                  n6=n6k.any(2), n7=n7, n9=n9, n9L=n9Lk.any(2), nb=nbk.any(2))
-    for t in (n1k, n2wk, n3k, n4k, n5k, n6k, n9Lk):
+    for t in (n1k, n3k, n4k, n5k, n6k, n9Lk):                                     # (n2w: taught, its key 'not the target')
         dck |= t
     # bands: keys, then the tick's own state
     hold_m = fx.mine & ~fx.r & fx.m
@@ -198,11 +200,13 @@ class Record:
     COUNTS = ("head_free", "attack", "keep", "trivial", "dropped", "dc_label", "taught", "dc_key_keep", "hp_keep_n",
               "hp_e_keep", "hp_pin_keep", "band_key_keep") + KINDS
 
-    def __init__(self, driver, labeller, keep_raw=False):
+    def __init__(self, driver, labeller, keep_raw=False, hook=None):
+        # hook(v, lab, T): called at every tick with the view, the labeller's answer and its tags (tactic/learn.py: the
+        # buffer and the label probe's read take their unit-ticks here)
         self.main, self.lab = driver, labeller
         self.allow = getattr(driver, "allow", (SC.HOLD, SC.ATTACK))
         self.name = getattr(driver, "name", "driver")
-        self.keep_raw = keep_raw
+        self.keep_raw, self.hook = keep_raw, hook
         self.cnt, self.labels, self.first, self.raw = {}, [], {}, []
 
     @property
@@ -229,6 +233,8 @@ class Record:
         if not self.first or any(b not in self.first for b in v.idx.tolist()):
             self._first_frames(v, out)
         T = tick(v, lab, self.lab)
+        if self.hook is not None:
+            self.hook(v, lab, T)
         rows = v.idx.tolist()
         keep = T["head_free"] & ~T["attack"]
         taught = keep & ~T["dropped"] & torch.stack([T["kinds"][n] for n in TAUGHT], 0).any(0)

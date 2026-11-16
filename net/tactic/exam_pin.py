@@ -27,7 +27,8 @@ tactic/pin.py through the tactic level (stage0/battle.play_tactic, watch.PinWatc
               check.json. --vision A1:<seed>,N1:<seed>,G:<battle>: records for game.vision (<out dir>/vision/<name>/)
     exam      stage 3, the exam before training (design section 5; review C, D, I): --set G (config drills.attack.sets.G:
               1,024 fresh general battles on the trained sizes + 256 on the held ones, slots shuffled) or S (the scenes'
-              set S, as `scenes --check --scene-set S` plays it) - each of --players (C,TEACH,TEACH:taught) through
+              set S, as `scenes --check --scene-set S` plays it) or F (S's recipes and counts on fresh seeds, review L)
+              - each of --players (C,TEACH,TEACH:taught) through
               HoleWatch (the first contact of each strike, my line's widest hole every 5 s), TEACH recorded
               (tags.Record: S's cause scenes = those with a full-weight label); <out dir>/<set>_<player>.json, then
               exam_table: B5, B8, B11, events, by script and size (G) / by family (S), the strikes' contact sides, the
@@ -35,8 +36,9 @@ tactic/pin.py through the tactic level (stage0/battle.play_tactic, watch.PinWatc
 A player's name: a key of pin.PLAYERS, optionally with ':holes' (config orders.hole_fits off - the old rule, a frame on a
 hole must move), ':line' (orders.zone_fit off - a line zone on the units' middle), ':norout' (orders.end_on_rout off),
 ':nocap' (orders.cap_all off), ':mt' (orders.teach.mt on), ':noreach' (orders.teach.come_reach_m null: TEACH with
-come_own's reach the counter's) and ':taught' (orders.teach.no_through on: TEACH giving only the attack orders the loss
-carries at full weight, review I.2). "Two errors" = paired().
+come_own's reach the counter's), ':taught' (orders.teach.no_through on: TEACH giving only the attack orders the loss
+carries at full weight, review I.2) and ':reach<m>' (orders.reach_m = m: a reference run keyed to its reach, e.g.
+TEACH:reach150). "Two errors" = paired().
 
     DOCK_NAME=agent-t2 DOCK_CPUS=8 DOCK_MEM=6g bash ops/dock.sh net.tactic.exam_pin players --players K,C --sim 1925110 \
         --ref K=tmp/tactic_slice/v2/stage1e/r/p_K.json@1925110 --out tmp/attack/s2/p.json
@@ -124,6 +126,9 @@ def _variant(name):
         o["teach"] = {**o["teach"], "come_reach_m": None}
     if "taught" in opts:
         o["teach"] = {**o["teach"], "no_through": True}
+    for x in opts:                       # ':reach<m>' - orders.reach_m pinned to m (a reference keyed to its reach)
+        if x.startswith("reach") and x[5:].replace(".", "", 1).isdigit():
+            o["reach_m"] = float(x[5:])
     return base, saved
 
 
@@ -561,11 +566,13 @@ def g_set():
     return sp, [int(c["tseed"]) + k for k in range((len(sp) + ch - 1) // ch)], ch
 
 
-def s_set(chunk=256):
-    """(specs, torch seeds, chunk) of set S as `scenes --check --scene-set S` plays it (TSEED + 200 + k)."""
+def s_set(chunk=256, name="S"):
+    """(specs, torch seeds, chunk) of set S as `scenes --check --scene-set S` plays it (TSEED + 200 + k); name F: the
+    fresh-seed set F of config drills.attack.sets.F (its own tseed + k)."""
     from net.tactic import scenes as SN
-    sp = SN.set_specs("S")
-    return sp, [TSEED + 200 + k for k in range((len(sp) + chunk - 1) // chunk)], chunk
+    sp = SN.set_specs(name)
+    t0 = TSEED + 200 if name == "S" else int(scfg()["drills"]["attack"]["sets"][name]["tseed"])
+    return sp, [t0 + k for k in range((len(sp) + chunk - 1) // chunk)], chunk
 
 
 def watched_run(name, specs, seeds, chunk, a, P, scene=False, record=False):
@@ -659,13 +666,13 @@ def full_label_battles(d):
 def exam(a, P, D):
     """`exam_pin exam --set G|S` (module doc): the players' files, then exam_table."""
     sname = a.set
-    specs, seeds, chunk = g_set() if sname == "G" else s_set(a.chunk)
+    specs, seeds, chunk = g_set() if sname == "G" else s_set(a.chunk, sname)
     for name in a.players.split(","):
         f = D / f"{sname}_{name.replace(':', '@')}.json"
         if f.exists():
             print(json.dumps({"exam": sname, "player": name, "kept": str(f)}), flush=True)
             continue
-        res = watched_run(name, specs, seeds, chunk, a, P, scene=sname == "S", record=name == "TEACH")
+        res = watched_run(name, specs, seeds, chunk, a, P, scene=sname != "G", record=name == "TEACH")
         f.write_text(json.dumps(res), encoding="utf-8")
     return exam_table(D, sname)
 
@@ -726,14 +733,14 @@ def exam_table(D, sname):
     out["events"] = {n: {k: pr[n].get(k) for k in ("attacks_battle", "reached_share", "intercepted_share",
                                                    "pin_lost_share", "within10_of_contact", "before_contact")}
                      for n in pr}
-    sel_all = [None] + ([sorted(full_label_battles(pl["TEACH"]))] if sname == "S" and "TEACH" in pl else [])
+    sel_all = [None] + ([sorted(full_label_battles(pl["TEACH"]))] if sname != "G" and "TEACH" in pl else [])
     out["contact_sides"] = {n: {"all": side_shares(pl[n])} for n in pl if n != "C"}
     out["holes_30s"] = {n: {"all": holes_after(pl[n], pl["C"])} for n in pl if n != "C"}
     if len(sel_all) > 1:
         for n in out["contact_sides"]:
             out["contact_sides"][n]["cause scenes"] = side_shares(pl[n], sel_all[1])
             out["holes_30s"][n]["cause scenes"] = holes_after(pl[n], pl["C"], sel_all[1])
-    if sname == "S":
+    if sname != "G":
         rc = pl["C"]["recipes"]
         for n in out["contact_sides"]:
             out["contact_sides"][n]["by_family"] = {r: side_shares(pl[n], [b for b in range(B) if rc[b] == r])
@@ -1122,7 +1129,7 @@ def main(argv=None):
     ap.add_argument("--set-seed", type=int, default=0, help="scenes --check --scene-set S: another seed (mending draws)")
     ap.add_argument("--no-g", action="store_true", help="scenes --check: the scenes only (no shuffled pilot battles)")
     ap.add_argument("--chunk", type=int, default=256)
-    ap.add_argument("--set", default="pilot", choices=("pilot", "G", "S"), help="players: pilot; exam: G or S")
+    ap.add_argument("--set", default="pilot", choices=("pilot", "G", "S", "F"), help="players: pilot; exam: G, S or F")
     ap.add_argument("--players", default="K,C")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--n", type=int, default=256)

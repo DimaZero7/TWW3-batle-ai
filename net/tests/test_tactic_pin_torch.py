@@ -12,6 +12,10 @@ counts what its name says.
                     names and nothing else
     the scenes      tactic/scenes' yield on a small draw: A1 scenes hold a teacher's order, N1 twins that run past none;
                     every other recipe draws within its bands, at most 8 units a side
+    the pointer     on a hand-built tick (tactic/heads.py): head-free units, the walk fed with the teacher's choice
+                    (a side taken closes the key for the next unit of that side; holders in the pair numbers), a fresh
+                    pointer keeps, the loss over {null} + open keys less don't-care keys (a label on one: weight 0),
+                    orders.own() with the side and the age zeroed without a target and the age capped
 """
 import math
 
@@ -130,10 +134,12 @@ def test_teacher_walk_and_masks():
     p.shut = shut()
     p.shut["targets"][0, 5] = True
     assert p(v)["target"][0].tolist() == [-1] * 5
-    # D: each free unit at the nearest valid open enemy within reach (enemy 6 is 160-173 m from units 1-3; unit 4 is
-    # not free, enemy 6 within 8 m of it): 1 and 3 at enemy 5, unit 2 finds its side taken
+    # D: each free unit at the nearest valid open enemy within orders.reach_m (enemy 6 is 160-173 m from units 1-3;
+    # unit 4 is not free, enemy 6 within 8 m of it): 1 and 3 at enemy 5, unit 2 finds 5's side taken and takes enemy 6
+    # when it is within the reach (173.2 m centre to centre: inside 240, outside 150)
     out = PN.player("D")(v)
-    assert out["target"][0].tolist() == [-1, 5, -1, 5, -1]
+    two = 6 if float(OR.c_orders()["reach_m"]) >= math.hypot(90.0, 148.0) else -1
+    assert out["target"][0].tolist() == [-1, 5, two, 5, -1]
 
 
 def test_second_enemy_walk():
@@ -366,3 +372,56 @@ def test_scene_yields():
              for i in range(2)]
     assert SN.check_bands(other) > 0
     assert all(len(s["mine"]) <= 8 and len(s["theirs"]) <= 8 for s in other)
+
+
+def test_pointer_walk_loss_and_own():
+    # the pointer's walk, loss and own() on the tick of test_teacher_walk_and_masks: anvil 0 in melee with 5 (pinned),
+    # free units 1, 2 on 5's right side, 3 on its left; the teacher's choice 'unit 1 attacks 5' fed through the walk
+    from net.tactic import heads as HD
+    units = [("mine", 0.0, 0.0, 0.0, 32, 10, 1, 0, 0.0),
+             ("mine", -60.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", -90.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 70.0, 10.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("mine", 0.0, -150.0, 0.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 0.0, 12.0, 180.0, 32, 10, 1, 0, 0.0),
+             ("enemy", 0.0, -138.0, 180.0, 32, 10, 0, 0, 0.0),
+             ("enemy", 30.0, 60.0, 180.0, 32, 10, 0, 1, 0.0)]
+    v = _tick(units)
+    fx = v.fx
+    assert HD.head_free(fx)[0].tolist() == [False, True, True, True, True], "the anvil in melee is not head-free"
+    given = torch.tensor([[-1, 5, -1, -1, -1]])
+    wi = HD.walk_inputs(fx, given)
+    # after unit 1 takes 5 on its right side, unit 2 (the same side) finds 5 closed, unit 3 (the left) open; 7 routs
+    assert not bool(wi["open"][0, 2, 5]) and bool(wi["open"][0, 3, 5]) and bool(wi["open"][0, 1, 5])
+    assert not bool(wi["open"][0, 1, 7])
+    # pair numbers: the holders on 5 at each unit's turn / 2; dist / pos_m; side one-hot (unit 1 on 5's right)
+    assert float(wi["pair"][0, 1, 5, 5]) == 0.0 and float(wi["pair"][0, 3, 5, 5]) == 0.5
+    assert abs(float(wi["pair"][0, 1, 5, 0]) - float(fx.g_dist[0, 1, 5]) / 100.0) < 1e-6
+    assert wi["pair"][0, 1, 5, 2:5].tolist() == [0.0, 0.0, 1.0]
+    # a fresh pointer keeps (last layers zero, the null bias): every pick null; with given, the walk is fed but the
+    # picks stay the pointer's
+    W = 8
+    ptr = HD.OrderPointer(W)
+    enc = {"cards": torch.randn(1, fx.K, W), "own": torch.zeros(1, fx.G, HD.OWN)}
+    out = HD.choose_orders(enc, fx, ptr, given=given)
+    assert out["k"][0].tolist() == [-1] * 5 and out["fed"][0].tolist() == given[0].tolist()
+    # the loss: cross-entropy at the label over {null} + open keys less the don't-care keys
+    lg = torch.full((1, 1, 1 + 4), HD.NEG)
+    lg[0, 0, :4] = torch.tensor([1.0, 2.0, 0.5, 3.0])          # null, rows 0, 1, 2 open; row 3 closed
+    dc = torch.tensor([[[False, False, True, False]]])          # row 2 a don't-care key: out of the softmax
+    got, st = HD.loss(lg, torch.tensor([[1]]), torch.ones(1, 1), dc)
+    want = -(0.5 - math.log(math.exp(1.0) + math.exp(2.0) + math.exp(0.5)))    # (label row 1)
+    assert abs(float(got) - want) < 1e-5 and st["n"] == 1 and st["out_of_set"] == 0
+    got, st = HD.loss(lg, torch.tensor([[2]]), torch.ones(1, 1), dc)     # the label on a don't-care key: weight 0
+    assert st["n"] == 0 and st["out_of_set"] == 1 and float(got) == 0.0
+    got, st = HD.loss(lg, torch.tensor([[-1]]), torch.zeros(1, 1), dc)   # a dropped tick: weight 0
+    assert st["n"] == 0 and float(got) == 0.0
+    # own(): the side zeroed with no target, the age 0 with no target and capped at orders.net.age_cap_s
+    order = {"skill": torch.tensor([[SC.HOLD, SC.ATTACK, SC.ATTACK, SC.HOLD, SC.HOLD]]),
+             "tgt": torch.tensor([[-1, 5, 5, -1, -1]]), "side": torch.tensor([[1, 2, 1, 2, -1]]),
+             "born": torch.tensor([[0.0, 590.0, 10.0, 5.0, 0.0]])}
+    o = OR.own(order, None, OR.Facts(v.rr, v.ctx, order), 600.0)
+    assert o.shape == (1, 5, 16)
+    assert o[0, 0, 12:15].tolist() == [0.0, 0.0, 0.0] and o[0, 3, 12:15].tolist() == [0.0, 0.0, 0.0]
+    assert o[0, 1, 12:15].tolist() == [0.0, 0.0, 1.0]
+    assert [round(float(x), 4) for x in o[0, :, 15]] == [0.0, round(10 / 60, 4), 5.0, 0.0, 0.0]

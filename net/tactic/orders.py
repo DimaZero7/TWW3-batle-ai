@@ -15,7 +15,8 @@ the rest of the order. Code, no weights; the same for every player (K, T, ...: t
     masks(view, out)        the code's masks over a player's output: (1) hygiene - no new order to a unit in melee;
                             (3, 4) skills hold / attack (counter for a reference player), an attack only on a valid open
                             target; returns the orders as given and the counts of what was masked
-    own(...)                the orders in force as the 16 numbers a unit of mine (stage 5's input; not used yet)
+    own(...)                the orders in force as the 16 numbers a unit of mine (the pointer's input, tactic/heads.py);
+                            Facts.pair(g, count) - the pointer's 7 pair numbers of my unit g
     View                    what a player gets at a tick (lower.Tacticians builds it)
 A player: a callable view -> {skill, target (the battle's slot, -1 none), side [r, G] long; frames, fell, kept, must,
 forced (frame_walk's / decide.choose's); drop [r, G] bool optional: frames to take off} in my-slot order (decide.my_slots).
@@ -139,6 +140,17 @@ class Facts:
     def slot_of_row(self, k):
         """[R, G] the battle's slot of rows k [R, G] (-1 stays -1)."""
         return torch.where(k >= 0, self.slot.gather(1, k.clamp(min=0)), torch.full_like(k, -1))
+
+    def pair(self, g, count):
+        """[R, K, 7] the pointer's pair numbers of my unit g against each row k (design_attack_v23 section 6 'Pair
+        numbers' - plain geometry, none of the rule's results): dist(g, k) and gap(g, k) / pos_m, side(g, k) one-hot 3
+        (AXIS, LEFT, RIGHT), count [R, K] (the walk's holders on k at g's turn) / 2, 'k is the target of g's order in
+        force'."""
+        pos = float(cfg()["pos_m"])
+        sd = torch.nn.functional.one_hot(self.g_side[:, g].clamp(0, 2), 3).float()
+        tg = (self.t_row[:, g:g + 1] == torch.arange(self.K, device=self.s.device)[None]).float()
+        return torch.cat([(self.g_dist[:, g] / pos)[..., None], (self.g_gap[:, g] / pos)[..., None], sd,
+                          (count / 2.0)[..., None], tg[..., None]], -1)
 
 
 class Walk:
@@ -287,16 +299,23 @@ def masks(view, out, allow=(SC.HOLD, SC.ATTACK)):
 def own(order, frames, fx, now):
     """[R, G, 16] the orders in force as numbers a unit of mine (design_flank_v2.md section 7: frame on, s, f, hw, hd /
     pos_m; skill one-hot 4; has a target; the target's place s, f / pos_m (0 without a row); side one-hot 3; age / 60
-    s). Not an input yet (stage 5)."""
+    s). Mended as design_attack_v23 section 6 (critic 2, 6): the side is zeroed when the order has no target, and the
+    age is 0 with no order (no target: the level's default skill is not an order of its own) and capped at
+    orders.net.age_cap_s. frames None: no frame in force. The pointer's input (tactic/heads.py)."""
     pos = float(cfg()["pos_m"])
+    cap = float(c_orders()["net"]["age_cap_s"])
+    if frames is None:
+        z = torch.zeros(order["skill"].shape, device=order["skill"].device)
+        frames = {"on": torch.zeros_like(z, dtype=torch.bool), "s": z, "f": z, "hw": z, "hd": z}
     on = frames["on"].float()
     fr = torch.stack([on, frames["s"] * on / pos, frames["f"] * on / pos, frames["hw"] * on / pos,
                       frames["hd"] * on / pos], -1)
     sk = torch.nn.functional.one_hot(order["skill"].clamp(0, len(SC.SKILLS) - 1), len(SC.SKILLS)).float()
-    has = (order["tgt"] >= 0).float()[..., None]
+    tg = order["tgt"] >= 0
+    has = tg.float()[..., None]
     k = fx.t_row.clamp(min=0)
     seen = (fx.t_row >= 0).float()
     tp = torch.stack([fx.s.gather(1, k) * seen / pos, fx.f.gather(1, k) * seen / pos], -1)
-    sd = torch.nn.functional.one_hot(order["side"].clamp(min=0), 3).float() * (order["side"] >= 0).float()[..., None]
-    age = ((now - order["born"]) / 60.0).clamp(min=0)[..., None]
-    return torch.cat([fr, sk, has, tp, sd, age], -1)
+    sd = torch.nn.functional.one_hot(order["side"].clamp(min=0), 3).float() * ((order["side"] >= 0) & tg).float()[..., None]
+    age = torch.where(tg, (now - order["born"]).clamp(0.0, cap), torch.zeros_like(order["born"])) / 60.0
+    return torch.cat([fr, sk, has, tp, sd, age[..., None]], -1)

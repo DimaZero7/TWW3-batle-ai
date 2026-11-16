@@ -5,7 +5,7 @@ Branch), read by the judge (plain health, watch.hp_trade) at the fork + 60 / 120
     record   the base (--base, a player of pin.PLAYERS) through Recorder (the base unchanged; every tick: the pinned enemies
              by the base's own pinned() with their ticks in melee mt, and my free units; with --kind-picks the kinds'
              candidates of tags.tick too) on a set of specs (--set pilot: exam_pin.pilot_set, its chunks' torch seeds;
-             G: the first 768 battles of exam_pin.g_set - its trained sizes -, S: exam_pin.s_set's scenes; G and S in
+             G: the first 768 battles of exam_pin.g_set - its trained sizes -, S / F: exam_pin.s_set's scenes; G, S, F in
              exam_pin.watched_run's full / by_limit batches); ASSERTS the file against --ref (exam_pin.check_ref);
              writes <out>/asis.json, rec.json and the states of the picks:
                1f    the battle's first cause (a) order (stage 1f's pick); fork = the first tick of the unbroken run of
@@ -27,8 +27,11 @@ Branch), read by the judge (plain health, watch.hp_trade) at the fork + 60 / 120
              (FWatch). ASSERTS every battle without a state, and every battle before its fork tick, equals asis;
              --branch-ref <dir>: ASSERTS the replay's series equal <dir>/A_<kind>.json's (stage 1f's files)
     table    the pairs teach - keep, now - keep, now - teach by state at 60 / 120 / 300 / 750 s, by near2, size, script,
-             YES by script and near2_at_i, S's families (and A1 + A3 pooled), n4's distance bands, the first contact
-             side of i on e in the x branch, the widest hole in my line 30 s after the fork (x against y)
+             YES by script and near2_at_i, S's families (and A1 + A3 pooled, review L's pool A1 + A2 + A3 + A6 NO), n4's
+             distance bands, the first contact side of i on e in the x branch, the widest hole in my line 30 s after the
+             fork (x against y); beside, the gold read (rout credited) at 60 / 120 / 300 s, and STATED groups (review L:
+             no pass mark reads them) by the keep arm's first intended attack of i (Track t_int / int_tgt): idle >= 120 s,
+             pulled in < 120 s, onto e / another enemy
     all      record, then every branch not yet written, then the table
 
     DOCK_NAME=agent-t2 DOCK_CPUS=8 DOCK_MEM=6g bash ops/dock.sh net.tactic.branches all --base TIu_back_co --pick 1f \
@@ -52,6 +55,8 @@ from net.unit import scripts as SC
 WINDOW_S = 300.0          # the branch holds its choice this long after the fork (the judge's window)
 HOLE_M = 50.0             # (the fork's watch: a gap in my line wider than this)
 READS = (60, 120, 300, 750)
+GOLD_S = (60, 120, 300)   # (the gold read's seconds after the fork: Track, stated beside the plain reads)
+IDLE_S = 120              # (stated groups, review L: the keep arm's i first intends an attack >= this after the fork)
 STEP = W.PinWatch.SERIES_S
 
 
@@ -160,7 +165,8 @@ class Track:
         self.has = self.fI >= 0
         nan = lambda: torch.full((B,), float("nan"), device=dev)                    # noqa: E731
         self.fm = {k: nan() for k in ("hpi0", "hpe0", "hpi60", "hpe60", "hpi120", "hpe120", "t_eu", "t_ie",
-                                      "t_att", "att_tgt", "gap30", "holes30", "side_ie")}
+                                      "t_att", "att_tgt", "gap30", "holes30", "side_ie", "t_int", "int_tgt")
+                   + tuple(f"gold{w}" for w in GOLD_S)}
         self.fm["att_e"] = torch.zeros(B, device=dev)
 
     def step(self, w, sec, st):
@@ -193,6 +199,18 @@ class Track:
         self.fm["att_tgt"] = torch.where(first, o["tgt"][ar, I].float(), self.fm["att_tgt"])
         inwin = att & (rel < WINDOW_S) & (o["tgt"][ar, I] == E)
         self.fm["att_e"] = torch.where(inwin, torch.ones_like(self.fm["att_e"]), self.fm["att_e"])
+        # STATED only (review L): the first second from the fork the unit script of i intends an attack (its own counter
+        # in the keep arm), and that attack's target (a battle unit index: e or another enemy)
+        from sim import orders as O
+        it = w.chain.units.intended
+        ia = on & (it.kind[ar, I] == O.ATTACK) & torch.isnan(self.fm["t_int"])
+        self.fm["t_int"] = torch.where(ia, t, self.fm["t_int"])
+        self.fm["int_tgt"] = torch.where(ia, it.target[ar, I].float(), self.fm["int_tgt"])
+        # the gold read (rout credited, watch._gold_trade) at min(fork + w, the play's last step) beside the plain one
+        gd = W._gold_trade(u, w.lord)
+        for gw in GOLD_S:
+            k = f"gold{gw}"
+            self.fm[k] = torch.where(on & (rel <= gw), gd, self.fm[k])
         due = self.has & (rel == 30)
         if bool(due.any()):
             g, n = w.holes(st)
@@ -322,8 +340,8 @@ def _set(a):
         held = EP.scfg()["drills"]["attack"]["sets"]["G"]["sizes_held"]
         assert G_N % ch == 0 and all(x["n"] not in held for x in EP.meta_of(sp[:G_N]))
         return sp[:G_N], seeds[:G_N // ch], ch, {"full": True, "by_limit": True}
-    if a.set == "S":
-        sp, seeds, ch = EP.s_set()
+    if a.set in ("S", "F"):
+        sp, seeds, ch = EP.s_set(name=a.set)
         return sp, seeds, ch, {"full": True, "by_limit": True, "battles": BA.scene_battles, "enemy": BA.SceneEnemy}
     raise ValueError(a.set)
 
@@ -458,6 +476,16 @@ def pd(x, y, S, w):
     return ms([J(x, b, S[b]["t"], w) - J(y, b, S[b]["t"], w) for b in sel])
 
 
+def pg(x, y, S, w):
+    """pd's pair by the gold read at fork + w (Track's gold<w>; absent in older files: n 0)."""
+    lx, ly = _ints(x.get("log", {})), _ints(y.get("log", {}))
+    fx_, fy_ = _ints(x.get("fm", {})), _ints(y.get("fm", {}))
+    k = f"gold{w}"
+    sel = [b for b in S if not lx.get(b, {}).get("why") and not ly.get(b, {}).get("why")
+           and k in fx_.get(b, {}) and k in fy_.get(b, {})]
+    return ms([fx_[b][k] - fy_[b][k] for b in sel])
+
+
 def table(D, picks=("1f", "new")):
     st = json.loads((D / "states.json").read_text(encoding="utf-8"))
     asis = json.loads((D / "asis.json").read_text(encoding="utf-8"))
@@ -503,8 +531,36 @@ def table(D, picks=("1f", "new")):
             groups += [("kind alone", lambda b: S[b].get("alone") is True),
                        ("with a taught kind or n1 / n6", lambda b: S[b].get("alone") is False)]
         if any("d" in v for v in S.values()):
-            groups += [(f"d {lo}-{hi} m", lambda b, lo=lo, hi=hi: lo <= S[b].get("d", -1) < hi)
-                       for lo, hi in ((0, 170), (170, 200), (200, 240.01))]
+            n4 = [float(x) for x in EP.scfg()["drills"]["attack"]["kinds"]["n4_m"]]
+            cuts = ((0, 170), (170, 200), (200, 240.01)) if n4 == [170.0, 240.0] else (
+                (0, n4[0]), (n4[0], n4[0] + 30), (n4[0] + 30, n4[1] + 0.01))    # (n4 moved with the reach: kinds.n4_m)
+            groups += [(f"d {lo:g}-{hi:g} m", lambda b, lo=lo, hi=hi: lo <= S[b].get("d", -1) < hi) for lo, hi in cuts]
+        if fams:
+            pool = ("A1", "A2", "A3", "A6")
+            groups += [("L pool A1 + A2 + A3 + A6, NO", lambda b: rc[b] in pool and no(b))]
+        # STATED groups (review L, last bullet; no pass mark reads them): by the keep arm's first intended attack of i
+        fk = _ints(files["keep"].get("fm", {})) if "keep" in files else {}
+        if any("t_int" in v for v in fk.values()):
+            def t_in(b):
+                x_ = fk.get(b, {}).get("t_int")
+                return math.inf if x_ is None or x_ != x_ else x_ - S[b]["t"]
+
+            def onto_e(b):
+                x_ = fk.get(b, {}).get("int_tgt")
+                return x_ is not None and x_ == x_ and int(x_) == int(S[b]["e"])
+            idle, pulled = (lambda b: t_in(b) >= IDLE_S), (lambda b: t_in(b) < IDLE_S)
+            base_g = [("", lambda b: True), (", NO", no)] + ([(", L pool NO", lambda b: rc[b] in pool and no(b))]
+                                                             if fams else [])
+            for sfx, gg in base_g:
+                groups += [(f"STATED keep idle >= {IDLE_S} s{sfx}", lambda b, gg=gg: gg(b) and idle(b)),
+                           (f"STATED keep pulled in < {IDLE_S} s{sfx}", lambda b, gg=gg: gg(b) and pulled(b)),
+                           (f"STATED   pulled in onto e{sfx}", lambda b, gg=gg: gg(b) and pulled(b) and onto_e(b)),
+                           (f"STATED   pulled in onto another{sfx}",
+                            lambda b, gg=gg: gg(b) and pulled(b) and not onto_e(b))]
+            groups += [(f"STATED family {r}, NO, keep idle", lambda b, r=r: rc[b] == r and no(b) and idle(b))
+                       for r in fams]
+            groups += [(f"STATED family {r}, NO, keep pulled in", lambda b, r=r: rc[b] == r and no(b) and pulled(b))
+                       for r in fams]
         res[pick] = {}
         for x, y in (("teach", "keep"), ("now", "keep"), ("now", "teach")):
             if x not in files or y not in files:
@@ -521,7 +577,12 @@ def table(D, picks=("1f", "new")):
                 SS = {b: v for b, v in S.items() if g(b)}
                 cells = [pd(files[x], files[y], SS, w) for w in READS]
                 res[pick][f"{x}-{y}:{lab.strip()}"] = [[round(c[0], 4), round(c[1], 4), c[2]] for c in cells]
-                lines.append(f"     {lab} (n {len(SS)}): " + " | ".join(f(c) for c in cells))
+                gc = [pg(files[x], files[y], SS, w) for w in GOLD_S]
+                has_g = any(c[2] for c in gc)
+                if has_g:
+                    res[pick][f"{x}-{y}:{lab.strip()}:gold"] = [[round(c[0], 4), round(c[1], 4), c[2]] for c in gc]
+                lines.append(f"     {lab} (n {len(SS)}): " + " | ".join(f(c) for c in cells)
+                             + ("   || gold 60 / 120 / 300 s: " + " | ".join(f(c) for c in gc) if has_g else ""))
             hx = [fx_[b]["gap30"] for b in S if b in fx_ and b in fy_]
             hy = [fy_[b]["gap30"] for b in S if b in fx_ and b in fy_]
             hd = ms([p - q for p, q in zip(hx, hy)])
@@ -538,7 +599,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("what", choices=("record", "branch", "table", "all"))
     ap.add_argument("--base", default="TEACH")
-    ap.add_argument("--set", default="pilot", choices=("pilot", "G", "S"))
+    ap.add_argument("--set", default="pilot", choices=("pilot", "G", "S", "F"))
     ap.add_argument("--kind-picks", action="store_true", help="record: the kinds' picks n2w, n4, n5 too")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--n", type=int, default=256)
