@@ -39,9 +39,12 @@ NOT_YET = ()                               # (vx, vz, f: view.shift_velocity, as
 ROW_NOT_YET = ()
 
 
-def skirmish(gap=120.0):
+def skirmish(gap=120.0, generals=False, jitter=0.0):
+    # jitter: each unit 0.5 or 1.5 x jitter m off the line (a straight line stands exactly between the two rows of
+    # its zone - a tie of the nearest cell that float noise of the turned map breaks either way)
     def line(keys, z, b):
-        return [{"key": k, "x": -60.0 + 30.0 * i, "z": z, "b": b} for i, k in enumerate(keys)]
+        return [{"key": k, "x": -60.0 + 30.0 * i, "z": z + jitter * (0.5 + i % 2), "b": b,
+                 **({"general": True} if generals and i == 0 else {})} for i, k in enumerate(keys)]
     return {"attacker": 1, "sides": {1: {"faction": "wh_main_emp_empire", "units": line(EMP, -gap / 2, 0.0)},
                                      2: {"faction": "wh2_main_skv_skaven", "units": line(SKV, gap / 2, 180.0)}}}
 
@@ -417,3 +420,116 @@ def test_the_side_wrapper_with_teach_gives_the_same_orders_from_the_bridge(tmp_p
     print("map", seen, gaps, eq)
     assert seen["m"], seen
     assert all(n >= 0.99 * t for n, t in eq.values()), eq
+    assert all(v <= 1e-5 for v in gaps.values()), gaps
+
+
+# ------------------------------------------------------------------ the companion's own path with the trained network
+def _weights_path():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1] / "weights" / "tactic" / "attack1" / "final.pt"
+
+
+def _weights():
+    p = _weights_path()
+    if not p.exists():
+        pytest.skip(f"no trained tactic weights {p}")
+    from net.tactic import ckpt as TC
+    net, critic, ck = TC.restore(str(p), "cpu")
+    assert critic is None and ck["kind"] == TC.KIND2
+    return net.eval()
+
+
+def run_companion(st, seconds, net, comp, place=None, terrain_path="flat", bounds="map_half"):
+    """The simulator's own side (stage0/battle.TacticSide with pin.NetPlayer(net)) plays side 1, 'nearest' side 2, on
+    duel.play's clock (each second: raw, the tick every 5 s, the unit script, then the steps); the companion's own path
+    (bridge/companion/tactic_chain.TacticChain.decide, what loop.py calls in the game) answers the bridge's document of
+    every second. Returns the per-tick and per-second comparisons."""
+    from bridge.companion import tactic_chain as TCH
+    from net.stage0 import battle as SB
+    from net.tactic import pin as PN
+    from sim import orders as O
+    sim_seer = TR.Seer(P)
+    card = T.cards(st, "cpu")[:1]
+    me = SB.TacticSide(PN.NetPlayer(net, greedy=True))
+    me.start(st, P, "cpu", card, None)
+    if bounds is None:
+        me.bounds = None
+    names = [f"u{i}" for i in range(st.N)]
+    ticks, secs, seen = [], [], {"m": False, "r": False, "attacks": 0, "orders": 0}
+    for s in range(seconds):
+        if bool(st.done.all()):
+            break                     # (the battle is over: the simulator's clock stops, the bridge's would go on)
+        rs = sim_seer.raw(st)
+        a = None
+        if s % 5 == 0:
+            me.tick(st, rs)
+            a = TCH.tick_record(me.tac)
+        me.second(st)
+        out, _, _ = comp.decide(doc_of_sim(st, 0, 1000 * s, own=1, place=place, terrain_path=terrain_path))
+        if s == 0:
+            assert torch.equal(comp.side.mine, me.mine) and torch.equal(comp.hide, me.hide)
+        b = comp.extra.get("tactic")
+        if a is not None:
+            assert b is not None, s
+            rb = TCH.tick_record(comp.side.tac)
+            for k in ("slot", "my"):
+                assert torch.equal(a[k], rb[k]), (s, k)
+            ticks.append((s, a, rb, _same_ticks(a, rb, names)))
+            seen["attacks"] += int(a["new"].sum())
+            # the log's attacks by name are the record's
+            want = [[names[i], names[t]] for i, t, n in zip(a["my"][0].tolist(), a["tgt"][0].tolist(),
+                                                             a["new"][0].tolist()) if n and i >= 0]
+            if place is None:
+                assert b["attacks"] == want, (s, b["attacks"], want)
+        mask = me.mine & (rs[..., TR.I["alive"]] > 0) & ~(rs[..., TR.I["r"]] > 0)
+        secs.append((s, me.units.intended, comp.units.intended, mask))
+        seen["orders"] += sum(1 for o in out if o["kind"] == "attack")
+        for j in range(round(1.0 / P.dt)):
+            o = O.merge(me.orders(st, j), opponents.nearest(st), st.u["side"] == 2)
+            battle.step(st, o, P)
+        seen["m"] |= bool((rs[..., TR.I["m"]] > 0).any())
+        seen["r"] |= bool((rs[..., TR.I["r"]] > 0).any())
+    return ticks, secs, seen
+
+
+def _gaps_rows(ticks):
+    out = _gaps(ticks)
+    out["rows"] = max((float((a["rows"] - b["rows"]).abs().max()) for _, a, b, _ in ticks if "rows" in a), default=0.0)
+    for _, a, b, _ in ticks:
+        assert torch.equal(a["mask"], b["mask"]) and torch.equal(a["new"], b["new"])
+    return out
+
+
+def test_the_companions_own_path_with_the_trained_network_gives_the_simulators_orders(tmp_path):
+    """The chain 'tactic_v2 only' (bridge/companion/tactic_chain.py, loop.load_chain of weights/tactic/attack1/final.pt)
+    on the bridge's documents against the simulator's stage0/battle.TacticSide with the same network: equal own(), mt,
+    D2's columns, pair numbers and rows (within 1e-5), head-free and open masks, outputs (the target by name), new
+    attacks and the unit script's gated orders - exactly on the flat field; on the turned map >= 0.99 of unit-ticks."""
+    from bridge.companion import loop
+    from bridge.companion import tactic_chain as TCH
+    net = _weights()
+    chain, what = loop.load_chain("formula", str(_weights_path()), None)
+    assert isinstance(chain, TCH.TacticChain), what
+    torch.manual_seed(5)
+    st = scenario.build([skirmish(generals=True)], P)
+    comp = TCH.TacticChain(net, params=P, allow_flat=True)
+    ticks, secs, seen = run_companion(st, 150, net, comp)
+    gaps, eq = _gaps_rows(ticks), _read(ticks, secs, None)
+    print("flat", seen, gaps, eq)
+    assert seen["m"] and seen["attacks"] > 0, seen
+    assert all(v <= 1e-5 for v in gaps.values()), gaps
+    assert all(n == t for n, t in eq.values()), eq
+    # the turned map: the game in the map's coordinates (no flat bounds on a map: both sides None)
+    folder = write_map(tmp_path / "testmap")
+    mid = terrain.load_npz(folder / "heights.npz")
+    torch.manual_seed(6)
+    st = scenario.build([skirmish(gap=100.0, generals=True, jitter=1.0)], P)
+    place = (150.0, 380.0, 35.0)
+    terrain.set_map(st, mid, place=tuple(torch.tensor([v]) for v in place))
+    comp = TCH.TacticChain(net, params=P, map_root=tmp_path, bounds=None)
+    ticks, secs, seen = run_companion(st, 120, net, comp, place=place, terrain_path="testmap", bounds=None)
+    gaps, eq = _gaps_rows(ticks), _read(ticks, secs, place)
+    print("map", seen, gaps, eq)
+    assert seen["m"], seen
+    assert all(n >= 0.99 * t for n, t in eq.values()), eq
+    assert all(v <= 1e-5 for v in gaps.values()), gaps

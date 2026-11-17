@@ -1,0 +1,242 @@
+"""The chain 'tactic_v2 only' in the game (companion --chain --chain-tactic <a tactic_v2 checkpoint>,
+bridge/docs/launch/watch.md "Цепочка «только тактик»"): the trained tactic level commands our side through the one side wrapper
+tactic/side.Side with the network as its player (tactic/pin.NetPlayer, greedy - the exams' player), the unit level by the
+unit's script (net/unit/scripts.Unit, no unit network), the strategist and the operative 'default' (no network: one
+group for the whole army but the lord, no re-parcel). The same path as the simulator's stage0/battle.TacticSide.
+
+Every state document (one a battle second):
+
+    second 0   side.of_raw on the seer's raw (my units the alive rows of side 1, the lord by the passport's caste or by
+               the name '<side>_lord'), Side.start: one group, its zone by formation (tactic/zfit), the lord's row hidden
+    every 5 s  Side.tick(raw, card, bounds, now = the battle second) -> lower.Units.write: each unit's frame, skill and
+               main target from the level (GameUnits, the unit level's raw)
+    every 1 s  the unit's script on the unit level's raw (its skill, frame, main target, pace any, its own last order -
+               the gate's output, as lower.Units.second), no leash; the order gate reissue.Gate (a changed order only);
+               the lord: hold once, then keep (the simulator's merge of hold over the hidden lord)
+
+bounds: P.map_half (the drill's flat battle), the chain's clock: the document's t rounded to the second (bridge/
+companion/chain.py). Per tick the log gets the second, the engine step (tick_ms), the head-free units, each new attack
+(unit -> target by the game's name) and the orders in force; the first dump_ticks ticks also the level's input (the
+185-number rows, D2's columns, own, the pair numbers, the masks) and the document (game/battle/tactic_read.py).
+"""
+import os
+import time
+
+import torch
+
+from bridge.companion import exchange
+from bridge.companion import tactic_input as TI
+from bridge.companion import unit_input as UI
+from bridge.companion.chain import GameUnits
+from net.common import reissue
+from net.tactic import cfg as tcfg
+from net.tactic import raw as TR
+from net.tactic import side as TS
+from net.unit import decode as Dc
+from net.unit import view as V
+from sim import orders as O
+
+KIND = "tactic_v2"
+DUMP_TICKS = 12          # the level's input dumped for the first 12 ticks (60 s: the approach and the first contact)
+
+
+def tick_record(tac):
+    """{own, mt, cols, pair, slot, head, open, skill, tgt, side, my, new, rows, mask} of the level's last tick
+    (lower.Tacticians.view): own() of the orders in force, ticks in melee, D2's columns, the walk's pair numbers and open
+    masks, the head-free mask, the outputs (tgt a unit index), my slots (unit indexes), the new attacks, the input rows and their mask.
+    The simulator's side and the companion read it alike (the contract case)."""
+    from net.tactic import heads as HD
+    from net.tactic import orders as OR
+    v = tac.view
+    if v is None:
+        return None
+    view = v["view"]
+    fx = view.fx
+    given = torch.where(v["new_attack"], fx.row_of_slot(v["tgt"]), torch.full_like(v["tgt"], -1))
+    x = HD.net_inputs(view)
+    wi = HD.walk_inputs(fx, given)
+    rec = {"own": OR.own(view.order, view.ctx.prev, fx, view.now), "mt": fx.mt, "cols": x["cols"],
+           "pair": wi["pair"], "slot": fx.slot, "head": HD.head_free(fx), "open": wi["open"], "skill": v["skill"],
+           "tgt": v["tgt"], "side": v["side"], "my": v["my"], "new": v["new_attack"]}
+    inp = getattr(view, "inp", None)
+    if isinstance(inp, dict) and "rows" in inp:
+        rec["rows"], rec["mask"] = inp["rows"], inp["mask"]
+    return rec
+
+
+def _frame0(units, own):
+    """The unit level's frames before the first tick: each unit's slot of the rows where it stands (stage0/battle.UnitSide:
+    config stage0 general enemy_row_m x enemy_rank_m)."""
+    from net.stage0 import battle as SB
+    from net.stage0 import cfg as scfg
+    g = scfg()["general"]
+    u = units.setup.st.u
+    B, N = own.shape
+    dev = own.device
+    units.area = {"x": u["x"].clone(), "z": u["z"].clone(), "b": u["b"].clone(),
+                  "front": torch.full((B, N), float(g[SB.FRAME_ROW[0]]), device=dev),
+                  "depth": torch.full((B, N), float(g[SB.FRAME_ROW[1]]), device=dev),
+                  "sb": u["b"].clone(), "sw": torch.zeros((B, N), device=dev), "on": own.clone()}
+
+
+class TacticChain:
+    """Our side in the game under the trained tactic level (module doc). net: a heads.TacticNet2 (ckpt.restore of a
+    tactic_v2 checkpoint); bounds 'map_half' (default) - the simulator's P.map_half, or a float / None."""
+    MODE = "chain"             # the answer's 'mode chain' (exchange.orders_text): the bridge's chain rules
+
+    def __init__(self, net, greedy=True, params=None, device="cpu", map_root=UI.MAPS, allow_flat=True, own=1,
+                 hygiene=True, bounds="map_half", dump_ticks=DUMP_TICKS, tick_ms=None):
+        assert own == 1, "the chain commands side 1"
+        self.seer = TI.TacticSeer(map_root, device, own, params, allow_flat)
+        self.P = self.seer.P
+        self.bounds = self.P.map_half if bounds == "map_half" else bounds
+        self.net, self.greedy, self.device, self.own, self.hygiene = net, greedy, device, own, hygiene
+        self.t_every = int(tcfg()["decide_s"])
+        self.dump_ticks = int(dump_ticks)
+        # the engine's step the launcher asked for (BAI_TICK_MS: launch.ps1 -TickMs; None - the engine's own)
+        env = tick_ms if tick_ms is not None else os.environ.get("BAI_TICK_MS")
+        self.tick_ms = int(env) if env not in (None, "") else None
+        self.batch = None
+        self.times, self.extra = {}, None
+
+    # -- a new battle
+    def start(self, doc, r):
+        from net.tactic import pin as PN
+        from net.unit import scripts as SC
+        dev = self.device
+        self.batch = doc["batch"]
+        self.names = [u["n"] for u in doc["units"]]
+        self.keys = [u.get("key") or "" for u in doc["units"]]
+        self.card = self.seer.card
+        x, z, b, mine, hide = TS.of_raw(r, self.card, self.own)
+        side = r[..., TR.I["side"]].round().long() == self.own
+        by_name = torch.tensor([[n.endswith("_lord") for n in self.names]], device=r.device) & side
+        hide = hide | by_name
+        mine = mine & ~hide
+        self.side = TS.Side(PN.NetPlayer(self.net, greedy=self.greedy), self.hygiene, dev).start(x, z, b, mine, hide)
+        N = r.shape[1]
+        self.units = GameUnits(r[..., :TR.BASE], self.keys, self.card, self.P, SC.Unit(), targets=False, still=True,
+                               aim=True, lords=hide)
+        self.units.gate = reissue.Gate(1, N, dev)
+        _frame0(self.units, self.units.setup.own)
+        self.hide, self.lord_held = hide, torch.zeros_like(hide)
+        self.next_tac = None
+        self.n_ticks = 0
+        men = float((r[..., TR.I["men"]] * (r[..., TR.I["alive"]] > 0)).sum())
+        self.start_info = {"men": round(men), "mine": [n for i, n in enumerate(self.names) if bool(mine[0, i])],
+                           "lord": [n for i, n in enumerate(self.names) if bool(hide[0, i])], "tick_ms": self.tick_ms}
+
+    def script_second(self, raw_u):
+        """lower.Units.second's script branch on the unit level's raw [1, N, RAW] -> (the gated orders, inside)."""
+        I = V.I
+        u = self.units
+        own = u.setup.own
+        ar = {k: u.area[k] for k in ("x", "z", "b", "front", "depth")}
+        inside = Dc.signed_dist(raw_u[..., I["x"]], raw_u[..., I["z"]], ar) >= 0
+        u.arrived = u.arrived | (inside & own)
+        live = own & (raw_u[..., I["alive"]] > 0) & ~(raw_u[..., I["r"]] > 0)
+        order = {"skill": u.skill, "area": ar, "target": u.prio, "pace": u.pace, "last": u.intended}
+        intended = u.net.intend(raw_u, order, live)
+        intended = u.gate.apply(intended, live)
+        u.intended = intended
+        return intended, inside
+
+    @torch.no_grad()
+    def step(self, r, sec):
+        """One second on the raw state r [1, N, RAW] at battle second sec -> (the orders to the game, the script's gated
+        orders, the tick's record or None)."""
+        t2 = time.perf_counter()
+        rec = None
+        if self.next_tac is None:
+            self.next_tac = sec
+        if sec >= self.next_tac:
+            tac = self.side.tick(r, self.card, self.bounds, now=float(sec))
+            self.units.write(tac)
+            rec = tick_record(tac)
+            self.n_ticks += 1
+            while self.next_tac <= sec:
+                self.next_tac += self.t_every
+        t3 = time.perf_counter()
+        self.times["tac_ms"] = (t3 - t2) * 1000
+        raw_u = r[..., :TR.BASE].clone()
+        raw_u[..., V.I["leash"]] = 0.0                  # (no leash under the script)
+        intended, inside = self.script_second(raw_u)
+        # the lord: hold once, then keep (the simulator merges a hold over the hidden lord every step)
+        first = self.hide & ~self.lord_held
+        out = O.merge(intended, O.hold(1, r.shape[1], r.device), first)
+        later = self.hide & self.lord_held
+        out.kind = torch.where(later, torch.full_like(out.kind, O.KEEP), out.kind)
+        self.lord_held = self.lord_held | self.hide
+        self.inside, self.sec, self.raw_u = inside, sec, raw_u
+        self.times["unit_ms"] = (time.perf_counter() - t3) * 1000
+        return out, intended, rec
+
+    @torch.no_grad()
+    def decide(self, doc):
+        """-> (orders list, think ms, abilities []) for one state document (loop.Seat's decide)."""
+        t0 = time.perf_counter()
+        self.times = {}
+        r = self.seer.raw(doc)
+        new = doc["batch"] != self.batch
+        if new:
+            self.start(doc, r)
+        self.times["raw_ms"] = (time.perf_counter() - t0) * 1000
+        sec = int(round(float(doc.get("t", 0)) / 1000.0))
+        o, _, rec = self.step(r, sec)
+        col = lambda f: getattr(o, f)[0].cpu().numpy()        # noqa: E731
+        side = [int(u["side"]) for u in doc["units"]]
+        out = exchange.orders_list(self.names, side, col("kind"), col("x"), col("z"), col("target"), col("run"),
+                                   own=self.own, face=col("face"), width=col("width"))
+        I = V.I
+        ctrl = {n for i, n in enumerate(self.names)
+                if side[i] == self.own and float(self.raw_u[0, i, I["alive"]]) > 0
+                and not float(self.raw_u[0, i, I["r"]]) > 0}
+        for x in out:
+            if x["unit"] not in ctrl:
+                x["out"] = True
+        self.extra = self._extra(doc, rec, new)
+        return out, (time.perf_counter() - t0) * 1000, []
+
+    # -- the log
+    def _name(self, i):
+        i = int(i)
+        return self.names[i] if 0 <= i < len(self.names) else None
+
+    def _extra(self, doc, rec, new):
+        row = {"sec": self.sec, "tick_ms": self.tick_ms, "ms": {k: round(v, 2) for k, v in self.times.items()}}
+        if new:
+            row["start"] = self.start_info
+        if self.n_ticks <= self.dump_ticks:
+            row["doc"] = doc               # (every second's: the replay's velocities need the documents between ticks)
+        if rec is None:
+            return row
+        my = rec["my"][0].tolist()
+        head = rec["head"][0].tolist()
+        o = self.side.tac.orders_of()
+        own = self.units.setup.own[0]
+        tac = {"tick": self.n_ticks - 1,
+               "head_free": [self._name(i) for i, h in zip(my, head) if h and i >= 0],
+               "attacks": [[self._name(i), self._name(t)] for i, t, n in
+                           zip(my, rec["tgt"][0].tolist(), rec["new"][0].tolist()) if n and i >= 0],
+               "in_force": {self.names[i]: [int(o["skill"][0, i]), self._name(o["tgt"][0, i])]
+                            for i in range(len(self.names)) if bool(o["on"][0, i]) and bool(own[i])}}
+        row["tactic"] = tac
+        if self.n_ticks <= self.dump_ticks:
+            row["dump"] = {k: v[0].tolist() if v.dtype != torch.bool else v[0].int().tolist()
+                           for k, v in rec.items()}
+        return row
+
+    def log_extra(self):
+        return self.extra
+
+    @staticmethod
+    def describe_extra(row):
+        """The console line of a decision's tactic fields (loop.answer)."""
+        ms = row["ms"]
+        line = (f"  tactic sec {row['sec']}: raw {ms.get('raw_ms', 0):.0f} tac {ms.get('tac_ms', 0):.0f} "
+                f"unit {ms.get('unit_ms', 0):.0f} ms, tick_ms {row['tick_ms'] or 'engine'}")
+        t = row.get("tactic")
+        if t is not None:
+            line += (f" | tick {t['tick']} head-free {len(t['head_free'])}, attacks "
+                     + (", ".join(f"{a} -> {b}" for a, b in t["attacks"]) or "none"))
+        return line

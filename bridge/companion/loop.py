@@ -11,6 +11,7 @@ deployment document once a battle (bridge/docs/apps/bridge.md, bridge/docs/launc
                  [--chain-greedy]]
                 (our side under the chain operative -> tacticians -> unit network: bridge/companion/chain.py; with
                  --strategist its groups start it). Without --chain only the deployment is answered.
+                --chain-tactic <a tactic_v2 checkpoint>: the chain 'tactic_v2 only' (bridge/companion/tactic_chain.py).
 
 One line per decision: move number, battle time, how long the chain took, the orders; the levels' ms, the operative's
 groups when it decided. A new battle (a new batch in the state) starts the chain afresh.
@@ -89,7 +90,9 @@ def answer(seat, doc, out=print):
     out(f"move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
         f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}")
     chain = seat.owner.log_extra() if hasattr(seat.owner, "log_extra") else None
-    if chain is not None:
+    if chain is not None and hasattr(seat.owner, "describe_extra"):
+        out(seat.owner.describe_extra(chain))          # (the chain 'tactic_v2 only': tactic_chain.py)
+    elif chain is not None:
         ms = chain["ms"]
         out(f"  chain sec {chain['sec']}: raw {ms['raw_ms']:.0f} op {ms['op_ms']:.0f} "
             f"tac {ms['tac_ms']:.0f} unit {ms['unit_ms']:.0f} ms, inside {sum(chain['inside'].values())}"
@@ -157,6 +160,19 @@ def load_chain(op="formula", tactic="formula", unit=None, greedy=False, plans=No
     from net.strategist import cfg as scfg
     from net.tactic import ckpt as TC
     from net.tactic import cfg as tcfg
+    if tactic != "formula":
+        path = scfg()["tactic_ckpt"] if tactic == "net" else tactic
+        tac_net, _, ck = TC.restore(str(_path(path)), device)
+        if ck.get("kind") == TC.KIND2:
+            # the chain 'tactic_v2 only' (bridge/companion/tactic_chain.py): the trained tactic level, the unit's
+            # script, the operative and the strategist's groups not used (one group for the whole army)
+            from bridge.companion.tactic_chain import TacticChain
+            if op != "formula" or unit is not None:
+                raise ValueError("a tactic_v2 checkpoint runs without an operative network and a unit network "
+                                 "(--chain-op formula, no --chain-unit)")
+            tac_net.eval()
+            return TacticChain(tac_net, greedy=True, device=device), (
+                f"tactic_v2 only: tactic {path} (NetPlayer greedy, one group), unit script, no operative")
     unit_net = unit_network(unit, device)
     op_net, op_what = None, "formula"
     if op != "formula":
@@ -164,12 +180,12 @@ def load_chain(op="formula", tactic="formula", unit=None, greedy=False, plans=No
         op_net, _, _ = OC.restore(str(_path(path)), device)
         op_net.eval()
         op_what = path
-    tac_net, tac_what = None, "formula"
+    tac_what = "formula"
     if tactic != "formula":
-        path = scfg()["tactic_ckpt"] if tactic == "net" else tactic
-        tac_net, _, _ = TC.restore(str(_path(path)), device)
-        tac_net.eval()
+        tac_net.eval()               # (restored above: a tactic_v1 TacticNet)
         tac_what = path
+    else:
+        tac_net = None
     chain = Chain(unit_net, op_net, tac_net, op_greedy=greedy, tactic_greedy=greedy, unit_greedy=greedy, plans=plans,
                   task=task, device=device)
     what = (f"operative {op_what}, tacticians {tac_what}, unit network {unit or tcfg()['train']['unit_ckpt']}, "
@@ -200,7 +216,9 @@ def main(argv=None):
                              "of 40 groups yet) or an operative checkpoint")
     parser.add_argument("--chain-tactic", default="formula",
                         help="the chain's tacticians: formula (net/tactic/teacher.drive, the simulator's default), net "
-                             "(net/config/strategist.json tactic_ckpt) or a tactic checkpoint")
+                             "(net/config/strategist.json tactic_ckpt) or a tactic checkpoint; a tactic_v2 one (weights/"
+                             "tactic/attack1/final.pt) - the chain 'tactic_v2 only' (bridge/companion/tactic_chain.py: "
+                             "one group, the unit script, no operative; --chain-op formula)")
     parser.add_argument("--chain-unit", default=None,
                         help="the unit network's checkpoint (default net/config/tactic.json train.unit_ckpt)")
     parser.add_argument("--chain-greedy", action="store_true",
