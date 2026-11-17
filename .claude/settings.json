@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py",
+            "args": ["-3.14", "${CLAUDE_PROJECT_DIR}/.claude/hooks/compact.py", "pre"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py",
+            "args": ["-3.14", "${CLAUDE_PROJECT_DIR}/.claude/hooks/compact.py", "start", "project-current-state.md"],
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "py",
+            "args": ["-3.14", "${CLAUDE_PROJECT_DIR}/.claude/hooks/compact.py", "start", "orchestrator-playbook.md"],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py",
+            "args": ["-3.14", "${CLAUDE_PROJECT_DIR}/.claude/hooks/compact.py", "post"],
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
