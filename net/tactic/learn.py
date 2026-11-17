@@ -27,6 +27,7 @@ on held-out seeds; if not, the cause is not visible to the network).
 
     DOCK_NAME=agent-s4 DOCK_CPUS=6 DOCK_MEM=6g bash ops/dock.sh net.tactic.learn probe --inputs A,B,C,X \
         --out tmp/tactic_slice/v23/stage4/probe --sim 1925110
+`learn train` and `learn after` (the first training, the exam after by the move marks): tactic/imitate.py.
 """
 import argparse
 import json
@@ -107,7 +108,7 @@ def features(v, T, teacher, ana):
         card = ana(rows, mask)
     pin = PN.pinned(fx, touch=getattr(teacher, "touch", None))
     near, e0 = nearest_eligible(fx, v, teacher, given)
-    on = fx.my >= 0
+    on = HD.g_on_of(fx)                       # (the network's rule, heads.net_inputs: the unit has its own row)
     fnc = torch.zeros((R, K), device=dev)
     fnc.scatter_add_(1, fx.g_row, (e0 & on).float())
     _, _, pe = ingredients(fx)
@@ -236,24 +237,26 @@ def play(name, specs, scene, seeds, chunk, a, P, hook_of, on_chunk):
                          full=True, by_limit=True, **kw)
 
 
-def round_specs(k, scale=1.0, gscale=None):
+def round_specs(k, scale=1.0, gscale=None, seeds=None):
     """(scenes, general battles) of training round k (config drills.attack.probe: seeds apart from every set; the
-    round's mix, E1-E3 on top; general battles on G's trained sizes); scale / gscale - a smaller draw (the smoke)."""
+    round's mix, E1-E3 on top; general battles on G's trained sizes); scale / gscale - a smaller draw (the smoke);
+    seeds {scenes, round_step, general} - another draw's seeds (the training's: config tactic.json train.learn.seeds)."""
     gscale = scale if gscale is None else gscale
     from net.tactic import scenes as SN
     c = _c()
-    pr, mix = c["probe"], c["mix"]
+    mix = c["mix"]
+    sd = c["probe"]["seeds"] if seeds is None else seeds
     rn = c["sets"]["round"]
     n = int(rn["scenes"])
     counts = {r: max(1, round(v * n * scale)) for r, v in mix.items() if r != "E_on_top"}
     e = max(1, round(float(mix.get("E_on_top", 0.0)) * n * scale / 3))
     counts.update({"E1": e, "E2": e, "E3": e})
-    s0 = int(pr["seeds"]["scenes"]) + int(pr["seeds"]["round_step"]) * k
+    s0 = int(sd["scenes"]) + int(sd["round_step"]) * k
     scenes = []
     for j, (rec, m) in enumerate(counts.items()):
         scenes += [SN.make(rec, s0 + 10000 * j + i) for i in range(int(m))]
     G = c["sets"]["G"]
-    gen = SP.drill_generals(max(1, round(int(rn["general"]) * gscale)), SP.seeded(int(pr["seeds"]["general"]) + k),
+    gen = SP.drill_generals(max(1, round(int(rn["general"]) * gscale)), SP.seeded(int(sd["general"]) + k),
                             sizes=G["sizes"], limit=int(G["limit"]))
     return scenes, gen
 
@@ -828,6 +831,12 @@ def probe(a):
 
 
 def main(argv=None):
+    import sys
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ("train", "after"):
+        # the first training and the exam after by the move marks (tactic/imitate.py)
+        from net.tactic import imitate as IM
+        return IM.main(argv)
     ap = argparse.ArgumentParser()
     ap.add_argument("what", choices=("probe",))
     ap.add_argument("--inputs", default="A,B,C,X")

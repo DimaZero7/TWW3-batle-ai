@@ -438,12 +438,13 @@ def test_kinds_n2w_and_n9_comer():
                ("enemy", 60.0, 60.0, 180.0, 32, 10, 0, 0, -3.0)])
     T = TG.tick(v, keep(2), PN.player("TEACH"))
     assert bool(T["kinds"]["n2w"][0, 0]) and "n2w" not in TG.TAUGHT and bool(T["dc_keys"][0, 0, 2])
-    # n9: enemy 2 two ticks in melee, not pinned (none of mine in melee), runs south at unit 0 (0, 0); unit 1 (200, 60)
-    # level with it: for 0 its key is don't-care and the tick no n9, for 1 the tick is n9 and the key taught
+    # n9 (review O.2: don't-care for the training): enemy 2 two ticks in melee, not pinned (none of mine in melee), runs
+    # south at unit 0 (0, 0); unit 1 (200, 60) level with it: for 0 the tick is no n9 (a comer), for 1 it is n9, not
+    # taught; the key is don't-care for both
     v = _tick([("mine", 0.0, 0.0, 0.0, 32, 10, 0, 0, 0.0),
                ("mine", 200.0, 60.0, 0.0, 32, 10, 0, 0, 0.0),
                ("enemy", 0.0, 60.0, 180.0, 32, 10, 1, 0, -3.0)])
     v.fx.mt = torch.tensor([[0, 0, 2]])
     T = TG.tick(v, keep(2), PN.player("TEACH"))
-    assert T["kinds"]["n9"][0].tolist() == [False, True] and "n9" in TG.TAUGHT
-    assert T["dc_keys"][0, :, 2].tolist() == [True, False]
+    assert T["kinds"]["n9"][0].tolist() == [False, True] and "n9" not in TG.TAUGHT
+    assert T["dc_keys"][0, :, 2].tolist() == [True, True]

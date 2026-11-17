@@ -266,6 +266,9 @@ class View:
     # command [r, 7] (decide.order_vec: the operative's verb and pace); None for every other player
     inp: object = None
     command: object = None
+    # the rows' parcel (R groups, parcel.Parcel) as the level got it: what inputs.build reads beside raw, card, tiles,
+    # the areas and bounds - the training buffer rebuilds the network's input from them (tactic/imitate.py)
+    parcel: object = None
 
     def frames(self, must=None):
         """frame_walk with this tick's frames in force and masks (must: another set of units forced)."""

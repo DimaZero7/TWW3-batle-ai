@@ -2,8 +2,8 @@
 section 4 'Unit-ticks'; review_attack_v23 C binding: n1 don't-care; n2 as tested taught keep; n2 widened (n2w)
 don't-care (review N: at the 240 m window now - keep is +0.0189 +- 0.0078; K's 'taught' was for the 150 m window); n4, n5
 don't-care; n3 don't-care; n6 the coming enemy's own key don't-care, the pinned target of a unit with an own enemy coming
-within come_reach_m (150 m, review J) taught keep (n7); n7 taught keep; n9 taught keep, the key of an enemy that comes at g
-don't-care whatever its melee flag (review M / N: n6's case with a lagging flag); n9L don't-care; bands of config
+within come_reach_m (150 m, review J) taught keep (n7); n7 taught keep; n9 don't-care for the training - its keys
+don't-care (review O.2; before: taught, the key of an enemy that comes at g don't-care); n9L don't-care; bands of config
 stage0.json drills.attack.bands). The labeller reads the level's
 input only; the tagger may read the simulator's state too (View.sim: n9L, my lord's fight).
 
@@ -15,8 +15,8 @@ input only; the tagger may read the simulator's state too (View.sim: n9L, my lor
                    kind_keys {n2w, n4, n5: [r, G, K]} - the enemies that make the kind (branches' kind picks)}
 KINDS     taught keep: n2 (an unheld enemy within the reach comes at another unit of mine not in melee, and a nearer
           enemy also comes at it), n7 (a cause target in reach, but a standing enemy within STICK_M of g or one of its
-          own coming within come_own's reach), n9 (an enemy within reach two ticks in melee but not pinned and not coming
-          at g); don't-care keys: n2w (as n2, the enemy being the nearest coming at my idle unit; review N: at the 240 m
+          own coming within come_own's reach); don't-care keys: n9 (an enemy within reach two ticks in melee but not
+          pinned; review O.2 - before, taught when not coming at g), n2w (as n2, the enemy being the nearest coming at my idle unit; review N: at the 240 m
           window now - keep is +0.0189 +- 0.0078), n9's comers (an n9 enemy that comes at g, its melee flag on or off:
           review M / N), n1 (the cause but mt(e) = 1), n3 (a cause target the
           teacher gave another unit or held back by the walk), n4 (a cause target kinds.n4_m away, beyond the reach's
@@ -37,7 +37,9 @@ from net.tactic import rows as RW
 from net.unit import scripts as SC
 
 KINDS = ("n1", "n2", "n2w", "n3", "n4", "n5", "n6", "n7", "n9", "n9L", "nb")
-TAUGHT = ("n2", "n7", "n9", "nb")      # (n2w don't-care as n5, review N: at the 240 m window now - keep is +0.0189 +- 0.0078)
+# (n2w don't-care as n5, review N: at the 240 m window now - keep is +0.0189 +- 0.0078; n9 don't-care for the training,
+# its keys don't-care - review_attack_v23 O.2: 69-151 ticks a read, the one cell D2 still failed)
+TAUGHT = ("n2", "n7", "nb")
 
 
 def _c():
@@ -141,7 +143,7 @@ def tick(v, lab, teacher):
         n9 = (n9k & ~n9ck & ~n9Lk).any(2)
     kinds.update(n1=n1k.any(2), n2=n2k.any(2), n2w=n2wk.any(2), n3=n3k.any(2), n4=n4k.any(2), n5=n5k.any(2),
                  n6=n6k.any(2), n7=n7, n9=n9, n9L=n9Lk.any(2), nb=nbk.any(2))
-    for t in (n1k, n2wk, n3k, n4k, n5k, n6k, n9ck, n9Lk):                         # (n2w, n9's comers: review N)
+    for t in (n1k, n2wk, n3k, n4k, n5k, n6k, n9k, n9Lk):                          # (n2w: review N; n9: review O.2)
         dck |= t
     # bands: keys, then the tick's own state
     hold_m = fx.mine & ~fx.r & fx.m
@@ -210,6 +212,9 @@ class Record:
         # buffer and the label probe's read take their unit-ticks here)
         self.main, self.lab = driver, labeller
         self.allow = getattr(driver, "allow", (SC.HOLD, SC.ATTACK))
+        # the driver's needs_input passed on (pin.NetPlayer: the level builds inputs.build for it); a caller may set it on
+        # (the teacher-path read asks the network on the teacher's own states)
+        self.needs_input = bool(getattr(driver, "needs_input", False))
         self.name = getattr(driver, "name", "driver")
         self.keep_raw, self.hook = keep_raw, hook
         self.cnt, self.labels, self.first, self.raw = {}, [], {}, []

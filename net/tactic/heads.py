@@ -198,14 +198,18 @@ def d2_cols():
     return CL.D2, tuple(CL.COLS.index(n) for n in CL.D2)
 
 
+def g_on_of(fx):
+    """[R, G] my unit g has its own row (the row g_row holds its slot) - the network's and the probe's one rule."""
+    return (fx.my >= 0) & (fx.slot.gather(1, fx.g_row) == fx.my) & fx.mask.gather(1, fx.g_row)
+
+
 def net_inputs(v):
     """(module doc) {cols, own, g_row, g_on} of a View."""
     fx = v.fx
     _, idx = d2_cols()
     cols = CL.row_cols(fx)[..., list(idx)]
     own = OR.own(v.order, v.ctx.prev, fx, v.now)
-    g_on = (fx.my >= 0) & (fx.slot.gather(1, fx.g_row) == fx.my) & fx.mask.gather(1, fx.g_row)
-    return {"cols": cols, "own": own, "g_row": fx.g_row, "g_on": g_on}
+    return {"cols": cols, "own": own, "g_row": fx.g_row, "g_on": g_on_of(fx)}
 
 
 class EncoderV2(DC.Encoder):

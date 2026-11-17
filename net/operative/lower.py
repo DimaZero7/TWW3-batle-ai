@@ -279,7 +279,7 @@ class Tacticians:
         must = must & ~exempt
         view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene, raw=S,
                        card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim, inp=inp,
-                       command=self.order[idx])
+                       command=self.order[idx], parcel=p)
         out = self.player(view)
         skill, tgt, side, change, cnt = OR.masks(view, out, getattr(self.player, "allow", (0, 2)))
         self.fell += float(out["fell"].sum())

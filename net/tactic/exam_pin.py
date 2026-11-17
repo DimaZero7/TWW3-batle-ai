@@ -946,8 +946,6 @@ def scenes_vision(a, P, D):
     """Records for game.vision (game/vision/README.md: record.sim_frame every second -> record.from_sim ->
     vision.render): --vision A1:<seed>,N1:<seed>,G:<the shuffled pilot's battle>; each played alone on this device,
     TEACH driving; <D>/vision/<name>/ gets the strip, the text, orders.json (the order log) and spec.json."""
-    from game import vision
-    from game.vision import record as RC
     from net.tactic import scenes as SN
     want = [x.split(":") for x in a.vision.split(",") if x]
     gsp = None
@@ -955,31 +953,40 @@ def scenes_vision(a, P, D):
         if kind == "G":
             if gsp is None:
                 gsp = shuffled_pilot(a.n, range(a.seeds), a.limit)[0]
-            sp, scene = [gsp[int(ident)]], False
+            sp, scene = gsp[int(ident)], False
             seeds = [TSEED + int(ident) // a.n]
         else:
-            sp, scene = [SN.make(kind, int(ident))], True
+            sp, scene = SN.make(kind, int(ident)), True
             seeds = [TSEED + 100]
-        frames = []
+        vision_record("TEACH", sp, scene, seeds, a, P, lambda: build_under("TEACH"), D / "vision" / f"{kind}_{ident}")
 
-        class VisWatch(SceneWatch):
-            def __call__(self, sec, st):
-                super().__call__(sec, st)
-                if not bool(st.done[0]):
-                    frames.append(RC.sim_frame(st, 0))
-        kw = {"battles": BA.scene_battles, "enemy": BA.SceneEnemy} if scene else {}
-        res = run_player("TEACH", sp, seeds, 1, a, P, make=lambda: build_under("TEACH"), watch_cls=VisWatch, **kw)
-        nm = f"{kind}_{ident}"
-        outd = D / "vision" / nm
-        bt = RC.from_sim(frames, list(range(len(frames))), map_name=None, name=nm)
-        r = vision.render(bt, outd)
-        (outd / "orders.json").write_text(json.dumps({"cols": res["order_log_cols"], "rows": res["order_log"]}),
-                                          encoding="utf-8")
-        (outd / "spec.json").write_text(json.dumps(sp[0], default=str), encoding="utf-8")
-        ci = {k: i for i, k in enumerate(res["order_log_cols"])}
-        first = min((r_[ci["sec"]] for r_ in res["order_log"]), default=None)
-        print(json.dumps({"vision": str(outd), "first_attack_order_s": first, "t_contact": res["per_battle"]["t_contact"],
-                          **r.get("tokens", {})}), flush=True)
+
+def vision_record(name, spec, scene, seeds, a, P, make, outd):
+    """One battle (spec) played alone on a.device by the player make() (run_player's name), recorded every second for
+    game.vision (record.sim_frame -> record.from_sim -> vision.render) into outd: the strip, the text, orders.json (the
+    order log) and spec.json. Returns the player's file."""
+    from game import vision
+    from game.vision import record as RC
+    frames = []
+
+    class VisWatch(SceneWatch):
+        def __call__(self, sec, st):
+            super().__call__(sec, st)
+            if not bool(st.done[0]):
+                frames.append(RC.sim_frame(st, 0))
+    kw = {"battles": BA.scene_battles, "enemy": BA.SceneEnemy} if scene else {}
+    res = run_player(name, [spec], seeds, 1, a, P, make=make, watch_cls=VisWatch, **kw)
+    outd = Path(outd)
+    bt = RC.from_sim(frames, list(range(len(frames))), map_name=None, name=outd.name)
+    r = vision.render(bt, outd)
+    (outd / "orders.json").write_text(json.dumps({"cols": res["order_log_cols"], "rows": res["order_log"]}),
+                                      encoding="utf-8")
+    (outd / "spec.json").write_text(json.dumps(spec, default=str), encoding="utf-8")
+    ci = {k: i for i, k in enumerate(res["order_log_cols"])}
+    first = min((r_[ci["sec"]] for r_ in res["order_log"]), default=None)
+    print(json.dumps({"vision": str(outd), "first_attack_order_s": first, "t_contact": res["per_battle"]["t_contact"],
+                      **r.get("tokens", {})}), flush=True)
+    return res
 
 
 def _rate(xs):
