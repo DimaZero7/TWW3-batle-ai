@@ -282,7 +282,7 @@ end
 
 -- (lane.approach's cancel) the distance from (px, pz) to the way left: from (ax, az) through pts[k], ..., pts[#pts]. Pure.
 function M.way_clearance(px, pz, ax, az, pts, k)
-    local best, x0, z0 = math.huge, ax, az
+    local best, x0, z0 = 1e18, ax, az   -- no math.huge in the game's Lua (it is nil there)
     for i = k, #pts do
         best = math.min(best, M.seg_dist(px, pz, x0, z0, pts[i].x, pts[i].z))
         x0, z0 = pts[i].x, pts[i].z
