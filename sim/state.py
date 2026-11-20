@@ -293,6 +293,8 @@ STATIC = {
                    "Perfection), index in that order, -1 none (vortex.py)"),
     "resist_all": ("f", "the ward, 0-1 (the database's damage_mod_all): the only resistance a magical vortex that is no "
                         "spell meets (vortex.py; mechanic.md P6)"),
+    "lv_att": ("f", "swings a file-second in melee attacking, the late factor in (melee.core.level; params.level_rows)"),
+    "lv_std": ("f", "the same standing (held: melee.held_cut)"),
     "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
                  "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
                  "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),

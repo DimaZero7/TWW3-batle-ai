@@ -87,6 +87,9 @@ def build(armies, params=None, device="cpu", per_side=None):
     magic.start(u, params)          # the sides' winds of magic, the spells' initial cooldowns
     u["vis"] = present.clone()
     stealth.start(u, params)        # units that can hide start hidden (stealth.py; sim/config/sim.json stealth)
+    from sim import core
+    if core.on(params, "share") or core.on(params, "shared_front_cap"):
+        core.ensure(u)              # (melee.core.share: the pair clock and the kept classes, sim/core.py)
     st.attacker = torch.tensor(attacker, dtype=torch.int64, device=device)
     st.bounds = params.map_half
     return st

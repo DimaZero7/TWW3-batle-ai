@@ -17,6 +17,9 @@
   `py -3.14 -m sim.passports.gamedb` (путь к игре — общие настройки `bridge.config`).
 - `config/sim.json` — то, чего в базе нет: замеры проб, разбор программы игры (Ghidra, memreader Plus), сообщество.
 - `config/pools.json`, `army_templates.json`, `arena.json` — армии и арена; `data/` — паспорта проб, карточки отрядов.
+- Рукопашная: `melee.py` + ядро `core.py` (`sim.json` melee.core: общая линия share, свои люди stack, замахи по отряду
+  level — включены, как и общий фронт цели shared_front_cap; все 0 = прежний симулятор один в один), доказательства
+  `evidence/melee_core/spec.md`.
 - `maps/<имя>/` — снятые карты (высоты, лес, стволы, «нельзя встать»), снимаются один раз в игре; путь — `sim.maps.MAPS`.
 
 **Доказательства.** Ссылки `_why` ведут в `sim/evidence/<папка>/` — разборы и выводы проб (md, в git).

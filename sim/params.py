@@ -50,6 +50,22 @@ def aim_times(missile, ms):
     return aim_s, rt_s, quiet_s
 
 
+def level_rows(melee, key, u):
+    """STATIC lv_att / lv_std of a unit (melee.core.level; sim/config/sim.json melee.core_level_why): its swings a
+    file-second in melee attacking / standing (melee.core_level swings[key]) x the late factor of the role (late); a unit
+    without a row takes its template family's (swings_default: 'rabble' - a units.json spacing.template with 'rabble' in
+    its name or spacing.chaotic -, else 'ordered'; standing: 'standing'). 0 / 0 with no core_level block."""
+    lv = melee.get("core_level")
+    if not lv:
+        return {"lv_att": 0.0, "lv_std": 0.0}
+    row = (lv.get("swings") or {}).get(key)
+    if row is None:
+        sp = u.get("spacing") or {}
+        fam = "rabble" if ("rabble" in str(sp.get("template") or "") or sp.get("chaotic")) else "ordered"
+        row = [lv["swings_default"][fam], lv["swings_default"]["standing"]]
+    return {"lv_att": float(row[0]) * float(lv["late"][0]), "lv_std": float(row[1]) * float(lv["late"][1])}
+
+
 def reform_share(cls, rf):
     """STATIC wmin_k of a unit of the database's class `cls` (land_units.class) by sim.json formation.reform `rf`: the
     narrowest formation's files as a share of its men - the cavalry's, monsters' and chariots' (classes starting with
@@ -295,6 +311,9 @@ class Params:
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "rout_death_s": (self.sim["morale"]["lord_fall"].get("rout_death_s") or {}).get(faction, 0),
             "cost": u.get("multiplayer_cost", 0),
+            # (melee.core.level; sim.json melee.core_level_why) swings a file-second in melee attacking / standing, the
+            # late factor folded in: the unit's row, else its template family's (units.json spacing.template / chaotic)
+            **level_rows(self.sim["melee"], key, u),
             # stealth (stealth.py): its spotting distance (open ground: spot_dist_scrub) and hiding_scalar
             "spot_m": float((u.get("spotting") or {}).get("scrub", 80.0)),
             # ... and of a target mostly on forest ground (spot_dist_tree: 60 m; stealth.py)

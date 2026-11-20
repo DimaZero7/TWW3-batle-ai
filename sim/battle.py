@@ -14,6 +14,8 @@ from sim import abilities, artillery, effects, fatigue, geometry, knobs, lone_ro
 from sim import movement
 from sim import detour, direct, ground, impact, reform, regen, skirmish, stealth, terrain, vortex
 from sim import orders as O
+from sim import core_trace
+from sim import core
 from sim.params import load
 
 # the time constant of u shot_dealt, a bookkeeping sum for net/strategist/drill_s1's metric (no effect on the battle;
@@ -53,6 +55,8 @@ def step(st, orders, params=None, dt=None):
     params = params or load()
     dt = dt or params.dt
     u = st.u
+    if core.on(params, "share") or core.on(params, "shared_front_cap"):
+        core.ensure(u)              # (melee.core: the ledger before the snapshot - a state built with share off)
     old = dict(u)
     live = ~st.done
     cal = params.sim
@@ -607,8 +611,23 @@ def step(st, orders, params=None, dt=None):
         afw = u["afw"].view(st.B, N, N)
         u["afw"] = torch.where(begin_fw | ((afw > 0) & touch), torch.ones_like(afw), torch.zeros_like(afw)).reshape(
             st.B, N * N)
+    if core_trace.HOOK is not None:
+        core_trace.HOOK.pre(st, u, pw, touch, strike, params, dt)      # (melee.core read-outs: sim/core_trace.py)
+    kw = {"parts": parts} if parts is not None else {}
+    assert core.on(params, "share") or not core.on(params, "stack"), "melee.core.stack reads share's ledger: share 1"
+    if core.on(params, "share") or core.on(params, "shared_front_cap"):
+        # (melee.core.share; sim/core.py) the pair clock of the enemy formations' contact (melee.core.shared_front_cap
+        # reads it too), and that contact for the classes
+        assert float(dt) == float(params.dt), "melee.core.share: core.classes reads params.dt as the step"
+        core.ensure(u)
+        # (cons. A.5) a routing unit leaves the ledger: its pair's time routing is a gap (contact.reset_s), not age
+        core.clock(u, touch & pw["enemy"] & standing[:, :, None] & standing[:, None, :], params, dt)
+    if core.on(params, "share"):
+        kw["touch"] = touch & pw["enemy"]
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire,
-                                                     late=late, **({"parts": parts} if parts is not None else {}))
+                                                     late=late, **kw)
+    if core_trace.HOOK is not None:
+        core_trace.HOOK.post(rate, mhit, sector, F_men)
     if big_on:
         # (impact.up_share) the front men of a unit knocked down by a large enemy do not strike it while they lie
         rate, swing = impact.up_share(u, params, rate), impact.up_share(u, params, swing)
