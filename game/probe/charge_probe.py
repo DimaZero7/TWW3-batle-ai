@@ -577,7 +577,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
               "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2", "turn",
-              "duel", "roster", "behind3", "duel2")
+              "duel", "roster", "behind3", "duel2", "side2r")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2115,7 +2115,7 @@ def run_config(plan, index):
     if plan == "counter":
         # (game/probe/unit_probe.py) health every 0.25 s; the men every 0.5 s from 60 m on to 40 s after the contact
         config.update(tick_ms=TURN_TICK_MS, men_ms=500, men_after_s=40, men_near_m=60)
-    if plan == "flank2v1":
+    if plan in ("flank2v1", "side2r"):
         # (game/probe/unit_probe.py) health every 0.25 s; no soldier places from the script (men_near_m 0); from memory
         # the hammer's and the target's men every 0.5 s (the sparse polls: their places, the charge's clock) and the
         # target's morale every 0.5 s (mem_morale: the effects, the sides its enemies struck from, the fight's outcome)
@@ -2390,6 +2390,14 @@ def runs(root=RUNS):
 
 # ---------------------------------------------------------------- the simulator on the same lanes
 
+def _seg_dist(px, pz, ax, az, bx, bz):
+    """The distance from the point (px, pz) to the segment a-b."""
+    dx, dz = bx - ax, bz - az
+    l2 = dx * dx + dz * dz
+    k = 0.0 if l2 == 0 else max(0.0, min(1.0, ((px - ax) * dx + (pz - az) * dz) / l2))
+    return math.hypot(px - (ax + k * dx), pz - (az + k * dz))
+
+
 def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, terrain_map=None):
     """The simulator on recorded lanes: each lane its own battle (its units at their places at the
     probe's go), the same scripted orders as the entry's modes, everyone fearless; terrain_map: a height map's id
@@ -2507,7 +2515,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
            "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B,
            "t_halt": {}, "after2": [None] * B, "arrive": [None] * B, "clear": [None] * B, "held_range": {},
-           "push_goal": {}, "go": [None] * B, "go_s": [{} for _ in range(B)]}
+           "push_goal": {}, "go": [None] * B, "go_s": [{} for _ in range(B)], "ap": [None] * B, "t2_goal": {}}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     # (the cavcheck plan's recharge) the game's goto point is the formation's front centre - the knights' centre stopped
@@ -2816,12 +2824,15 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             # lane.after (entries/charge_probe.lua): at_s after the first contact the attacker gets one more order,
             # kept from then on (attack_t2 / attack_same / halt / move_near to its place then + (dx, dz) / none);
             # lane.after2 the same, later (the holdmelee plan's halt), replacing it from its own at_s on
+            # (lane.clock_flag, the side2r plan) these orders' clock is the step that shows the flag (the entry's tick
+            # sees it then), not the start of the step it rose in (c)
+            cf = c + params.dt if c is not None and sp.get("clock_flag") else c
             key = "after"
             af2 = sp.get("after2")
-            if af2 and c is not None and t - c >= af2["at_s"] - 1e-6:
+            if af2 and cf is not None and t - cf >= af2["at_s"] - 1e-6:
                 key = "after2"
             af = sp.get(key)
-            if af and c is not None and t - c >= af["at_s"] - 1e-6 and af["kind"] != "none":
+            if af and cf is not None and t - cf >= af["at_s"] - 1e-6 and af["kind"] != "none":
                 if st_[key][b] is None:
                     st_[key][b] = (float(ax[b]), float(az[b]))
                     st_["phases"][b].append({"phase": "after:" + af["kind"], "t": t * 1000,
@@ -2839,6 +2850,58 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     sx, sz = st_[key][b]
                     kind[b, A], target[b, A], run_[b, A] = O.MOVE, -1, not walk
                     x[b, A], z[b, A] = sx + af.get("dx", 0), sz + af.get("dz", 0)
+            # (lane.approach, the side2r plan of game/probe/unit_probe.py; entries/charge_probe.lua approach) at_s after
+            # the flag a move at a run through approach.points - each the target's centre then + (dx, dz), arriving facing
+            # its bearing; the next once within near_m - and at the last (P) the attack at a run, kept ('charge'; or
+            # max_s after the order: late); with clear_m the attack at once, for good, when the second target's centre
+            # comes within clear_m of the way left (the attacker -> its point -> ... -> P: 'cancel')
+            ap = sp.get("approach")
+            if ap and cf is not None and t - cf >= ap["at_s"] - 1e-6:
+                s_ = st_["ap"][b]
+                if s_ is None:
+                    pts = [(float(tx[b]) + q["dx"], float(tz[b]) + q["dz"], float(q.get("bearing", -1.0)))
+                           for q in ap["points"]]
+                    s_ = st_["ap"][b] = {"pts": pts, "k": 0, "t": t, "ph": "walk"}
+                    st_["phases"][b].append({"phase": "after:approach", "t": t * 1000, "n": len(pts),
+                                             "x": round(pts[-1][0], 1), "z": round(pts[-1][1], 1)})
+                T2_ = int(slot["t2"][b])
+                if s_["ph"] == "walk" and ap.get("clear_m") is not None and T2_ >= 0:
+                    way = [(float(ax[b]), float(az[b]))] + [(q[0], q[1]) for q in s_["pts"][s_["k"]:]]
+                    cx_, cz_ = float(u["x"][b, T2_]), float(u["z"][b, T2_])
+                    cl = min(_seg_dist(cx_, cz_, *way[j], *way[j + 1]) for j in range(len(way) - 1))
+                    if cl < ap["clear_m"]:
+                        s_["ph"] = "attack"
+                        st_["phases"][b].append({"phase": "cancel", "t": t * 1000, "clear": round(cl, 1)})
+                while s_["ph"] == "walk":
+                    qx, qz, _ = s_["pts"][s_["k"]]
+                    d_ = math.hypot(float(ax[b]) - qx, float(az[b]) - qz)
+                    last_ = s_["k"] == len(s_["pts"]) - 1
+                    if d_ <= ap["near_m"] and not last_:
+                        s_["k"] += 1
+                        st_["phases"][b].append({"phase": "waypoint", "t": t * 1000, "k": s_["k"]})
+                        continue
+                    if (d_ <= ap["near_m"] and last_) or t - s_["t"] >= ap["max_s"] - 1e-6:
+                        s_["ph"] = "attack"
+                        st_["phases"][b].append({"phase": "charge", "t": t * 1000, "d": round(d_, 1),
+                                                 "late": d_ > ap["near_m"]})
+                    break
+                if s_["ph"] == "walk":
+                    qx, qz, qb = s_["pts"][s_["k"]]
+                    kind[b, A], target[b, A], run_[b, A], x[b, A], z[b, A] = O.MOVE, -1, True, qx, qz
+                    face[b, A] = qb
+                else:
+                    kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
+                    face[b, A] = -1.0
+            # (lane.t2_after, the side2r plan's comer; entries/charge_probe.lua) at_s after the flag the second target
+            # gets one order, kept: 'attack_a' - attack the attacker at a run (walk: at a walk)
+            t2a = sp.get("t2_after")
+            if t2a and int(slot["t2"][b]) >= 0 and cf is not None and t - cf >= t2a["at_s"] - 1e-6:
+                T2_ = int(slot["t2"][b])
+                if b not in st_["t2_goal"]:
+                    st_["t2_goal"][b] = True
+                    st_["phases"][b].append({"phase": "t2_after:" + t2a["kind"], "t": t * 1000})
+                if t2a["kind"] == "attack_a":
+                    kind[b, T2_], target[b, T2_], run_[b, T2_] = O.ATTACK, A, not t2a.get("walk")
             # the second target: halted unless it attacks (t2_mode)
             if sp.get("t2_mode") == "attack" and int(slot["t2"][b]) >= 0:
                 # (lane.t2_run, the own plan: at a run)

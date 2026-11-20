@@ -80,6 +80,14 @@
 -- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>' (n = 1). lane.after2 (optional,
 -- the same fields): a second order at its own at_s after the first contact (n = 2; the holdmelee plan: a halt 3 or
 -- 10 s after a move or an attack given in melee).
+-- lane.approach (optional; the side2r plan) {at_s, points = {{dx, dz, bearing}, ...}, near_m, max_s, clear_m}: at_s after
+-- the first contact the attacker walks at a run through the points (each the target's centre then + (dx, dz), one
+-- goto_location_angle_width a point, arriving facing its bearing; the next within near_m of one), at the last the attack
+-- on the target at a run (probe_phase 'after:approach', 'waypoint' {k}, 'charge' {d, late}: late - max_s after the start,
+-- not there); with clear_m (and target2) the attack at once, for good, when the second target's centre comes within
+-- clear_m of the way left (probe_phase 'cancel' {clear}; M.way_clearance). lane.t2_after (optional) {at_s, kind, walk}:
+-- at_s after the first contact the second target gets one order - 'attack_a' an attack on the attacker at a run
+-- (probe_phase 't2_after:attack_a').
 -- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one; lane.t2_run:
 -- at a run - the own plan);
 -- 'attack_extra' (the intercept plan): it attacks the first extra at a run at the go (lane.t2_walk: at a walk).
@@ -206,6 +214,7 @@ M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear
     skirmish = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true, face = true}
 M.AT_ROUT = {halt = true, none = true, away = true}
+M.T2_AFTER_KINDS = {attack_a = true}
 -- The card values a lane with card_rows samples (its row's cs): leadership, speed, melee attack / defence, weapon damage,
 -- missile damage (the contact effects' stats: poison, the censer's contagion, suppressing fire; frenzy).
 M.CARD_STATS = {stat_morale = true, scalar_speed = true, stat_melee_attack = true, stat_melee_defence = true,
@@ -262,6 +271,25 @@ function M.due_casts(casts, done, elapsed_ms)
 end
 
 -- The second target's centre (x, z) for a lane's layout L: t2_dx beside the target, t2_dz along z. Pure.
+-- The distance from (px, pz) to the segment (ax, az) - (bx, bz). Pure.
+function M.seg_dist(px, pz, ax, az, bx, bz)
+    local dx, dz = bx - ax, bz - az
+    local l2 = dx * dx + dz * dz
+    local k = 0
+    if l2 > 0 then k = math.max(0, math.min(1, ((px - ax) * dx + (pz - az) * dz) / l2)) end
+    return math.sqrt((px - (ax + k * dx)) ^ 2 + (pz - (az + k * dz)) ^ 2)
+end
+
+-- (lane.approach's cancel) the distance from (px, pz) to the way left: from (ax, az) through pts[k], ..., pts[#pts]. Pure.
+function M.way_clearance(px, pz, ax, az, pts, k)
+    local best, x0, z0 = math.huge, ax, az
+    for i = k, #pts do
+        best = math.min(best, M.seg_dist(px, pz, x0, z0, pts[i].x, pts[i].z))
+        x0, z0 = pts[i].x, pts[i].z
+    end
+    return best
+end
+
 function M.t2_place(L, lane)
     return L.tx + (lane.t2_dx or 0), L.tz + (lane.t2_dz or 0)
 end
@@ -986,6 +1014,71 @@ function M.main(bm, config, globals)
                             goal = af.goal and round(af.goal, 0) or nil})
                     end
                 end
+                -- lane.approach (the side2r plan, game/probe/unit_probe.py; its twin charge_probe.py sim_lanes): at_s after
+                -- the first contact the attacker walks at a run through approach.points, each the target's centre then
+                -- + (dx, dz), arriving facing its bearing (one move_formation a point); within near_m of a point the next
+                -- one, at the last (P) the attack on the target at a run ('charge' {d, late}; or max_s after the start:
+                -- late); with clear_m, while walking, the attack at once and for good when the second target's centre
+                -- comes within clear_m of the way left (the attacker -> its point -> ... -> P: 'cancel' {clear})
+                local ap = lane.approach
+                if ap and lane.contact and now - lane.contact >= ap.at_s * 1000 then
+                    if not lane.ap then
+                        local tp = read(function() return lane.t.unit:position() end)
+                        if tp then
+                            local pts = {}
+                            for k, q in ipairs(ap.points) do
+                                pts[k] = {x = tp:get_x() + (q.dx or 0), z = tp:get_z() + (q.dz or 0), b = q.bearing}
+                            end
+                            lane.ap = {pts = pts, k = 1, t = now, ph = 'walk', sent = 0}
+                            emit('probe_phase', {lane = lane.name, phase = 'after:approach', t = now - lane.t0,
+                                n = #pts, x = round(pts[#pts].x), z = round(pts[#pts].z)})
+                        end
+                    end
+                    local s = lane.ap
+                    local p = s and read(function() return lane.a.unit:position() end)
+                    if s and p and s.ph == 'walk' and ap.clear_m and lane.t2 then
+                        local q2 = read(function() return lane.t2.unit:position() end)
+                        if q2 then
+                            local cl = M.way_clearance(q2:get_x(), q2:get_z(), p:get_x(), p:get_z(), s.pts, s.k)
+                            if cl < ap.clear_m then
+                                s.ph = 'attack'
+                                attack(lane, lane.a, lane.t, false)
+                                emit('probe_phase', {lane = lane.name, phase = 'cancel', t = now - lane.t0,
+                                    clear = round(cl, 1)})
+                            end
+                        end
+                    end
+                    while s and p and s.ph == 'walk' do
+                        local q = s.pts[s.k]
+                        local d = math.sqrt((p:get_x() - q.x) ^ 2 + (p:get_z() - q.z) ^ 2)
+                        local last = s.k == #s.pts
+                        if d <= ap.near_m and not last then
+                            s.k = s.k + 1
+                            emit('probe_phase', {lane = lane.name, phase = 'waypoint', k = s.k, t = now - lane.t0})
+                        else
+                            if (d <= ap.near_m and last) or now - s.t >= ap.max_s * 1000 then
+                                s.ph = 'attack'
+                                attack(lane, lane.a, lane.t, false)
+                                emit('probe_phase', {lane = lane.name, phase = 'charge', t = now - lane.t0,
+                                    d = round(d, 1), late = d > ap.near_m})
+                            end
+                            break
+                        end
+                    end
+                    if s and s.ph == 'walk' and s.sent ~= s.k then
+                        s.sent = s.k
+                        local q = s.pts[s.k]
+                        orders.move_formation(lane.a.uc, vec(q.x, q.z), q.b, lane.a_width, true)
+                    end
+                end
+                -- lane.t2_after (the side2r plan's comer): at_s after the first contact the second target gets one order,
+                -- kept: 'attack_a' an attack on the attacker at a run (walk: at a walk); probe_phase 't2_after:<kind>'
+                local t2a = lane.t2_after
+                if t2a and lane.t2 and lane.contact and not lane.t2_after_done and now - lane.contact >= t2a.at_s * 1000 then
+                    lane.t2_after_done = true
+                    if t2a.kind == 'attack_a' then attack(lane, lane.t2, lane.a, t2a.walk == true) end
+                    emit('probe_phase', {lane = lane.name, phase = 't2_after:' .. t2a.kind, t = now - lane.t0})
+                end
                 -- lane.t_stop_fire_s (a 'skirmish' target, the suppress2 plan): the shooter falls silent that long after
                 -- the go - fire at will off and a halt (its ranged attack dropped)
                 if lane.t_stop_fire_s and not lane.stop_fire_done and now - lane.t0 >= lane.t_stop_fire_s * 1000 then
@@ -1605,6 +1698,20 @@ function M.main(bm, config, globals)
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
             if l.after2 then assert(M.AFTER_KINDS[l.after2.kind], 'unknown after2 kind ' .. tostring(l.after2.kind)) end
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
+            if l.approach then
+                local ap = l.approach
+                assert(type(ap.at_s) == 'number' and type(ap.near_m) == 'number' and type(ap.max_s) == 'number'
+                    and type(ap.points) == 'table' and #ap.points >= 1, 'an approach needs at_s, near_m, max_s, points')
+                for _, q in ipairs(ap.points) do
+                    assert(type(q.dx) == 'number' and type(q.dz) == 'number' and type(q.bearing) == 'number',
+                        'an approach point needs dx, dz, bearing')
+                end
+                assert(ap.clear_m == nil or (type(ap.clear_m) == 'number' and l.target2), 'approach.clear_m needs target2')
+            end
+            if l.t2_after then
+                assert(l.target2 and M.T2_AFTER_KINDS[l.t2_after.kind] and type(l.t2_after.at_s) == 'number',
+                    't2_after needs target2, at_s and a kind: ' .. tostring(l.t2_after.kind))
+            end
             if l.mode == 'retarget' or l.mode == 'attack_t2' then
                 assert(l.target2, 'a ' .. l.mode .. ' lane needs target2')
             end
