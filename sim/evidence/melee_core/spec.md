@@ -65,3 +65,21 @@ All switches 0 = before the fixes bit for bit. With share + stack + level: flank
 unchanged; AI vs AI the game's winner 12 -> 13 of 32, routs a battle 15.06 -> 15.03 (game 16.4), first rout 161 / 210 s.
 `melee.core.shared_front_cap` (off; `core_cap_why`): the target's front shared by two formations, L = W - 0.5 max(W - a,
 0) (`tmp/astra/wide_flank/out/CHANGE1.md`).
+
+## Known gross error: the hammer caught on its walk (21.11)
+Game probe `side2r` (`game/probe/evidence/side2r_game.json`, 32 battles): a hammer walking round to the flank is attacked
+by a second enemy unit 4 s after its order. Going on with the flank against the plain front attack: game +0.022 narrow,
+-0.016 wide; the simulator -0.179, -0.239 - the decision "cancel the walk or go on" has the reversed sign. Without the
+comer the flank from the second row is understated: +0.039 / +0.061 against +0.096 / +0.089.
+Where (two outside passes, `caught_hammer/pass1.md`, `pass2.md`; their numbers, not rerun by us): (1) the formation is
+held as one body - the hammer's first damage to the ordered target comes at 47-49 s from the order, the game's first
+swing at 36 s; (2) the comer's hits stay "rear" by the unit's sector (23 % of damaging ticks) while in the game the struck
+men turn (6 % of swing starts from behind; half-time to front 2.5 s); (3) after the first minute the hammer gives the
+target 3-4 fighters of ~15-20 in contact, the game about half its swings. Three rules under switches were written and
+REJECTED by the lines set in advance (`caught_hammer/A.patch` free advance: closes 18 %; `B.patch` individual facing:
+24 %, but moves flank2v1's rear - front away from the game by 0.02-0.05; `C.patch` charge after interception: 3 %; all
+three: 50 %, with the same regression). Not merged; the patches are kept for the next attempt. The same passes show that
+the rear on a WIDE target (flank2v1: game +0.181, here +0.037) is not a matter of the rear defence penalty: the game's
+rear attackers rarely swing "from behind" after the start (75 of 1326), yet the target loses far more.
+Until mended: simulator exams of drills report apart the battles where an enemy comes at a unit AFTER its order to
+walk round, and paired play on such states is not trusted; imitation of a teacher's rule is not affected.

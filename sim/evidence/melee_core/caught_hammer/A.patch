@@ -1,0 +1,125 @@
+--- a/config/sim.json
++++ b/config/sim.json
+@@ -36,4 +36,5 @@
+   },
+   "contact": {
++    "free_advance": 0,
+     "move_crowd": 1,
+     "move_crowd_why": "A formation on the move through its own standing formation is slowed by their men, as a router is (battle.py; morale.rout_crowd own shares by the formations standing still - speed <= 0.3 m/s, no lord - whose centres are within its m 15; 0 / absent: not slowed). The search for the way does not know the unit's own (reverse/notes/p4/way.md: the A* over the navigation mesh's edges, no unit in it) and the game's unit goes straight through: the memform probe (tmp/old-build/charge-probe/runs/20261101-130745, tmp/old-build/diag_p4; 160 clanrat spearmen running 160 m straight through 160 clanrats standing across their way, 30 m fronts): the centre stays on the line (within 2-4 m), the men's speed 3.6 -> 2.0-2.1 m/s while the blocks overlap (0.60), z 67-125 m in 22.2 s game / 16.0 s the twin before / 19.0 s with this rule (-14 %). No number of its own: rout_crowd's 0.73 / 0.46 (many routers) rather than one lane's 0.60. NOT MEASURED: a walk, cavalry, a friend on the move or a lord (not counted: counting every non-routing friend and lord changed all 48 test battles, the winner in 20 %).",
+--- a/battle.py
++++ b/battle.py
+@@ -56,4 +56,7 @@
+     dt = dt or params.dt
+     u = st.u
++    if params.sim["contact"].get("free_advance"):
++        from sim import free_advance
++        free_advance.ensure(u)
+     if core.on(params, "share") or core.on(params, "shared_front_cap"):
+         core.ensure(u)              # (melee.core: the ledger before the snapshot - a state built with share off)
+@@ -491,4 +494,14 @@
+     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt,
+                                  torch.where(u["out_s"] < reset_s, u["contact_s"], torch.zeros_like(u["contact_s"])))
++    if cal["contact"].get("free_advance"):
++        # The advance party has its own contact while the main body follows the usual movement.
++        ahead = free_advance.arrivals(u, pw, touch, standing, new_order, kind, tgt, run, R, dt)
++        pw["advance_men"] = ahead
++        # An ordered blow is exempt from incidental breakoff; defenders retain their strike gates.
++        strike = strike | ((ahead > 0) & seen[:, None, :])
++        reply = (ahead.transpose(1, 2) > 0) & striker[:, :, None] & seen[:, None, :]
++        if "fbk_s" in u:
++            reply = reply & (u["fbk_s"].view(st.B, N, N) <= 0)
++        strike = strike | reply
+     # --- the charge (CA Feature Focus #2, sim/evidence/charge/spec.md): an attack order and a run-up - charge.min_runup_m
+     # run at charge.min_speed_share of the run speed or faster - give the full charge bonus at the contact (an
+--- a/melee.py
++++ b/melee.py
+@@ -833,4 +833,9 @@
+     F = F * torch.where(single_j, torch.ones_like(F), share_j.pow(cal.get("men_exp_target", 0.0)))
+     F = torch.where(contact, F, torch.zeros_like(F))
++    if "advance_men" in pw:
++        # One reciprocal contact per arriving man, before the normal side, file and headcount caps.
++        arrivals = pw["advance_men"]
++        pairs = torch.maximum(arrivals, arrivals.transpose(1, 2))
++        F = torch.where(contact & (pairs > 0), torch.minimum(men_i, pairs), F)
+     F_geo = F                            # (melee.core.share: the men from the line, before every side, stack and answer cap)
+     if core_trace.HOOK is not None:
+@@ -1052,4 +1057,7 @@
+         # answer_struck's parts for the rows in scope
+         F = core.share(u, F, F_geo, F_ans, F_pre, cover, ahead_k, contact, core_cls, params)
++    if "advance_men" in pw:
++        # Reply and senior allocation above may restore a full native line. Only arrivals can use it.
++        F = torch.where(pairs > 0, torch.minimum(F, pairs), F)
+     own =torch.where(single_i, torch.ones_like(men_i), men_i)
+     total = F.sum(dim=2, keepdim=True)
+--- /dev/null
++++ b/free_advance.py
+@@ -0,0 +1,69 @@
++"""Experimental free infantry files on an attack order issued during another contact."""
++import torch
++from sim import geometry, orders
++
++
++def ensure(u):
++    if "advance_target" in u:
++        return
++    count = max(1, int(u["men0"].max().item()))
++    b, n = u["men"].shape
++    u["advance_target"] = torch.full_like(u["order_target"], -1)
++    u["advance_distance"] = torch.zeros_like(u["men"])
++    for key in ("advance_x", "advance_z"):
++        u[key] = u["men"].new_zeros(b, n * count)
++    u["advance_free"] = torch.zeros(b, n * count, dtype=torch.bool, device=u["men"].device)
++
++
++def slot_distance(x, z, u, pw, b, j):
++    # Distance to the rectangle of enemy soldier centres, half a place inside each box edge.
++    angle = u["b"][b, j] * geometry.DEG
++    half_depth = (pw["depth"][b, j] - u["sp_v"][b, j]).clamp(min=0) / 2
++    half_width = (pw["front"][b, j] - u["sp_h"][b, j]).clamp(min=0) / 2
++    return geometry._box_point_dist(x, z, u["x"][b, j], u["z"][b, j], angle.sin(), angle.cos(),
++                                    half_depth, half_width)
++
++
++def arrivals(u, pw, touch, standing, changed, kind, target, run, rules, dt):
++    bsize, n = target.shape
++    count = u["advance_free"].shape[1] // n
++    j = target.clamp(min=0)
++    in_order = ((kind == orders.ATTACK) & (target >= 0) & standing & standing.gather(1, j)
++                & (u["range"] <= 0) & (u["men0"] > 1) & (u["men0"].gather(1, j) > 1)
++                & ~touch.gather(2, j.unsqueeze(2)).squeeze(2))
++    begin = in_order & changed & (touch & standing[:, None, :]).any(2)
++    tracking = in_order & (begin | (~changed & (u["advance_target"] == target)))
++    u["advance_target"] = torch.where(tracking, target, -1)
++    age_m = torch.where(tracking & ~begin, u["advance_distance"], 0.)
++    result = torch.zeros_like(pw["gap"])
++    # Free men start at their deployment-template places. Leave occupied places with the interceptor.
++    b, i = begin.nonzero(as_tuple=True)
++    reach = rules["entity_action_attack_formed_combat_distance"]
++    if b.numel():
++        h = u["sp_h"][b, i, None].clamp(min=1e-6)
++        v = u["sp_v"][b, i, None]
++        files = (pw["front"][b, i, None] / h).round().clamp(min=1)
++        k = torch.arange(count, device=b.device)[None, :]
++        dx = (k % files + .5) * h - pw["front"][b, i, None] / 2
++        dz = pw["depth"][b, i, None] / 2 - (torch.floor(k / files) + .5) * v
++        a = u["b"][b, i, None] * geometry.DEG
++        x = u["x"][b, i, None] + dx * a.cos() + dz * a.sin()
++        z = u["z"][b, i, None] - dx * a.sin() + dz * a.cos()
++        free = k < u["men"][b, i, None]
++        for enemy in range(n):
++            gap = slot_distance(x, z, u, pw, b[:, None], enemy)
++            free = free & ~(touch[b, i, enemy, None] & (gap <= reach + u["radius"][b, enemy, None]))
++        for key, value in (("advance_x", x), ("advance_z", z), ("advance_free", free)):
++            updated = u[key].clone().view(bsize, n, count)
++            updated[b, i] = value
++            u[key] = updated.flatten(1)
++    b, i = tracking.nonzero(as_tuple=True)
++    if b.numel():
++        j = target[b, i]
++        x, z, free = [u[key].view(bsize, n, count)[b, i] for key in ("advance_x", "advance_z", "advance_free")]
++        gap = slot_distance(x, z, u, pw, b[:, None], j[:, None])
++        arrived = free & (gap <= age_m[b, i, None] + reach + u["radius"][b, j, None])
++        result[b, i, j] = arrived.sum(1).to(result.dtype)
++    # Straight paths from each free place to the target box at the infantry order speed.
++    u["advance_distance"] = torch.where(tracking, age_m + torch.where(run, u["run"], u["walk"]) * dt, 0.)
++    return result

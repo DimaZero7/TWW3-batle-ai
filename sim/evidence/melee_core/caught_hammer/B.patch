@@ -1,0 +1,82 @@
+--- a/config/sim.json
++++ b/config/sim.json
+@@ -162,4 +162,5 @@
+   },
+   "melee": {
++    "individual_facing": 0,
+     "core": {"share": 1, "share_k": 0, "stack": 1, "stack_k": 0, "profile": 0, "stand": 0, "level": 1, "shared_front_cap": 1},
+     "core_cap_why": "melee.core.shared_front_cap (sim/melee.py, before target_face_cap; ON by default since 20.11: against 0 it keeps the narrow target bit for bit, moves the wide target of probe flank2v1 towards the game - front 0.193 -> 0.168 (game 0.153), flank - front +0.055 -> +0.080 (game +0.101), rear - front +0.012 -> +0.037 (game +0.181) - AI vs AI the game's winner 13 -> 15 of 32, the duel tables identical, tactic TEACH - C +0.0541 +- 0.0069, unit - stand +0.0219 +- 0.0022; the 0.5 is read from that probe's contact widths, 37.2 m measured against the 44.8 m box at a 29.6 m pinning front, and 28.85 against 28.8 on the narrow target; runs tmp/window_fix/out, tmp/astra/cap): when exactly two formations strike the target through its front and one joined later (the older pair clock is the earlier opponent, its front a), the target's front W is shared as L = W - 0.5 max(W - a, 0) metres in place of W, before and after the wave; a lone attacker, the flanks and the back keep the cap as before. The 0.5 is not a game measurement: the reviewer's rule (tmp/astra/wide_flank/out/CHANGE1.md: only half of the front beyond the earlier opponent is free), aimed at the flank2v1 wide target (45 m) where the twin's front strike is too strong (sim/evidence/flank2v1/spec.md: game flank - front +0.101, rear - front +0.181 at 120 s). Measured (sim/evidence/melee_core/spec.md, the review section): the 45 m target's front 0.193 -> 0.168, flank - front +0.055 -> +0.080, rear - front +0.012 -> +0.037; the 30 m target unchanged. The pair clock runs with this switch alone (sim/core.py clock).",
+--- a/battle.py
++++ b/battle.py
+@@ -66,4 +66,6 @@
+     mdepth = geometry.melee_depth(cal)              # a formation in melee keeps room for its dead (geometry.dims)
+ 
++    if cal["melee"].get("individual_facing") and "face_pair_s" not in u:
++        old["face_pair_s"] = u["face_pair_s"] = u["men"].new_zeros(st.B, st.N * st.N)
+     present = u["side"] > 0
+     alive = present & (u["men"] > 0) & ~u["gone"]
+@@ -623,4 +625,7 @@
+         # (cons. A.5) a routing unit leaves the ledger: its pair's time routing is a gap (contact.reset_s), not age
+         core.clock(u, touch & pw["enemy"] & standing[:, :, None] & standing[:, None, :], params, dt)
++    if cal["melee"].get("individual_facing"):
++        previous = u["face_pair_s"].view(st.B, N, N)
++        u["face_pair_s"] = torch.where(touch, previous + dt, 0.).flatten(1)
+     if core.on(params, "share"):
+         kw["touch"] = touch & pw["enemy"]
+--- a/melee.py
++++ b/melee.py
+@@ -602,4 +602,47 @@
+     not_t = u["order_target"][:, :, None] != torch.arange(contact.shape[2], device=contact.device)[None, None, :]
+     return free_way(u, contact, cal)[:, :, None] & not_t
++
++
++def facing_mix(u, pw, fighters, sector, attack, p, params, excluded):
++    """Expected hit chance by the opponent each struck cohort is occupied with."""
++    cc, rules = params.sim["contact"], params.battle
++    # Disengaging men have no reply to these incidental enemies during the exit window.
++    assigned = fighters
++    if cc.get("fresh_incidental") == 0 and "order_s" in u:
++        k = torch.arange(fighters.shape[-1], device=fighters.device)
++        silenced = ((u["order_kind"] == O.ATTACK) & (u["order_s"] < rules["melee_breakoff_secs"]))
++        assigned = torch.where(silenced[:, :, None] & (u["order_target"][:, :, None] != k), 0., assigned)
++    # [i,j,k]: incoming i seen by defender j while j faces opponent k.
++    incoming = pw["theta"].transpose(1, 2)
++    angle = geometry.wrap(incoming.unsqueeze(3) - pw["theta"].unsqueeze(1))
++    sides = geometry.sector(angle, cc["front_deg"], cc["rear_deg"])
++    # Match reciprocal fighters locally first. Surplus blows strike men busy facing another enemy.
++    reply = assigned.transpose(1, 2)
++    others = (assigned.sum(2)[:, None, :] - reply).clamp(min=0)
++    mutual = torch.where(others > 0, (reply / fighters.clamp(min=1e-6)).clamp(max=1), 1.)
++    can_turn = (assigned.sum(2) > 0)[:, None, :] & ~excluded
++    age = (u["face_pair_s"].view_as(p) - params.dt).clamp(min=0)
++    # Pooled KM median from the two probes for a defender targeting the same attacker: 2.5 s.
++    turned = torch.where(can_turn, 1 - torch.exp2(-age / 2.5), 0.)
++    mix = torch.zeros_like(p)
++    shares = []
++    for side, scale in enumerate((1., rules["melee_defence_direction_penalty_coefficient_flank"],
++                                  rules["melee_defence_direction_penalty_coefficient_rear"])):
++        weight = (assigned.unsqueeze(1) * (sides == side)).sum(3)
++        if side == 0:
++            weight = (weight - reply).clamp(min=0)
++        q = (1 - mutual) * weight / others.clamp(min=1e-6)
++        if side == 0:
++            q = q + mutual
++        q = (1 - turned) * (sector == side) + turned * q
++        shares.append(q)
++        defence = directional_defence(u["defence"][:, None, :], p.new_tensor(scale))
++        chance = hit_chance(attack, defence, rules["melee_hit_chance_normalisation_coefficient"],
++                            rules["melee_hit_chance_base"], rules["melee_hit_chance_min"],
++                            rules["melee_hit_chance_max"], float(params.sim["melee"].get("hit_roll_offset", 0.)))
++        mix = mix + q * chance
++    pw["facing_shares"] = shares
++    return torch.where(turned > 0, mix, p)
++
+ 
+ 
+@@ -1202,4 +1245,6 @@
+     p = hit_chance(attack, defence, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
+                    B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
++    if cal.get("individual_facing"):
++        p = facing_mix(u, pw, F, sector, attack, p, params, single_i | single_j | routing_j)
+     # (melee.side_cadence) the chance of the same blow from the front: a man's swings come at the same cadence whichever
+     # side he strikes from, hit or miss (below)

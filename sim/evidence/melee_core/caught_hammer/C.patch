@@ -1,0 +1,101 @@
+--- a/config/sim.json
++++ b/config/sim.json
+@@ -232,4 +232,5 @@
+   },
+   "charge": {
++    "intercept_deadline": 0,
+     "min_speed_share": 0.75,
+     "min_runup_m": 10.0,
+--- a/battle.py
++++ b/battle.py
+@@ -58,4 +58,7 @@
+     if core.on(params, "share") or core.on(params, "shared_front_cap"):
+         core.ensure(u)              # (melee.core: the ledger before the snapshot - a state built with share off)
++    if params.sim["charge"].get("intercept_deadline"):
++        from sim import intercept_charge
++        intercept_charge.ensure(u)
+     old = dict(u)
+     live = ~st.done
+@@ -525,4 +528,6 @@
+             block = block & (s_k == s_i[:, :, None])
+         busy_t = (tgt >= 0) & block.any(2)
++    if ccal.get("intercept_deadline"):
++        intercept_charge.approach(u, pw, touch, standing, new_order, kind, tgt, run, busy_t, st.t, decay)
+     min_runup = knobs.get(u, "min_runup_m", float(ccal["min_runup_m"]))
+     if ccal.get("first_runup_m") is not None and virgin is not None:
+--- a/melee.py
++++ b/melee.py
+@@ -1109,4 +1109,7 @@
+                                                      B["melee_defence_direction_penalty_coefficient_rear"]))
+     ch = charge_now[:, :, None].expand_as(F)
++    if "charge_model_time" in pw:
++        from sim import intercept_charge
++        ch = torch.maximum(ch, intercept_charge.landing(u, pw, F, B["charge_decay_duration"]))
+     # Pursuit (contact.pursuit_rate; absent: off): a routing enemy is struck with every man the contact holds at
+     # pursuit_rate of the rule, without the striker's charge (measured: a router loses 0.64 of what a standing target
+--- /dev/null
++++ b/intercept_charge.py
+@@ -0,0 +1,63 @@
++"""Charge deadlines of successive fighters entering an intercepted unit's ordered contact."""
++import torch
++from sim import orders
++
++
++def ensure(u):
++    if "charge_admitted" in u:
++        return
++    b, n = u["men"].shape
++    u["charge_admitted"] = torch.zeros_like(u["men"])
++    u["charge_reserve_end"] = torch.zeros_like(u["men"])
++    u["charge_destination"] = torch.full_like(u["order_target"], -1)
++    u["charge_man_end"] = u["men"].new_zeros(b, n * max(1, int(u["men0"].max())))
++
++
++def approach(u, pw, touch, standing, changed, kind, tgt, run, blocked, now, decay):
++    j = tgt.clamp(min=0)
++    ordered = ((kind == orders.ATTACK) & run & standing & (tgt >= 0) & standing.gather(1, j)
++               & (u["men0"] > 1) & (u["range"] <= 0))
++    pair = j[:, :, None] == torch.arange(j.shape[1], device=j.device)
++    at_target = (touch & pair).any(2)
++    other = (touch & ~pair & standing[:, None, :]).any(2)
++    keep = ordered & ~changed & (u["charge_destination"] == tgt)
++    follow = keep | (ordered & other & ~at_target)
++    u["charge_destination"] = torch.where(follow, tgt, -1)
++    u["charge_admitted"] = torch.where(keep, u["charge_admitted"], 0.)
++    gap = pw["gap"].gather(2, j.unsqueeze(2)).squeeze(2)
++    towards = (u["x"].gather(1, j) - u["x"]) * u["vx"] + (u["z"].gather(1, j) - u["z"]) * u["vz"]
++    # Gait proxy for men still on their way: a clear running attack inside charge distance.
++    gait = follow & ~blocked & (gap <= u["charge_dist"]) & (~at_target | (towards > 0))
++    u["charge_reserve_end"] = torch.where(gait, now[:, None] + decay,
++                                          torch.where(keep, u["charge_reserve_end"], 0.))
++    pw["charge_model_time"] = now
++
++
++def landing(u, pw, fighters, decay):
++    """Allocate an ordinal to each new fighter on arrival. Admitted men cease refreshing independently."""
++    bsize, n, _ = fighters.shape
++    factor = torch.zeros_like(fighters)
++    live = torch.zeros_like(fighters)
++    b, i = (u["charge_destination"] >= 0).nonzero(as_tuple=True)
++    if b.numel():
++        j = u["charge_destination"][b, i]
++        count = fighters[b, i, j]
++        previous = u["charge_admitted"][b, i]
++        slots = u["charge_man_end"].view(bsize, n, -1)
++        k = torch.arange(slots.shape[2], device=b.device)[None, :]
++        # Formation densities can supply a fractional last fighter.
++        admitted = (k < count[:, None]) & (k >= previous.ceil()[:, None])
++        ends = torch.where(admitted, u["charge_reserve_end"][b, i, None], slots[b, i])
++        updated = slots.clone()
++        updated[b, i] = ends
++        u["charge_man_end"] = updated.flatten(1)
++        peak = u["charge_admitted"].clone()
++        peak[b, i] = torch.maximum(count, previous)
++        u["charge_admitted"] = peak
++        weight = (count[:, None] - k).clamp(0, 1)
++        remaining = ((ends - pw["charge_model_time"][b, None]) / decay).clamp(0, 1)
++        norm = count.clamp(min=1e-8)
++        factor[b, i, j] = (weight * remaining).sum(1) / norm
++        live[b, i, j] = (weight * (remaining > 0)).sum(1) / norm
++    pw["intercept_factor"], pw["intercept_live"] = factor, live
++    return factor
