@@ -500,7 +500,10 @@ class NetPlayer:
     the one it stands on); every other order stays in force; then orders.fill_default with the level's default (config
     orders.default_skill, orders.back_default) - as TEACH. allow = (hold, attack, the default): else orders.masks
     rejects the fill. last_tags {cause 1 when the chosen target is pinned and waited by the labeller's facts (pinned()
-    at orders.teach.touch_m, fx.mt >= 2), else 3; u -1; cell} [r, G] - watch.PinWatch's measures by cause."""
+    at orders.teach.touch_m, fx.mt >= 2), else 3; u -1; cell} [r, G] - watch.PinWatch's measures by cause.
+    A network with a side head (heads.TacticNet3, drill T0-2): out['approach'] [r, G] - the head's side of each attack
+    it gives (0 front elsewhere; read by orders.masks only for a new attack: an order in force keeps its own, a keep keeps
+    target, approach and age), the side where the approach is a flank (as SideTeacher); last_tags + approach."""
     name = "N"
     needs_input = True
 
@@ -530,7 +533,12 @@ class NetPlayer:
         cause = torch.where(att, torch.where(cause.gather(1, kc), 1, 3), 0)
         self.last_tags = {"cause": cause, "u": torch.full_like(tgt, -1), "cell": cell(fx, tgt)}
         self.last = o
-        return _out(v, fr, skill, tgt, side)
+        if "approach" not in o:
+            return _out(v, fr, skill, tgt, side)
+        ap = torch.where(att, o["approach"], torch.zeros_like(o["approach"]))
+        side = torch.where(ap > OR.FRONT, ap, side)
+        self.last_tags["approach"] = ap
+        return {**_out(v, fr, skill, tgt, side), "approach": ap}
 
 
 PLAYERS = {"K": Keep, "T": Teacher, "D": lambda: Teacher(dumb="reach"), "D35": lambda: Teacher(dumb="d35"),
@@ -602,6 +610,106 @@ def _teach():
 
 
 PLAYERS["TEACH"] = _teach
+
+
+def choose_sides(fx, order, out, touch=None):
+    """[R, G] the approach (orders.APPROACHES) of each NEW attack order in out (skill attack, a target, another order
+    than the one in force), in slot order (drill T0-2's teacher, tmp/drill2/design_merged.md decision 3; the numbers
+    config orders.side): the target pinned (pinned() at touch) AND frontally (cols.frontal: the anvil's centre within
+    frontal_deg of its facing), then among its flanks LEFT / RIGHT that are open (cols.lateral: no other non-routing
+    enemy in the band), whose way is clear (cols.ways: the way g -> P >= clear_enemy_m from other enemies, >= clear_own_m
+    from my other units), whose extra path <= extra_cap_m, held by no striker (orders.Walk: the orders in force and the
+    walk's earlier ones) and on which no new striker of an EARLIER slot of this walk on the same target stands
+    (orders.side_of; prior reservations only - a later slot never vetoes) - the least extra path; a tie within TIE_M -
+    the side g stands on (its offset across the target's facing, > 0 right) when it is TIE_M or more off the target's
+    axis, else LEFT; open - the lateral clearance capped at band_lat_m (the column's value) reaches the cap; none - FRONT. Every other order: FRONT (never read: the masks keep an order in force's own). No memory."""
+    from net.tactic import cols as CL
+    c = CL.c_side()
+    R, G, K = fx.R, fx.G, fx.K
+    ap = torch.zeros((R, G), dtype=torch.long, device=fx.s.device)
+    new = fx.able & (out["skill"] == SC.ATTACK) & (out["target"] >= 0) & (
+        (out["target"] != order["tgt"]) | (order["skill"] != SC.ATTACK))
+    if not bool(new.any()):
+        return ap
+    k = fx.row_of_slot(out["target"])                                              # [R, G]
+    w0 = CL.ways(fx)
+    # (open: the lateral clearance as the network's column reads it - capped at band_lat_m, a blocker at the cap or
+    # beyond is no blocker: cols.side_rows' 1)
+    opn = CL.lateral(fx) >= float(c["band_lat_m"])                                 # [R, K, 2]
+    feas = (opn[:, None] & (w0["seg_enemy"] >= float(c["clear_enemy_m"])) & (w0["seg_own"] >= float(c["clear_own_m"]))
+            & (w0["extra"] <= float(c["extra_cap_m"])))                             # [R, G, K, 2]
+    front_ok = pinned(fx, touch=touch) & CL.frontal(fx, SC.TOUCH_M if touch is None else touch)   # [R, K]
+    th = torch.deg2rad(fx.b)
+    gs, gf = fx.s.gather(1, fx.g_row), fx.f.gather(1, fx.g_row)
+    off = (gs[:, :, None] - fx.s[:, None, :]) * torch.cos(th)[:, None, :] - (gf[:, :, None] - fx.f[:, None, :]) * torch.sin(th)[:, None, :]
+    w = OR.Walk(fx)
+    kc = k.clamp(min=0)
+    gside = fx.g_side.gather(2, kc[..., None])[..., 0]                             # [R, G] the side each stands on
+    for g in range(G):
+        on = new[:, g] & (k[:, g] >= 0)
+        if not bool(on.any()):
+            continue
+        kg = kc[:, g]
+        f2 = feas[:, g].gather(1, kg[:, None, None].expand(-1, 1, 2))[:, 0]           # [R, 2]
+        # (prior reservations only: the new strikers of EARLIER slots of this walk - what the head of slot g is shown)
+        others = new & (k == k[:, g:g + 1]) & (torch.arange(G, device=fx.s.device)[None] < g)
+        ok = torch.stack([f2[:, i] & w.flank_free(kg, torch.full_like(kg, s))
+                          & ~(others & (gside == s)).any(1) for i, s in enumerate((OR.LEFT, OR.RIGHT))], 1)
+        ex = torch.where(ok, w0["extra"][:, g].gather(1, kg[:, None, None].expand(-1, 1, 2))[:, 0],
+                         torch.full_like(f2, OR.INF, dtype=torch.float32))
+        og = off[:, g].gather(1, kg[:, None])[:, 0]
+        # a tie: the side g stands on when it stands TIE_M or more off the target's axis, else LEFT (no roundoff)
+        by_off = torch.where(og.abs() >= TIE_M, torch.where(og > 0, OR.RIGHT, OR.LEFT), torch.full_like(kg, OR.LEFT))
+        tie = (ex[:, 0] - ex[:, 1]).abs() < TIE_M
+        pick = torch.where(tie, by_off, torch.where(ex[:, 0] <= ex[:, 1], OR.LEFT, OR.RIGHT))
+        has = on & ok.any(1) & front_ok.gather(1, kg[:, None])[:, 0]
+        ap[:, g] = torch.where(has, pick, torch.zeros_like(pick))
+        w.give(g, kg, on, approach=ap[:, g])
+    return ap
+
+
+TIE_M = 1.0      # (choose_sides: two flanks whose extra paths differ by less than this, m, are a tie)
+
+
+class SideTeacher:
+    """TEACH2 - drill T0-2's teacher 'side of the strike' (tmp/drill2/design_merged.md): its base (TEACH, the first
+    drill's teacher) unchanged for who strikes whom and for the keeps; each new attack order it gives gets its approach
+    by choose_sides (out['approach']; masks keep an order in force's own - the side never changes it). last_tags: the
+    base's + approach [r, G]. shut goes to the base."""
+    name = "TEACH2"
+
+    def __init__(self, base):
+        self.base = base
+        if hasattr(base, "allow"):
+            self.allow = base.allow
+        self.touch = getattr(base, "touch", None)
+        self.last_tags = None
+
+    def __getattr__(self, name):
+        # every other attribute is the base's (the labeller's come_free, come_reach, no_through, ...: tags.tick and
+        # learn read them off the teacher - the same dropped-label mask as TEACH's)
+        if name == "base":
+            raise AttributeError(name)
+        return getattr(self.base, name)
+
+    @property
+    def shut(self):
+        return self.base.shut
+
+    @shut.setter
+    def shut(self, v):
+        self.base.shut = v
+
+    def __call__(self, v):
+        out = self.base(v)
+        ap = choose_sides(v.fx, v.order, out, self.touch)
+        out["approach"] = ap
+        out["side"] = torch.where(ap > OR.FRONT, ap, out["side"])
+        self.last_tags = {**(self.base.last_tags or {}), "approach": ap}
+        return out
+
+
+PLAYERS["TEACH2"] = lambda: SideTeacher(_teach())
 HYGIENE_OFF = ("T_nohyg",)
 
 

@@ -35,6 +35,10 @@ from net.unit import zmap as Z
 
 SIDES = ("axis", "left", "right")
 AXIS, LEFT, RIGHT = range(3)
+# an attack order's approach (drill T0-2 'side of the strike', tmp/drill2/design_merged.md): straight at the target, or
+# round to the TARGET's own left / right flank (the same codes as SIDES' left / right: the strikers' cap holds that side)
+APPROACHES = ("front", "left", "right")
+FRONT = 0
 LORD_COL = RW.RI["p36"]            # the passport's caste one-hot starts at 36 (net/cards/passport.features): 'lord'
 RUN_COL = RW.RI["p5"]              # the run speed / 10 m/s
 INF = float("inf")
@@ -203,14 +207,24 @@ class Walk:
         self.skill[:, g] = torch.where(on, torch.full_like(self.skill[:, g], SC.HOLD), self.skill[:, g])
         self.t_row[:, g] = torch.where(on, torch.full_like(self.t_row[:, g], -1), self.t_row[:, g])
 
-    def give(self, g, k, on):
-        """My unit g attacks row k [R] where on [R] (its old attack released first); its side written."""
+    def give(self, g, k, on, approach=None):
+        """My unit g attacks row k [R] where on [R] (its old attack released first); its side written - the side it
+        stands on, or (approach [R]: APPROACHES, drill T0-2) the target's flank it goes round to where LEFT / RIGHT: one
+        hammer a flank."""
         self.release(g, on)
         self.skill[:, g] = torch.where(on, torch.full_like(self.skill[:, g], SC.ATTACK), self.skill[:, g])
         self.t_row[:, g] = torch.where(on, k, self.t_row[:, g])
         sd = self.fx.g_side[:, g].gather(1, k.clamp(min=0)[:, None])[:, 0]
+        if approach is not None:
+            sd = torch.where(approach > FRONT, approach, sd)
         self.side[:, g] = torch.where(on, sd, self.side[:, g])
         self._add(g, on & self.holder[:, g], 1.0)
+
+    def flank_free(self, k, approach):
+        """[R] row k's flank approach (LEFT / RIGHT [R]) is held by no striker now (FRONT: True)."""
+        kc = k.clamp(min=0)
+        h = self.held[self.k, kc, approach.clamp(min=0)]
+        return (approach <= FRONT) | ~h
 
 
 def frame_walk(mine_raw, able, tiles, prev, must, fixed=None, size=None):
@@ -276,13 +290,19 @@ class View:
                           self.fixed)
 
 
-def masks(view, out, allow=(SC.HOLD, SC.ATTACK)):
+def masks(view, out, allow=(SC.HOLD, SC.ATTACK), with_approach=False):
     """(skill, target, side, change [r, G], counts {melee_changes, melee_blocked, rejected}) - the player's out after the
     code's masks (module doc), walked in slot order so an earlier order counts at once. change: the order (skill,
-    target or frame) differs from the one in force."""
+    target or frame) differs from the one in force. with_approach: also approach [r, G] (APPROACHES, drill T0-2) as the
+    sixth: a new attack order takes out's approach (absent: FRONT), a flank another striker already holds turns FRONT;
+    an order in force keeps its own (the side never changes an order in force); any other new order - FRONT."""
     fx = view.fx
     o = view.order
     skill, tgt, side = out["skill"].clone(), out["target"].clone(), out["side"].clone()
+    ap_in = o.get("approach")
+    ap_in = torch.zeros_like(skill) if ap_in is None else ap_in
+    ap_out = out.get("approach")
+    ap_out = torch.zeros_like(skill) if ap_out is None else ap_out.clone()
     want = (skill != o["skill"]) | (tgt != o["tgt"])
     melee = view.melee
     blocked = want & melee & view.hygiene
@@ -298,7 +318,9 @@ def masks(view, out, allow=(SC.HOLD, SC.ATTACK)):
         ok = att & (k >= 0) & w.open(g).gather(1, k.clamp(min=0)[:, None])[:, 0]
         bad = (att & ~ok) | (on & ~torch.isin(skill[:, g], torch.tensor(allow, device=skill.device)))
         rejected[:, g] = bad
-        w.give(g, k, ok & ~bad)
+        a = torch.where(att & w.flank_free(k, ap_out[:, g]), ap_out[:, g], torch.zeros_like(ap_out[:, g]))
+        ap_out[:, g] = a
+        w.give(g, k, ok & ~bad, approach=a if with_approach else None)
         w.release(g, on & ~att & ~bad)
         side[:, g] = torch.where(ok & ~bad, w.side[:, g], side[:, g])
     # (a unit that does not choose - routing, dead - may only have its order taken away: hold, no target)
@@ -311,15 +333,24 @@ def masks(view, out, allow=(SC.HOLD, SC.ATTACK)):
     fr = out["forced"] if "forced" in out else torch.zeros_like(given)
     change = (given | fr) & fx.able
     cnt = {"melee_changes": (change & melee).float(), "melee_blocked": blocked.float(), "rejected": rejected.float()}
-    return skill, tgt, side, change, cnt
+    if not with_approach:
+        return skill, tgt, side, change, cnt
+    ap = torch.where(given, torch.where((skill == SC.ATTACK) & (tgt >= 0), ap_out, torch.zeros_like(ap_out)), ap_in)
+    return skill, tgt, side, change, cnt, ap
 
 
-def own(order, frames, fx, now):
+def own(order, frames, fx, now, approach=False):
     """[R, G, 16] the orders in force as numbers a unit of mine (design_flank_v2.md section 7: frame on, s, f, hw, hd /
     pos_m; skill one-hot 4; has a target; the target's place s, f / pos_m (0 without a row); side one-hot 3; age / 60
     s). Mended as design_attack_v23 section 6 (critic 2, 6): the side is zeroed when the order has no target, and the
     age is 0 with no order (no target: the level's default skill is not an order of its own) and capped at
-    orders.net.age_cap_s. frames None: no frame in force. The pointer's input (tactic/heads.py)."""
+    orders.net.age_cap_s. frames None: no frame in force. The pointer's input (tactic/heads.py). approach (drill T0-2):
+    [R, G, 19] - the order's approach one-hot 3 (APPROACHES; zeroed without a target; absent in order: FRONT) appended."""
+    if approach:
+        a = order.get("approach")
+        a = torch.zeros_like(order["skill"]) if a is None else a
+        hot = torch.nn.functional.one_hot(a.clamp(0, 2), 3).float() * (order["tgt"] >= 0).float()[..., None]
+        return torch.cat([own(order, frames, fx, now), hot], -1)
     pos = float(cfg()["pos_m"])
     cap = float(c_orders()["net"]["age_cap_s"])
     if frames is None:

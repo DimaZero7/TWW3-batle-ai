@@ -34,6 +34,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import random
 import shutil
 import time
@@ -64,6 +65,13 @@ P_KEYS = ("mine", "target", "cx", "cz", "sin", "cos", "line", "group")
 T_KEYS = ("cx", "cz", "heading", "rows", "cols", "mask")
 NET_KEYS = ("raw", "command", "cols", "own", "g_row", "g_on", "open", "pair", "label", "dc", "bounds") + tuple(
     "p_" + k for k in P_KEYS) + tuple("t_" + k for k in T_KEYS) + tuple("a_" + k for k in A_KEYS + ("on",))
+# drill T0-2 (side=True): own() of 19, the S2 row columns, the side label (approach, -1 none) and the side head's columns
+# at the label's target (heads.side_feats + held) - learn.side_label_inputs
+SIDE_KEYS = ("s2", "ap", "x_k")
+# drill T0-2's side marks on V (config tactic.json drills.side.marks): followed per class on the teacher's path,
+# false flank on the no-cause scenes S2N
+SIDE_MARKS = tcfg()["drills"]["side"]["marks"]
+STOP_FROM = int(SIDE_MARKS.get("stop_from_round", 4))      # (drill T0-2: no early stop before this round)
 
 
 def L():
@@ -72,6 +80,44 @@ def L():
 
 def _bands():
     return scfg()["drills"]["attack"]["bands"]
+
+
+# drill T0-2: a label whose teacher approach is LEFT / RIGHT is not dropped for 'through own' (the walk goes round P; the
+# teacher's answer is definite) - in the pointer's and the side's loss and in the validation reads; FRONT keeps T0-1's
+# exclusion, the key-band part stays (tmp/astra/t02_review/out/REVIEW.md finding 1). False only for a scratch check.
+KEEP_FLANK_THROUGH_OWN = True
+
+
+def drop_of(T, ap=None):
+    """[R, G] the dropped / don't-care labels of a tick's tags T: T0-1's dropped | dc_label; with ap [R, G] (drill T0-2:
+    the teacher's approach of each label, -1 none) a flank label's through_own part is lifted."""
+    if ap is None or not KEEP_FLANK_THROUGH_OWN:
+        return T["dropped"] | T["dc_label"]
+    flank = (ap == OR.LEFT) | (ap == OR.RIGHT)
+    return T["dropped"] | T["dc_band"] | (T["dc_thr"] & ~flank)
+
+
+def done_rows(v):
+    """[R] bool: the view's battles already over (sim st.done; REVIEW2 finding 3 - net/matchup/duel.py keeps stepping a
+    chunk until its last battle ends, and a finished battle's frozen state is seen again at every later tick: its rows
+    are kept out of the buffer and the marks)."""
+    st = v.sim
+    dn = getattr(st, "done", None) if st is not None else None
+    if dn is None:
+        return torch.zeros(v.idx.shape, dtype=torch.bool, device=v.fx.s.device)
+    return dn.to(v.idx.device)[v.idx].to(v.fx.s.device)
+
+
+def open_at(opn, k):
+    """[.., G] bool: the row k (-1 none: False) open in opn [.., G, K] - the pointer's mask of the walk the execution
+    uses at that slot (REVIEW2 finding 2: a side label whose own pointer label is closed there is impossible)."""
+    return opn.gather(-1, k.clamp(min=0)[..., None])[..., 0] & (k >= 0)
+
+
+def group_of_meta(m):
+    if m.get("kind") == "general":
+        return "general"
+    return "S2" if m.get("recipe") in LN.SIDE_RECIPES else "T0-1 scenes"
 
 
 # ------------------------------------------------------------------ the network's input rebuilt
@@ -105,18 +151,26 @@ def _diff(a, b):
 class NetBuffer:
     """(module doc) ticks: a list of dicts (CPU); cards {battle id: [N, 69]}; meta by battle id."""
 
-    def __init__(self, check=0, every=None):
+    def __init__(self, check=0, every=None, side=False):
         self.every = int(LN._c()["loss"]["trivial_every"] if every is None else every)
         self.pending, self.ticks, self.meta, self.cards, self.pend_card = [], [], [], [], {}
         self.n_triv = 0
         self.check, self.checked, self.check_max = int(check), 0, 0.0
         self.NK = None
+        self.side = bool(side)
+        self.pend_done, self.done_stats = {}, {}     # rows of finished battles left out: {group: [rows seen, left out]}
 
     def hook(self, net_driven):
-        return lambda v, lab, T: self(v, T, net_driven)
+        return lambda v, lab, T: self(v, T, net_driven, lab)
 
-    def __call__(self, v, T, net_driven):
-        head = T["head_free"]
+    def __call__(self, v, T, net_driven, lab=None):
+        dn = done_rows(v)
+        h0 = T["head_free"].any(1)
+        for b, a_, d_ in zip(v.idx.tolist(), h0.tolist(), (h0 & dn).tolist()):
+            c = self.pend_done.setdefault(b, [0, 0])
+            c[0] += int(a_)
+            c[1] += int(d_)
+        head = T["head_free"] & ~dn[:, None]
         sel = head.any(1)
         if not bool(sel.any()):
             return
@@ -137,8 +191,13 @@ class NetBuffer:
         assert self.NK == nk, f"the battles' slots / rows changed: {self.NK} -> {nk}"
         R, G = fx.R, fx.G
         dev = fx.s.device
-        x = HD.net_inputs(v)
-        wi = HD.walk_inputs(fx, T["k"])
+        if self.side:
+            x = HD.net_inputs3(v)
+            si = LN.side_label_inputs(v, lab, T)
+            wi = si["wi"]
+        else:
+            x = HD.net_inputs(v)
+            wi = HD.walk_inputs(fx, T["k"])
         label = torch.where(T["attack"], T["k"], torch.full_like(T["k"], -1))
         kinds = torch.zeros((R, G), dtype=torch.int32, device=dev)
         for i, n in enumerate(TG.KINDS):
@@ -159,8 +218,12 @@ class NetBuffer:
             bounds = torch.full((R,), float(bd), device=dev)
         st = {"raw": v.raw.float(), "command": v.command.float(), "cols": x["cols"], "own": x["own"],
               "g_row": x["g_row"], "g_on": x["g_on"], "open": wi["open"], "pair": wi["pair"], "label": label,
-              "dc": T["dc_keys"], "bounds": bounds, "head": head, "drop": T["dropped"] | T["dc_label"], "kinds": kinds,
+              "dc": T["dc_keys"], "bounds": bounds, "head": head,
+              "drop": drop_of(T, si["ap"] if self.side else None), "kinds": kinds,
               "trivial": T["trivial"], "near2": T["tags"]["near2"] & T["attack"]}
+        if self.side:
+            # (dc_thr: the labels T0-1 drops as through own - kept to read the F1 share with and without the lift)
+            st.update(s2=x["s2"], ap=si["ap"], x_k=si["x_k"], dc_thr=T["dc_thr"])
         for k in P_KEYS:
             st["p_" + k] = getattr(p, k)
         for k in T_KEYS:
@@ -178,9 +241,10 @@ class NetBuffer:
         for k, t in st.items():
             t = t[sel]
             if t.dim() >= 2 and t.shape[1] == G and (k in ("own", "g_row", "g_on", "open", "pair", "label", "dc",
-                                                           "head", "drop", "kinds", "trivial", "near2")
+                                                           "head", "drop", "kinds", "trivial", "near2", "ap", "x_k",
+                                                           "dc_thr")
                                                       or k.startswith("a_")):
-                t = LN._pad_g(t, -1 if k == "label" else 0)
+                t = LN._pad_g(t, -1 if k in ("label", "ap") else 0)
             out[k] = t.cpu()
         for r in sel.nonzero()[:, 0].tolist():
             b = int(v.idx[r])
@@ -194,9 +258,13 @@ class NetBuffer:
             s = specs[i]
             self.meta.append({"kind": kind, "recipe": s.get("recipe", "G"), "twin_of": s.get("twin_of"),
                               "held": s.get("held"), "n": len(s["mine"]), "net": bool(net_driven),
-                              "disturbed": i in disturbed})
+                              "disturbed": i in disturbed,
+                              **({"start": s["axes"].get("start")} if isinstance(s.get("axes"), dict) else {})})
             c = self.pend_card.get(j)
             self.cards.append(c)
+            n = self.pend_done.get(j, [0, 0])
+            g = self.done_stats.setdefault(group_of_meta(self.meta[-1]), [0, 0])
+            g[0], g[1] = g[0] + n[0], g[1] + n[1]
         for t in self.pending:
             keep = t["b"] < len(ii)
             if not bool(keep.any()):
@@ -204,7 +272,7 @@ class NetBuffer:
             t = {k: x[keep] for k, x in t.items()}
             t["b"] = t["b"].long() + base
             self.ticks.append(t)
-        self.pending, self.pend_card = [], {}
+        self.pending, self.pend_card, self.pend_done = [], {}, {}
 
     def data(self):
         d = {k: torch.cat([t[k] for t in self.ticks], 0) for k in self.ticks[0]}
@@ -289,10 +357,12 @@ def _kw(scene):
     return {"battles": BA.scene_battles, "enemy": BA.SceneEnemy} if scene else {}
 
 
-def play(name, specs, scene, seeds, chunk, a, P, make_driver, hook_of, on_flush, needs_input=None, watch=None):
+def play(name, specs, scene, seeds, chunk, a, P, make_driver, hook_of, on_flush, needs_input=None, watch=None,
+         labeller="TEACH"):
     """exam_pin.run_player under tags.Record: the driver make_driver(ii) (ii the chunk's spec indices, play_tactic's
-    order by limit), the labeller TEACH built under its own name, hook_of(driver) the Record's hook; on_flush(ii)
-    after each chunk; needs_input - set on the Record (the teacher-path read: the network asked on TEACH's states)."""
+    order by limit), the labeller (TEACH; drill T0-2: TEACH2) built under its own name, hook_of(driver) the Record's
+    hook; on_flush(ii) after each chunk; needs_input - set on the Record (the teacher-path read: the network asked on
+    the teacher's states)."""
     order = sorted(range(len(specs)), key=lambda i: int(specs[i]["limit"]))
     chunks = [order[i:i + chunk] for i in range(0, len(order), chunk)]
     state = [0]
@@ -303,7 +373,7 @@ def play(name, specs, scene, seeds, chunk, a, P, make_driver, hook_of, on_flush,
         state[0] += 1
         drv = make_driver(ii)
         drivers.append(drv)
-        rec = TG.Record(drv, EP.build_under("TEACH"), hook=hook_of(drv))
+        rec = TG.Record(drv, EP.build_under(labeller), hook=hook_of(drv))
         if needs_input is not None:
             rec.needs_input = bool(needs_input)
         return rec
@@ -321,26 +391,53 @@ class Marks:
         self.net, self.path = net, path
         self.pending, self.rows, self.meta = [], [], []
         self.hold_pending, self.holds = [], {}
+        self.pick_side = {}          # (the chunk's battle row, unit) -> (target slot, side class at the pick); path N
+        self.done_cnt = [0, 0]       # head-free group-ticks seen, of finished battles left out (REVIEW2 finding 3)
 
     def hook(self, drv):
-        return lambda v, lab, T: self(v, T, drv)
+        return lambda v, lab, T: self(v, T, drv, lab)
 
-    def __call__(self, v, T, drv):
+    def __call__(self, v, T, drv, lab=None):
         fx = v.fx
-        head = T["head_free"]
+        dn = done_rows(v)
+        h0 = T["head_free"].any(1)
+        self.done_cnt[0] += int(h0.sum())
+        self.done_cnt[1] += int((h0 & dn).sum())
+        head = T["head_free"] & ~dn[:, None]
         now = int(round(float(v.now)))
+        side = isinstance(self.net, HD.TacticNet3) and lab is not None and "approach" in lab
+        nap = None
         if self.path == "T":
             with torch.no_grad():
-                k = self.net.act(v, greedy=True, given=T["k"])["k"]
+                if side:
+                    o = self.net.act(v, greedy=True, given=T["k"], given_ap=lab["approach"])
+                    nap = o["approach"]
+                else:
+                    o = self.net.act(v, greedy=True, given=T["k"])
+                k = o["k"]
         else:
             k = drv.last["k"]
+            if side:
+                nap = drv.last["approach"]
             o = v.order
             att = k >= 0
             kc = k.clamp(min=0)
             pt = torch.where(att, fx.slot_of_row(k), o["tgt"])
             ps = torch.where(att, fx.g_side.gather(2, kc[..., None])[..., 0], o["side"])
+            if side:
+                # (T0-1's M3 'followed by target' reads the side class the striker stood on at its pick; a flank order
+                # in force carries its approach in o['side'] (pin.NetPlayer) - the class at the pick is kept here per
+                # battle and unit, so M3 means on the side path what it meant on T0-1's - REVIEW.md finding 14)
+                ps = ps.clone()
+                for r_, g_ in (~att & (o["skill"] == SC.ATTACK) & (o["tgt"] >= 0)).nonzero().tolist():
+                    m_ = self.pick_side.get((int(v.idx[r_]), g_))
+                    if m_ is not None and m_[0] == int(o["tgt"][r_, g_]):
+                        ps[r_, g_] = m_[1]
+                for r_, g_ in att.nonzero().tolist():
+                    self.pick_side[(int(v.idx[r_]), g_)] = (int(pt[r_, g_]), int(ps[r_, g_]))
             pk = torch.where(att, torch.full_like(o["skill"], SC.ATTACK), o["skill"])
-            code = torch.where((pk == SC.ATTACK) & (pt >= 0) & fx.able, pt * 4 + ps.clamp(min=0), torch.full_like(pt, -1))
+            code = torch.where((pk == SC.ATTACK) & (pt >= 0) & fx.able & ~dn[:, None], pt * 4 + ps.clamp(min=0),
+                               torch.full_like(pt, -1))
             self.hold_pending.append((v.idx.cpu(), now, code.cpu()))
         if not bool(head.any()):
             return
@@ -358,12 +455,25 @@ class Marks:
         for i, n in enumerate(TG.KINDS):
             kinds |= T["kinds"][n].int() << i
         r, g = head.nonzero(as_tuple=True)
-        self.pending.append({"b": v.idx[r].cpu(), "sec": torch.full((r.numel(),), now, dtype=torch.int32),
-                             "att": (label >= 0)[r, g].cpu(), "drop": (T["dropped"] | T["dc_label"])[r, g].cpu(),
-                             "kinds": kinds[r, g].cpu(), "near2": (T["tags"]["near2"] & T["attack"])[r, g].cpu(),
-                             "code": code[r, g].to(torch.int8).cpu(), "unc": unc[r, g].cpu(),
-                             "e": fx.slot_of_row(label)[r, g].cpu(),
-                             "es": fx.g_side.gather(2, lc[..., None])[..., 0][r, g].cpu()})
+        row = {"b": v.idx[r].cpu(), "sec": torch.full((r.numel(),), now, dtype=torch.int32),
+               "att": (label >= 0)[r, g].cpu(),
+               "drop": drop_of(T, torch.where(label >= 0, lab["approach"], torch.full_like(label, -1))
+                               if side else None)[r, g].cpu(),
+               "kinds": kinds[r, g].cpu(), "near2": (T["tags"]["near2"] & T["attack"])[r, g].cpu(),
+               "code": code[r, g].to(torch.int8).cpu(), "unc": unc[r, g].cpu(),
+               "e": fx.slot_of_row(label)[r, g].cpu(),
+               "es": fx.g_side.gather(2, lc[..., None])[..., 0][r, g].cpu()}
+        if side:
+            # the side marks (drill T0-2): the label's approach, the network's at the label's pair (path T: asked on it;
+            # path N: where its pick is the label's target, else -1)
+            lap = torch.where(label >= 0, lab["approach"], torch.full_like(label, -1))
+            ok_n = (code == 1) if self.path == "N" else (label >= 0)
+            si = LN.side_label_inputs(v, lab, T)
+            sb = LN.side_band(si["x_k"], lap)                                        # (the rule's threshold)
+            sc = (label >= 0) & ~open_at(si["wi"]["open"], label)                    # (REVIEW2 finding 2)
+            row.update(lap=lap[r, g].cpu(), nap=torch.where(ok_n, nap, torch.full_like(nap, -1))[r, g].cpu(),
+                       sband=sb[r, g].cpu(), sclosed=sc[r, g].cpu())
+        self.pending.append(row)
 
     def flush(self, ii, specs, kind):
         base = len(self.meta)
@@ -380,7 +490,7 @@ class Marks:
             for r, b in enumerate(idx.tolist()):
                 if b < len(ii):
                     self.holds[(b + base, now)] = set(x for x in code[r].tolist() if x >= 0)
-        self.pending, self.hold_pending = [], []
+        self.pending, self.hold_pending, self.pick_side = [], [], {}
 
     def data(self):
         return {k: torch.cat([t[k] for t in self.rows], 0) for k in self.rows[0]}
@@ -492,7 +602,59 @@ def marks(mN, mT, setname):
         cellT = [cell_of(m, setname) for m in mT.meta]
         out["followed_T"] = followed(dT["code"].long() == 1, dT, cellT, labT)
         out["false_T"] = false(dT, [m["recipe"] if setname != "H" else cell_of(m, setname) for m in mT.meta])
+    sN, sT = side_marks(mN), (side_marks(mT) if mT is not None else None)
+    if sN is not None or sT is not None:
+        out["side_N"], out["side_T"] = sN, sT
     return out
+
+
+def side_marks(m):
+    """Drill T0-2's side marks of a Marks read (its rows with lap / nap; None without): per class front / left / right
+    followed (the network's approach = the label's, of the labels it was read on) - pooled, on S2 scenes, on S2N, on the
+    other scenes, on G; false flank - front labels the network sided left / right, same groups."""
+    if not m.rows or "lap" not in m.rows[0]:
+        return None
+    d = m.data()
+    gr = [LN.side_group(x) for x in m.meta]
+    gb = [gr[int(b)].split(" held")[0] for b in d["b"].tolist()]
+    ok0 = ~d["drop"] & (d["lap"] >= 0) & (d["nap"] >= 0)
+    sb = d["sband"] if "sband" in d else torch.zeros_like(ok0)
+    scl = d["sclosed"] if "sclosed" in d else torch.zeros_like(ok0)
+    ok = ok0 & ~sb & ~scl          # (the labels at the rule's threshold and those the execution's mask closes out)
+    lap, nap = d["lap"].long(), d["nap"].long()
+    out = {}
+    for name in ("all", "S2", "S2N", "T0-1 scenes", "G"):
+        grp = torch.tensor([name == "all" or x == name for x in gb], dtype=torch.bool)
+        sel = ok & grp
+        res = {c: LN.share(int((sel & (lap == i) & (nap == i)).sum()), int((sel & (lap == i)).sum()))
+               for i, c in enumerate(OR.APPROACHES)}
+        res["false_flank"] = LN.share(int((sel & (lap == 0) & (nap > 0)).sum()), int((sel & (lap == 0)).sum()))
+        res["banded"] = LN.share(int((ok0 & grp & sb).sum()), int((ok0 & grp).sum()))
+        res["closed"] = LN.share(int((ok0 & grp & scl).sum()), int((ok0 & grp).sum()))
+        out[name] = res
+    return out
+
+
+def side_ok(sm, M=None):
+    """(passed, fails) of the side marks on V's teacher path (SIDE_MARKS); a class or the S2N front labels with no
+    observation are 'not judged' = not passed (REVIEW.md finding 14)."""
+    M = M or SIDE_MARKS
+    if sm is None:
+        return False, ["no side marks"]
+    fails = []
+    mn = int(M.get("min_n", 1))
+    for c in OR.APPROACHES:
+        x = sm["all"][c]
+        if x["n"] < mn or x["share"] is None:
+            fails.append(f"side followed T {c} not judged (n {x['n']} < {mn})")
+        elif x["share"] < float(M["followed_t"]):
+            fails.append(f"side followed T {c} {x['share']} (n {x['n']})")
+    x = sm["S2N"]["false_flank"]
+    if x["n"] < mn or x["share"] is None:
+        fails.append(f"false flank S2N not judged (n {x['n']} < {mn})")
+    elif x["share"] > float(M["false_flank"]):
+        fails.append(f"false flank S2N {x['share']} (n {x['n']})")
+    return not fails, fails
 
 
 def m3(t, M=None):
@@ -538,21 +700,43 @@ def brief(t):
            "false_N2": g(t["false_N"]["by_recipe"].get("N2", {"share": None})),
            "nocause_false": g(t["nocause_false"]), "uncaused": g(t["uncaused"]), "M4": g(t["M4"])}
     out["cells_N"] = {c: [x["NO"]["share"], x["YES"]["share"]] for c, x in t["followed_N"]["cells"].items()}
+    n = lambda x: x["n"]                                                              # noqa: E731
+    out["n"] = {"fol_N": n(t["followed_N"]["pooled"]), "fol_N_NO": n(t["followed_N"]["NO"]),
+                "fol_N_YES": n(t["followed_N"]["YES"]),
+                "fol_T": n(t["followed_T"]["pooled"]) if "followed_T" in t else None,
+                "false_tick": n(t["false_N"]["tick"]), "nocause_false": n(t["nocause_false"]), "uncaused": n(t["uncaused"]),
+                "M4": n(t["M4"]), "false_kind": {k: n(x) for k, x in t["false_N"]["by_kind"].items() if x["taught"]}}
+    for p in ("side_T", "side_N"):
+        if t.get(p):
+            out[p] = {grp: {c: x["share"] for c, x in v.items()} for grp, v in t[p].items()}
+            out["n"][p] = {grp: {c: x["n"] for c, x in v.items()} for grp, v in t[p].items()}
     return out
 
 
-def read(net, specs, scene, seeds, chunk, a, P, kind, mN=None, mT=None, watch=None, paths="NT"):
-    """The two reads of specs (module doc) into Marks mN / mT (new ones when None): ({path: player file}, mN, mT)."""
+def minus_v0(bv, b0, key="fol_N"):
+    """{diff, two_errors, n, n0}: a round's V share minus V0's (brief dicts), two errors by two proportions (the two
+    reads' labels are not the same states - N drives - so no pairing by tick)."""
+    if not bv or not b0 or bv.get(key) is None or b0.get(key) is None:
+        return None
+    p1, p0 = float(bv[key]), float(b0[key])
+    n1, n0 = int(bv["n"][key]), int(b0["n"][key])
+    se = math.sqrt(max(p1 * (1 - p1), 1e-12) / max(n1, 1) + max(p0 * (1 - p0), 1e-12) / max(n0, 1))
+    return {"diff": round(p1 - p0, 4), "two_errors": round(2 * se, 4), "n": n1, "n0": n0}
+
+
+def read(net, specs, scene, seeds, chunk, a, P, kind, mN=None, mT=None, watch=None, paths="NT", teacher="TEACH"):
+    """The two reads of specs (module doc) into Marks mN / mT (new ones when None): ({path: player file}, mN, mT);
+    teacher - the labeller and path T's driver (drill T0-2: TEACH2)."""
     mN = mN or Marks(net, "N")
     mT = mT or Marks(net, "T")
     files = {}
     net.eval()
     if "N" in paths:
         files["N"], _ = play("N", specs, scene, seeds, chunk, a, P, lambda ii: PN.NetPlayer(net, greedy=True), mN.hook,
-                             lambda ii: mN.flush(ii, specs, kind), needs_input=True, watch=watch)
+                             lambda ii: mN.flush(ii, specs, kind), needs_input=True, watch=watch, labeller=teacher)
     if "T" in paths:
-        files["T"], _ = play("TEACH", specs, scene, seeds, chunk, a, P, lambda ii: EP.build_under("TEACH"), mT.hook,
-                             lambda ii: mT.flush(ii, specs, kind), needs_input=True, watch=watch)
+        files["T"], _ = play(teacher, specs, scene, seeds, chunk, a, P, lambda ii: EP.build_under(teacher), mT.hook,
+                             lambda ii: mT.flush(ii, specs, kind), needs_input=True, watch=watch, labeller=teacher)
     return files, mN, mT
 
 
@@ -565,65 +749,218 @@ def _limit(specs, s):
     return specs
 
 
-def v_specs(smoke=0):
+def s2_specs(seed0, n):
+    """n S2 scenes of the seeds seed0.. and their n S2N twins (drill T0-2, scenes.side_scene)."""
+    from net.tactic import scenes as SN
+    return [SN.side_scene(seed0 + i) for i in range(n)] + [SN.side_scene(seed0 + i, twin=True) for i in range(n)]
+
+
+def v_specs(smoke=0, side=False):
     """(scenes, general battles) of the validation set V (config drills.attack.sets.V; its general battles on G's
-    trained sizes, Random(train.learn.seeds.V_general))."""
+    trained sizes, Random(train.learn.seeds.V_general)); side - + V's S2 / S2N scenes (learn.SIDE_LEARN)."""
     from net.tactic import scenes as SN
     c = scfg()["drills"]["attack"]["sets"]
     sc = SN.set_specs("V")
+    if side:
+        sc += s2_specs(int(LN.SIDE_LEARN["seeds"]["V"]), int(LN.SIDE_LEARN["V_n"]) if not smoke else 2)
     G = c["G"]
     gen = SP.drill_generals(int(c["V"]["general"]), SP.seeded(int(L()["seeds"]["V_general"])), sizes=G["sizes"],
                             limit=int(G["limit"]))
     if smoke:
-        sc, gen = _limit(sc[::max(1, len(sc) // smoke)][:smoke], 200), _limit(gen[:smoke], 200)
+        sc, gen = _limit(sc[::max(1, len(sc) // smoke)][:smoke] + (sc[-4:] if side else []), 200), _limit(gen[:smoke], 200)
     return sc, gen
 
 
-def v_read(net, a, P, chunk, smoke=0):
-    sc, gen = v_specs(smoke)
+def v_read(net, a, P, chunk, smoke=0, side=False):
+    sc, gen = v_specs(smoke, side)
     sd = L()["seeds"]
     t0 = int(sd["V_tseed"])
     mN, mT = Marks(net, "N"), Marks(net, "T")
+    teacher = "TEACH2" if side else "TEACH"
     ch = min(chunk, len(sc))
-    read(net, sc, True, LN._seeds(t0, len(sc), ch), ch, a, P, "scene", mN, mT)
+    read(net, sc, True, LN._seeds(t0, len(sc), ch), ch, a, P, "scene", mN, mT, teacher=teacher)
     ch = min(chunk, len(gen))
-    read(net, gen, False, LN._seeds(t0 + 50, len(gen), ch), ch, a, P, "general", mN, mT)
-    return marks(mN, mT, "V")
+    read(net, gen, False, LN._seeds(t0 + 50, len(gen), ch), ch, a, P, "general", mN, mT, teacher=teacher)
+    out = marks(mN, mT, "V")
+    out["done_rows"] = {"N": list(mN.done_cnt), "T": list(mT.done_cnt)}
+    if side:
+        # M3 apart (REVIEW2 'Stopping'): T0-1's scene types and the general battles (retention), and the S2 / S2N scenes
+        out["parts"] = {nm: marks(subset(mN, f), subset(mT, f), "V") for nm, f in (
+            ("retention", lambda m: m["recipe"] not in LN.SIDE_RECIPES), ("S2", lambda m: m["recipe"] in LN.SIDE_RECIPES))}
+    return out
+
+
+def subset(m, keep):
+    """A Marks read restricted to the battles whose meta passes keep (the others' rows out, their meta kind 'out')."""
+    s = Marks(m.net, m.path)
+    s.meta = [x if keep(x) else {**x, "kind": "out"} for x in m.meta]
+    ok = torch.tensor([keep(x) for x in m.meta], dtype=torch.bool)
+    s.rows = [{k: v[ok[t["b"]]] for k, v in t.items()} for t in m.rows]
+    s.rows = [t for t in s.rows if t["b"].numel()] or [{k: v[:0] for k, v in m.rows[0].items()}]
+    s.holds = m.holds
+    return s
+
+
+def losses(net, t, inp, w):
+    """(pointer loss, side loss or None) of a minibatch t (NetBuffer's keys on the device) with its input inp: the
+    pointer's cross-entropy (heads.loss) and, for a TacticNet3, the side head's on the attack labels with an approach
+    (weight: the label's own w - the change ticks' weight, as T0-1's)."""
+    side = isinstance(net, HD.TacticNet3)
+    g_row = t["g_row"].long()
+    if side:
+        enc = net.enc(inp, t["command"], t["cols"], t["own"], g_row, t["g_on"], t["s2"])
+    else:
+        enc = net.enc(inp, t["command"], t["cols"], t["own"], g_row, t["g_on"])
+    lg = net.ptr.logits_all(enc["cards"], t["own"], g_row, t["pair"], t["open"])
+    lp, _ = HD.loss(lg, t["label"].long(), w, t["dc"])
+    if not side:
+        return lp, None
+    cards = enc["cards"]
+    W = cards.shape[-1]
+    lab = t["label"].long()
+    ap = t["ap"].long()
+    cg = cards.gather(1, g_row[..., None].expand(-1, -1, W))
+    ck = cards.gather(1, lab.clamp(min=0)[..., None].expand(-1, -1, W))
+    sl = net.side(cg, t["own"], ck, LN.at_label(t["pair"], lab), t["x_k"].float())     # [M, G, 3]
+    m = side_mask(t, w)
+    ls, _ = HD.side_loss(sl[m], ap[m], w[m])
+    return lp, ls
+
+
+def side_mask(t, w):
+    """[M, G] the side labels that count: an attack label with an approach and weight, not at the rule's threshold
+    (learn.side_band, config drills.side.bands), and open for the pointer under the execution's mask of its slot (the
+    stored walk fed with the teacher's targets and approaches - REVIEW2 finding 2)."""
+    lab, ap = t["label"].long(), t["ap"].long()
+    return (lab >= 0) & (ap >= 0) & (w > 0) & ~LN.side_band(t["x_k"], ap) & open_at(t["open"], lab)
+
+
+def side_counts(d, w):
+    """The side labels of a round's buffer (weight > 0): all, at the threshold, closed for the pointer, counting."""
+    lab, ap = d["label"].long(), d["ap"].long()
+    base = (lab >= 0) & (ap >= 0) & (w > 0)
+    bd = LN.side_band(d["x_k"], ap) & base
+    cl = ~open_at(d["open"], lab) & base
+    return {"side_labels": int(base.sum()), "at_threshold": int(bd.sum()), "closed_for_pointer": int(cl.sum()),
+            "closed_share": round(int(cl.sum()) / max(int(base.sum()), 1), 4),
+            "counting": int((base & ~bd & ~cl).sum())}
+
+
+def m3_split(tv_parts):
+    """(passed, fails) of M3 on V's two parts (T0-1's scene types + general = retention; S2 / S2N)."""
+    fails = []
+    for nm, t in tv_parts.items():
+        ok, f = m3(t)
+        fails += [f"[{nm}] {x}" for x in f]
+    return not fails, fails
 
 
 def fit(net, opt, d, w, dev, K, log, gen, passes, mb):
     """Section 7's update: passes over the buffer's group-ticks with weight in minibatches of mb; the input rebuilt
-    (rebuild), the pointer on the stored walk (fed with the labeller's choices). Returns the mean loss a pass."""
+    (rebuild), the pointer on the stored walk (fed with the labeller's choices). Returns the mean loss a pass. A
+    TacticNet3 (drill T0-2): loss = pointer + side (losses); the pass -1 - the losses before any update; the history
+    {loss, pointer, side} a pass."""
     use = (w.sum(1) > 0).nonzero()[:, 0]
-    net.train()
     hist = []
     c = L()
-    for p in range(passes):
-        perm = use[torch.randperm(use.numel(), generator=gen)]
-        tot, nb, t0 = 0.0, 0, time.time()
+    side = isinstance(net, HD.TacticNet3)
+    keys = NET_KEYS + (SIDE_KEYS if side else ())
+    hs = {"pointer": [], "side": []}
+    for p in range(-1 if side else 0, passes):
+        net.train(p >= 0)
+        perm = use[torch.randperm(use.numel(), generator=gen)] if p >= 0 else use
+        tot, tp, ts, nb, t0 = 0.0, 0.0, 0.0, 0, time.time()
         for i in range(0, perm.numel(), mb):
             idx = perm[i:i + mb]
-            t = {k: d[k][idx].to(dev) for k in NET_KEYS}
+            t = {k: d[k][idx].to(dev) for k in keys}
             card = d["cards"][d["b"][idx]].to(dev)
             with torch.no_grad():
                 inp = rebuild(t, card, K)
-            enc = net.enc(inp, t["command"], t["cols"], t["own"], t["g_row"].long(), t["g_on"])
-            lg = net.ptr.logits_all(enc["cards"], t["own"], t["g_row"].long(), t["pair"], t["open"])
-            loss, _ = HD.loss(lg, t["label"].long(), w[idx].to(dev), t["dc"])
-            opt.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_([q for q in net.parameters() if q.requires_grad], float(c["max_grad"]))
-            opt.step()
+            with torch.set_grad_enabled(p >= 0):
+                lp, ls = losses(net, t, inp, w[idx].to(dev))
+                loss = lp if ls is None else lp + ls
+            if p >= 0:
+                opt.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_([q for q in net.parameters() if q.requires_grad], float(c["max_grad"]))
+                opt.step()
             tot += float(loss.detach())
+            tp += float(lp.detach())
+            ts += 0.0 if ls is None else float(ls.detach())
             nb += 1
-        hist.append(round(tot / max(nb, 1), 5))
-        log({"pass": p, "loss": hist[-1], "minibatches": nb, "min": round((time.time() - t0) / 60, 1)})
+        if p >= 0:
+            hist.append(round(tot / max(nb, 1), 5))
+        row = {"pass": p, "loss": round(tot / max(nb, 1), 5), "minibatches": nb, "min": round((time.time() - t0) / 60, 1)}
+        if side:
+            hs["pointer"].append(round(tp / max(nb, 1), 5))
+            hs["side"].append(round(ts / max(nb, 1), 5))
+            row.update(pointer=hs["pointer"][-1], side=hs["side"][-1])
+        log(row)
     net.eval()
-    return hist
+    return (hist, hs) if side else hist
 
 
-def collect(r, net, a, P, chunk, no_general, smoke, log):
-    """Round r's buffer (section 7 'Round', 'Who drives')."""
+def seed_ranges(rounds):
+    """{"train": {name: [lo, hi)}, "kept": {name: [lo, hi)}} - the scene seeds (an S2 scene and its S2N twin share one
+    seed: twins are the same ranges) and the general battles' Random seeds the training draws in `rounds` rounds, and
+    those of the sets it must never see (V, the label probe's, the exams'); a fixed set of recipes is taken whole
+    (seed + 10000 x its number of recipes), a superset of its seeds."""
+    st = scfg()["drills"]
+    at = st["attack"]
+    sd = L()["seeds"]
+    SL, SP_ = LN.SIDE_LEARN, LN.SIDE_PROBE
+    nrec = len([r for r in at["mix"] if r != "E_on_top"]) + 3
+    tr, kept = {}, {}
+    for k in range(rounds):
+        s0 = int(sd["scenes"]) + int(sd["round_step"]) * k
+        tr[f"T0-1 scenes r{k + 1}"] = (s0, s0 + 10000 * nrec)
+        s2 = int(SL["seeds"]["s2"]) + int(SL["seeds"]["round_step"]) * k
+        tr[f"S2 + S2N twins r{k + 1}"] = (s2, s2 + int(SL["s2_round"]))
+    tr["general (Random seeds)"] = (int(sd["general"]), int(sd["general"]) + rounds)
+    sets = at["sets"]
+    for nm in ("S", "V", "F"):
+        kept[f"T0-1 {nm}"] = (int(sets[nm]["seed"]), int(sets[nm]["seed"]) + 10000 * len(sets[nm]["counts"]))
+    kept["T0-1 H"] = (int(sets["H"]["seed"]), int(sets["H"]["seed"]) + 10000 * len(sets["H"]["axes"]))
+    kept["V S2 + S2N"] = (int(SL["seeds"]["V"]), int(SL["seeds"]["V"]) + int(SL["V_n"]))
+    kept["probe S2 train"] = (int(SP_["seeds"]["train"]), int(SP_["seeds"]["train"]) + int(SP_["n_train"]))
+    kept["probe S2 eval"] = (int(SP_["seeds"]["eval"]), int(SP_["seeds"]["eval"]) + int(SP_["n_eval"]))
+    kept["probe held axes"] = (int(SP_["seeds"]["held"]), int(SP_["seeds"]["held"]) + 10000 * len(st["side"]["sets"]["held"]["axes"]))
+    pr = at["probe"]["seeds"]
+    kept["T0-1 probe scenes (2 rounds)"] = (int(pr["scenes"]), int(pr["scenes"]) + int(pr["round_step"]) + 10000 * nrec)
+    kept["T0-1 probe S'"] = (int(pr["S"]), int(pr["S"]) + 10000 * len(sets["S"]["counts"]))
+    ss = st["side"]["sets"]
+    kept["exam taught"] = (int(ss["taught"]["seed"]), int(ss["taught"]["seed"]) + int(ss["taught"]["n"]))
+    kept["exam held"] = (int(ss["held"]["seed"]), int(ss["held"]["seed"]) + 10000 * len(ss["held"]["axes"]))
+    kept["general V (Random)"] = (int(sd["V_general"]), int(sd["V_general"]) + 1)
+    for nm in ("seed", "held_seed"):
+        kept[f"general G {nm} (Random)"] = (int(sets["G"][nm]), int(sets["G"][nm]) + 1)
+    kept["general probe (Random)"] = (int(pr["general"]), int(pr["general"]) + 2)
+    for nm in ("G", "G_held"):
+        kept[f"general probe {nm} (Random)"] = (int(pr[nm]), int(pr[nm]) + 1)
+    return {"train": tr, "kept": kept}
+
+
+def seed_check(rounds, log=None):
+    """seed_ranges asserted: no training range meets a kept one (REVIEW.md finding 4); printed once into the log."""
+    rg = seed_ranges(rounds)
+    bad = [(a, b) for a, (lo, hi) in rg["train"].items() for b, (lo2, hi2) in rg["kept"].items() if lo < hi2 and lo2 < hi]
+    if log is not None:
+        log({"seed_ranges": {k: {n: list(x) for n, x in v.items()} for k, v in rg.items()}, "rounds": rounds,
+             "overlaps": bad})
+    assert not bad, f"training seeds meet a kept set: {bad}"
+    return rg
+
+
+def side_round(r, smoke=0):
+    """Drill T0-2's scenes of training round r (learn.SIDE_LEARN: s2_round S2 seeds + their S2N twins)."""
+    s = LN.SIDE_LEARN
+    n = int(s["s2_round"]) if not smoke else max(1, smoke // 2)
+    return s2_specs(int(s["seeds"]["s2"]) + int(s["seeds"]["round_step"]) * r, n)
+
+
+def collect(r, net, a, P, chunk, no_general, smoke, log, side=False):
+    """Round r's buffer (section 7 'Round', 'Who drives'); side (drill T0-2): the mix + the side scenes (side_round),
+    TEACH2 drives (with the disturbances) and labels."""
     c = L()
     sd = c["seeds"]
     n_sc = float(scfg()["drills"]["attack"]["sets"]["round"]["scenes"])
@@ -632,7 +969,10 @@ def collect(r, net, a, P, chunk, no_general, smoke, log):
     scenes, gen = LN.round_specs(r, scale, gscale, seeds=sd)
     if smoke:
         scenes, gen = _limit(scenes[:smoke], 200), _limit(gen[:smoke], 200)
-    buf = NetBuffer(check=64 if smoke else 32)
+    if side:
+        scenes = scenes + (_limit(side_round(r, smoke), 200) if smoke else side_round(r))
+    teacher = "TEACH2" if side else "TEACH"
+    buf = NetBuffer(check=64 if smoke else 32, side=side)
     rnd = random.Random(int(sd["tseed"]) * 1000 + r)
     dc = c["disturb"]
     stats = {"battles_teacher": 0, "battles_net": 0, "disturbed": 0, "send": 0, "hold": 0, "held_ticks": 0}
@@ -654,11 +994,12 @@ def collect(r, net, a, P, chunk, no_general, smoke, log):
         t0 = time.time()
         if sp_t:
             ch = min(chunk, len(sp_t))
-            _, drv = play("TEACH", sp_t, scene, LN._seeds(int(sd["tseed"]) + 100 * r + off, len(sp_t), ch), ch, a, P,
-                          lambda ii: Disturb(EP.build_under("TEACH"),
+            _, drv = play(teacher, sp_t, scene, LN._seeds(int(sd["tseed"]) + 100 * r + off, len(sp_t), ch), ch, a, P,
+                          lambda ii: Disturb(EP.build_under(teacher),
                                              {j: copy.deepcopy(plans[i]) for j, i in enumerate(ii) if i in plans},
                                              dseed + ii[0]),
-                          lambda d_: buf.hook(False), lambda ii: buf.flush(ii, sp_t, kind, False, dis))
+                          lambda d_: buf.hook(False), lambda ii: buf.flush(ii, sp_t, kind, False, dis),
+                          labeller=teacher)
             for d_ in drv:
                 for k in ("send", "hold", "held_ticks"):
                     stats[k] += d_.n[k]
@@ -667,7 +1008,7 @@ def collect(r, net, a, P, chunk, no_general, smoke, log):
             ch = min(chunk, len(sp_n))
             play("N", sp_n, scene, LN._seeds(int(sd["tseed"]) + 100 * r + off + 25, len(sp_n), ch), ch, a, P,
                  lambda ii: PN.NetPlayer(net, greedy=True), lambda d_: buf.hook(True),
-                 lambda ii: buf.flush(ii, sp_n, kind, True))
+                 lambda ii: buf.flush(ii, sp_n, kind, True), labeller=teacher)
         log({"collect": kind, "round": r + 1, "teacher": len(sp_t), "net": len(sp_n), "disturbed": len(dis),
              "group_ticks_total": sum(t["b"].shape[0] for t in buf.ticks), "min": round((time.time() - t0) / 60, 1)})
     stats.update(rebuild_checked=buf.checked, rebuild_max_diff=buf.check_max)
@@ -696,44 +1037,111 @@ def train(a):
     dev = a.device
     ar = SimpleNamespace(device=dev, sim=a.sim)
     torch.manual_seed(int(c["seeds"]["tseed"]))
-    net = HD.TacticNet2().to(dev)
+    side = a.drill == "side"
+    if side:
+        # drill T0-2: the network of T0-1 (tactic_v2) in a TacticNet3, the new layers at their start (ckpt.from_v2)
+        from net.tactic import ckpt as TK
+        net, _ = TK.from_v2(a.init, dev)
+    else:
+        net = HD.TacticNet2().to(dev)
     opt = torch.optim.Adam([q for q in net.parameters() if q.requires_grad], lr=float(c["lr"]))
     gen = torch.Generator().manual_seed(int(c["seeds"]["tseed"]))
     rounds = min(int(a.rounds or c["rounds"]), int(c["rounds"]))
     chunk = int(c["chunk"])
+    passes = int(a.passes or c["passes"])
     log({"start": time.strftime("%H:%M"), "rounds_max": rounds, "no_general": a.no_general, "device": dev, "sim": a.sim,
          "sim_key": EP.sim_key(), "reach_m": OR.c_orders()["reach_m"], "taught": TG.TAUGHT, "cols": HD.d2_cols()[0],
-         "smoke": a.smoke, "learn": {k: v for k, v in c.items() if not k.startswith("_")}})
+         "smoke": a.smoke, "learn": {k: v for k, v in c.items() if not k.startswith("_")}, "drill": a.drill,
+         "passes": passes, **({"init": a.init, "side_learn": LN.SIDE_LEARN, "side_marks": SIDE_MARKS} if side else {})})
     table, passed, shares, final = [], [], [], None
     r0 = 0
+    key = run_key(a, side, rounds, passes)
+    if side:
+        seed_check(int(c["rounds"]), log)
+        log({"stop_rule": f"from round {STOP_FROM} on, two rounds running with ALL of: T0-1's M3 on V's retention part "
+                          "(T0-1's scene types + general) AND on its S2 / S2N part (imitate.m3 on each: followed on N's "
+                          "and T's path, false attacks, no-cause, uncaused - config train.learn.marks) AND the side marks "
+                          "on V's teacher path (imitate.side_ok: front / left / right followed >= drills.side.marks."
+                          "followed_t each, false flank on S2N <= false_flank, each with n >= drills.side.marks.min_n, "
+                          "fewer = not judged = no stop); final.pt = the last round's weights either way"})
+    ckr = None
     if a.resume:
-        # the same training continued in a new process (the earlier one cut): the network and the optimiser from the
-        # checkpoint of round from_round - 1, the rounds before it read back from this log folder (their ROUND rows and
-        # V reads); the rounds from from_round on draw the seeds they would have had (round_specs / collect by r). The
-        # minibatch order's generator cannot be replayed: it starts anew at tseed + 1000 x from_round (said in the log)
+        # the same training continued in a new process (the earlier one cut), said explicitly: the network, the
+        # optimiser, the minibatch generator and torch's random state from the checkpoint of round from_round - 1
         ckr = torch.load(a.resume, map_location=dev, weights_only=False)
-        net.load_state_dict(ckr["net"])
-        opt.load_state_dict(ckr["opt"])
         r0 = int(a.from_round) - 1
         assert int(ckr.get("round", r0)) == r0, (ckr.get("round"), r0)
-        gen = torch.Generator().manual_seed(int(c["seeds"]["tseed"]) + 1000 * (r0 + 1))
-        for line in (logd / "train.log").read_text(encoding="utf-8").splitlines():
+        src = str(a.resume)
+    else:
+        # the keeper restarts the same command after a crash: the latest complete checkpoint of THIS run in --out (its
+        # run_key) is taken up; a checkpoint of another run there is refused (REVIEW.md finding 7)
+        cks = sorted(out.glob("round_[0-9][0-9].pt"))
+        if cks:
+            ckr = torch.load(cks[-1], map_location=dev, weights_only=False)
+            if ckr.get("run_key") != key:
+                raise SystemExit(f"{cks[-1]}: a checkpoint of another run (run_key {ckr.get('run_key')} != {key}) in "
+                                 f"--out {out} - give a clean folder or --resume explicitly")
+            r0 = int(ckr["round"])
+            src = str(cks[-1])
+    if ckr is not None:
+        net.load_state_dict(ckr["net"])
+        opt.load_state_dict(ckr["opt"])
+        if ckr.get("gen_state") is not None:
+            gen.set_state(ckr["gen_state"].cpu())
+        else:
+            gen = torch.Generator().manual_seed(int(c["seeds"]["tseed"]) + 1000 * (r0 + 1))
+        if ckr.get("rng") is not None:
+            torch.set_rng_state(ckr["rng"].cpu())
+        if ckr.get("cuda_rng") is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all([x.cpu() for x in ckr["cuda_rng"]])
+        lf = logd / "train.log"
+        for line in (lf.read_text(encoding="utf-8", errors="replace").splitlines() if lf.exists() else []):
             if line.startswith('{"ROUND"'):
-                row = json.loads(line)["ROUND"]
+                try:
+                    row = json.loads(line)["ROUND"]
+                except (ValueError, KeyError):
+                    # (a torn last line of a crashed process: dropped, the row is rebuilt from its checkpoint below)
+                    log({"TORN_ROUND_LINE_DROPPED": line[:80]})
+                    continue
                 if row["round"] <= r0:
                     table = [x for x in table if x["round"] != row["round"]] + [row]
+        have = {x["round"] for x in table}
+        for rr in range(1, r0 + 1):
+            if rr in have:
+                continue
+            # the checkpoint of round rr is complete but its ROUND line never reached the log: its row from the
+            # checkpoint, written once now (no duplicate line, no double count)
+            p = out / f"round_{rr:02d}.pt"
+            row = torch.load(p, map_location="cpu", weights_only=False).get("row") if p.exists() else None
+            assert row is not None, f"round {rr}: no ROUND line in {lf} and no row in {p}"
+            log({"ROUND_FROM_CKPT": rr})
+            log({"ROUND": row})
+            table.append(row)
         table.sort(key=lambda x: x["round"])
         assert [x["round"] for x in table] == list(range(1, r0 + 1)), [x["round"] for x in table]
         for x in table:
-            passed.append(bool(x["M3_V"]))
+            passed.append(bool(x["stop_ok"]) if "stop_ok" in x else
+                          (bool(x["M3_V"]) and (not side or bool(x.get("side_V")))))
             if x["label_share_net_states"] is not None:
                 shares.append(x["label_share_net_states"])
-        log({"RESUME": str(a.resume), "from_round": r0 + 1, "rounds_read": len(table), "passed_v": passed,
-             "minibatch_generator_seed": int(c["seeds"]["tseed"]) + 1000 * (r0 + 1)})
+        log({"RESUME": src, "from_round": r0 + 1, "rounds_read": len(table), "passed_v": passed,
+             "minibatch_generator": "restored" if ckr.get("gen_state") is not None else
+             int(c["seeds"]["tseed"]) + 1000 * (r0 + 1)})
+        if len(passed) >= 2 and passed[-1] and passed[-2] and (not side or r0 >= STOP_FROM):
+            final = out / f"round_{r0:02d}.pt"
+            log({"STOP": f"(restored) M3 and the side marks held on V at rounds {r0 - 1} and {r0}"})
     t_all = time.time()
-    for r in range(r0, rounds):
+    if side and r0 == 0 and not a.no_v and not (logd / "v_round_00.json").exists():
+        # (the start's marks on V - the reference a round's M3 is compared with; written once, a restart skips it)
+        tv0 = v_read(net, ar, P, chunk, a.smoke, side=True)
+        (logd / "v_round_00.json").write_text(json.dumps(tv0, indent=1), encoding="utf-8")
+        log({"V0": brief(tv0), "M3_V0": m3(tv0)[0], "side_V0": side_ok(tv0.get("side_T"))})
+    b0 = None
+    if side and (logd / "v_round_00.json").exists():
+        b0 = brief(json.loads((logd / "v_round_00.json").read_text(encoding="utf-8")))
+    for r in range(r0, rounds if final is None else r0):
         t0 = time.time()
-        buf, st = collect(r, net, ar, P, chunk, a.no_general, a.smoke, log)
+        buf, st = collect(r, net, ar, P, chunk, a.no_general, a.smoke, log, side=side)
         d, meta = buf.data(), buf.meta
         w, winfo = LN.weights(d, meta)
         item = d["head"] & ~d["drop"]
@@ -747,44 +1155,117 @@ def train(a):
              "attack_labels": int(att.sum()), "attack_labels_net_states": int((att & on_net).sum()),
              "label_share_net_states": share_net, "bytes": nbytes, **st})
         log({"weights": winfo})
-        hist = fit(net, opt, d, w, dev, buf.NK[1], log, gen, int(c["passes"]), int(c["minibatch"]))
+        extra = {}
+        if side:
+            aps = d["ap"][att & (d["ap"] >= 0)]
+            extra["side_labels"] = {n: int((aps == i).sum()) for i, n in enumerate(OR.APPROACHES)}
+            extra["flank_weighted"] = flank_weight_share(d, meta, w)
+            extra["side_count"] = side_counts(d, w)
+            extra["done_rows"] = {k: {"rows": v[0], "left_out": v[1], "share": round(v[1] / max(v[0], 1), 4)}
+                                  for k, v in buf.done_stats.items()}
+            log({"side_labels": extra["side_labels"], "flank_weighted": extra["flank_weighted"],
+                 "side_count": extra["side_count"], "done_rows": extra["done_rows"]})
+        hist = fit(net, opt, d, w, dev, buf.NK[1], log, gen, passes, int(c["minibatch"]))
+        if side:
+            hist, extra["losses"] = hist
         del d, w, buf
         ck = out / f"round_{r + 1:02d}.pt"
-        tv = v_read(net, ar, P, chunk, a.smoke)
-        ok, fails = m3(tv)
-        passed.append(ok)
-        TK_save(ck, net, opt, a, round=r + 1, marks_v=brief(tv), passed_v=ok)
+        if a.no_v:
+            tv = None
+            ok, fails, sok, sfails = False, ["V not read (--no-v)"], False, []
+        else:
+            tv = v_read(net, ar, P, chunk, a.smoke, side=side)
+            ok, fails = m3(tv)
+            sok, sfails = side_ok(tv.get("side_T")) if side else (True, [])
+        if side and tv is not None:
+            pok, pfails = m3_split(tv["parts"])
+            stop_ok = pok and sok
+            fails = pfails
+        else:
+            stop_ok = ok and sok
+        bv = brief(tv) if tv is not None else None
+        if side:
+            mv = {"M3 fol_N minus V0": minus_v0(bv, b0), "M3 fol_T minus V0": minus_v0(bv, b0, "fol_T")}
+            log({"round": r + 1, "V_n": bv["n"] if bv else None, **mv,
+                 "M3_parts": {k: brief(x) for k, x in tv["parts"].items()} if tv is not None else None,
+                 "done_rows_V": tv.get("done_rows") if tv is not None else None})
         row = {"round": r + 1, "drove": "teacher" if (r == 0 and not a.smoke) else "teacher + network (half)",
                "battles": st["battles_teacher"] + st["battles_net"], "labels": int(att.sum()),
-               "label_share_net_states": share_net, "loss": hist, "V": brief(tv), "M3_V": ok, "fails": fails,
-               "ckpt": str(ck), "min": round((time.time() - t0) / 60, 1)}
+               "label_share_net_states": share_net, "loss": hist, "V": bv, "M3_V": ok, "fails": fails + sfails,
+               "ckpt": str(ck), "min": round((time.time() - t0) / 60, 1),
+               "stop_ok": stop_ok, **({"side_V": sok, **extra, **mv} if side else {})}
+        if tv is not None:
+            (logd / f"v_round_{r + 1:02d}.json").write_text(json.dumps(tv, indent=1), encoding="utf-8")
+        state = {"row": row, "run_key": key, "gen_state": gen.get_state(), "rng": torch.get_rng_state(),
+                 "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}
+        if side:
+            TK_save3(ck, net, opt, a, round=r + 1, marks_v=bv, passed_v=ok, side_v=sok, **state)
+        else:
+            TK_save(ck, net, opt, a, round=r + 1, marks_v=bv, passed_v=ok, **state)
+        passed.append(stop_ok)
         table.append(row)
         log({"ROUND": row})
-        (logd / f"v_round_{r + 1:02d}.json").write_text(json.dumps(tv, indent=1), encoding="utf-8")
         if share_net is not None:
             shares.append(share_net)
             if len(shares) >= 3 and shares[-3] < shares[-2] < shares[-1]:
                 log("!!!!!! LOUD: the share of attack labels on the network's own states grew three rounds running "
                     f"{[round(x, 5) for x in shares[-3:]]} - look at two battles (design section 7); going on")
-        if len(passed) >= 2 and passed[-1] and passed[-2]:
+        if len(passed) >= 2 and passed[-1] and passed[-2] and (not side or r + 1 >= STOP_FROM):
             final = ck
-            log({"STOP": f"M3 held on V at rounds {r} and {r + 1}"})
+            log({"STOP": f"M3{' and the side marks' if side else ''} held on V at rounds {r} and {r + 1}"})
             break
     if final is None:
         final = out / f"round_{len(table):02d}.pt"
         log({"NO_STOP": f"{len(table)} rounds without M3 two rounds running", "fails_last": table[-1]["fails"]})
-    shutil.copyfile(final, out / "final.pt")
+    part = out / "final.pt.part"
+    shutil.copyfile(final, part)
+    os.replace(part, out / "final.pt")
+    held = len(passed) >= 2 and passed[-1] and passed[-2] and (not side or len(passed) >= STOP_FROM)
     res = {"rounds": table, "final": str(final), "final_copy": str(out / "final.pt"), "sha256": _sha(out / "final.pt"),
-           "stopped": len(passed) >= 2 and passed[-1] and passed[-2], "minutes": round((time.time() - t_all) / 60, 1)}
+           "stopped": held, "minutes": round((time.time() - t_all) / 60, 1)}
     (logd / "train.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     log({"done": res["final"], "sha256": res["sha256"], "stopped": res["stopped"], "minutes": res["minutes"]})
+    log({"STOP_CONDITION_HELD": held, "last_round_stop_ok": passed[-1] if passed else None,
+         "note": "final.pt = the last round's weights; converged only if STOP_CONDITION_HELD"})
     logf.close()
     return res
+
+
+def run_key(a, side, rounds, passes):
+    """sha256 (16) of what makes a training run itself: the drill, its start's weights, rounds, passes, the draw's
+    options and the configs it reads - a restart of the same command has the same key."""
+    from net.tactic import cfg as tc
+    x = {"drill": a.drill, "init": _sha(a.init) if side else None, "rounds": rounds, "passes": passes, "smoke": a.smoke,
+         "no_general": a.no_general, "no_v": a.no_v, "sim": a.sim, "sim_key": EP.sim_key(), "learn": L(),
+         "side": tc()["drills"].get("side"), "orders": tc()["orders"], "stage0": scfg()["drills"]}
+    return hashlib.sha256(json.dumps(x, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def flank_weight_share(d, meta, w):
+    """Acceptance line 1 of the T0-2 fix (REVIEW.md finding 1): of the flank-labelled attack ticks (teacher approach left
+    / right) the share with loss weight > 0 - all and on the scenes whose start is second_row; and the same with T0-1's
+    through-own exclusion put back (dc_thr in the drop) - the number before the fix, from the same buffer."""
+    lab, ap = d["label"] >= 0, d["ap"]
+    fl = d["head"] & lab & ((ap == OR.LEFT) | (ap == OR.RIGHT))
+    sr = torch.tensor([m.get("start") == "second_row" for m in meta], dtype=torch.bool)[d["b"]][:, None] & fl
+    out = {}
+    w0, _ = LN.weights({**d, "drop": d["drop"] | (d["dc_thr"] & lab)}, meta)
+    for nm, ww in (("with_fix", w), ("without_fix", w0)):
+        out[nm] = {"all": LN.share(int((fl & (ww > 0)).sum()), int(fl.sum())),
+                   "second_row": LN.share(int((sr & (ww > 0)).sum()), int(sr.sum()))}
+    return out
 
 
 def TK_save(path, net, opt, a, **more):
     from net.tactic import ckpt as TK
     TK.save_v2(path, net, opt, ["T0-2"], unit_commit=a.unit, sim_commit=a.sim, **more)
+
+
+def TK_save3(path, net, opt, a, **more):
+    # (the journal's ids: T0-1 'бить связанного' - the start's weights, a.init -, and T0-2 'сторона удара')
+    from net.tactic import ckpt as TK
+    TK.save_v3(path, net, opt, ["T0-1", "T0-2"], unit_commit=a.unit, sim_commit=a.sim, init=a.init,
+               init_sha256=_sha(a.init), **more)
 
 
 # ------------------------------------------------------------------ the exam after
@@ -949,6 +1430,278 @@ def vision_picks(net, tabs, sets, a, P, D, log):
     return out
 
 
+# ------------------------------------------------------------------ drill T0-2: the exam after (METHOD step 6)
+SIDE_PLAYERS = ("C", "TEACH", "TEACH2", "N", "N1")
+SIDE_PAIRS = (("N", "TEACH"), ("N", "TEACH2"), ("N", "C"), ("N", "N1"), ("N1", "TEACH"), ("TEACH2", "TEACH"),
+              ("TEACH2", "C"), ("TEACH", "C"))
+
+
+def net_side_run(net, specs, seeds, chunk, a, P, scene=True):
+    """exam_side.side_run with the network as the player (pin.NetPlayer greedy) - the same watch, the same file."""
+    from net.tactic import exam_side as ES
+    ex = {"strikes": []}
+
+    def look(ii, watch, side_):
+        ex["strikes"] += [[ii[r[0]]] + r[1:] for r in watch.strikes if r[0] < len(ii)]
+    res = EP.run_player("N", specs, seeds, chunk, a, P, make=lambda: PN.NetPlayer(net, greedy=True), on_chunk=look,
+                        watch_cls=ES.SideWatch, full=True, by_limit=True, **_kw(scene))
+    res.update(strikes=ex["strikes"])
+    return res
+
+
+def side_comer(mt, pl):
+    """exam_side.comer_scenes + the battles where a flank walk of the network (N) met a comer (scripts.Unit.comer)."""
+    from net.tactic import exam_side as ES
+    cm = ES.comer_scenes(mt, pl)
+    seen = {int(r[0]) for p in ("N",) if p in pl for r in pl[p].get("strikes", []) if r[4] > 0 and len(r) > 9 and r[9]}
+    return {**cm, "seen_N": sorted(seen), "all": sorted(set(cm["all"]) | seen)}
+
+
+def side_table(D, names):
+    """exam_side.table's reads with the network's players and pairs (SIDE_PLAYERS, SIDE_PAIRS) and side_comer."""
+    from net.tactic import exam_side as ES
+    out = {}
+    for nm in names:
+        files = {p: D / f"{nm}_{p}.json" for p in SIDE_PLAYERS if (D / f"{nm}_{p}.json").exists()}
+        if "C" not in files:
+            continue
+        pl = {p: json.loads(f.read_text(encoding="utf-8")) for p, f in files.items()}
+        mt = json.loads((D / f"{nm}_meta.json").read_text(encoding="utf-8"))
+        R = {p: EP.reads(d, pl["C"]["per_battle"]["t_contact"]) for p, d in pl.items()}
+        cm = side_comer(mt, pl)
+        tab = {"battles": len(mt), "comer_scenes": cm, "pairs": {}, "orders_min": {}, "exec": {}, "n_battles": {}}
+        for lab, sel in ES.groups_of(mt, nm, set(cm["all"])):
+            tab["n_battles"][lab] = len(sel)
+            for x, y in SIDE_PAIRS:
+                if x in pl and y in pl:
+                    tab["pairs"].setdefault(f"{x} - {y}", {})[lab] = {
+                        "i_300": EP.paired(R[x]["i"], R[y]["i"], sel), "iii_end": EP.paired(R[x]["iii"], R[y]["iii"], sel),
+                        "orders": EP.paired(pl[x]["per_battle"]["game_orders_min"],
+                                            pl[y]["per_battle"]["game_orders_min"], sel)}
+            for p, d in pl.items():
+                tab["orders_min"].setdefault(p, {})[lab] = EP._mean([d["per_battle"]["game_orders_min"][b] for b in sel])
+                if "strikes" in d:
+                    tab["exec"].setdefault(p, {})[lab] = ES._flank_exec(d, sel)
+        out[nm] = tab
+    return out
+
+
+def pool_all(parts):
+    """exam_side._pool of parts, None (not judged) when any part is missing (REVIEW2 finding 6)."""
+    from net.tactic import exam_side as ES
+    return None if any(p is None for p in parts) else ES._pool(parts)
+
+
+def _piece(passed, **x):
+    """A verdict piece: passed True / False, None = not judged (a missing or undefined number)."""
+    return {**x, "passed": passed, "status": {True: "passed", False: "failed", None: "not judged"}[passed]}
+
+
+def line_c_of(out, player):
+    """exam_side's line c (first contact on the target's flank) for player - exam_side's own definition: its line_c
+    when it has one, else its lines() read on a copy where the player's execution stands in TEACH2's place."""
+    from net.tactic import exam_side as ES
+    if hasattr(ES, "line_c"):
+        return ES.line_c(out, player)
+    o2 = {nm: ({**t, "exec": {**t["exec"], "TEACH2": t["exec"].get(player, {})}} if isinstance(t, dict) and "exec" in t
+               else t) for nm, t in out.items() if nm != "lines"}
+    return ES.lines(o2)["c"]
+
+
+def side_lines(out, t01=None):
+    """METHOD step 6's verdict of drill T0-2 (REVIEW.md finding 3): six pieces, each must be present and hold - a
+    missing piece is 'not judged' = not passed. The comer battles out everywhere (exam_side.comer_scenes).
+      i    closes: N - TEACH on the cause scenes (taught + held pooled) >= half of TEACH2 - TEACH (and TEACH2 - TEACH > 0)
+      ii   executes: N's flank orders a cause scene >= half of TEACH2's, and N's first contact on the flank (exam_side's
+           line c, its own definition) >= 0.75
+      iii  no harm: N - TEACH on the no-cause scenes (pooled) and on G not below -2 errors
+      iv   held: (N - TEACH) held cause - taught cause not below -2 errors
+      v    T0-1 retained: t01_compare (N3 - C on T0-1's sets against the reference's N - C) passed
+      vi   orders: N's orders to the game a unit-minute <= 1.2 on every set (taught, held, G)"""
+    from net.tactic import exam_side as ES
+    X = " [-comer]"
+    g = lambda nm, lab, pair: ES._get(out, nm, lab, pair=pair)                       # noqa: E731
+    res = {}
+    # i
+    nt = pool_all([g("taught", "cause" + X, "N - TEACH"), g("held", "cause" + X, "N - TEACH")])
+    tt = pool_all([g("taught", "cause" + X, "TEACH2 - TEACH"), g("held", "cause" + X, "TEACH2 - TEACH")])
+    ok = None if not (nt and tt and tt["diff"] > 0) else nt["diff"] >= 0.5 * tt["diff"]
+    res["i_closes"] = _piece(ok, rule="N - TEACH >= 0.5 x (TEACH2 - TEACH) on the S2 cause scenes (taught + held pooled, "
+                                      "comer out); TEACH2 - TEACH <= 0 or missing: not judged",
+                             N_TEACH=nt, TEACH2_TEACH=tt,
+                             share_closed=round(nt["diff"] / tt["diff"], 3) if nt and tt and tt["diff"] else None)
+    # ii
+    def per_scene(p):
+        fo, nb = 0, 0
+        for nm in ("taught", "held"):
+            e = out.get(nm, {}).get("exec", {}).get(p, {}).get("cause" + X)
+            n = out.get(nm, {}).get("n_battles", {}).get("cause" + X)
+            if e is None or not n:
+                return None
+            fo, nb = fo + e["flank_orders"], nb + n
+        return {"flank_orders": fo, "cause_scenes": nb, "a_scene": round(fo / nb, 4)}
+    fN, fT = per_scene("N"), per_scene("TEACH2")
+    cN = line_c_of(out, "N") if all(nm in out for nm in ("taught", "held", "G")) else None
+    a_ok = None if not (fN and fT and fT["a_scene"] > 0) else fN["a_scene"] >= 0.5 * fT["a_scene"]
+    c_ok = None if not cN or cN.get("share") is None else cN["share"] >= 0.75
+    ok = False if (a_ok is False or c_ok is False) else (None if (a_ok is None or c_ok is None) else True)
+    res["ii_executes"] = _piece(ok, rule="N's flank orders a cause scene (comer out) >= 0.5 x TEACH2's, and N's first "
+                                         "contact on the flank (exam_side line c) >= 0.75",
+                                flank_orders_N=fN, flank_orders_TEACH2=fT,
+                                orders_ok={True: "passed", False: "failed", None: "not judged"}[a_ok],
+                                line_c_N=cN, line_c_ok={True: "passed", False: "failed", None: "not judged"}[c_ok])
+    # iii
+    nn = pool_all([g("taught", "no cause" + X, "N - TEACH"), g("held", "no cause" + X, "N - TEACH")])
+    gt = g("G", "all" + X, "N - TEACH")
+    ok = None if not (nn and gt) else (nn["diff"] >= -nn["two_errors"] and gt["diff"] >= -gt["two_errors"])
+    res["iii_no_harm"] = _piece(ok, rule="N - TEACH >= -2 errors on the no-cause scenes (taught + held pooled) and on G "
+                                         "(comer out)", no_cause=nn, G=gt,
+                                G_N_N1=g("G", "all" + X, "N - N1"), G_N_TEACH2=g("G", "all" + X, "N - TEACH2"))
+    # iv
+    t, h = g("taught", "cause" + X, "N - TEACH"), g("held", "cause" + X, "N - TEACH")
+    if t and h:
+        e2 = round(math.sqrt(t["two_errors"] ** 2 + h["two_errors"] ** 2), 4)
+        res["iv_held"] = _piece(h["diff"] - t["diff"] >= -e2, rule="(N - TEACH) held cause - taught cause >= -2 errors",
+                                taught=t, held=h, gap=round(h["diff"] - t["diff"], 4), two_errors=e2,
+                                by_axis={lab: x for lab, x in out["held"]["pairs"].get("N - TEACH", {}).items()
+                                         if lab.startswith("held ") and lab.endswith(", cause" + X)})
+    else:
+        res["iv_held"] = _piece(None, rule="(N - TEACH) held cause - taught cause >= -2 errors", taught=t, held=h)
+    # v
+    if t01 is None:
+        res["v_t01"] = _piece(None, rule="T0-1 retained (t01_compare)", note="--t01-new / --t01-ref not given")
+    else:
+        res["v_t01"] = _piece(t01.get("passed"), rule="T0-1 retained (t01_compare)", **{k: v for k, v in t01.items()
+                                                                                       if k != "passed"})
+    # vi
+    om = {nm: out.get(nm, {}).get("orders_min", {}).get("N", {}).get("all" + X) for nm in ("taught", "held", "G")}
+    known = all(isinstance(v, (int, float)) and math.isfinite(v) for v in om.values())
+    res["vi_orders"] = _piece(None if not known else all(v <= 1.2 for v in om.values()),
+                              rule="N's orders to the game a unit-minute <= 1.2 (METHOD: 1.5 x human 0.8) on taught, held, "
+                                   "G (comer out)", by_set=om)
+    res["comer_alone"] = {nm: g(nm, "comer", "N - TEACH") for nm in ("taught", "held", "G")}
+    pieces = ("i_closes", "ii_executes", "iii_no_harm", "iv_held", "v_t01", "vi_orders")
+    res["passed"] = all(res[p]["passed"] is True for p in pieces)
+    res["verdict"] = "passed" if res["passed"] else "NOT passed"
+    res["reasons"] = [f"{p}: {res[p]['status']}" for p in pieces if res[p]["passed"] is not True]
+    return res
+
+
+def t01_compare(new_dir, ref_dir):
+    """Piece v: T0-1 retained - `learn after --ckpt` (T0-1's exam) of the new network (new_dir) against T0-1's network
+    (ref_dir, tmp/drill1_w/before): on each of T0-1's sets with an outcome (S, G) the paired N3 - N1 of the battle's
+    health trade (the same battles: the files' meta and simulator must agree, else not judged) >= -2 errors; T0-1's
+    marks (followed on N's path, false attacks a tick) printed beside. A missing folder, file or set: not judged."""
+    nd, rd = Path(new_dir), Path(ref_dir)
+    res = {"new": str(nd), "ref": str(rd), "sets": {}}
+    if nd.resolve() == rd.resolve():
+        return {**res, "passed": None, "note": "--t01-new and --t01-ref are the same folder: refused (REVIEW2 finding 6)"}
+    try:
+        a_, b_ = (json.loads((Path(x) / "after.json").read_text(encoding="utf-8")) for x in (nd, rd))
+    except (OSError, ValueError) as e:
+        return {**res, "passed": None, "note": f"after.json unreadable: {e!r}"}
+    for s in ("S", "G"):
+        fa, fb = nd / f"{s}_N.json", rd / f"{s}_N.json"
+        if not (fa.exists() and fb.exists()):
+            res["sets"][s] = {"passed": None, "note": "no N file"}
+            continue
+        x, y = (json.loads(f.read_text(encoding="utf-8")) for f in (fa, fb))
+        if x.get("sim_key") != y.get("sim_key") or x.get("meta") != y.get("meta"):
+            res["sets"][s] = {"passed": None, "note": "the files' simulator or battles differ: the reference is to be "
+                                                      "replayed on this simulator", "sim_key": [x.get("sim_key"), y.get("sim_key")]}
+            continue
+        hp = lambda f: f["per_battle"]["hp_trade"]                                   # noqa: E731
+        d = EP.paired(hp(x), hp(y))
+        r = {"N3 - N1": d, "N3 - C": (a_.get("stated", {}).get(s) or {}).get("N - C"),
+             "N1 - C": (b_.get("stated", {}).get(s) or {}).get("N - C"),
+             "passed": None if d is None else d["diff"] >= -d["two_errors"]}
+        if s in a_ and s in b_:
+            r["marks"] = {"followed_N": [a_[s]["followed_N"]["pooled"]["share"], b_[s]["followed_N"]["pooled"]["share"]],
+                          "false_tick": [a_[s]["false_N"]["tick"]["share"], b_[s]["false_N"]["tick"]["share"]]}
+        res["sets"][s] = r
+    st = [x["passed"] for x in res["sets"].values()]
+    res["passed"] = False if False in st else (None if None in st else True)
+    return res
+
+
+def after_side(a):
+    """`learn after --drill side --ckpt PATH --out DIR [--exam-ref DIR] [--t01-new DIR --t01-ref DIR] [--n N]`: the
+    network N (tactic_v3) on exam_side's sets (taught, held, G) beside TEACH2, TEACH, C (reused from --exam-ref when
+    that file is this simulator's and these battles, else played) and N1 (T0-1's network, --init); exam_side's splits,
+    the comer battles apart; METHOD step 6's lines (side_lines)."""
+    from sim.params import load
+    from net.tactic import ckpt as TK
+    from net.tactic import exam_side as ES
+    P = load()
+    D = Path(a.out)
+    D.mkdir(parents=True, exist_ok=True)
+    ar = SimpleNamespace(device=a.device, sim=a.sim)
+    net, _, ck = TK.restore(a.ckpt, a.device)
+    net.eval()
+    n1, _, _ = TK.restore(a.init, a.device)
+    n1.eval()
+    sa = SimpleNamespace(n=a.n, chunk=a.chunk)
+    shas = {"N": _sha(a.ckpt), "N1": _sha(a.init)}
+    names = [x for x in a.sets.split(",") if x]
+    players = [x for x in a.players.split(",") if x]
+    print(json.dumps({"after_side": a.ckpt, "kind": ck.get("kind"), "round": ck.get("round"), "sim_key": EP.sim_key()}),
+          flush=True)
+    for nm, (sp, sd, ch, scene) in ES.sets_of(names, sa).items():
+        (D / f"{nm}_meta.json").write_text(json.dumps(ES.meta(sp)), encoding="utf-8")
+        for name in players:
+            f = D / f"{nm}_{name}.json"
+            sha = shas.get(name)
+            if f.exists():
+                # (an earlier result in this folder is taken only when it is this simulator's, these battles and - for
+                # N / N1 - these weights; anything else is refused, never silently reused: REVIEW.md finding 7)
+                x = json.loads(f.read_text(encoding="utf-8"))
+                same = x.get("sim_key") == EP.sim_key() and x.get("meta") == EP.meta_of(sp) and (
+                    sha is None or x.get("ckpt_sha256") == sha)
+                if not same:
+                    raise SystemExit(f"{f}: an earlier result of other weights, battles or simulator (ckpt_sha256 "
+                                     f"{x.get('ckpt_sha256')} vs {sha}) - give a clean --out")
+                print(json.dumps({"set": nm, "player": name, "kept": str(f), "ckpt_sha256": sha}), flush=True)
+                continue
+            if a.exam_ref and name in ES.PLAYERS:
+                ref = Path(a.exam_ref) / f"{nm}_{name}.json"
+                if ref.exists():
+                    x = json.loads(ref.read_text(encoding="utf-8"))
+                    if x.get("sim_key") == EP.sim_key() and x.get("meta") == EP.meta_of(sp):
+                        f.write_text(json.dumps(x), encoding="utf-8")
+                        print(json.dumps({"set": nm, "player": name, "reused": str(ref)}), flush=True)
+                        continue
+            t0 = time.time()
+            if name in ("N", "N1"):
+                res = net_side_run(net if name == "N" else n1, sp, sd, ch, ar, P, scene=scene)
+                res["ckpt_sha256"] = sha
+            else:
+                res = ES.side_run(name, sp, sd, ch, ar, P, scene=scene)
+            f.write_text(json.dumps(res), encoding="utf-8")
+            print(json.dumps({"set": nm, "player": name, "battles": len(sp), "min": round((time.time() - t0) / 60, 1)}),
+                  flush=True)
+    out = side_table(D, names)
+    t01 = t01_compare(a.t01_new, a.t01_ref) if a.t01_new and a.t01_ref else None
+    out["lines"] = side_lines(out, t01)
+    (D / "after_side.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+    for nm, tab in out.items():
+        if nm == "lines":
+            continue
+        print(f"\n## set {nm} ({tab['battles']} battles) - (i) C's first contact + 300 s | (iii) end | orders")
+        for pair, rows in tab["pairs"].items():
+            if pair.startswith(("N", "TEACH2 - TEACH")):
+                for lab, r in rows.items():
+                    if lab in ("all", "cause", "no cause", "all [-comer]", "cause [-comer]", "no cause [-comer]", "comer"):
+                        print(f"  {pair} {lab}: {EP.fmt(r['i_300'])} | {EP.fmt(r['iii_end'])} | {EP.fmt(r['orders'])}")
+        print("  orders a unit-minute (all):", {p: v.get("all") for p, v in tab["orders_min"].items()})
+    print("\nlines:", json.dumps(out["lines"], indent=1))
+    ln = out["lines"]
+    for p in ("i_closes", "ii_executes", "iii_no_harm", "iv_held", "v_t01", "vi_orders"):
+        x = {k: v for k, v in ln[p].items() if k not in ("rule", "by_axis")}
+        print(f"PIECE {p}: {ln[p]['status']} - {json.dumps(x)}", flush=True)
+    print(f"VERDICT: {ln['verdict']}" + (f" - {'; '.join(ln['reasons'])}" if ln["reasons"] else ""), flush=True)
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("what", choices=("train", "after"))
@@ -965,8 +1718,23 @@ def main(argv=None):
     ap.add_argument("--sim", default="", help="the simulator's commit (said by the caller)")
     ap.add_argument("--unit", default="", help="the unit script's commit (said by the caller)")
     ap.add_argument("--smoke", type=int, default=0, help="n scenes + n general battles a part, 200 s, tiny reads")
+    ap.add_argument("--drill", choices=("attack", "side"), default="attack",
+                    help="attack: T0-1 'бить связанного'; side: T0-2 'сторона удара' (tactic_v3 from --init, TEACH2)")
+    ap.add_argument("--init", default="weights/tactic/attack1/final.pt",
+                    help="side: the tactic_v2 checkpoint the training starts from; after: T0-1's network N1")
+    ap.add_argument("--passes", type=int, default=0, help="train: passes a round (config train.learn.passes)")
+    ap.add_argument("--no-v", action="store_true", help="train: no V read after the rounds (a plumbing run)")
+    ap.add_argument("--sets", default="taught,held,G", help="after --drill side: exam_side's sets")
+    ap.add_argument("--players", default=",".join(SIDE_PLAYERS), help="after --drill side: the players")
+    ap.add_argument("--exam-ref", default="", help="after --drill side: exam_side's folder (C, TEACH, TEACH2 reused)")
+    ap.add_argument("--n", type=int, default=0, help="after --drill side: a smaller set (exam_side --n)")
+    ap.add_argument("--chunk", type=int, default=256, help="after --drill side: the scenes' chunk")
+    ap.add_argument("--t01-new", default="", help="after --drill side: `learn after --ckpt` folder of this network")
+    ap.add_argument("--t01-ref", default="tmp/drill1_w/before", help="after --drill side: the same of T0-1's network (tmp/drill1_w/before)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
+    if a.what == "after" and a.drill == "side":
+        return after_side(a)
     return train(a) if a.what == "train" else after(a)
 
 

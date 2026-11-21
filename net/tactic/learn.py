@@ -28,6 +28,18 @@ on held-out seeds; if not, the cause is not visible to the network).
     DOCK_NAME=agent-s4 DOCK_CPUS=6 DOCK_MEM=6g bash ops/dock.sh net.tactic.learn probe --inputs A,B,C,X \
         --out tmp/tactic_slice/v23/stage4/probe --sim 1925110
 `learn train` and `learn after` (the first training, the exam after by the move marks): tactic/imitate.py.
+
+Drill T0-2 'side of the strike' (tmp/drill2/design_merged.md; `learn probe --side`): TEACH2 drives and labels; per
+group-tick with a new attack label SideBuffer keeps the probe's input (the card, D2's and the S2 row columns, own() of 19,
+the walk fed with the teacher's targets AND approaches: the pair numbers, heads.side_feats and the held flanks at the
+label's target) and the label's approach; heads.SideProbe learns it (held-back battles, plateau) on the training draw
+(T0-1's scenes and general battles of the T0-1 probe's seeds + S2 / S2N scenes of SIDE_PROBE's seeds) and is read on
+held-out seeds: S2 / S2N scenes of new seeds, the held axes (scenes.held_specs_side of new seeds), S' and G' (T0-1's
+probe sets). The lines (written before the run, the brief): followed >= 0.90 per class front / left / right on the
+held-out reads pooled, false flank (left / right where the teacher says front) on the no-cause scenes S2N <= 3 %.
+    bash ops/dock.sh net.tactic.learn probe --side --teacher TEACH2 --out tmp/t02b/probe --sim <commit>
+weights(d, meta): S2 / S2N battles with an attack label are their own type 'side' (mass SIDE_LEARN.mass), without one
+'nocause'.
 """
 import argparse
 import json
@@ -57,6 +69,12 @@ INPUTS = {"A": ((0, 1), ()), "B": ((0, 1, 2, 3), ()), "C": ((0, 1, 2, 3, 4), ())
 GMAX = 8
 FAMILIES = ("A1", "A2", "A3", "A4", "A5", "A6")
 NOCAUSE, GENERAL = len(FAMILIES), len(FAMILIES) + 1
+SIDE = GENERAL + 1
+SIDE_RECIPES = ("S2", "S2N")
+# drill T0-2's training and label-probe settings: config tactic.json drills.side (learn, probe; their _why)
+from net.tactic import cfg as _tcfg  # noqa: E402
+SIDE_LEARN = _tcfg()["drills"]["side"]["learn"]
+SIDE_PROBE = _tcfg()["drills"]["side"]["probe"]
 
 
 def _c():
@@ -335,12 +353,15 @@ def weights(d, meta):
     cause[bt[att]] = True
     ty = torch.empty(B, dtype=torch.long)
     for i, m in enumerate(meta):
+        if m["kind"] != "general" and m["recipe"] in SIDE_RECIPES:
+            ty[i] = SIDE if cause[i] else NOCAUSE                 # (drill T0-2's scenes: their own type)
+            continue
         ty[i] = GENERAL if m["kind"] == "general" else (FAMILIES.index(family_of(m)) if cause[i] else NOCAUSE)
     t_ = ty[bt]
     cnt = _c()["sets"]["S"]["counts"]
     tot_f = sum(cnt[f] for f in FAMILIES)
     mass = {i: float(L["families"]) * cnt[f] / tot_f for i, f in enumerate(FAMILIES)}
-    mass.update({NOCAUSE: float(L["nocause"]), GENERAL: float(L["general"])})
+    mass.update({NOCAUSE: float(L["nocause"]), GENERAL: float(L["general"]), SIDE: float(SIDE_LEARN["mass"])})
     present = {i for i in mass if bool((item & (t_ == i)).any())}
     z = sum(mass[i] for i in present) or 1.0
     tb = sum(1 << TG.KINDS.index(n) for n in TG.TAUGHT if n in TG.KINDS)
@@ -371,7 +392,7 @@ def weights(d, meta):
         w = torch.where(taught & sel, torch.full_like(w, a_ * wo), w)
         w = torch.where(triv & sel, torch.full_like(w, b_ * wo), w)
         w = torch.where(other & sel, torch.full_like(w, wo), w)
-        name = FAMILIES[i] if i < NOCAUSE else ("nocause" if i == NOCAUSE else "general")
+        name = FAMILIES[i] if i < NOCAUSE else {NOCAUSE: "nocause", GENERAL: "general", SIDE: "side"}[i]
         info[name] = {"mass": round(M, 4), "battles": int((ty == i).sum()), "attack": int(na), "taught": int(nt),
                       "trivial": int(nv), "other": int(no), "taught_x": round(a_, 3), "trivial_x": round(b_, 3),
                       "taught_share_of_keep_mass": round(a_ * nt / den, 4) if den else 0.0,
@@ -724,6 +745,366 @@ def brief(tab):
             f"YES {f['YES']['share']} ({f['YES']['n']}); false/tick {p['false_tick']['share']} (n {p['false_tick']['n']})")
 
 
+# ------------------------------------------------------------------ drill T0-2: the side's label probe (module doc)
+def side_row_cols():
+    """The side probe's row columns: D2's (cols.D2) and cols.SIDE_ROW - indices into cols.COLS."""
+    from net.tactic.cols import SIDE_ROW
+    return tuple(HD.d2_cols()[1]) + tuple(COLS.index(n) for n in SIDE_ROW)
+
+
+def at_label(t, k):
+    """t [R, G, K, c] at the rows k [R, G] (clamped) -> [R, G, c]."""
+    return t.gather(2, k.clamp(min=0)[..., None, None].expand(-1, -1, 1, t.shape[-1]))[:, :, 0]
+
+
+def side_label_inputs(v, lab, T):
+    """The side's label and the pair's side inputs of a tick: {k [R, G] the label's row (-1 none), ap [R, G] its approach
+    (-1 none), pair_k [R, G, 7], x_k [R, G, SIDE_X] (side_feats + held at k)} - the walk fed with the labeller's targets
+    and approaches (TEACH2: lab['approach'])."""
+    fx = v.fx
+    assert "approach" in lab, "the labeller gives no approach: drill T0-2 needs TEACH2"
+    att = T["attack"]
+    k = torch.where(att, T["k"], torch.full_like(T["k"], -1))
+    ap = torch.where(att, lab["approach"], torch.full_like(lab["approach"], -1))
+    wi = HD.walk_inputs(fx, T["k"], approach=lab["approach"])
+    x = torch.cat([at_label(HD.side_feats(fx), k), at_label(wi["held"], k)], -1)
+    return {"k": k, "ap": ap, "pair_k": at_label(wi["pair"], k), "x_k": x, "wi": wi}
+
+
+class SideBuffer:
+    """(module doc) ticks: dicts (CPU) of the group-ticks with an attack label; meta by battle."""
+
+    def __init__(self, ana):
+        self.ana = ana
+        self.pending, self.ticks, self.meta = [], [], []
+        self.frontal = {"rows": 0, "differ": 0, "rows_labelled": 0, "differ_labelled": 0}
+
+    def hook(self, teacher):
+        return lambda v, lab, T: self(v, lab, T, teacher)
+
+    def check_frontal(self, fx, T, teacher):
+        """cols.anvil_off(touch) <= frontal_deg against the teacher's cols.frontal(touch) on every row of the tick (and
+        on the labels' targets): the column must carry the teacher's fact exactly."""
+        from net.tactic import cols as CL
+        from net.unit import scripts as SC
+        tch = getattr(teacher, "touch", None)
+        tch = SC.TOUCH_M if tch is None else tch
+        a = CL.anvil_off(fx, tch) <= float(CL.c_side()["frontal_deg"])
+        b = CL.frontal(fx, tch)
+        m = fx.mask
+        self.frontal["rows"] += int(m.sum())
+        self.frontal["differ"] += int(((a != b) & m).sum())
+        k = T["k"].clamp(min=0)
+        att = T["attack"]
+        self.frontal["rows_labelled"] += int(att.sum())
+        self.frontal["differ_labelled"] += int(((a.gather(1, k) != b.gather(1, k)) & att).sum())
+
+    def __call__(self, v, lab, T, teacher=None):
+        fx = v.fx
+        self.check_frontal(fx, T, teacher)
+        sel = T["attack"].any(1)
+        if not bool(sel.any()):
+            return
+        s = side_label_inputs(v, lab, T)
+        with torch.no_grad():
+            card = self.ana(v.rr["rows"], v.rr["mask"])
+        f = {"card": card, "mask": v.rr["mask"], "cols": row_cols(fx)[..., list(side_row_cols())],
+             "own": OR.own(v.order, v.ctx.prev, fx, v.now, approach=True), "g_row": fx.g_row, "g_on": HD.g_on_of(fx),
+             "k": s["k"], "ap": s["ap"], "pair_k": s["pair_k"], "x_k": s["x_k"],
+             "lab_open": s["wi"]["open"].gather(-1, s["k"].clamp(min=0)[..., None])[..., 0] & (s["k"] >= 0)}
+        out = {"b": v.idx[sel].cpu()}
+        for k, t in f.items():
+            t = t[sel]
+            if k not in ("mask", "card", "cols"):
+                t = _pad_g(t, -1 if k in ("k", "ap") else (True if k == "lab_open" else 0))
+            out[k] = (t.half() if t.is_floating_point() else t).cpu()
+        self.pending.append(out)
+
+    def flush(self, ii, specs, kind):
+        base = len(self.meta)
+        for i in ii:
+            s = specs[i]
+            self.meta.append({"kind": kind, "recipe": s.get("recipe", "G"), "held": s.get("held"),
+                              "cause": s.get("s2_cause"), "n": len(s["mine"])})
+        for t in self.pending:
+            keep = t["b"] < len(ii)
+            if bool(keep.any()):
+                t = {k: x[keep] for k, x in t.items()}
+                t["b"] = t["b"].long() + base
+                self.ticks.append(t)
+        self.pending = []
+
+    def data(self):
+        return {k: torch.cat([t[k] for t in self.ticks], 0) for k in self.ticks[0]}
+
+
+def side_band(x, ap):
+    """[..] bool: a side label at the rule's threshold (config drills.side.bands, its _why) - its DECIDING column, for the
+    side the teacher chose or refused, inside a band: the way's clearance within way_m of its line (clear_enemy_m,
+    clear_own_m), the extra path within extra_m of extra_cap_m, the anvil's off-facing angle within anvil_deg of
+    frontal_deg. x [.., SIDE_X] the side columns at the label's pair (heads.side_feats + held), ap [..] the teacher's
+    approach (-1 none: False). A flank s is 'at the threshold' when it is open and not held and either feasible with
+    one of its threshold columns in a band, or not feasible with every failing threshold column in a band. A flank
+    label: its own flank at the threshold, or the anvil's angle in its band. A front label: the anvil's angle in its
+    band while a flank is feasible or at the threshold, or the target frontal and a flank at the threshold."""
+    from net.tactic import cols as CL
+    c = CL.c_side()
+    b = _tcfg()["drills"]["side"]["bands"]
+    pos = float(_tcfg()["pos_m"])
+    x = x.float()
+    wm, am, em = float(b["way_m"]), float(b["anvil_deg"]), float(b["extra_m"])
+    ce, co, cap, fd = (float(c[k]) for k in ("clear_enemy_m", "clear_own_m", "extra_cap_m", "frontal_deg"))
+    se, so, ex = x[..., [0, 4]] * ce, x[..., [1, 5]] * co, x[..., [2, 6]] * pos
+    opn = (x[..., [8, 9]] >= 1 - 1e-3) & (x[..., [11, 12]] < 0.5)
+    pe, po, px = se >= ce, so >= co, ex <= cap
+    ie, io, ix = (se - ce).abs() <= wm, (so - co).abs() <= wm, (ex - cap).abs() <= em
+    feas = opn & pe & po & px
+    amb = opn & ((feas & (ie | io | ix)) | (~feas & (pe | ie) & (po | io) & (px | ix)))
+    anv = x[..., 10] * 180.0
+    ia = (anv - fd).abs() <= am
+    fl = (ap == 1) | (ap == 2)
+    own = torch.where(ap == 2, amb[..., 1], amb[..., 0])
+    flank_b = fl & (own | ia)
+    front_b = (ap == 0) & ((ia & (feas | amb).any(-1)) | ((anv <= fd) & amb.any(-1)))
+    return flank_b | front_b
+
+
+def side_batch(d, idx, dev):
+    g = lambda k: d[k][idx].to(dev)                                                  # noqa: E731
+    return {"card": g("card").float(), "cols": g("cols").float(), "mask": g("mask"), "own": g("own").float(),
+            "g_row": g("g_row").long(), "g_on": g("g_on"), "k": g("k").long(), "pair_k": g("pair_k").float(),
+            "x_k": g("x_k").float(), "ap": g("ap").long(),
+            # (buffers collected before REVIEW2 finding 2 have no lab_open: taken as open)
+            "lab_open": g("lab_open").bool() if "lab_open" in d else torch.ones_like(g("ap"), dtype=torch.bool)}
+
+
+def side_probe_train(d, width, dev, log, held, seed=17, passes=160):
+    """heads.SideProbe (its SideHead reads the threshold-centred columns) by recipe R3 (tmp/t02/fix/b/probe_recipes.md):
+    Adam lr 1e-3 falling by cosine to 1e-5 over passes (160), minibatch 128, no early stop, the LAST state; the labels
+    at the rule's threshold (side_band) out of the loss. The held-back tenth only logged."""
+    pr = _c()["probe"]
+    torch.manual_seed(seed)
+    net = HD.SideProbe(len(side_row_cols()), width=width, heads=int(pr["heads"]), ff=int(pr["ff"])).to(dev)
+    opt = torch.optim.Adam(net.parameters(), lr=1e-3)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=passes, eta_min=1e-5)
+    use, hidx = (~held).nonzero()[:, 0], held.nonzero()[:, 0]
+    mb = 128
+    gen = torch.Generator().manual_seed(seed)
+
+    def lossof(b):
+        lg = net(b)
+        m = (b["ap"] >= 0) & ~side_band(b["x_k"], b["ap"]) & b["lab_open"]
+        return HD.side_loss(lg[m], b["ap"][m], torch.ones(int(m.sum()), device=dev))[0]
+    hist = {"train": [], "held": []}
+    for p in range(passes):
+        net.train()
+        perm = use[torch.randperm(use.numel(), generator=gen)]
+        tot, nb = 0.0, 0
+        for i in range(0, perm.numel(), mb):
+            loss = lossof(side_batch(d, perm[i:i + mb], dev))
+            opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+            opt.step()
+            tot, nb = tot + float(loss.detach()), nb + 1
+        sched.step()
+        net.eval()
+        with torch.no_grad():
+            hl = [float(lossof(side_batch(d, hidx[i:i + mb], dev))) for i in range(0, hidx.numel(), mb)]
+        hl = sum(hl) / max(len(hl), 1)
+        hist["train"].append(round(tot / max(nb, 1), 5))
+        hist["held"].append(round(hl, 5))
+        log(json.dumps({"side_probe": width, "pass": p, "loss": hist["train"][-1], "held": hist["held"][-1]}))
+    return net.eval(), hist
+
+
+def side_picks(net, d, dev, mb=1024):
+    """[n, 4] (b, label ap, pick, at the rule's threshold - side_band) of every labelled unit-tick of d."""
+    out = []
+    with torch.no_grad():
+        for i in range(0, d["b"].shape[0], mb):
+            idx = torch.arange(i, min(i + mb, d["b"].shape[0]))
+            b = side_batch(d, idx, dev)
+            pk = net(b).argmax(-1)
+            m = b["ap"] >= 0
+            r, g = m.nonzero(as_tuple=True)
+            bd = (side_band(b["x_k"], b["ap"]) | ~b["lab_open"])[m].long()
+            out.append(torch.stack([d["b"][idx][r.cpu()], b["ap"][m].cpu(), pk[m].cpu(), bd.cpu()], 1))
+    return torch.cat(out, 0) if out else torch.zeros((0, 4), dtype=torch.long)
+
+
+def side_group(m):
+    if m["kind"] == "general":
+        return "G"
+    if m["recipe"] in SIDE_RECIPES:
+        return m["recipe"] + ("" if m.get("held") is None else f" held {m['held']}")
+    return "T0-1 scenes"
+
+
+def side_tables(rows, meta, bands=True):
+    """{group: {per class c: followed {share, two_errors, n}, false_flank (front labels picked left / right), banded
+    (the share of the group's labels at the rule's threshold)}}; groups by side_group, + 'all held-out' and 'S2N (no
+    cause)' pooled; bands - the labels at the threshold (rows[:, 3]) left out of the shares."""
+    gr = [side_group(m) for m in meta]
+    gb = [gr[int(b)] for b in rows[:, 0].tolist()]
+    out = {}
+    bd = rows[:, 3].bool() if rows.shape[1] > 3 else torch.zeros(rows.shape[0], dtype=torch.bool)
+
+    def one(sel0):
+        sel = sel0 & ~bd if bands else sel0
+        lab, pk = rows[sel, 1], rows[sel, 2]
+        res = {}
+        for c, name in enumerate(OR.APPROACHES):
+            n = int((lab == c).sum())
+            res[name] = share(int(((lab == c) & (pk == c)).sum()), n)
+        res["false_flank"] = share(int(((lab == 0) & (pk > 0)).sum()), int((lab == 0).sum()))
+        res["banded"] = share(int((sel0 & bd).sum()), int(sel0.sum()))
+        return res
+    for g in sorted(set(gb)):
+        out[g] = one(torch.tensor([x == g for x in gb], dtype=torch.bool))
+    out["all"] = one(torch.ones(len(gb), dtype=torch.bool))
+    out["S2N (no cause)"] = one(torch.tensor([x.startswith("S2N") for x in gb], dtype=torch.bool))
+    return out
+
+
+def side_verdict(tab):
+    """The brief's lines on the held-out read: (passed, fails)."""
+    L_ = SIDE_PROBE["lines"]
+    fails = []
+    for c in OR.APPROACHES:
+        x = tab["all"][c]
+        if x["share"] is None or x["share"] < float(L_["followed"]):
+            fails.append(f"followed {c} {x['share']} (n {x['n']})")
+    x = tab["S2N (no cause)"]["false_flank"]
+    if x["share"] is None or x["share"] > float(L_["false_flank"]):
+        fails.append(f"false flank on S2N {x['share']} (n {x['n']})")
+    x = tab["all"]["banded"]
+    if x["share"] is None or x["share"] > float(_tcfg()["drills"]["side"]["bands"]["band_share_max"]):
+        fails.append(f"labels at the rule's threshold {x['share']} (n {x['n']})")
+    return not fails, fails
+
+
+def side_buffer_key(a):
+    """sha256 (16) of what the side probe's buffers depend on: the column code (cols.py), the side head's inputs
+    (heads.side_feats, learn.side_label_inputs), the teacher (pin.py, orders.py, scenes.py), the configs, the simulator."""
+    import hashlib
+    from net.tactic import cfg as tc
+    src = "".join((ROOT_T / f).read_text(encoding="utf-8") for f in ("cols.py", "heads.py", "pin.py", "orders.py",
+                                                                      "scenes.py", "learn.py"))
+    x = {"src": hashlib.sha256(src.encode()).hexdigest(), "side": tc()["drills"].get("side"), "orders": tc()["orders"],
+         "stage0": scfg()["drills"], "sim_key": EP.sim_key(), "teacher": a.teacher}
+    return hashlib.sha256(json.dumps(x, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+ROOT_T = Path(__file__).resolve().parent
+
+
+def side_probe(a, P, log, D):
+    from net.tactic import scenes as SN
+    t0 = time.time()
+    sp = SIDE_PROBE
+    dev = a.device
+    ar = _args(dev, a.sim)
+    ana = HD.frozen_analysis(dev)
+    sm = a.smoke
+    pr = _c()["probe"]
+    tseed = int(pr["seeds"]["tseed"]) + 7000
+
+    def s2(seed0, n):
+        return [SN.side_scene(seed0 + i) for i in range(n)] + [SN.side_scene(seed0 + i, twin=True) for i in range(n)]
+
+    def plays(buf, parts, base):
+        for j, (kind, specs, scene) in enumerate(parts):
+            if not specs:
+                continue
+            if sm:
+                for x in specs:
+                    x["limit"] = min(int(x["limit"]), 150)
+            t1 = time.time()
+            ch = min(a.chunk, len(specs))
+            play(a.teacher, specs, scene, _seeds(tseed + base + 10 * j, len(specs), ch), ch, ar, P, buf.hook,
+                 lambda ii, specs=specs, kind=kind: buf.flush(ii, specs, kind))
+            log(json.dumps({"side_collect": kind, "battles": len(specs), "group_ticks": sum(t["b"].shape[0] for t in buf.ticks),
+                            "frontal_check": dict(buf.frontal), "min": round((time.time() - t1) / 60, 1)}))
+    n_tr, n_ev, n_h = (sm, max(2, sm // 4), 2) if sm else (sp["n_train"], sp["n_eval"], sp["n_held"])
+    sc, gs = (sm / 1536.0, sm / 512.0) if sm else (sp["scale"], sp["gscale"])
+    bpath = D / "side_train.pt"
+    epath = D / "side_eval.pt"
+    fc = {}
+    key = side_buffer_key(a)
+    if not sm and (bpath.exists() or epath.exists()):
+        # (cached buffers are never reused silently - REVIEW.md finding 2: only with --reuse, their key printed and
+        # compared, and the frontal check run anew on a small fresh draw of this code)
+        if not a.reuse:
+            raise SystemExit(f"{D}: side_train.pt / side_eval.pt exist - give a clean --out, or --reuse to read them")
+        bufc = SideBuffer(ana)
+        plays(bufc, [("scene", s2(sp["seeds"]["eval"], 16), True)], 900)
+        fc["reuse_check"] = dict(bufc.frontal)
+        log(json.dumps({"reuse_frontal_check": fc["reuse_check"], "battles": 32}))
+        assert bufc.frontal["differ"] == 0 and bufc.frontal["differ_labelled"] == 0, bufc.frontal
+    if bpath.exists() and not sm:
+        x = torch.load(bpath, weights_only=False)
+        d, meta = x["data"], x["meta"]
+        log(json.dumps({"loaded": str(bpath), "key": x.get("key"), "key_now": key}))
+        assert x.get("key") in (None, key), f"{bpath}: collected by other code / config ({x.get('key')} != {key})"
+    else:
+        scenes, gen = round_specs(0, sc, gs)
+        if sm:
+            scenes, gen = scenes[:sm], gen[:sm]
+        buf = SideBuffer(ana)
+        plays(buf, [("scene", scenes + s2(sp["seeds"]["train"], n_tr), True), ("general", gen, False)], 0)
+        d, meta = buf.data(), buf.meta
+        fc["train"] = dict(buf.frontal)
+        if not sm:
+            torch.save({"data": d, "meta": meta, "key": key}, bpath)
+    held = held_split(d)
+    lab = d["ap"][d["ap"] >= 0]
+    log(json.dumps({"train_labels": {c: int((lab == i).sum()) for i, c in enumerate(OR.APPROACHES)},
+                    "group_ticks": int(d["b"].shape[0]), "battles": len(meta), "min": round((time.time() - t0) / 60, 1)}))
+    # the held-out reads
+    if epath.exists() and not sm:
+        x = torch.load(epath, weights_only=False)
+        de, me = x["data"], x["meta"]
+        log(json.dumps({"loaded": str(epath), "key": x.get("key"), "key_now": key}))
+        assert x.get("key") in (None, key), f"{epath}: collected by other code / config ({x.get('key')} != {key})"
+    else:
+        S, _, G = eval_specs(sp["eval_scale"] if not sm else 0.02)
+        if sm:
+            S, G = S[:sm], G[:sm]
+        Hs = SN.held_specs_side(seed0=sp["seeds"]["held"], n=n_h)
+        bufe = SideBuffer(ana)
+        plays(bufe, [("scene", s2(sp["seeds"]["eval"], n_ev) + Hs + S, True), ("general", G, False)], 500)
+        de, me = bufe.data(), bufe.meta
+        fc["eval"] = dict(bufe.frontal)
+        if not sm:
+            torch.save({"data": de, "meta": me, "key": key}, epath)
+    res = {"teacher": a.teacher, "sim": a.sim, "sim_key": EP.sim_key(), "lines": sp["lines"], "by_width": {},
+           "frontal_check": fc}
+    log(json.dumps({"frontal_check": fc}))
+    widths = [int(x) for x in a.widths.split(",") if x] if a.widths else [int(pr["width"]), int(pr["width_retry"])]
+    for wd in widths:
+        net, hist = side_probe_train(d, wd, dev, log, held)
+        torch.save(net.state_dict(), D / f"side_probe_{wd}.pt")
+        rows_e = side_picks(net, de, dev)
+        tab = side_tables(rows_e, me)
+        tab_un = side_tables(rows_e, me, bands=False)
+        tab_in = side_tables(side_picks(net, d, dev), meta)
+        ok, fails = side_verdict(tab)
+        res["by_width"][str(wd)] = {"history": hist, "held_out": tab, "held_out_unbanded": {
+            k: tab_un[k] for k in ("all", "S2N (no cause)")}, "training_draw": tab_in["all"], "passed": ok,
+            "fails": fails}
+        log(json.dumps({"side_probe_width": wd, "passed": ok, "fails": fails, "all": tab["all"],
+                        "S2N": tab["S2N (no cause)"], "unbanded_all": tab_un["all"],
+                        "unbanded_S2N": tab_un["S2N (no cause)"]}))
+        if ok:
+            break
+    res["passed"] = any(x["passed"] for x in res["by_width"].values())
+    res["minutes"] = round((time.time() - t0) / 60, 1)
+    (D / "side_probe.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    log(json.dumps({"SIDE_PROBE": {"passed": res["passed"], "minutes": res["minutes"]}}))
+    return res
+
+
 # ------------------------------------------------------------------ the command
 def probe(a):
     from sim.params import load
@@ -736,6 +1117,11 @@ def probe(a):
         print(s, flush=True)
         logf.write(s + "\n")
         logf.flush()
+    if a.side:
+        a.teacher = "TEACH2" if a.teacher == "TEACH" else a.teacher
+        res = side_probe(a, P, log, D)
+        logf.close()
+        return res
     t0 = time.time()
     pr = _c()["probe"]
     dev = a.device
@@ -851,6 +1237,9 @@ def main(argv=None):
     ap.add_argument("--collect-only", action="store_true", help="collect the buffer into --buffer and stop")
     ap.add_argument("--read-only", action="store_true", help="the reads only, of the probes saved in --out (probe_*.pt, "
                                                                  "probe.json): written to probe_read.json")
+    ap.add_argument("--side", action="store_true", help="drill T0-2's side probe (module doc; --teacher TEACH2)")
+    ap.add_argument("--reuse", action="store_true", help="--side: read side_train.pt / side_eval.pt already in --out "
+                                                         "(their key compared, the frontal check run on a fresh draw)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     probe(a)

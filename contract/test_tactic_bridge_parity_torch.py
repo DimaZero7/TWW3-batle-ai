@@ -290,10 +290,13 @@ class _Seat:
         v = tac.view
         fx, view = v["view"].fx, v["view"]
         given = torch.where(v["new_attack"], fx.row_of_slot(v["tgt"]), torch.full_like(v["tgt"], -1))
+        from net.tactic import cols as CL
         x = HD.net_inputs(view)
         wi = HD.walk_inputs(fx, given)
-        return {"own": OR.own(view.order, view.ctx.prev, fx, view.now), "mt": fx.mt, "cols": x["cols"],
-                "pair": wi["pair"], "slot": fx.slot, "head": HD.head_free(fx), "open": wi["open"],
+        s2 = [CL.COLS.index(n) for n in CL.SIDE_ROW]
+        return {"own": OR.own(view.order, view.ctx.prev, fx, view.now, approach=True), "mt": fx.mt, "cols": x["cols"],
+                "pair": wi["pair"], "s2_cols": CL.row_cols(fx)[..., s2], "s2_pair": CL.side_pairs(fx),
+                "slot": fx.slot, "head": HD.head_free(fx), "open": wi["open"],
                 "skill": v["skill"], "tgt": v["tgt"], "side": v["side"], "my": v["my"]}
 
     def second(self, raw):
@@ -310,9 +313,10 @@ class _Seat:
 
 
 def _same_ticks(a, b, names):
-    """{name: (equal unit-ticks, all)} of two ticks' masks and outputs (my-slot order; outputs: the target by name)."""
+    """{name: (equal unit-ticks, all)} of two ticks' masks and outputs (my-slot order; outputs: the target by name;
+    drill T0-2's approach where both records have it)."""
     out = {}
-    for k in ("head", "skill", "side"):
+    for k in ("head", "skill", "side") + (("approach",) if "approach" in a and "approach" in b else ()):
         out[k] = (int((a[k] == b[k]).sum()), a[k].numel())
     out["open"] = (int((a["open"] == b["open"]).all(2).sum()), a["head"].numel())
     nm = lambda t: [[names[i] if i >= 0 else "" for i in r] for r in t.tolist()]       # noqa: E731
@@ -383,11 +387,12 @@ def _read(ticks, secs, place):
 
 
 def _gaps(ticks):
-    """{own, cols, pair: the largest |sim - game|}; mt equal at every tick."""
-    out = {"own": 0.0, "cols": 0.0, "pair": 0.0}
+    """{own, cols, pair, s2_cols, s2_pair (drill T0-2's ingredients, tactic/cols.py S2; where a tick has them): the
+    largest |sim - game|}; mt equal at every tick."""
+    out = {"own": 0.0, "cols": 0.0, "pair": 0.0, "s2_cols": 0.0, "s2_pair": 0.0, "own3": 0.0, "s2": 0.0, "sx": 0.0}
     for s, a, b, _ in ticks:
         for k in out:
-            if a[k].numel():
+            if k in a and a[k].numel():
                 out[k] = max(out[k], float((a[k] - b[k]).abs().max()))
         assert torch.equal(a["mt"], b["mt"]), (s, "mt")
     return out
@@ -396,8 +401,9 @@ def _gaps(ticks):
 def test_the_side_wrapper_with_teach_gives_the_same_orders_from_the_bridge(tmp_path):
     """tmp/tactic_slice/design_attack_v23.md section 6 item 8: the side wrapper (tactic/side.py) with TEACH ticked on
     the simulator's raw state and on the bridge's documents of the same battle (through melee and a rout) - equal
-    own(), mt, D2's columns, head-free and open masks, outputs (the target by the unit's name) and the unit script's
-    orders: exactly on the flat field; on the turned map in >= 0.99 of unit-ticks."""
+    own() (with drill T0-2's approach), mt, D2's columns, T0-2's S2 row and pair columns (tactic/cols.py), head-free and
+    open masks, outputs (the target by the unit's name) and the unit script's orders: exactly on the flat field; on the
+    turned map in >= 0.99 of unit-ticks."""
     torch.manual_seed(5)
     st = scenario.build([skirmish()], P)
     seer = TI.TacticSeer(allow_flat=True, params=P, own=1)
@@ -455,7 +461,7 @@ def run_companion(st, seconds, net, comp, place=None, terrain_path="flat", bound
     if bounds is None:
         me.bounds = None
     names = [f"u{i}" for i in range(st.N)]
-    ticks, secs, seen = [], [], {"m": False, "r": False, "attacks": 0, "orders": 0}
+    ticks, secs, seen = [], [], {"m": False, "r": False, "attacks": 0, "orders": 0, "flank": 0}
     for s in range(seconds):
         if bool(st.done.all()):
             break                     # (the battle is over: the simulator's clock stops, the bridge's would go on)
@@ -476,6 +482,7 @@ def run_companion(st, seconds, net, comp, place=None, terrain_path="flat", bound
                 assert torch.equal(a[k], rb[k]), (s, k)
             ticks.append((s, a, rb, _same_ticks(a, rb, names)))
             seen["attacks"] += int(a["new"].sum())
+            seen["flank"] += int((a["new"] & (a["approach"] > 0)).sum())
             # the log's attacks by name are the record's
             want = [[names[i], names[t]] for i, t, n in zip(a["my"][0].tolist(), a["tgt"][0].tolist(),
                                                              a["new"][0].tolist()) if n and i >= 0]
@@ -504,7 +511,8 @@ def test_the_companions_own_path_with_the_trained_network_gives_the_simulators_o
     """The chain 'tactic_v2 only' (bridge/companion/tactic_chain.py, loop.load_chain of weights/tactic/attack1/final.pt)
     on the bridge's documents against the simulator's stage0/battle.TacticSide with the same network: equal own(), mt,
     D2's columns, pair numbers and rows (within 1e-5), head-free and open masks, outputs (the target by name), new
-    attacks and the unit script's gated orders - exactly on the flat field; on the turned map >= 0.99 of unit-ticks."""
+    attacks and the unit script's gated orders - exactly on the flat field; on the turned map >= 0.99 of unit-ticks.
+    Drill T0-2: the same with a tactic_v3 network sending flank attacks (approach, age into the unit's order), flat."""
     from bridge.companion import loop
     from bridge.companion import tactic_chain as TCH
     net = _weights()
@@ -533,3 +541,22 @@ def test_the_companions_own_path_with_the_trained_network_gives_the_simulators_o
     assert seen["m"], seen
     assert all(n >= 0.99 * t for n, t in eq.values()), eq
     assert all(v <= 1e-5 for v in gaps.values()), gaps
+    # drill T0-2: a tactic_v3 network (the trained pointer, ckpt.from_v2) whose side head always says the target's
+    # right - the approach goes through the masks into the unit's order (approach, age, walk guard) and the unit script
+    # walks round on both paths: equal own() of 19, S2 columns, the side head's columns, approaches and unit orders
+    from net.tactic import ckpt as TC
+    from net.tactic import orders as OR
+    net3, _ = TC.from_v2(str(_weights_path()), "cpu")
+    with torch.no_grad():
+        net3.side.l2.bias.zero_()
+        net3.side.l2.bias[OR.RIGHT] = 4.0
+    net3.eval()
+    torch.manual_seed(5)
+    st = scenario.build([skirmish(generals=True)], P)
+    comp = TCH.TacticChain(net3, params=P, allow_flat=True)
+    ticks, secs, seen = run_companion(st, 150, net3, comp)
+    gaps, eq = _gaps_rows(ticks), _read(ticks, secs, None)
+    print("flat v3", seen, gaps, eq)
+    assert seen["flank"] > 0 and "approach" in eq, (seen, eq)
+    assert all(v <= 1e-5 for v in gaps.values()), gaps
+    assert all(n == t for n, t in eq.values()), eq

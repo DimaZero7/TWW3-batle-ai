@@ -16,7 +16,18 @@ The skills of stage 0 (SKILLS; design/unit, METHOD.md table):
               reflexes strike / melee_still); its fight over out of the frame - a HOLD where it stands (not back to the
               frame: the same health, 0.10 fewer orders a unit-minute, tmp/tactic_slice/v2/stage1c). Not memorised:
               a frame moved while the unit holds out of it is not followed (the tactician's 'hold' brings it back)
-    attack    attack the main target (a run unless the pace is slow) while it stands and is seen; then stand where it is
+    attack    attack the main target (a run unless the pace is slow) while it stands and is seen; then stand where it is.
+              With the order's approach the target's left / right (drill T0-2, tmp/drill2/design_merged.md; order
+              'approach', 'age' - s since the order; config tactic.json orders.side) first WALK: a MOVE at a run to P =
+              the target's centre + side x (its front / 2 + off_m + our depth / 2) across its facing, from its raw
+              columns each second (sent again only when P moved reissue.MOVE_M from the point sent and side.reissue_s
+              passed since that MOVE), facing the target; the order's first second out of melee always walks; then
+              the attack above (CHARGE) once within near_m of P or walk_max_s after the order - or at once, for good
+              (FALLBACK), when no other standing unit of our side is in melee within STICK_M of the target, the target
+              turned its front sector over the side P was on at the order's birth (the level's face0), or (side.cancel_comer, off: the game's probe) another standing seen
+              enemy's centre is within cancel_clear_m of the way left (seen always: Unit.comer); an attack on the target already given is kept (one way: the order
+              in force 'last' is the only memory). Unit.trace [B, N] - the PHASES code of each unit this second
+              (game/probe/unit_probe.py side2r measured this walk: P 35 m off, 8 m, 30 s)
     withdraw  out of the frame: break off and go to its centre (WITHDRAW: a run), facing its course, no strike on the
               way; in the frame: hold (the game's price - 24 s with no blow, struck in the back - is paid once: the
               WITHDRAW is one order to the game, never flipped to a strike and back; a push out of the frame up to
@@ -218,6 +229,8 @@ class Unit:
     def __init__(self, turn=True, taken=True):
         self.turn = turn
         self.taken = taken
+        self.trace = None
+        self.comer = None
 
     def intend(self, raw, order, own):
         f = Facts(raw)
@@ -276,6 +289,18 @@ class Unit:
         att = own & (skill == ATTACK)
         o = _set(o, att & main_ok, O.ATTACK, target=tgt, run=pace != Nt.PACE_SLOW, face=-1.0)
         o = _set(o, att & ~main_ok, O.HOLD, x=x, z=z, run=False, face=-1.0)
+        # attack round the target's flank (drill T0-2; module doc 'attack'): WALK to P, then the attack above
+        ap = order.get("approach")
+        self.trace = None
+        self.comer = None
+        if ap is not None and bool((att & (ap > 0)).any()):
+            walk, code, px, pz, pb, hold = self.flank(f, raw, att & (ap > 0), tgt, ap, order.get("age"), last, main_ok,
+                                                      order.get("walk_s"), order.get("face0"), order.get("move_s"))
+            o = _set(o, walk, O.MOVE, x=px, z=pz, run=pace != Nt.PACE_SLOW, face=pb)
+            if hold is not None:
+                # (the walk's MOVE in force given again as it was: no new order to the game this second)
+                o = _set(o, hold, O.MOVE, x=last.x, z=last.z, run=last.run, face=last.face)
+            self.trace = code
         # withdraw: out of its frame - break off and go to the centre (one WITHDRAW, kept: no strike on the way)
         wd = own & (skill == WITHDRAW) & ~came
         o = _set(o, wd, O.WITHDRAW, x=ar["x"], z=ar["z"], run=True, face=course)
@@ -289,6 +314,136 @@ class Unit:
         hit = own & (j >= 0) & ~busy
         o = _set(o, hit, O.ATTACK, target=j, run=True, face=-1.0)
         return o
+
+    def flank(self, f, raw, on, tgt, ap, age, last, main_ok, walk_s=None, face0=None, move_s=None):
+        """(walk [B, N], code [B, N] PHASES index, px, pz, pb [B, N], hold [B, N] or None) of the units on [B, N] under
+        an attack whose approach ap is the target's left (1) or right (2) (module doc 'attack'): P from the target's raw
+        columns now, the facing at P towards the target; walk - the unit goes on to P (MOVE), else the attack in force
+        stands: arrived, late, or a fact of the fallback; an attack on the target already given (last) is kept - one
+        way. face0 - the target's facing at the order's birth (birth(); the side P was on then), move_s - seconds since
+        the unit's last MOVE sent to the game (sent_move()); hold - walking, the MOVE in force given again as it was
+        (P moved less than reissue.MOVE_M from the point sent, or less than side.reissue_s since that MOVE)."""
+        c = side_cfg()
+        B, N = tgt.shape
+        dev = raw.device
+        tc = tgt.clamp(min=0)
+        x, z = _c(raw, "x"), _c(raw, "z")
+        tg = lambda k: _c(raw, k).gather(1, tc)                                         # noqa: E731
+        tb = tg("b")
+        px, pz, pb = flank_point(raw, tgt, ap)
+        z0 = torch.zeros((B, N), dtype=torch.bool, device=dev)
+        charged = z0 if last is None else (last.kind == O.ATTACK) & (last.target == tgt)
+        if last is not None and age is not None:
+            # a fresh flank order (its first second) starts with the walk whatever the unit did before - out of melee
+            # an attack in force on the same target (a counter's charge) is no strike begun; in melee it is kept
+            charged = charged & ((age >= 0.5) | f.melee)
+            # one way: past the order's first second the walk goes on only from its own MOVE (a hold sent while the
+            # target was unseen, an attack - the walk is over)
+            charged = charged | ((age >= 0.5) & (last.kind != O.MOVE))
+        # the anvil: another standing unit of my side in melee within STICK_M of the target (edge to edge)
+        side = _c(raw, "side")
+        eye = torch.eye(N, dtype=torch.bool, device=dev)[None]
+        ours = (side[:, :, None] == side[:, None, :]) & f.standing[:, None, :] & ~eye
+        gt = f.gap.gather(1, tc[:, :, None].expand(B, N, N))                            # [b, i, j] gap(tgt_i, j)
+        no_anvil = ~(ours & f.melee[:, None, :] & (gt <= STICK_M)).any(2)
+        # the target turned its front to P's side: the side P was on at the order's birth (the target's facing then
+        # + 90 deg to its right, - 90 to its left - flank_point's geometry) now in its front sector; measured from the
+        # birth, not from the last MOVE (P turns with the target: the point last sent never enters its front)
+        turned = z0
+        if face0 is not None:
+            sg = torch.where(ap == 1, torch.full_like(tb, -1.0), torch.ones_like(tb))
+            w0 = face0 + sg * 90.0
+            turned = (torch.isfinite(face0)
+                      & ((torch.remainder(w0 - tb + 180.0, 360.0) - 180.0).abs() < FRONT_DEG))
+        # a comer: another standing seen enemy's centre within cancel_clear_m of the way left - always seen (self.comer,
+        # for the exam), a fallback only with the switch (config side.cancel_comer; CANCEL_COMER overrides it)
+        other = f.foe & (torch.arange(N, device=dev)[None, None, :] != tc[:, :, None])
+        d = seg_dist(x[:, None, :], z[:, None, :], x[:, :, None], z[:, :, None], px[:, :, None], pz[:, :, None])
+        seen = (other & (d < float(c["cancel_clear_m"]))).any(2)
+        switch = bool(c.get("cancel_comer", False)) if CANCEL_COMER is None else bool(CANCEL_COMER)
+        comer = seen if switch else z0
+        arrived = torch.sqrt((px - x) ** 2 + (pz - z) ** 2) <= float(c["near_m"])
+        # the walk's time (a guard against a stuck unit, not the drill's rule): walk_s of the order - walk_limit at the
+        # order (the level's Units); without it the flat walk_max_s
+        lim = walk_s if walk_s is not None else torch.full_like(x, float(c["walk_max_s"]))
+        late = z0 if age is None else age >= lim
+        code = torch.full((B, N), PHASES.index("walk"), dtype=torch.long, device=dev)
+        for name, m in (("timeout", late), ("arrived", arrived), ("fb_comer", comer), ("fb_turned", turned),
+                        ("fb_anvil", no_anvil), ("attacking", charged), ("fb_invalid", ~main_ok)):
+            code = torch.where(m, torch.full_like(code, PHASES.index(name)), code)
+        code = torch.where(on, code, torch.zeros_like(code))
+        walk = on & (code == PHASES.index("walk"))
+        self.comer = on & seen & ((code == PHASES.index("walk")) | (code == PHASES.index("fb_comer")))
+        hold = None
+        if last is not None and age is not None:
+            # the walk's MOVE again only when P moved MOVE_M from the point sent AND reissue_s passed since that MOVE
+            # (arrival above is tested against P now): a turning target moves P every second
+            moved = (px - last.x) ** 2 + (pz - last.z) ** 2 >= reissue.MOVE_M ** 2
+            if move_s is not None:
+                moved = moved & (move_s >= float(c["reissue_s"]))
+            hold = walk & (age >= 0.5) & (last.kind == O.MOVE) & ~moved
+        return walk, code, px, pz, pb, hold
+
+
+def flank_point(raw, tgt, ap):
+    """(px, pz, pb [B, N]) P of each unit at its target tgt's side ap (1 left, else right; orders.side off_m): the
+    target's centre + side x (front / 2 + off_m + own depth / 2) across its facing; pb faces the target."""
+    c = side_cfg()
+    tc = tgt.clamp(min=0)
+    x = _c(raw, "x")
+    tg = lambda k: _c(raw, k).gather(1, tc)                                             # noqa: E731
+    tx, tz, tb = tg("x"), tg("z"), tg("b")
+    sg = torch.where(ap == 1, torch.full_like(x, -1.0), torch.ones_like(x))
+    half = tg("front") / 2 + float(c["off_m"]) + _c(raw, "depth") / 2
+    th = torch.deg2rad(tb)
+    px, pz = tx + sg * half * torch.cos(th), tz - sg * half * torch.sin(th)
+    pb = torch.remainder(torch.rad2deg(torch.atan2(tx - px, tz - pz)), 360.0)
+    return px, pz, pb
+
+
+def walk_limit(raw, tgt, ap):
+    """(walk_s, dist [B, N]) at the order: walk_base_s + walk_k x |unit -> P| / the unit's run speed (raw 'run', m/s;
+    orders.side) - the walk's time guard; dist the way's length, m."""
+    c = side_cfg()
+    px, pz, _ = flank_point(raw, tgt, ap)
+    d = torch.sqrt((px - _c(raw, "x")) ** 2 + (pz - _c(raw, "z")) ** 2)
+    run = _c(raw, "run").clamp(min=0.5)
+    return float(c["walk_base_s"]) + float(c["walk_k"]) * d / run, d
+
+
+def birth(raw, tgt):
+    """[B, N] the target's facing (raw 'b', deg) at a flank order's birth - the side its P was on then (Unit.flank's
+    'turned'); NaN with no target."""
+    b = _c(raw, "b").gather(1, tgt.clamp(min=0))
+    return torch.where(tgt >= 0, b, torch.full_like(b, float("nan")))
+
+
+def sent_move(intended, gate):
+    """[B, N] the intended orders that go to the game as a new MOVE (reissue.Gate's own test against the last sent;
+    no gate: every MOVE) - before gate.apply; the level keeps the second of each for Unit.flank's move_s."""
+    mv = intended.kind == O.MOVE
+    if gate is None:
+        return mv
+    return mv & reissue.differs(intended, gate.last, gate.move_m, gate.face_deg, gate.width_m)
+
+
+CANCEL_COMER = None     # the exam's override of config side.cancel_comer (None: the config; exam_side TEACH2_ON)
+
+PHASES =("none", "walk", "arrived", "timeout", "fb_anvil", "fb_turned", "fb_comer", "fb_invalid", "attacking")
+
+
+def side_cfg():
+    """The flank approach's settings (drill T0-2: net/config/tactic.json orders.side)."""
+    from net.tactic import cfg
+    return cfg()["orders"]["side"]
+
+
+def seg_dist(ps, pz, ax, az, bx, bz):
+    """Distance of points (ps, pz) to the segments a -> b (broadcast)."""
+    dx, dz = bx - ax, bz - az
+    L2 = (dx * dx + dz * dz).clamp(min=1e-9)
+    t = (((ps - ax) * dx + (pz - az) * dz) / L2).clamp(0.0, 1.0)
+    return torch.sqrt((ps - ax - t * dx) ** 2 + (pz - az - t * dz) ** 2)
 
 
 class Stand:

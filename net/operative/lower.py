@@ -52,6 +52,7 @@ class Tacticians:
         self.skill = torch.zeros((R, N), dtype=torch.long, device=device)          # (unit/scripts.SKILLS; 0 hold)
         self.tgt = torch.full((R, N), -1, dtype=torch.long, device=device)
         self.side = torch.full((R, N), -1, dtype=torch.long, device=device)       # (orders.SIDES; -1 none)
+        self.approach = torch.zeros((R, N), dtype=torch.long, device=device)      # (orders.APPROACHES; 0 front)
         self.born = torch.zeros((R, N), device=device)
         # mt: ticks in melee of every unit (by the battle's slot) as this row's level saw it - consecutive ticks up to this
         # one with a row and its m on (no row or m off: 0); 0 before the first tick, reset by a fresh parcel
@@ -126,6 +127,7 @@ class Tacticians:
         self.skill = torch.where(fresh[:, None], torch.zeros_like(self.skill), self.skill)
         self.tgt = torch.where(fresh[:, None], torch.full_like(self.tgt, -1), self.tgt)
         self.side = torch.where(fresh[:, None], torch.full_like(self.side, -1), self.side)
+        self.approach = torch.where(fresh[:, None], torch.zeros_like(self.approach), self.approach)
         self.born = torch.where(fresh[:, None], torch.zeros_like(self.born), self.born)
         self.mt = torch.where(fresh[:, None], torch.zeros_like(self.mt), self.mt)
         idx = t.nonzero()[:, 0]
@@ -243,7 +245,8 @@ class Tacticians:
             rr = RW.build(raw, card, p, tiles, rows=K)
         ctx = DC.ctx_of(rr, p, tiles, prev if has_prev else None)
         order = {"skill": self.skill[idx][k, s0], "tgt": torch.where(on_my, self.tgt[idx][k, s0], -1),
-                 "side": torch.where(on_my, self.side[idx][k, s0], -1), "born": self.born[idx][k, s0]}
+                 "side": torch.where(on_my, self.side[idx][k, s0], -1), "born": self.born[idx][k, s0],
+                 "approach": torch.where(on_my, self.approach[idx][k, s0], 0)}
         # the orders that end by themselves (taking an order away is no new order: before the masks, in melee too):
         # the target routs or dies -> no target (an attack without one stands where it is: unit/scripts.py);
         # my striker routs or dies -> its order goes (config tactic.json orders.end_on_rout, cap_all)
@@ -281,7 +284,8 @@ class Tacticians:
                        card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim, inp=inp,
                        command=self.order[idx], parcel=p)
         out = self.player(view)
-        skill, tgt, side, change, cnt = OR.masks(view, out, getattr(self.player, "allow", (0, 2)))
+        skill, tgt, side, change, cnt, approach = OR.masks(view, out, getattr(self.player, "allow", (0, 2)),
+                                                           with_approach=True)
         self.fell += float(out["fell"].sum())
         self.ticks += r
         bi = self.bi[idx]
@@ -309,24 +313,25 @@ class Tacticians:
         self.fr_on[idx] = cur
         born = torch.where((skill != order["skill"]) | (tgt != order["tgt"]), torch.full_like(order["born"], now),
                            order["born"])
-        for name, v in (("skill", skill), ("tgt", tgt), ("side", side), ("born", born)):
+        for name, v in (("skill", skill), ("tgt", tgt), ("side", side), ("born", born), ("approach", approach)):
             cur = getattr(self, name)[idx]
             cur[sel] = v[on_my]
             getattr(self, name)[idx] = cur
         self.view = {"view": view, "skill": skill, "tgt": tgt, "side": side, "change": change, "new_attack": new_att, "bi": bi,
-                     "my": my}
+                     "my": my, "approach": approach}
 
     def counts(self):
         """{name: [B]} the level's counts (self.cnt) summed over each battle's rows."""
         return {n: v.view(self.B, self.G).sum(1) for n, v in self.cnt.items()}
 
     def orders_of(self):
-        """{skill, tgt, born} [B, N] each unit's order in force (the row of its group; skill 0, tgt -1 when none)."""
+        """{skill, tgt, born, approach} [B, N] each unit's order in force (the row of its group; skill 0, tgt -1, approach
+        0 when none)."""
         mem = (self.mine & self.active[:, None]).view(self.B, self.G, self.N)
         any_m = mem.any(1)
         g = mem.float().argmax(1)[:, None]
         out = {}
-        for name, none in (("skill", 0), ("tgt", -1), ("born", 0.0)):
+        for name, none in (("skill", 0), ("tgt", -1), ("born", 0.0), ("approach", 0)):
             v = getattr(self, name).view(self.B, self.G, self.N).gather(1, g)[:, 0]
             out[name] = torch.where(any_m, v, torch.full_like(v, none))
         out["on"] = any_m
@@ -386,6 +391,17 @@ class Units:
         self.arrived = torch.zeros((B, N), dtype=torch.bool, device=dev)
         self.pace = torch.full((B, N), Nt.PACE_ANY, dtype=torch.long, device=dev)
         self.skill = torch.zeros((B, N), dtype=torch.long, device=dev)     # (scripts.SKILLS; 0 hold)
+        # (drill T0-2: the attack order's approach - tactic/orders.APPROACHES, 0 front - and its battle second)
+        self.approach = torch.zeros((B, N), dtype=torch.long, device=dev)
+        self.born = torch.zeros((B, N), device=dev)
+        # (drill T0-2: the flank walk's time guard and length, set at the order's first second - scripts.walk_limit)
+        self.walk_s = torch.full((B, N), float("inf"), device=dev)
+        self.walk_d = torch.zeros((B, N), device=dev)
+        # (drill T0-2: the target's facing at a flank order's birth - scripts.birth - and the second of the unit's last
+        # MOVE sent to the game - scripts.sent_move)
+        self.face0 = torch.full((B, N), float("nan"), device=dev)
+        self.move_t = torch.full((B, N), -float("inf"), device=dev)
+        self.fresh = torch.zeros((B, N), dtype=torch.bool, device=dev)
         self.bi, self.ii = own.nonzero(as_tuple=True)
         self.n = 0
 
@@ -412,6 +428,9 @@ class Units:
             o = tac.orders_of()
             self.skill = torch.where(o["on"], o["skill"], self.skill)
             self.prio = torch.where(o["on"], o["tgt"], self.prio)
+            self.fresh = self.fresh | (o["on"] & ((o["born"] != self.born) | (o["approach"] != self.approach)))
+            self.approach = torch.where(o["on"], o["approach"], self.approach)
+            self.born = torch.where(o["on"], o["born"], self.born)
         elif self.targets:
             self.prio = self.prio_of(tac)
 
@@ -642,11 +661,11 @@ class Units:
         intended.kind[:] = O.KEEP
         mine = torch.zeros((B, N), dtype=torch.bool, device=st.device)
         mine[bl, il] = True
-        if hasattr(self.net, "intend"):
+        script = hasattr(self.net, "intend")
+        now = st.t.float().reshape(-1, 1)
+        if script:
             # the unit's script reads the input's columns only (view.RAW, as the bridge gives them)
-            order = {"skill": self.skill, "area": ar, "target": self.prio, "pace": self.pace,
-                     "last": self.intended}           # (its own order in force: the last one given)
-            intended = self.net.intend(raw_u, order, mine)
+            intended = self.net.intend(raw_u, self.script_order(raw_u, ar, now), mine)
             self.n += int(bl.numel())
         elif bl.numel():
             idx = torch.full_like(bl, V.T)
@@ -666,10 +685,37 @@ class Units:
                 intended = self.sticky_rule(intended, st, inside)
                 intended = self.fast_rule(intended, st)
             self.n += int(bl.numel())
+        if script:
+            self.note_sent(intended, mine, now)
         if self.gate is not None:
             intended = self.gate.apply(intended, mine)
         self.intended = intended
         return self.cad.delays(P.dt, B, st.device, getattr(self, "gen", None))
+
+    def script_order(self, raw_u, ar, now):
+        """The unit script's order {skill, area, target, pace, last, approach, age, walk_s, face0, move_s} at battle
+        second now ([B, 1] or [B, N]) on the unit level's raw - the simulator's and the bridge's (bridge/companion/
+        tactic_chain.py) one code. A new flank order (fresh, drill T0-2) gets here its walk guard (scripts.walk_limit) and
+        the target's facing at its birth (scripts.birth)."""
+        from net.unit import scripts as SC
+        if bool(self.fresh.any()):
+            fl = self.fresh & (self.approach > 0)
+            if bool(fl.any()):
+                lim, d = SC.walk_limit(raw_u, self.prio, self.approach)
+                self.walk_s = torch.where(fl, lim, self.walk_s)
+                self.walk_d = torch.where(fl, d, self.walk_d)
+                self.face0 = torch.where(fl, SC.birth(raw_u, self.prio), self.face0)
+            self.fresh = torch.zeros_like(self.fresh)
+        return {"skill": self.skill, "area": ar, "target": self.prio, "pace": self.pace,
+                "last": self.intended,           # (its own order in force: the last one given)
+                "approach": self.approach, "age": now - self.born, "walk_s": self.walk_s,
+                "face0": self.face0, "move_s": now - self.move_t}
+
+    def note_sent(self, intended, live, now):
+        """Before the gate: the second of each live unit's new MOVE to the game (scripts.sent_move) -> self.move_t."""
+        from net.unit import scripts as SC
+        new = SC.sent_move(intended, self.gate) & live
+        self.move_t = torch.where(new, torch.zeros_like(self.move_t) + now, self.move_t)
 
     def orders(self, st, j, lands, script):
         now_in = lands <= j

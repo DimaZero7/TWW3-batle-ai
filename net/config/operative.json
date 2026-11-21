@@ -109,5 +109,25 @@
     "seed": 7351,
     "army_seed": 7352,
     "_why": "по 128 боёв на случай (в «Идти или стоять» по 64 на команду): ошибка доли ±0,09 в 95 %; те же бои у сети, формулы и сравнений"
+  },
+  "o1_probe": {
+    "start_s": 30,
+    "decide_s": 15,
+    "l60_m": 60.0,
+    "comes_ms": 1.0,
+    "still_ms": 0.5,
+    "still_s": 5,
+    "no_sally_s": 45,
+    "lord_back_m": 20.0,
+    "arrive_m": 15.0,
+    "halt_resume": true,
+    "e_move_m": 10.0,
+    "taken_margin_m": 3.0,
+    "comer_gap_m": 100.0,
+    "lord_regive_m": 8.0,
+    "blocked_r_m": 3.0,
+    "blocked_step_m": 5.0,
+    "blocked_steps": 20,
+    "_why": "ASSUMPTION of the kill check, tmp/op1/design_merged.md (plan `holder`; net/operative/opside.py, game/battle/holder_read.py): the zone moves at start_s, decisions every decide_s; D: front l60_m from E's front, HALT when E's standing units close at >= comes_ms or a member has a comer, 'no sally' march when E has not come no_sally_s after arrival; the lord MOVE lord_back_m behind the zone centre. arrive_m (arrival at the ordered line: the members' centroid within it) - tmp/op1/design_opus.md section 4, '80 / 20 / 15 m ASSUMPTION'. halt_resume: the halt point counts as an arrival (E stands no_sally_s after a halt -> march, flagged 'halt_stood', not 'no sally') - the coder's reading, so a false alarm cannot stall the battle. taken_margin_m: the line is never nearer than the members' frames' front TAKEN_M + taken_margin_m short of E's nearest centre (the unit script's 'taken' reflex holds a unit whose frame an enemy holds: M's gap 0 is this bound) - the coder's. comer_gap_m: a comer counts for HALT only within this edge gap of a member (ASSUMPTION of the kill check, the review tmp/astra/holder_review/out/REVIEW.md 3: a far mover must not halt the line). lord_regive_m: the lord's point is re-given only when it moved this far - the re-issue gate's MOVE_M (net/common/reissue.py). halt_resume now counts no_sally_s of UNINTERRUPTED quiet (the review 2). blocked_*: a frame centre within blocked_r_m of the map's 'cannot stand' ground (sim/maps/<name>/passable.npz) - the game drops a MOVE there silently (h13 M, run 20261121-055845: two of four units never moved) - steps the whole line back by blocked_step_m, at most blocked_steps times (the coder's). The reader: standing = < still_ms for >= still_s; E's first move = its centroid advanced e_move_m toward ours (game/battle/aivai.py measure: 'set off' 10 m)"
   }
 }

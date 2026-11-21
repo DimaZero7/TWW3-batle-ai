@@ -16,6 +16,7 @@ counts what its name says.
                     (a side taken closes the key for the next unit of that side; holders in the pair numbers), a fresh
                     pointer keeps, the loss over {null} + open keys less don't-care keys (a label on one: weight 0),
                     orders.own() with the side and the age zeroed without a target and the age capped
+    the side drill  (T0-2, the area's smoke) S2 scenes by TEACH2 give flank orders the unit script walks
 """
 import math
 
@@ -372,6 +373,27 @@ def test_scene_yields():
              for i in range(2)]
     assert SN.check_bands(other) > 0
     assert all(len(s["mine"]) <= 8 and len(s["theirs"]) <= 8 for s in other)
+
+
+def test_side_drill_smoke():
+    # drill T0-2 'side of the strike', the smoke (tmp/drill2/design_merged.md): S2 detachment scenes with no blocker,
+    # played by TEACH2 through the level and the unit script, give flank orders, the unit script walks them (its walk
+    # ends by a phase of scripts.PHASES) and the drill's input columns have their shapes; the twins draw
+    from types import SimpleNamespace
+    from net.tactic import cols as CL
+    from net.tactic import exam_side as ES
+    from net.tactic import scenes as SN
+    from sim.params import load
+    sp = [s for s in (SN.side_scene(900000 + i) for i in range(40))
+          if s["axes"]["line"] == "detachment" and s["axes"]["blocker"] == "none"][:4]
+    assert len(sp) == 4 and all(len(SN.side_scene(int(s["seed"]), twin=True)["theirs"]) <= 8 for s in sp)
+    for s in sp:
+        s["limit"] = 150
+    res = ES.side_run("TEACH2", sp, [2700], len(sp), SimpleNamespace(device="cpu", sim=""), load())
+    fl = [r for r in res["strikes"] if r[4] > 0]
+    assert fl, res["strikes"]
+    assert any(r[5] in SC.PHASES for r in fl), fl
+    assert len(CL.SIDE_PAIR) == 8 and CL.COLS[-len(CL.SIDE_ROW):] == CL.SIDE_ROW
 
 
 def test_pointer_walk_loss_and_own():

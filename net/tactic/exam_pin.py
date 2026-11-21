@@ -516,8 +516,9 @@ class SceneWatch(W.PinWatch):
         self.c_tgt = t
         hs = st.u["hit_sec"].view(self.B, self.N, self.N)
         tc = t.clamp(min=0)
-        sd = hs.gather(1, tc[:, None, :])[:, 0, :]                                    # hs[b, t, i]: the side of t
-        back = hs.gather(2, tc[..., None])[..., 0]                                    # hs[b, i, t]: i touched by t
+        # (sim hit_sec [b, striker, struck] holds the STRUCK one's side - sim/battle.py attacked_first: held[b, i, j])
+        sd = hs.gather(2, tc[..., None])[..., 0]                                      # hs[b, i, t]: the side of t
+        back = hs.gather(1, tc[:, None, :])[:, 0, :]                                  # hs[b, t, i]: i struck by t
         new = att & ~self.c_done & ((sd > 0) | (back > 0)) & ~st.done[:, None]
         for b, i in new.nonzero().tolist():
             self.contacts.append((b, i, int(t[b, i]), int(sec), int(sd[b, i])))

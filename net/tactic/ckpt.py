@@ -10,11 +10,18 @@
               names), row_width, drills (the journal's ids it learnt), unit_commit (the unit script's), card8 (sha256 of
               weights/tactic/card8/card8.pt), sim_commit, orders (config tactic.json orders as trained), attack (config
               stage0.json drills.attack as trained)} + more
+    save_v3(path, net, opt, drills, unit_commit, sim_commit, **more)   tactic_v3 (heads.TacticNet3, drill T0-2 'side of the
+              strike'): save_v2's fields + side_cols (cols.SIDE_PAIR + SIDE_ROW), side (config tactic.json orders.side as
+              trained); restore refuses one whose extra or side columns are not this code's
+    from_v2(path, device) -> (net, ck)   a TacticNet3 with a tactic_v2 checkpoint's weights in its old parts (the new
+              layers at their start: the v2 network's numbers bit for bit, the approach 'front' everywhere)
 The forward pass: decide.TacticNet (its input: raw.Seer -> inputs.build; decide.order_vec); heads.TacticNet2 through
 pin.NetPlayer in lower.Tacticians(player=) (its input: the same inputs.build + heads.net_inputs).
 """
 import copy
 import hashlib
+import os
+from pathlib import Path
 
 import torch
 
@@ -25,6 +32,19 @@ from net.unit import ckpt as UT
 
 KIND = "tactic_v1"
 KIND2 = "tactic_v2"
+KIND3 = "tactic_v3"
+
+
+def _atomic_save(obj, path):
+    """torch.save to a temporary name beside path, then os.replace: a crash mid-save never leaves a truncated file
+    under path (the keeper restarts the same command; REVIEW.md finding 7)."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".part")
+    with open(tmp, "wb") as f:                       # (fsync the handle written: a read-only one fails on Windows)
+        torch.save(obj, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 def unit_network(device, path=None):
@@ -37,7 +57,7 @@ def unit_network(device, path=None):
 
 
 def save(path, net, critic, opt, cfg_, updates):
-    torch.save({"kind": KIND, "net": net.state_dict(), "critic": critic.state_dict(), "opt": opt.state_dict(),
+    _atomic_save({"kind": KIND, "net": net.state_dict(), "critic": critic.state_dict(), "opt": opt.state_dict(),
                 "cfg": cfg_, "updates": updates}, path)
 
 
@@ -55,7 +75,7 @@ def save_v2(path, net, opt, drills, unit_commit="", sim_commit="", **more):
     from net.stage0 import cfg as scfg
     width, cols = _shape()
     assert list(net.enc.col_names) == cols, (net.enc.col_names, cols)
-    torch.save({"kind": KIND2, "net": net.state_dict(), "opt": None if opt is None else opt.state_dict(),
+    _atomic_save({"kind": KIND2, "net": net.state_dict(), "opt": None if opt is None else opt.state_dict(),
                 "cols": cols, "row_width": width, "drills": list(drills), "unit_commit": unit_commit,
                 "card8": card8_sha(), "sim_commit": sim_commit, "orders": copy.deepcopy(cfg()["orders"]),
                 "attack": copy.deepcopy(scfg()["drills"]["attack"]), **more}, path)
@@ -74,12 +94,57 @@ def _restore_v2(ck, path, device):
     return net, None, ck
 
 
+def _side_cols():
+    from net.tactic import cols as CL
+    return list(CL.SIDE_PAIR) + list(CL.SIDE_ROW)
+
+
+def save_v3(path, net, opt, drills, unit_commit="", sim_commit="", **more):
+    from net.stage0 import cfg as scfg
+    width, cols = _shape()
+    assert list(net.enc.col_names) == cols, (net.enc.col_names, cols)
+    _atomic_save({"kind": KIND3, "net": net.state_dict(), "opt": None if opt is None else opt.state_dict(),
+                "cols": cols, "side_cols": _side_cols(), "row_width": width, "drills": list(drills),
+                "unit_commit": unit_commit, "card8": card8_sha(), "sim_commit": sim_commit,
+                "orders": copy.deepcopy(cfg()["orders"]), "attack": copy.deepcopy(scfg()["drills"]["attack"]),
+                "side": copy.deepcopy(scfg()["drills"].get("side")), **more}, path)
+
+
+def _restore_v3(ck, path, device):
+    from net.tactic import heads as HD
+    width, cols = _shape()
+    if (ck.get("row_width") != width or list(ck.get("cols") or []) != cols
+            or list(ck.get("side_cols") or []) != _side_cols()):
+        raise ValueError(f"{path}: trained on rows of {ck.get('row_width')}, extra columns {ck.get('cols')}, side "
+                         f"columns {ck.get('side_cols')}; this code has {width}, {cols}, {_side_cols()}")
+    net = HD.TacticNet3(card=False).to(device)
+    net.load_state_dict(ck["net"])
+    for p in net.frozen():
+        p.requires_grad_(False)
+    return net, None, ck
+
+
+def from_v2(path, device="cpu"):
+    """(module doc) -> (net, ck of the v2 checkpoint)."""
+    from net.tactic import heads as HD
+    ck = torch.load(path, map_location=device, weights_only=False)
+    if ck.get("kind") != KIND2:
+        raise ValueError(f"not a {KIND2} checkpoint: {path}")
+    _restore_v2(ck, path, device)                     # (its shape checks)
+    net = HD.TacticNet3(card=False).to(device).load_v2(ck["net"])
+    for p in net.frozen():
+        p.requires_grad_(False)
+    return net, ck
+
+
 def restore(path, device="cpu"):
     ck = torch.load(path, map_location=device, weights_only=False)
     if ck.get("kind") == KIND2:
         return _restore_v2(ck, path, device)
+    if ck.get("kind") == KIND3:
+        return _restore_v3(ck, path, device)
     if ck.get("kind") != KIND:
-        raise ValueError(f"not a {KIND} or {KIND2} checkpoint: {path}")
+        raise ValueError(f"not a {KIND}, {KIND2} or {KIND3} checkpoint: {path}")
     net, critic = DC.TacticNet().to(device), DC.TacticCritic().to(device)
     ck["padded"] = False
     sd, own = dict(ck["net"]), net.state_dict()

@@ -471,6 +471,8 @@ def build(rnd, sp, mine, enemies, held):
             p["k"] = slot[p["k"]]
         if p.get("wp") is not None:
             p["wx"], p["wz"] = SP.world(mz, *p.pop("wp"))
+        if callable(p.get("pt")):
+            p["pt"] = p["pt"](loc)                                  # (a point that follows my snapped places)
         if p.get("pt") is not None:
             p["x"], p["z"] = SP.world(mz, *p.pop("pt"))
         plans.append(p)
@@ -918,6 +920,279 @@ def set_specs(name, seed0=None, counts=None):
     for j, (rec, n) in enumerate((counts or st["counts"]).items()):
         out += [make(rec, seed0 + 10000 * j + i) for i in range(int(n))]
     return out
+
+
+def held_specs_side(seed0=None, n=None):
+    """Drill T0-2's held-out set (config drills.side.sets.held): for each held axis, n S2 scenes and their n S2N twins
+    with exactly that axis at its held-out value."""
+    st = cs()["sets"]["held"]
+    seed0 = int(st["seed"] if seed0 is None else seed0)
+    n = int(st["n"] if n is None else n)
+    out = []
+    for j, axis in enumerate(st["axes"]):
+        out += [side_scene(seed0 + 10000 * j + i, held=axis) for i in range(n)]
+        out += [side_scene(seed0 + 10000 * j + i, held=axis, twin=True) for i in range(n)]
+    return out
+
+
+def side_set(name, n=None):
+    """Drill T0-2's sets by name: 'taught' (n S2 + their n S2N twins, no axis held) or 'held' (held_specs_side)."""
+    if name == "held":
+        return held_specs_side(n=n)
+    st = cs()["sets"][name]
+    n = int(st["n"] if n is None else n)
+    s0 = int(st["seed"])
+    return [side_scene(s0 + i) for i in range(n)] + [side_scene(s0 + i, twin=True) for i in range(n)]
+
+
+def side_binds(sp):
+    """True when the scene's held axis (sp['held']) binds - its held-out value is what the axis names in this scene:
+    the target's width; a lateral hammer at its lateral draw; the target's start gap / heading (its own start, not the
+    side_on twin's); a comer placed; my hammer the held unit. None: no held axis."""
+    h = sp.get("held")
+    if h is None:
+        return None
+    ax, flip = sp["axes"], (sp.get("s2") or {}).get("flip")
+    if h == "unit":
+        return sp["mine"][sp["roles"]["free"][0]] in bands("unit", "held")
+    if h == "blocker":
+        return ax.get("blocker") in (cs()["axes"]["blocker"].get("held") or [])
+    if h == "lateral_m" and ax.get("start") != "lateral":
+        return False
+    if h in ("setback_m", "heading_deg") and flip == "side_on":
+        return False
+    return bool(s_in_band(h, "held", ax[h]))
+
+
+def binds_count(specs):
+    """{held axis: {scenes, binds}} of a set's scenes (side_binds)."""
+    out = {}
+    for s in specs:
+        b = side_binds(s)
+        if b is None:
+            continue
+        r = out.setdefault(s["held"], {"scenes": 0, "binds": 0})
+        r["scenes"] += 1
+        r["binds"] += int(bool(b))
+    return out
+
+
+# ------------------------------------------------------------------ drill T0-2 'side of the strike': the family S2
+# (config drills.side; tmp/drill2/design_merged.md decision 5). My anvil (role anvil) and my hammer (role free); the
+# target `at` the anvil from setback_m along heading_deg; the hammer in the second row, beside or lateral on the mirror's
+# side; a full line (line_n units, the anvil at its end on the hammer's side, each with its enemy `at` it) or the
+# detachment alone; a blocker on one flank (the hammer's nearer one with blocker_pref): an enemy standing in the band,
+# my unit on the way, or (held) a comer `at` the hammer after the expected order. The twin S2N: the same draws, one fact
+# flipped (closed / blocked / threatened / side_on - the anvil not frontal: config flips). The target's width is its formation's (spec width_theirs).
+def cs():
+    return scfg()["drills"]["side"]
+
+
+def sdraw(rnd, name, held):
+    """A value of a drill T0-2 axis (config drills.side.axes; any other name: drill T0-1's axes, draw())."""
+    ax = cs()["axes"]
+    if name not in ax:
+        return draw(rnd, name, held)
+    v = ax[name].get("held" if held == name else "train") or []
+    assert v, f"axis {name} has no value"
+    if isinstance(v[0], list):
+        lo, hi = rnd.choices(v, weights=[max(b - a, 1e-6) for a, b in v])[0]
+        return rnd.uniform(lo, hi)
+    return copy.deepcopy(rnd.choice(v))
+
+
+def s_in_band(name, which, x):
+    ax = cs()["axes"]
+    if name not in ax:
+        return in_band(name, which, x)
+    v = ax[name].get(which) or []
+    if isinstance(x, (int, float)) and v and isinstance(v[0], list):
+        return any(lo - 1e-9 <= x <= hi + 1e-9 for lo, hi in v)
+    return x in v
+
+
+def _speed(key, run):
+    return float(_passports()[key]["speed"]["run" if run else "walk"])
+
+
+def side_scene(seed, held=None, twin=False):
+    """One S2 scene (twin: its S2N) of a seed (module doc above)."""
+    rnd = random.Random(seed)
+    for t in range(int(c()["redraw"])):
+        r2 = random.Random(seed * 7919 + 31 + t)
+        sp = _side_try(rnd, held, twin, r2)
+        if sp is not None:
+            sp.update(seed=int(seed), held=held, recipe="S2N" if twin else "S2", family="S2", s2_cause=not twin)
+            return sp
+    raise RuntimeError(f"S2 seed {seed}: no layout in {c()['redraw']} draws")
+
+
+def _side_try(rnd, held, twin, r2):
+    S = cs()
+    sd = OR_side()
+    sp = _base(rnd, held)
+    mz = sp["mine_zone"]
+    f_row = mz["depth"] / 2 - 30.0
+    shift = rnd.uniform(*S["shift_m"]) * rnd.choice((-1.0, 1.0))
+    m = rnd.choice((-1.0, 1.0))                                     # (mirror: the hammer's side of the anvil)
+    ax = {k: sdraw(rnd, k, held) for k in ("width_m", "start", "row_back_m", "beside_gap_m", "lateral_m", "setback_m",
+                                            "blocker", "heading_deg", "line", "worn_anvil")}
+    ax["pace"] = draw(rnd, "pace", held)
+    # (a held axis binds in every scene of its set - side_binds: the lateral draw places only a 'lateral' hammer; the
+    # held unit is my hammer - my faction one whose roster has it)
+    if held == "lateral_m":
+        ax["start"] = "lateral"
+    if held == "unit":
+        hu = bands("unit", "held")
+        fx = [f for f in bands("factions", "train") if any(k in scfg()["roster"][f[0]] for k in hu)]
+        fac = copy.deepcopy(rnd.choice(fx))
+        sp.update(fac={1: fac[0], 2: fac[1]}, factions={1: scfg()["factions"][fac[0]], 2: scfg()["factions"][fac[1]]})
+        sp["axes"]["factions"] = fac
+    phi = ax["heading_deg"] + rnd.uniform(-1.0, 1.0) * float(S["heading_jitter_deg"])
+    run = ax["pace"] == "run"
+    nom = float(S["nominal_w_m"])
+    n_line = rnd.randint(*S["line_n"]) if ax["line"] == "full" else 1
+    gap = rnd.uniform(*S["row_m"])
+    row = [(shift - m * gap * i, f_row) for i in range(n_line)]     # (row[0] the anvil, the line's end on side m)
+    if ax["start"] == "second_row":
+        hm = (shift, f_row - ax["row_back_m"])
+    elif ax["start"] == "beside":
+        hm = (shift + m * (nom + ax["beside_gap_m"]), f_row)
+    else:
+        hm = (shift + m * ax["lateral_m"], f_row - rnd.uniform(0.0, 20.0))
+    keys = _keys(rnd, sp["fac"][1], n_line + 1, held)
+    w_anvil = None if ax["worn_anvil"] == "fresh" else rnd.uniform(*rnd.choice(c()["worn"]["train"]))
+    # my units by role index: 0 the anvil, 1 the hammer, 2.. the line's others, then the blockers
+    mine = [{"sf": row[0], "role": "anvil", "key": keys[0], "worn": w_anvil},
+            {"sf": hm, "role": "free", "key": keys[1], "worn": None}]
+    mine += [{"sf": row[i], "role": "line", "key": keys[1 + i], "worn": worn_share(rnd, held)} for i in range(1, n_line)]
+    ref = {0: row[0], 1: hm, **{1 + i: row[i] for i in range(1, n_line)}}
+    # the expected meeting: the target's centre contact_m from the anvil's along the heading, facing the anvil
+    a = math.radians(phi)
+    dirv = (math.sin(a), math.cos(a))
+    cm = float(S["contact_m"])
+    d0 = ax["setback_m"] + cm
+    ce = (row[0][0] + cm * dirv[0], row[0][1] + cm * dirv[1])
+    beta = math.radians(phi + 180.0)
+    fw, rt = (math.sin(beta), math.cos(beta)), (math.cos(beta), -math.sin(beta))   # (the target's axes, my zone's)
+    w = ax["width_m"]
+    half = w / 2 + float(sd["off_m"]) + 5.0
+
+    def P(sg):
+        return (ce[0] + sg * half * rt[0], ce[1] + sg * half * rt[1])
+
+    def in_band(p, sg):
+        d = (p[0] - ce[0], p[1] - ce[1])
+        lat, al = d[0] * rt[0] + d[1] * rt[1], d[0] * fw[0] + d[1] * fw[1]
+        return abs(al) <= float(sd["band_along_m"]) and 0.0 < sg * lat <= float(sd["band_lat_m"])
+    nb = [(row[i][0] + cm * dirv[0], row[i][1] + cm * dirv[1]) for i in range(1, n_line)]
+    opens = [sg for sg in (-1.0, 1.0) if not any(in_band(p, sg) for p in nb)]
+    if not opens:
+        return None
+    ext = {sg: math.hypot(P(sg)[0] - hm[0], P(sg)[1] - hm[1]) + half for sg in opens}
+    pref = min(ext, key=lambda s: ext[s])
+    blk = ax["blocker"]
+    if blk != "none" and len(opens) < 2 and blk != "comer":
+        blk = "none"                                                # (a blocker on the only open flank: no cause)
+    side_b = pref if rnd.random() < float(S["blocker_pref"]) else -pref
+    if side_b not in opens:
+        side_b = pref
+    enemies = []
+
+    def foe(p, face, plan, k_ref=0, key=None, worn=None, width=None):
+        r0 = ref[k_ref]
+
+        def place(loc, p=p, r0=r0, k=k_ref):
+            return (p[0] + loc[k][0] - r0[0], p[1] + loc[k][1] - r0[1])
+
+        def facing(loc, q=face, r0=r0, k=k_ref):
+            return (q[0] + loc[k][0] - r0[0], q[1] + loc[k][1] - r0[1])
+        enemies.append({"place": place, "face": facing, "plan": plan,
+                        "key": key or _keys(rnd, sp["fac"][2], 1, held)[0], "worn": worn, "width": width})
+    e_key = _keys(rnd, sp["fac"][2], 1, held)[0]
+    foe((row[0][0] + d0 * dirv[0], row[0][1] + d0 * dirv[1]), row[0], {"kind": "at", "k": 0, "run": run}, 0,
+        key=e_key, worn=worn_share(rnd, held), width=w)
+    for i in range(1, n_line):
+        foe((row[i][0] + d0 * dirv[0], row[i][1] + d0 * dirv[1]), row[i], {"kind": "at", "k": 1 + i, "run": run}, 1 + i)
+    t_order = d0 / _speed(e_key, run) + float(S["order_lag_s"])
+
+    def band(sg):
+        lat = w / 2 + rnd.uniform(*S["band_m"]) + nom / 2
+        al = rnd.uniform(*S["band_along_m"])
+        p = (ce[0] + sg * lat * rt[0] + al * fw[0], ce[1] + sg * lat * rt[1] + al * fw[1])
+        foe(p, (p[0] + fw[0], p[1] + fw[1]), {"kind": "hold"}, 0)
+
+    def own_way(sg):
+        q = P(sg)
+        mine.append({"sf": ((hm[0] + q[0]) / 2, (hm[1] + q[1]) / 2), "role": "blocker",
+                     "key": _keys(rnd, sp["fac"][1], 1, held)[0], "worn": None})
+
+    def enemy_way(sg):
+        # (the twin's 'blocked': an enemy standing on the way - a unit of mine there would be a free unit itself, the
+        # first drill's teacher hands it the strike)
+        q = P(sg)
+        k = float(S["way_at"])
+        p = (hm[0] + k * (q[0] - hm[0]), hm[1] + k * (q[1] - hm[1]))
+        foe(p, (p[0] + fw[0], p[1] + fw[1]), {"kind": "hold"}, 0)
+
+    def comer(sg):
+        q = P(sg)
+        p = (q[0] + sg * float(S["comer_m"]) * rt[0], q[1] + sg * float(S["comer_m"]) * rt[1])
+        foe(p, hm, {"kind": "at", "k": 1, "run": True, "from_s": t_order + rnd.uniform(*S["comer_from_s"])}, 0)
+    if blk == "band":
+        band(side_b)
+    elif blk == "own":
+        own_way(side_b)
+    elif blk == "comer":
+        comer(side_b)
+    flip = None
+    if twin:
+        flip = r2.choice(S["flips"])
+        if flip == "side_on" and (n_line > 1 or held in ("setback_m", "heading_deg")):
+            # (side_on: the detachment only; not under a held setback / heading - its target starts aside, neither binds)
+            flip = r2.choice([f for f in S["flips"] if f != "side_on"])
+        rest = [s for s in opens if not (blk in ("band", "own") and s == side_b)]
+        if flip == "closed":
+            for s in rest:
+                band(s)
+        elif flip == "blocked":
+            for s in rest:
+                enemy_way(s)
+        elif flip == "side_on":
+            # the anvil not frontal: the target comes along my row's front from the side away from the hammer and
+            # stops with its line's end on the anvil's front - the anvil at its flank, its front across (a point plan)
+            dest = (row[0][0] + (float(S["side_on_anvil_m"]) + w / 2) * dirv[0],
+                    row[0][1] + (float(S["side_on_anvil_m"]) + w / 2) * dirv[1])
+            L = r2.uniform(*S["side_on_m"])
+            p0 = (dest[0] + m * L * rt[0], dest[1] + m * L * rt[1])          # (rt: -x at heading 0; the hammer at +m x)
+            e0 = enemies[0]
+            r0 = row[0]
+            # (the point plan's end follows the anvil's snapped place as its start and facing do - build's loc)
+            foe(p0, dest, {"kind": "point", "run": run,
+                           "pt": lambda loc, q=dest: (q[0] + loc[0][0] - r0[0], q[1] + loc[0][1] - r0[1])},
+                0, key=e_key, worn=e0["worn"], width=w)
+            enemies[0] = enemies.pop()
+        else:
+            p = (hm[0] + m * r2.uniform(*S["threat_aside_m"]), hm[1] + ax["setback_m"] + r2.uniform(*S["threat_ahead_m"]))
+            foe(p, hm, {"kind": "at", "k": 1, "run": True}, 1)
+    if len(mine) > 8 or len(enemies) > 8:
+        return None
+    widths = [e.pop("width") for e in enemies]
+    out = build(rnd, sp, mine, enemies, held)
+    if out is None:
+        return None
+    out["width_theirs"] = widths
+    out["limit"] = int(S["limit_s"])
+    out["s2"] = {"flip": flip, "blocker": blk, "blocker_side": side_b, "pref_side": pref, "opens": opens,
+                 "t_order_est": round(t_order, 1), "mirror": m, "phi": round(phi, 1)}
+    out["axes"].update(ax)
+    out["axes"]["blocker"] = blk
+    return out
+
+
+def OR_side():
+    from net.tactic import cfg as tcfg
+    return tcfg()["orders"]["side"]
 
 
 def held_specs(seed0=None):

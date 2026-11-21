@@ -550,7 +550,8 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
 def scene_battles(specs):
     """The battles of tactic/scenes' specs: every unit at the spec's place (places_mine, places_theirs), a worn unit
     with men = ceil(men0 x share) (sim/scenario: hp_abs follows; TacticSide sets hp and checks), the lords at the
-    spec's lords."""
+    spec's lords; an enemy's frontage width_theirs[j] m where the spec gives one (drill T0-2's target, sim/scenario's
+    width)."""
     from net.tactic import scenes as SC
     out = []
     for s in specs:
@@ -558,8 +559,9 @@ def scene_battles(specs):
         for k, (keys, places, worn) in ((1, (s["mine"], s["places_mine"], s["worn"]["mine"])),
                                          (2, (s["theirs"], s["places_theirs"], s["worn"]["theirs"]))):
             us = []
-            for key, p, w in zip(keys, places, worn):
-                u = _unit(key, *p)
+            wd = s.get("width_theirs") if k == 2 else None
+            for j, (key, p, w) in enumerate(zip(keys, places, worn)):
+                u = _unit(key, *p, width=None if not wd else wd[j])
                 if w is not None:
                     u["men"] = math.ceil(SC._men0(key) * w)
                 us.append(u)

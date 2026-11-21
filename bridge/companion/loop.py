@@ -163,16 +163,16 @@ def load_chain(op="formula", tactic="formula", unit=None, greedy=False, plans=No
     if tactic != "formula":
         path = scfg()["tactic_ckpt"] if tactic == "net" else tactic
         tac_net, _, ck = TC.restore(str(_path(path)), device)
-        if ck.get("kind") == TC.KIND2:
+        if ck.get("kind") in (TC.KIND2, TC.KIND3):
             # the chain 'tactic_v2 only' (bridge/companion/tactic_chain.py): the trained tactic level, the unit's
             # script, the operative and the strategist's groups not used (one group for the whole army)
             from bridge.companion.tactic_chain import TacticChain
             if op != "formula" or unit is not None:
-                raise ValueError("a tactic_v2 checkpoint runs without an operative network and a unit network "
+                raise ValueError("a tactic_v2 / tactic_v3 checkpoint runs without an operative network and a unit network "
                                  "(--chain-op formula, no --chain-unit)")
             tac_net.eval()
             return TacticChain(tac_net, greedy=True, device=device), (
-                f"tactic_v2 only: tactic {path} (NetPlayer greedy, one group), unit script, no operative")
+                f"{ck.get('kind')} only: tactic {path} (NetPlayer greedy, one group), unit script, no operative")
     unit_net = unit_network(unit, device)
     op_net, op_what = None, "formula"
     if op != "formula":
