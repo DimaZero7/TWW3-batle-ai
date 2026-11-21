@@ -156,8 +156,16 @@ def _dump(rec):
 
 
 def replay(rows, net, n):
+    import os
     from bridge.companion import tactic_chain as TCH
+    start = next((r["chain"]["start"] for r in rows if "start" in r["chain"]), {})
+    was = os.environ.get("BAI_OP_SCRIPT")
+    os.environ["BAI_OP_SCRIPT"] = start.get("op") or ""        # (plan `holder`: the replay runs the run's op script)
     comp = TCH.TacticChain(net, dump_ticks=n)
+    if was is None:                                             # (restored: the next chain in this process as before)
+        os.environ.pop("BAI_OP_SCRIPT")
+    else:
+        os.environ["BAI_OP_SCRIPT"] = was
     worst, k = {}, 0
     for r in rows:
         c = r["chain"]

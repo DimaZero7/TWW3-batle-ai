@@ -73,7 +73,7 @@ Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms" -f $ma
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logRel = "build/$Target/companion/$stamp.jsonl"
 $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${game}:/game`" -w /repo -e PYTHONPATH=/repo " +
-    "-e PYTHONUNBUFFERED=1 -e BAI_TICK_MS=$env:BAI_TICK_MS snake-ai-trainer python -m bridge.companion --game /game --log /repo/$logRel"
+    "-e PYTHONUNBUFFERED=1 -e BAI_TICK_MS=$env:BAI_TICK_MS -e BAI_OP_SCRIPT=$env:BAI_OP_SCRIPT snake-ai-trainer python -m bridge.companion --game /game --log /repo/$logRel"
 if ($Chain) {
     $dockerArgs += ' --chain --chain-op ' + ($ChainOp -replace '\\', '/') + ' --chain-tactic ' + ($ChainTactic -replace '\\', '/')
     if ($ChainGreedy) { $dockerArgs += ' --chain-greedy' }

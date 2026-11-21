@@ -13,32 +13,39 @@
 #                 of the stage-0 armies (game/battle/aivai.py, default f1 - flat, the game's AI attacks), the trained tactic
 #                 weights/tactic/attack1/final.pt commands our side, the unit script under it; BAI_TICK_MS=100 above 5,000
 #                 men; then: bash ops/dock.sh game.battle.tactic_read <run>
+#        OP=holder:M|holder:D bash game/battle/chain.sh tactic h01   the game probe plan `holder` (tmp/op1/design_merged.md):
+#                 a start h01..h24 of game/battle/holder_read.py (build/holder; our side attacks, the game's AI defends),
+#                 the scripted operative net/operative/opside.py on the chain (BAI_OP_SCRIPT); without OP as before
 cd "$(dirname "$0")/../.." || exit 1
 . ops/guard.sh
 . ops/python.sh
 if [ "$1" = "tactic" ]; then
   b="${2:-f1}"
+  MK=game.battle.aivai; MKA=make; AD=build/aivai
+  case "$b" in h[0-9]*) MK=game.battle.holder_read; MKA=--make; AD=build/holder ;; esac
+  if [ -n "$OP" ]; then export BAI_OP_SCRIPT="$OP"; else unset BAI_OP_SCRIPT; fi
+  tag="$b${OP:+_${OP#*:}}"
   W=weights/tactic/attack1/final.pt
   [ -f "$W" ] || { echo "no $W" >&2; exit 1; }
   if [ -n "$DRY" ]; then why="$(guard_busy)" && { echo "not starting: $why" >&2; exit 1; }
   else guard_take "chain tactic $b" || exit 1; trap guard_release EXIT; fi
   export BAI_GRAPHICS="${BAI_GRAPHICS:-low}"
   mkdir -p tmp/chain
-  "$PY" -m game.battle.aivai make > tmp/chain/tactic_make.log 2>&1 || { echo "make failed (tmp/chain/tactic_make.log)"; exit 1; }
-  read -r map role men < <("$PY" -c "import json;b=json.load(open('build/aivai/battles.json'))['$b'];print(b['map'],b['role'],sum(u['men'] for s in b['units'].values() for u in s))")
+  "$PY" -m $MK $MKA > tmp/chain/tactic_make.log 2>&1 || { echo "make failed (tmp/chain/tactic_make.log)"; exit 1; }
+  read -r map role men < <("$PY" -c "import json;b=json.load(open('$AD/battles.json'))['$b'];print(b['map'],b['role'],sum(u['men'] for s in b['units'].values() for u in s))")
   men="${men//[!0-9]/}"
   [ "$men" -gt 5000 ] && export BAI_TICK_MS=100
-  args=(--own-ai net --arena-json "build/aivai/$b.json" --speed 3 --timeout 900)
+  args=(--own-ai net --arena-json "$AD/$b.json" --speed 3 --timeout 900)
   [ "$map" != "flat" ] && args+=(--map "$map")
   [ "$role" = "defend" ] && args+=(--own-role attack)
-  echo "=== tactic $b $map ai:$role men $men tick_ms ${BAI_TICK_MS:-engine} $(date +%T)"
-  "$PY" -m bridge.build nn-arena "${args[@]}" > "tmp/chain/tactic_$b.build.log" 2>&1     || { echo "build failed (tmp/chain/tactic_$b.build.log)"; exit 1; }
+  echo "=== tactic $b $map ai:$role men $men tick_ms ${BAI_TICK_MS:-engine}${OP:+ op $OP} $(date +%T)"
+  "$PY" -m bridge.build nn-arena "${args[@]}" > "tmp/chain/tactic_$tag.build.log" 2>&1     || { echo "build failed (tmp/chain/tactic_$tag.build.log)"; exit 1; }
   if [ -n "$DRY" ]; then echo "dry: built; watch.ps1 -NoBuild -Chain -ChainTactic $W"; exit 0; fi
   guard_human && { echo "the user plays: stop"; exit 1; }
-  powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/watch.ps1 -NoBuild -Chain -ChainTactic "$W"     > "tmp/chain/tactic_$b.log" 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/watch.ps1 -NoBuild -Chain -ChainTactic "$W"     > "tmp/chain/tactic_$tag.log" 2>&1
   code=$?
   run=$(ls -t build/nn-arena/runs 2>/dev/null | head -1)
-  echo "--- tactic $b exit $code $(date +%T) $run; read: bash ops/dock.sh game.battle.tactic_read build/nn-arena/runs/$run"
+  echo "--- tactic $tag exit $code $(date +%T) $run; read: bash ops/dock.sh game.battle.tactic_read build/nn-arena/runs/$run"
   exit $code
 fi
 n=2
