@@ -16,13 +16,16 @@
 #        OP=holder:M|holder:D bash game/battle/chain.sh tactic h01   the game probe plan `holder` (tmp/op1/design_merged.md):
 #                 a start h01..h24 of game/battle/holder_read.py (build/holder; our side attacks, the game's AI defends),
 #                 the scripted operative net/operative/opside.py on the chain (BAI_OP_SCRIPT); without OP as before
+#        bash game/battle/chain.sh tactic r01   the plan's reference arm R: the same start with the roles swapped (the
+#                 game's AI attacks, ours defends), the chain without the operative script (OP must be empty)
 cd "$(dirname "$0")/../.." || exit 1
 . ops/guard.sh
 . ops/python.sh
 if [ "$1" = "tactic" ]; then
   b="${2:-f1}"
   MK=game.battle.aivai; MKA=make; AD=build/aivai
-  case "$b" in h[0-9]*) MK=game.battle.holder_read; MKA=--make; AD=build/holder ;; esac
+  case "$b" in h[0-9]*|r[0-9]*) MK=game.battle.holder_read; MKA=--make; AD=build/holder ;; esac
+  case "$b" in r[0-9]*) [ -n "$OP" ] && { echo "$b is the reference arm R: no OP" >&2; exit 1; } ;; esac
   if [ -n "$OP" ]; then export BAI_OP_SCRIPT="$OP"; else unset BAI_OP_SCRIPT; fi
   tag="$b${OP:+_${OP#*:}}"
   W=weights/tactic/attack1/final.pt

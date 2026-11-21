@@ -93,6 +93,17 @@ move   61  t   60.0 s  think   4.0 ms  turn  10.8 ms  | hold 1 attack 5 | lord a
     bash game/battle/chain.sh tactic f1        # BAI_TICK_MS=100 сам, если людей больше 5 000
     bash ops/dock.sh game.battle.tactic_read build/nn-arena/runs/<время>
 
+Скриптовый оперативник над цепочкой «только тактик» (проба `holder`, `tmp/op1/design_merged.md`): переменная
+`BAI_OP_SCRIPT` = `holder:M` (линия идёт на линию врага) или `holder:D` (выход на 60 м и остановка, когда враг
+идёт); пусто или нет — оперативника нет, как раньше. `watch.ps1` передаёт её в контейнер помощника (`-e
+BAI_OP_SCRIPT`), там её читает `bridge/companion/tactic_chain.py` (`net/operative/opside.parse`; иное значение —
+ошибка на старте). Раз в 15 с скрипт двигает зону группы и лорда, его заметки — в `companion.jsonl`, поле `chain.op`;
+на старте `chain.start.op` — значение переменной. В `chain.sh` её задаёт переключатель `OP`:
+
+    OP=holder:D bash game/battle/chain.sh tactic h01   # старты h01..h24 (build/holder): мы наступаем, ИИ игры держит
+    bash game/battle/chain.sh tactic r01               # r01..r24: тот же старт, ИИ игры наступает, без OP (с OP — отказ)
+    python -m game.battle.holder_read <прогоны> --out <json>   # строки плана 1, 2, 2R, 3
+
 Чтец печатает: дошли ли «атаковать» до игры (приказ помощника → `nn_orders` → цель `t` отряда или схватка рядом с ней в
 `nn_sample` за 20 с), повтор входа первых тактов по записанным документам и вход такта 0 против двойника в симуляторе.
 Сверка без игры — `contract/test_tactic_bridge_parity_torch.py` (путь помощника против `TacticSide`).

@@ -9,6 +9,7 @@
     bash game/battle/aivai.sh [f1 .. k4]           # ИИ игры против планировщика CA, армии этапа 0; меры и двойник — game.battle.aivai
     python -m game.vision <прогон>...              # лента 6 кадров PNG + текст (бои и пробы), ~2,7 тыс. токенов (vision/README.md)
 М1, М2 — прогоны человека (`data/human/runs`, железнобокие → длинноствольные), М3 — seed 1000702112 v3; карта ksl_plains_01.
+Проба оперативника `holder`: `OP=holder:M|D bash game/battle/chain.sh tactic h01` (ИИ держит), `r01` — ответ (ИИ наступает), отчёт — `game.battle.holder_read`.
 ## Проба механики
     bash game/probe/run.sh <план> [<план>...]       # по бою на план (BATTLE=N — его N-й бой), --mem, BAI_GRAPHICS=low
     python -m game.probe.charge_probe report <прогоны> [--sim]   # игра против двойника симулятора
@@ -23,8 +24,7 @@
 ## Карта местности (один раз на карту)
     python -m game.maps.map_grid capture --name <карта> [--dry]   # снять в игре, свести -> sim/maps/<карта>/ (в git)
 ## Данные (вне git, `data/`, 220 МБ)
-`nn-arena/runs` — база М1–М3 (07.11 22:08, 22:11, 22:15) и after6 (08.11 09:27–09:40); `human/runs` — 5 боёв
-человека; `label/` — 3 живых боя 07.11, `human_set`, `maps`, `matchups`, `human_rules.md`; `label_icons/` — портреты.
+`nn-arena/runs` — база М1–М3 (07.11 22:08, 22:11, 22:15) и after6 (08.11 09:27–09:40); `human/runs` — 5 боёв человека; `label/` — 3 живых боя 07.11, `human_set`, `maps`, `matchups`, `human_rules.md`; `label_icons/` — портреты.
 Тест (без игры): `python -m pytest -q game/tests` — паки боя цепочки и пробы из этого дерева, замок, разбор боя.
 Открытый вопрос пользователю: пресет `low` не закрепляет видеокарту (берётся из настроек игры); RTX закреплена только
 в `ultrafull`. Системные настройки не трогаем — закрепить RTX в игре для `low` или оставить как есть?

@@ -1,12 +1,14 @@
 """The game probe plan `holder` (tmp/op1/design_merged.md 'The kill check'): the starts and the report.
 
-    python -m game.battle.holder_read --make        build/holder/<h01..h24>.json (arenas for --arena-json), battles.json
+    python -m game.battle.holder_read --make        build/holder/<h01..h24, r01..r24>.json (--arena-json), battles.json
     bash game/battle/chain.sh tactic h01             (OP=holder:M | holder:D: the scripted operative net/operative/opside)
+    bash game/battle/chain.sh tactic r01             (arm R, no OP: the reference - the same start, the game's AI attacks)
     python -m game.battle.holder_read <runs...> --out <json>    the report of the recorded runs
 
 Starts: 24 = 2 maps (flat mp_crossroads_flat, ksl_plains_01) x 6 armies (4-8 infantry + lord a side, gold matched as
 game/battle/aivai.py: net/stage0/specs._sides) x 2 mirrors (1: the two armies and factions swap sides); ours attack, the
-game's AI defends. h = 1 + map x 12 + army x 2 + mirror.
+game's AI defends. h = 1 + map x 12 + army x 2 + mirror. rNN - the same start with the roles swapped (the design's last
+section): the game's AI attacks, ours defend with the chain alone (arm R; E = the enemy's infantry).
 
 Per battle (the run's events.jsonl nn_sample a second, companion.jsonl's op notes, the arena's keys): arm, start, our
 move (the first zone move), E (the op note's piece; none - the enemy's infantry), E's first move (its centroid advanced
@@ -16,7 +18,7 @@ the share of our members standing (< still_ms for >= still_s before their first 
 orders a unit-minute (game/battle/tactic_read.orders), the whole-field trade over [30, 630 s] and [30, 330 s] (enemy
 lost - own lost, shares of each side's start health: hp x the key's hp_total, lords in, men 0 = all lost; a battle that
 ended before the window's end: its last health carried forward - counted), no_sally / halt_stood (the op's flags). Then
-the paired D - M by start (SE = sd / sqrt(n)) and the plan's three lines with their verdicts.
+the paired D - M by start (SE = sd / sqrt(n)), the plan's three lines with their verdicts and line 2R (better - R).
 """
 import argparse
 import contextlib
@@ -39,8 +41,9 @@ WINDOWS = ((30.0, 630.0), (30.0, 330.0))
 N_PAIRS = 24
 STAND_WIN_S, STAND_RUN_S = 20.0, 3.0   # ('received from a stand': the amendment in tmp/op1/design_merged.md)
 E_MOVE_FAR_M = 40.0      # (line 1: E came out while our front >= 40 m from his - the amendment; front to front)
-WALK_STEP_S = 5.0
-E_MOVE_RUN_S = 3.0      # (E's first move: a standing unit of E faster than comes_ms for 3 s in a row - the review 9)       # (the centroid's path in 5 s steps: the samples' jitter a second adds ~0.2 m/s standing)
+WALK_STEP_S = 5.0       # (the centroid's path in 5 s steps: the samples' jitter a second adds ~0.2 m/s standing)
+E_MOVE_RUN_S = 3.0      # (E's first move: a standing unit of E faster than comes_ms for 3 s in a row - the review 9)
+SAMPLE_MAX_S = 1.5      # (... in consecutive ~1 s samples: a longer interval breaks the run - the second review)
 
 
 def conf():
@@ -55,6 +58,14 @@ def starts():
             for mir in (0, 1):
                 out.append((f"h{1 + mi * 12 + k * 2 + mir:02d}", mp, k, mir))
     return out
+
+
+def ref_name(h):
+    """hNN -> rNN: the reference arm's start (the same place, armies and map; the game's AI attacks)."""
+    return "r" + h[1:]
+
+
+PLANNED = tuple(s[0] for s in starts())          # (the pairs count only these 24 starts, by name)
 
 
 def make():
@@ -78,7 +89,12 @@ def make():
         (OUT / f"{name}.json").write_text(json.dumps(arena, indent=1), encoding="utf-8")
         allb[name] = {"seed": seed, "army": k, "mirror": mir, "map": mp, "role": "defend", "fac": sp["fac"],
                       "gold": sp["gold"], "units": {str(s): v for s, v in units.items()}}
-        print(name, mp, "army", k, "mirror", mir, sp["fac"], len(mine), len(theirs), [round(g) for g in sp["gold"]])
+        # the reference arm R (the last section of the design): the same start, only the role swapped
+        rn = ref_name(name)
+        arena["name"], arena["note"] = f"holder_{rn}", "plan holder, arm R: stage 0 armies, the game's AI attacks, ours defend"
+        (OUT / f"{rn}.json").write_text(json.dumps(arena, indent=1), encoding="utf-8")
+        allb[rn] = dict(allb[name], role="attack")
+        print(name, rn, mp, "army", k, "mirror", mir, sp["fac"], len(mine), len(theirs), [round(g) for g in sp["gold"]])
     (OUT / "battles.json").write_text(json.dumps(allb, indent=1), encoding="utf-8")
 
 
@@ -110,7 +126,7 @@ def _front_gap(us, ours, theirs, spc):
         b = math.radians(u["b"])
         return (abs(ux * math.sin(b) + uz * math.cos(b)) * depth + abs(ux * math.cos(b) - uz * math.sin(b)) * files * h) / 2
     along = lambda u: (u["x"] - oc[0]) * ux + (u["z"] - oc[1]) * uz          # noqa: E731
-    return round(min(along(us[n]) - ext(us[n], n) for n in theirs) - max(along(us[n]) + ext(us[n], n) for n in ours), 1)
+    return min(along(us[n]) - ext(us[n], n) for n in theirs) - max(along(us[n]) + ext(us[n], n) for n in ours)
 
 
 def battle(run):
@@ -132,7 +148,7 @@ def battle(run):
     comp = TRD.companion_rows(run)
     st0 = next((r["chain"]["start"] for r in comp if "start" in r["chain"]), {})
     notes = [n for r in comp for n in r["chain"].get("op") or []]
-    arm = (st0.get("op") or "off").split(":")[-1]
+    arm = (st0.get("op") or ("R" if start.startswith("r") else "off")).split(":")[-1]   # (rNN without op: arm R)
     res = next((d for d in ev if d.get("event") == "result"), {})
     fr = [(d["t"] / 1000.0, {u["n"]: u for u in d["units"]}) for d in ev if d.get("event") == "nn_sample"]
     fin = next((d for d in ev if d.get("event") == "nn_final"), None)
@@ -144,7 +160,7 @@ def battle(run):
     foes = [n for n in names if n.startswith("enemy_") and not n.endswith("_lord")]
     move = next((n for n in notes if n.get("zone") is not None), None)
     t_move = move["sec"] if move else None
-    E = (move or {}).get("E") or foes
+    E = (move or {}).get("E") or next((n["E"] for n in notes if n.get("E")), None) or foes   # (D never moved: the decision's E)
     E = [e if isinstance(e, str) else names[e] for e in E]
     row = {"run": run.name, "start": start, "arm": arm, "status": res.get("status"), "winner": res.get("winner"),
            "end_s": round(res["duration_model_ms"] / 1000, 1) if res.get("duration_model_ms") else fr[-1][0],
@@ -172,7 +188,7 @@ def battle(run):
         for n in E:
             a_, b_ = fr[i - 1][1].get(n), fr[i][1].get(n)
             fast = False
-            if up(a_) and up(b_) and dt > 0 and oc_[i] is not None:
+            if up(a_) and up(b_) and 0 < dt <= SAMPLE_MAX_S and oc_[i] is not None:   # (a sampling hole breaks the run)
                 wx, wz = oc_[i][0] - a_["x"], oc_[i][1] - a_["z"]
                 wn = math.hypot(wx, wz) or 1.0
                 fast = ((b_["x"] - a_["x"]) * wx + (b_["z"] - a_["z"]) * wz) / wn / dt > float(c["comes_ms"])
@@ -187,7 +203,8 @@ def battle(run):
     if first is not None:
         us = fr[first][1]
         row["e_move_s"] = ts[first]
-        row["e_move_gap_m"] = _front_gap(us, [n for n in mine if up(us.get(n))], [n for n in E if up(us.get(n))], spc)
+        g_ = _front_gap(us, [n for n in mine if up(us.get(n))], [n for n in E if up(us.get(n))], spc)
+        row["e_move_gap_m"], row["e_move_gap_exact_m"] = (None, None) if g_ is None else (round(g_, 1), g_)   # (line 1 gates the exact)
         row["e_move_gap_centres_m"] = round(min(math.hypot(us[a_]["x"] - us[b_]["x"], us[a_]["z"] - us[b_]["z"])
                                                 for a_ in mine if up(us.get(a_)) for b_ in E if up(us.get(b_))), 1)
     row["e_move_after_ours_s"] = None if first is None or t_move is None else round(ts[first] - t_move, 1)
@@ -195,19 +212,28 @@ def battle(run):
     for side, us_n in (("own", mine), ("enemy", foes)):
         path, to_c = 0.0, None
         last = {}
+        seg = lambda u, l: math.hypot(u["x"] - l[1], u["z"] - l[2])          # noqa: E731
         for t, us in fr:
-            if contact is not None and to_c is None and t >= contact:
-                to_c = path
+            at_c = contact is not None and to_c is None and t >= contact
+            part = 0.0                     # (the stretches since each unit's last step, up to the contact sample)
             for n in us_n:
                 u = us.get(n)
                 if not up(u):
+                    if n in last and u is not None and u.get("x") is not None:
+                        path += seg(u, last[n])          # (the stretch up to the rout sample)
                     last.pop(n, None)
                     continue
                 if n not in last:
                     last[n] = (t, u["x"], u["z"])
                 elif t - last[n][0] >= WALK_STEP_S:
-                    path += math.hypot(u["x"] - last[n][1], u["z"] - last[n][2])
+                    path += seg(u, last[n])
                     last[n] = (t, u["x"], u["z"])
+                elif at_c:
+                    part += seg(u, last[n])
+            if at_c:
+                to_c = path + part
+        us = fr[-1][1]
+        path += sum(seg(us[n], l) for n, l in last.items() if n in us)     # (the stretch up to the end sample)
         row[f"{side}_walked_m"] = round(path, 1)
         row[f"{side}_walked_to_contact_m"] = None if to_c is None else round(to_c, 1)
     # standing at the first melee
@@ -235,7 +261,7 @@ def battle(run):
             continue
         run_s, best = 0.0, 0.0
         for i in range(1, k + 1):
-            if ts[i] < ts[k] - STAND_WIN_S:
+            if ts[i - 1] < ts[k] - STAND_WIN_S - 1e-6:          # (the whole interval inside the window)
                 continue
             a, b = fr[i - 1][1].get(n), fr[i][1].get(n)
             dt = ts[i] - ts[i - 1]
@@ -243,7 +269,7 @@ def battle(run):
             run_s = run_s + dt if slow else 0.0
             best = max(best, run_s)
         rec_n += best >= STAND_RUN_S - 1e-6
-    row["stand_share"] = round(rec_n / tot, 3) if tot else None
+    row["stand_share"], row["stand_n"] = (round(rec_n / tot, 3) if tot else None), rec_n
     # our members moving (> still_ms) at E's first move (not gating)
     row["moving_at_e_move"] = None
     if row["e_move_s"] is not None:
@@ -313,9 +339,14 @@ def summary(rows):
     """The arms, the paired D - M and the plan's lines (module doc). A crashed run (no result event or an unreadable
     record) is out; a repeated start:arm - the latest run (by run id) wins everywhere; a start with a missing arm is out
     of the pairs and counted; a stalled or no-contact battle stays in. The lines are FINAL only with N_PAIRS complete
-    pairs (all 48 battles in), else PROVISIONAL - and with fewer than 2 pairs no teacher is named."""
+    pairs (all 48 battles in), else PROVISIONAL - and with fewer than 2 pairs no teacher is named. Only the planned
+    starts count (h01..h24 arms D, M; r01..r24 arm R), each by its name. Line 2R pairs the better attack arm of line 2
+    with R by start; FINAL with 24 complete triples (hNN D, hNN M, rNN R)."""
+    plan = {**{(h, a): h for h in PLANNED for a in ("D", "M")}, **{(ref_name(h), "R"): h for h in PLANNED}}
     crashed = [r for r in rows if r.get("crashed")]
     good = sorted((r for r in rows if not r.get("crashed")), key=lambda r: r["run"])
+    off_plan = [r["run"] for r in good if (r["start"], r["arm"]) not in plan]
+    good = [r for r in good if (r["start"], r["arm"]) in plan]
     last = {}
     for r in good:
         last[(r["start"], r["arm"])] = r
@@ -324,25 +355,31 @@ def summary(rows):
     for r in rows:
         by.setdefault(r["arm"], []).append(r)
     out = {"n": {a: len(v) for a, v in by.items()}, "arms": {}, "crashed": [r["run"] for r in crashed],
-           "duplicates_dropped": len(good) - len(rows)}
+           "duplicates_dropped": len(good) - len(rows), "off_plan": off_plan}
     for a, v in by.items():
         m, se = _mse([r["trade_30_630"] for r in v])
         ss = [r["stand_share"] for r in v if r["stand_share"] is not None]
         out["arms"][a] = {"trade_30_630": m, "se": se, "trade_30_330": _mse([r["trade_30_330"] for r in v])[0],
                           "contact": sum(r["contact_s"] is not None for r in v), "n": len(v),
-                          "stand_share": (sum(ss) / len(ss)) if ss else None,
+                          "stand_share_battles": (sum(ss) / len(ss)) if ss else None,
+                          "stand_share": (sum(r["stand_n"] for r in v) / max(sum(r["first_melee_members"] for r in v), 1)
+                                          if ss else None),         # (pooled over the members, not a mean of battles)
                           "ended_before_630": sum(r["ended_before"]["30_630"] for r in v),
                           "stalled": sum(r["status"] == "stalled" for r in v),
                           "no_sally": sum(r["no_sally"] for r in v), "halt_stood": sum(r["halt_stood"] for r in v),
                           "orders_per_unit_min": _mse([r["orders_per_unit_min"] for r in v])[0]}
     pairs = {}
     for r in rows:
-        pairs.setdefault(r["start"], {})[r["arm"]] = r
+        pairs.setdefault(plan[(r["start"], r["arm"])], {})[r["arm"]] = r
     for r in crashed:
-        if r.get("start"):
-            pairs.setdefault(r["start"], {})
+        h = next((v for (st, _), v in plan.items() if st == r.get("start")), None)
+        if h:
+            pairs.setdefault(h, {}).setdefault("crashed", set()).add("R" if r["start"].startswith("r") else "DM")
     both = [p for p in pairs.values() if "D" in p and "M" in p]
-    out["pairs"], out["pairs_dropped"] = len(both), len(pairs) - len(both)
+    triples = sum("D" in p and "M" in p and "R" in p for p in pairs.values())
+    out["pairs"], out["triples"] = len(both), triples
+    out["pairs_dropped"] = sum(("D" in p or "M" in p or "DM" in p.get("crashed", ())) and not ("D" in p and "M" in p)
+                               for p in pairs.values())
     for key in ("30_630", "30_330"):
         d = [p["D"][f"trade_{key}"] - p["M"][f"trade_{key}"] for p in both]
         m, se = _mse(d)
@@ -352,7 +389,8 @@ def summary(rows):
     lines = []
     D = by.get("D", [])
     n_d = len(D)
-    far = sum(r["e_move_gap_m"] is not None and r["e_move_gap_m"] >= E_MOVE_FAR_M for r in D)
+    gx = lambda r: r.get("e_move_gap_exact_m", r["e_move_gap_m"])          # noqa: E731  (the exact, not the rounded)
+    far = sum(gx(r) is not None and gx(r) >= E_MOVE_FAR_M for r in D)
     gaps = [r["e_move_gap_m"] for r in D if r["e_move_gap_m"] is not None]
     med = stt.median(gaps) if gaps else float("nan")
     ns = sum(r["no_sally"] for r in D)
@@ -379,6 +417,28 @@ def summary(rows):
             rng = f" [{lo:+.3f}, {hi:+.3f}]"
         lines.append(("2 worth", f"{tag}: better arm {best}: contact {b['contact']} of {b['n']} (need 22 of 24; "
                                  f"stalled {b['stalled']}), trade {b['trade_30_630']:+.3f}{rng}: {verdict}"))
+    # line 2R (the design's last section): paired by start, (the better attack arm of line 2) - R
+    if cand and "R" in arms:
+        rp = [p for p in pairs.values() if best in p and "R" in p]
+        r_drop = sum(("R" in p or "R" in p.get("crashed", ())) and not (best in p and "R" in p) for p in pairs.values())
+        t2 = "FINAL" if triples >= N_PAIRS else f"PROVISIONAL ({triples} of {N_PAIRS} triples)"
+        for key in ("30_630", "30_330"):
+            d = [p[best][f"trade_{key}"] - p["R"][f"trade_{key}"] for p in rp]
+            m, se = _mse(d)
+            out[f"{best}-R_{key}"] = {"mean": m, "se": se, "n": len(d), "positive": sum(x > 0 for x in d),
+                                      "dropped": r_drop}
+        bR = out[f"{best}-R_30_630"]
+        if bR["n"] >= 2:
+            lo, hi = bR["mean"] - 2 * bR["se"], bR["mean"] + 2 * bR["se"]
+            v = ("GO (advancing costs no more than 0.05 of trade against being attacked)" if lo >= -0.05 else
+                 "NOT WORTH (the next step is how to attack, not the teacher)" if hi < -0.05 else
+                 "GO-with-cost (the teacher ADVANCE / KEEP, the cost in the journal)")
+            lines.append(("2R reference", f"{t2}: {best} - R {bR['mean']:+.3f} [{lo:+.3f}, {hi:+.3f}] over {bR['n']} "
+                                          f"pairs ({bR['positive']} positive; dropped: {r_drop}; R alone "
+                                          f"{arms['R']['trade_30_630']:+.3f}, contact {arms['R']['contact']} of "
+                                          f"{arms['R']['n']}): {v}"))
+        else:
+            lines.append(("2R reference", f"{t2}: {best} - R over {bR['n']} pairs (dropped: {r_drop}): no verdict (n < 2)"))
     dm = out["D-M_30_630"]
     if dm["n"] >= 2:
         lo, hi = dm["mean"] - 2 * dm["se"], dm["mean"] + 2 * dm["se"]
@@ -418,7 +478,7 @@ def main(argv=None):
             p = game.BUILD / "nn-arena" / "runs" / r
         try:
             rows.append(battle(p))
-        except Exception as e:                 # (a crashed run: no result or an unreadable record - out of the pairs)
+        except (Exception, SystemExit) as e:   # (a crashed run: no result or an unreadable record - out of the pairs)
             st = None
             try:
                 man = json.loads((p / "manifest.json").read_text(encoding="utf-8"))
