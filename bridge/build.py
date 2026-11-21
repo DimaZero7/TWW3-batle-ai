@@ -102,6 +102,9 @@ TIMEOUT_MARGIN_S = 60
 # and real ms after the teleports before the places are read (the 26.09.2026 check read them 1000 ms after).
 DEPLOY_WAIT_S = 120
 DEPLOY_SETTLE_MS = 1000
+# nn-arena --park-lords: the corners' margin inside the map's square, the least gap wanted from the other side's units
+# (the user's 21.11: far from the fight), the drift that makes the script take the lord again (m).
+PARK_MARGIN_M, PARK_MIN_M, PARK_DRIFT_M = 60.0, 400.0, 10.0
 # human: every soldier's position every this many ticks (a reading of all men takes ~50 ms).
 HUMAN_SOLDIERS_EVERY = 5
 ARENA_TARGETS = ("nn-arena", "human")
@@ -309,6 +312,20 @@ def nn_arena_config(args, run_config):
         # skirmish: the game's skirmish mode off for every unit the bridge commands by default - the simulator's network
         # units have it off (sim/state.py "sk"; contract/parity.md); 'game': as the game sets it
         run_config.update(decide_ms=args.decide_ms, poll_ms=NET_POLL_MS, skirmish=args.skirmish or "off")
+    if getattr(args, "park_lords", False):
+        # both lords parked in two far corners for the whole battle (bridge/lua/entries/nn_arena.lua park_lords): the
+        # square - a captured map's frame (sim/maps/<name>/meta.json), else the flat map's edge (sim/config/sim.json
+        # map_half_m: routing units leave it at 1020 m)
+        if args.map:
+            from sim import maps as arena_map
+            fr = arena_map.meta(args.map)["frame"]
+            half = min(fr["max_x"] - fr["min_x"], fr["max_z"] - fr["min_z"]) / 2
+            cx, cz = (fr["max_x"] + fr["min_x"]) / 2, (fr["max_z"] + fr["min_z"]) / 2
+        else:
+            sim_cfg = json.loads((Path(__file__).resolve().parents[1] / "sim/config/sim.json").read_text(encoding="utf-8"))
+            half, cx, cz = float(sim_cfg["map_half_m"]["value"]), 0.0, 0.0
+        run_config["park_lords"] = {"half": float(half), "cx": float(cx), "cz": float(cz), "margin": PARK_MARGIN_M,
+                                    "min_m": PARK_MIN_M, "drift_m": PARK_DRIFT_M}
     if args.own_ai == "human":
         run_config["soldiers_every"] = HUMAN_SOLDIERS_EVERY if args.soldiers_every is None else args.soldiers_every
         if args.free_speed:
@@ -370,6 +387,10 @@ def parser_of():
                         help="nn-arena: the game's skirmish mode (a unit steps back from approaching enemies by itself, "
                              "over its order) off for every unit the bridge commands (default: as the simulator's "
                              "network units, sim/state.py 'sk') or as the game sets it ('game')")
+    parser.add_argument("--park-lords", action="store_true",
+                        help="nn-arena --own-ai net: both lords taken out of the fight - teleported to two far corners "
+                             "at the start and held there by the script (no orders from the game's AI or the companion; "
+                             "bridge/lua/entries/nn_arena.lua): the infantry alone")
     parser.add_argument("--soldiers-every", type=int,
                         help=f"human: every soldier's position every this many ticks (0: never; default "
                              f"{HUMAN_SOLDIERS_EVERY})")
@@ -448,6 +469,8 @@ def check_args(parser, args):
         parser.error("--own-role is for nn-arena and human")
     if args.skirmish is not None and args.target != "nn-arena":
         parser.error("--skirmish is for nn-arena (the bridge's units)")
+    if args.park_lords and not (args.target == "nn-arena" and args.own_ai == "net"):
+        parser.error("--park-lords is for nn-arena --own-ai net (the planner of 'ai' would order the lord again)")
     for flag, ok in (("live_label", args.target == "human"), ("live_test", args.live_label),
                      ("free_speed", args.target == "human"), ("extra_mod", args.target == "human"),
                      ("soldiers_every", args.target == "human")):

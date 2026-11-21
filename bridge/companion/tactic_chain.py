@@ -14,7 +14,9 @@ Every state document (one a battle second):
                the gate's output, and drill T0-2's approach, age = the second - the order's birth, and the flank walk's
                time guard walk_s, the target's facing at its birth and the last MOVE's second - lower.Units.script_order
                / note_sent, one code), no leash; the order gate reissue.Gate (a
-               changed order only); the lord: hold once, then keep (the simulator's merge of hold over the hidden lord)
+               changed order only); the lord: hold once, then keep (the simulator's merge of hold over the hidden lord);
+               with the state's lords = 'park' (bridge.build --park-lords) the lord gets no order at all (marked out,
+               no op MOVE): the game's script holds him in a corner
 A tactic_v3 checkpoint (heads.TacticNet3, drill T0-2 'side of the strike') runs the same chain: the network's approach
 goes through the level's masks into the unit's order; the record adds own() of 19, the S2 row columns, the side head's
 columns and the approach.
@@ -109,7 +111,7 @@ class TacticChain:
         env = tick_ms if tick_ms is not None else os.environ.get("BAI_TICK_MS")
         self.tick_ms = int(env) if env not in (None, "") else None
         self.op_arm, self.op = OPS.parse(os.environ.get("BAI_OP_SCRIPT")), None     # (off: None - no hook runs)
-        self.batch = None
+        self.batch, self.parked = None, False
         self.times, self.extra = {}, None
 
     # -- a new battle
@@ -133,6 +135,7 @@ class TacticChain:
         self.units.gate = reissue.Gate(1, N, dev)
         _frame0(self.units, self.units.setup.own)
         self.hide, self.lord_held = hide, torch.zeros_like(hide)
+        self.parked = doc.get("lords") == "park"       # (bridge.build --park-lords: the lords held by the game's script)
         self.next_tac = None
         self.n_ticks = 0
         men = float((r[..., TR.I["men"]] * (r[..., TR.I["alive"]] > 0)).sum())
@@ -141,6 +144,8 @@ class TacticChain:
         self.op = None if self.op_arm is None else OPS.OpScript(self.op_arm, self.names, blocked=OPS.blocked_of(doc.get("map")))
         if self.op is not None:
             self.start_info["op"] = "holder:" + self.op_arm
+        if self.parked:
+            self.start_info["lords"] = "park"
 
     def script_second(self, raw_u, sec=0.0):
         """lower.Units.second's script branch on the unit level's raw [1, N, RAW] at battle second sec -> (the gated
@@ -187,7 +192,7 @@ class TacticChain:
         later = self.hide & self.lord_held
         out.kind = torch.where(later, torch.full_like(out.kind, O.KEEP), out.kind)
         self.lord_held = self.lord_held | self.hide
-        if lord:                                        # (plan `holder`: the lord's MOVE behind the moved zone)
+        if lord and not self.parked:                    # (plan `holder`: the lord's MOVE behind the moved zone)
             out = self.op.lord_orders(out, self.hide, lord)
         self.inside, self.sec, self.raw_u = inside, sec, raw_u
         self.times["unit_ms"] = (time.perf_counter() - t3) * 1000
@@ -212,7 +217,7 @@ class TacticChain:
         I = V.I
         ctrl = {n for i, n in enumerate(self.names)
                 if side[i] == self.own and float(self.raw_u[0, i, I["alive"]]) > 0
-                and not float(self.raw_u[0, i, I["r"]]) > 0}
+                and not float(self.raw_u[0, i, I["r"]]) > 0 and not (self.parked and bool(self.hide[0, i]))}
         for x in out:
             if x["unit"] not in ctrl:
                 x["out"] = True

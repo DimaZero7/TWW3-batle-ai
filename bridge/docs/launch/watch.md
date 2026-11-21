@@ -103,6 +103,10 @@ BAI_OP_SCRIPT`), там её читает `bridge/companion/tactic_chain.py` (`n
     OP=holder:D bash game/battle/chain.sh tactic h01   # старты h01..h24 (build/holder): мы наступаем, ИИ игры держит
     bash game/battle/chain.sh tactic r01               # r01..r24: тот же старт, ИИ игры наступает, без OP (с OP — отказ)
     python -m game.battle.holder_read <прогоны> --out <json>   # строки плана 1, 2, 2R, 3
+    LORDS=park OP=holder:D bash game/battle/chain.sh tactic h01   # оба лорда вне боя (--park-lords): чистая пехота
+
+С `LORDS=park` (`tmp/holder/night.sh` передаёт её дальше) сборка получает `--park-lords`, лог — суффикс `_park`;
+чтец помечает строку `lords: "park"`, размен считает без лордов и парует такие бои только между собой.
 
 Чтец печатает: дошли ли «атаковать» до игры (приказ помощника → `nn_orders` → цель `t` отряда или схватка рядом с ней в
 `nn_sample` за 20 с), повтор входа первых тактов по записанным документам и вход такта 0 против двойника в симуляторе.

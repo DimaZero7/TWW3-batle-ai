@@ -18,6 +18,8 @@
 #                 the scripted operative net/operative/opside.py on the chain (BAI_OP_SCRIPT); without OP as before
 #        bash game/battle/chain.sh tactic r01   the plan's reference arm R: the same start with the roles swapped (the
 #                 game's AI attacks, ours defends), the chain without the operative script (OP must be empty)
+#        LORDS=park bash game/battle/chain.sh tactic h01   both lords out of the fight (bridge.build --park-lords: two far
+#                 corners, held by the script; the manifest's config.park_lords); empty - as before
 cd "$(dirname "$0")/../.." || exit 1
 . ops/guard.sh
 . ops/python.sh
@@ -27,7 +29,8 @@ if [ "$1" = "tactic" ]; then
   case "$b" in h[0-9]*|r[0-9]*) MK=game.battle.holder_read; MKA=--make; AD=build/holder ;; esac
   case "$b" in r[0-9]*) [ -n "$OP" ] && { echo "$b is the reference arm R: no OP" >&2; exit 1; } ;; esac
   if [ -n "$OP" ]; then export BAI_OP_SCRIPT="$OP"; else unset BAI_OP_SCRIPT; fi
-  tag="$b${OP:+_${OP#*:}}"
+  case "${LORDS:-}" in ""|park) ;; *) echo "LORDS must be empty or park" >&2; exit 1 ;; esac
+  tag="$b${OP:+_${OP#*:}}${LORDS:+_$LORDS}"
   W=weights/tactic/attack1/final.pt
   [ -f "$W" ] || { echo "no $W" >&2; exit 1; }
   if [ -n "$DRY" ]; then why="$(guard_busy)" && { echo "not starting: $why" >&2; exit 1; }
@@ -41,7 +44,8 @@ if [ "$1" = "tactic" ]; then
   args=(--own-ai net --arena-json "$AD/$b.json" --speed 3 --timeout 900)
   [ "$map" != "flat" ] && args+=(--map "$map")
   [ "$role" = "defend" ] && args+=(--own-role attack)
-  echo "=== tactic $b $map ai:$role men $men tick_ms ${BAI_TICK_MS:-engine}${OP:+ op $OP} $(date +%T)"
+  [ "$LORDS" = "park" ] && args+=(--park-lords)
+  echo "=== tactic $b $map ai:$role men $men tick_ms ${BAI_TICK_MS:-engine}${OP:+ op $OP}${LORDS:+ lords $LORDS} $(date +%T)"
   "$PY" -m bridge.build nn-arena "${args[@]}" > "tmp/chain/tactic_$tag.build.log" 2>&1     || { echo "build failed (tmp/chain/tactic_$tag.build.log)"; exit 1; }
   if [ -n "$DRY" ]; then echo "dry: built; watch.ps1 -NoBuild -Chain -ChainTactic $W"; exit 0; fi
   guard_human && { echo "the user plays: stop"; exit 1; }

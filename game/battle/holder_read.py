@@ -19,6 +19,11 @@ orders a unit-minute (game/battle/tactic_read.orders), the whole-field trade ove
 lost - own lost, shares of each side's start health: hp x the key's hp_total, lords in, men 0 = all lost; a battle that
 ended before the window's end: its last health carried forward - counted), no_sally / halt_stood (the op's flags). Then
 the paired D - M by start (SE = sd / sqrt(n)), the plan's three lines with their verdicts and line 2R (better - R).
+
+lords (the manifest's config.park_lords, LORDS=park bash game/battle/chain.sh): "park" - both lords held in far corners
+out of the fight (bridge.build --park-lords), the trade then WITHOUT the lords' health (infantry alone, both sides);
+"in" - as before, the lords in the trade. Runs of the two flags never pair: with both flags among the runs the
+summary is made per flag ("summary_by_lords"), each alone.
 """
 import argparse
 import contextlib
@@ -135,6 +140,7 @@ def battle(run):
     c = conf()
     run = Path(run)
     man = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+    lords = _lords(man)
     src = Path(str(man["config"]["army"]["from_file"]).replace("\\", "/"))
     start = src.stem
     UN = json.loads((ROOT / "sim/config/units.json").read_text(encoding="utf-8"))["units"]
@@ -162,7 +168,7 @@ def battle(run):
     t_move = move["sec"] if move else None
     E = (move or {}).get("E") or next((n["E"] for n in notes if n.get("E")), None) or foes   # (D never moved: the decision's E)
     E = [e if isinstance(e, str) else names[e] for e in E]
-    row = {"run": run.name, "start": start, "arm": arm, "status": res.get("status"), "winner": res.get("winner"),
+    row = {"run": run.name, "start": start, "arm": arm, "lords": lords, "status": res.get("status"), "winner": res.get("winner"),
            "end_s": round(res["duration_model_ms"] / 1000, 1) if res.get("duration_model_ms") else fr[-1][0],
            "our_move_s": t_move, "E": E, "op": [{k: n.get(k) for k in ("sec", "act", "gap_front", "e_close", "comer")}
                                                for n in notes if n.get("act")]}
@@ -302,7 +308,7 @@ def battle(run):
     def health(us, pre):
         h = 0.0
         for nm, u in us.items():
-            if not nm.startswith(pre):
+            if not nm.startswith(pre) or (lords == "park" and nm.endswith("_lord")):    # (parked: no lords)
                 continue
             if (u.get("men") or 0) <= 0:
                 dead[nm] = True
@@ -325,6 +331,11 @@ def battle(run):
         row[f"enemy_lost_{key}"] = round((ea - eb) / max(h0e, 1e-9), 4)
         row["ended_before"][key] = H[-1][0] < b
     return row
+
+
+def _lords(man):
+    """The run's lords flag (module doc): "park" with the manifest's config.park_lords, else "in"."""
+    return "park" if (man.get("config") or {}).get("park_lords") else "in"
 
 
 def _mse(v):
@@ -479,15 +490,16 @@ def main(argv=None):
         try:
             rows.append(battle(p))
         except (Exception, SystemExit) as e:   # (a crashed run: no result or an unreadable record - out of the pairs)
-            st = None
+            st, lf = None, "in"
             try:
                 man = json.loads((p / "manifest.json").read_text(encoding="utf-8"))
+                lf = _lords(man)
                 st = Path(str(man["config"]["army"]["from_file"]).replace(chr(92), "/")).stem
             except Exception:
                 pass
-            print(f"crashed run {p.name} ({st}): {type(e).__name__}: {e}")
-            rows.append({"run": p.name, "start": st, "arm": None, "crashed": True})
-    hdr = ("run", "start", "arm", "our_move_s", "e_move_s", "e_move_gap_m", "own_walked_m", "enemy_walked_m",
+            print(f"crashed run {p.name} ({st}, lords {lf}): {type(e).__name__}: {e}")
+            rows.append({"run": p.name, "start": st, "arm": None, "lords": lf, "crashed": True})
+    hdr = ("run", "start", "arm", "lords", "our_move_s", "e_move_s", "e_move_gap_m", "own_walked_m", "enemy_walked_m",
            "contact_s", "stand_share", "standing5_share", "moving_at_e_move", "e_move_after_ours_s", "own_routs", "enemy_routs", "status", "winner", "end_s",
            "orders_per_unit_min", "trade_30_630", "trade_30_330", "no_sally", "halt_stood")
     for r in rows:
@@ -496,13 +508,21 @@ def main(argv=None):
         print(" ".join(f"{k}={r[k]}" for k in hdr))
         print("   op: " + "; ".join(f"{n['sec']:.0f} {n['act']} gap {n['gap_front']} close {n['e_close']}"
                                      + (" comer" if n["comer"] else "") for n in r["op"]))
-    s = summary(rows)
-    print(json.dumps({k: v for k, v in s.items() if k != "lines"}, indent=1, default=str))
-    for k, v in s["lines"].items():
-        print(f"LINE {k}: {v}")
+    flags = sorted({r.get("lords") or "in" for r in rows})
+    by_flag = {f: summary([r for r in rows if (r.get("lords") or "in") == f]) for f in flags}   # (never paired across)
+    for f, s in by_flag.items():
+        s["lords"] = f
+        print(json.dumps({k: v for k, v in s.items() if k != "lines"}, indent=1, default=str))
+        for k, v in s["lines"].items():
+            print(f"LINE {k}{' [lords ' + f + ']' if len(flags) > 1 else ''}: {v}")
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.out).write_text(json.dumps({"rows": rows, "summary": s}, indent=1, default=str), encoding="utf-8")
+        doc = {"rows": rows}
+        if len(by_flag) == 1:
+            doc["summary"] = next(iter(by_flag.values()))
+        else:
+            doc["summary_by_lords"] = by_flag
+        Path(a.out).write_text(json.dumps(doc, indent=1, default=str), encoding="utf-8")
     return 0
 
 

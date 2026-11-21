@@ -24,6 +24,17 @@
 -- unit the bridge commands, as the simulator's network units have it off (apps.bridge.adapter); 'game' or absent: the
 -- game's own setting. Every row of a
 -- unit that has the mode carries sk = is it on now (unit:is_behaviour_active).
+-- config.park_lords = {half, cx, cz, margin, min_m, drift_m} (bridge.build --park-lords; absent: none of this runs, the battle as
+-- before): both lords out of the fight, the infantry alone. At the battle's start each side's lord (slot 'lord') is
+-- taken under the script's own unit controller (out of the game's AI and of the bridge's orders: the companion gives the
+-- lord none, the state carries lords = 'park'), teleported to a corner of the square (cx, cz) +-(half - margin) facing its
+-- centre and halted: of the 12 ordered pairs of different corners the one that keeps each lord at least min_m from
+-- every infantry unit of the other side (then the lords farthest apart, then the larger least gap); event 'lords_park'.
+-- The engine may stop the teleport short of the corner (the flat map: ~300 m): at the first tick the place the lord
+-- stands at (not moving) becomes his corner ('lord_park_settled': x, z, d - short by, least_m).
+-- Every tick a lord not in melee that stands, or moves ordered, more than drift_m off its corner is taken again, teleported
+-- back and halted ('lord_park_retake': d, ordered gap, moving); a lord in melee is left to fight ('lord_park_melee' at
+-- each melee's first second).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted research telemetry); 'nn_final' is the
 -- last such record. The battle ends on the game's outcome, a stall, the timeout or the deadline: 'result'.
 local battle = require('apps.battle.adapter')
@@ -35,6 +46,7 @@ local map = require('apps.map.adapter')
 local bridge = require('apps.bridge.adapter')
 local observer = require('apps.telemetry.observer_adapter')
 local orders = require('apps.orders.adapter')
+local facing = require('apps.orders.facing')
 local deploy = require('apps.bridge.deploy_adapter')
 local label_overlay = require('apps.battle.label_overlay')
 local live_label = require('apps.battle.live_label')
@@ -209,8 +221,107 @@ function M.main(bm, config, globals)
         flush()
     end
 
+    -- (config.park_lords, the header) the lords to the corners at the start; parked = {{it, uc, x, z, b, melee}}
+    local function xz_of(u)
+        local p = try(function() return u:position() end)
+        if not p then return nil end
+        return p:get_x(), p:get_z()
+    end
+    local function least_to(x, z, side)
+        local best = nil
+        for _, it in ipairs(state.sides[side]) do
+            if it.slot ~= 'lord' then
+                local ux, uz = xz_of(it.unit)
+                if ux then
+                    local d = math.sqrt((ux - x) ^ 2 + (uz - z) ^ 2)
+                    if best == nil or d < best then best = d end
+                end
+            end
+        end
+        return best or 0
+    end
+    local function park_lords()
+        local pc = config.park_lords
+        local c = pc.half - pc.margin
+        local cx, cz = pc.cx or 0, pc.cz or 0
+        local corners = {{cx - c, cz - c}, {cx - c, cz + c}, {cx + c, cz - c}, {cx + c, cz + c}}
+        local pick = nil
+        for i, a in ipairs(corners) do
+            for j, b in ipairs(corners) do
+                if i ~= j then
+                    local s = math.min(least_to(a[1], a[2], 2), least_to(b[1], b[2], 1))
+                    local k = {math.min(s, pc.min_m), math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2), s}
+                    local better = pick == nil
+                    if not better then
+                        for q = 1, 3 do
+                            if k[q] > pick.k[q] + 1e-6 then better = true break end
+                            if k[q] < pick.k[q] - 1e-6 then break end
+                        end
+                    end
+                    if better then pick = {k = k, own = a, enemy = b} end
+                end
+            end
+        end
+        state.parked = {}
+        local rows = {}
+        for side = 1, 2 do
+            local army = side == 1 and state.own_army or state.enemy_army
+            local at = side == 1 and pick.own or pick.enemy
+            for _, it in ipairs(state.sides[side]) do
+                if it.slot == 'lord' then
+                    local fx, fz = xz_of(it.unit)
+                    local b = math.deg((math.atan2 or math.atan)(cx - at[1], cz - at[2])) % 360
+                    local uc = orders.take_control(army, it.unit)
+                    orders.teleport(uc, vec(at[1], at[2]), facing.snap(b), 5)
+                    orders.halt(uc)
+                    state.parked[#state.parked + 1] = {it = it, uc = uc, x = at[1], z = at[2], b = b, melee = false}
+                    rows[#rows + 1] = {n = it.name, side = side, x = at[1], z = at[2], b = round(b, 1),
+                        from_x = round(fx), from_z = round(fz), least_m = round(least_to(at[1], at[2], 3 - side))}
+                end
+            end
+        end
+        emit('lords_park', {units = rows, half = pc.half, margin = pc.margin, min_m = pc.min_m,
+            least_m = round(pick.k[3]), apart_m = round(pick.k[2])})
+    end
+    local function keep_parked()
+        local pc = config.park_lords
+        for _, p in ipairs(state.parked) do
+            local u = p.it.unit
+            local alive = (try(function() return u:number_of_men_alive() end) or 0) > 0
+            local melee = try(function() return u:is_in_melee() end) == true
+            if alive and melee and not p.melee then
+                emit('lord_park_melee', {n = p.it.name, least_m = round(least_to(p.x, p.z, 3 - p.it.side))})
+            end
+            p.melee = melee
+            local ux, uz = xz_of(u)
+            local o = try(function() return u:ordered_position() end)
+            if alive and not melee and ux then
+                local d = math.sqrt((ux - p.x) ^ 2 + (uz - p.z) ^ 2)
+                local od = o and math.sqrt((o:get_x() - p.x) ^ 2 + (o:get_z() - p.z) ^ 2) or 0
+                local mv = try(function() return u:is_moving() end) == true
+                if not p.settled and not mv then
+                    -- the first look after the teleport: the engine may stop the lord short of the corner (21.11, the
+                    -- flat map: ~300 m short, at about +-760 of +-960); where he stands is his corner from now on
+                    p.settled = true
+                    emit('lord_park_settled', {n = p.it.name, x = round(ux), z = round(uz), d = round(d),
+                        least_m = round(least_to(ux, uz, 3 - p.it.side))})
+                    p.x, p.z, d = ux, uz, 0
+                    od = o and math.sqrt((o:get_x() - p.x) ^ 2 + (o:get_z() - p.z) ^ 2) or 0
+                end
+                if d > pc.drift_m or (mv and od > pc.drift_m) then
+                    pcall(function() p.uc:take_control() end)
+                    orders.teleport(p.uc, vec(p.x, p.z), facing.snap(p.b), 5)
+                    orders.halt(p.uc)
+                    p.n = (p.n or 0) + 1
+                    emit('lord_park_retake', {n = p.it.name, d = round(d), od = round(od), k = p.n, mv = mv})
+                end
+            end
+        end
+    end
+
     local function tick()
         if not state.active then return end
+        if state.parked then keep_parked() end
         if state.stall.update(bm:time_elapsed_ms(), battle.health_signature(state.all_units)) then
             finish('stalled', 0)
             bm:force_battle_end(0, 'stalled', true)
@@ -286,7 +397,8 @@ function M.main(bm, config, globals)
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
-                attacker = config.enemy_role == 'defend' and 1 or 2, map = config.map}})
+                attacker = config.enemy_role == 'defend' and 1 or 2, map = config.map,
+                lords = config.park_lords and 'park' or nil}})
         emit('own_ai', {mode = 'net', own_ai = config.own_ai, decide_ms = config.decide_ms,
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
     end
@@ -389,10 +501,11 @@ function M.main(bm, config, globals)
             end)
         end
         hand_over()
+        if config.park_lords then park_lords() end
         if state.observer then state.observer.changes() end
         state.stall = battle_services.new_stall_detector(config.stall_ms)
         emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s,
-            free_speed = config.free_speed == true})
+            free_speed = config.free_speed == true, lords = config.park_lords and 'park' or nil})
         snapshot('nn_sample')
         flush()
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
@@ -422,6 +535,9 @@ function M.main(bm, config, globals)
         assert(common and vector_type, 'common and battle_vector globals required')
         assert(M.OWN_AI[config.own_ai], 'own_ai must be net, human or ai')
         assert(config.skirmish == nil or M.SKIRMISH[config.skirmish], 'skirmish must be absent, game or off')
+        local pl = config.park_lords
+        assert(pl == nil or (type(pl.half) == 'number' and type(pl.margin) == 'number' and type(pl.min_m) == 'number'
+            and type(pl.drift_m) == 'number' and pl.half > pl.margin), 'park_lords needs numbers half > margin, min_m, drift_m')
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army, state.enemy_army = sides[1].alliance, sides[1].army, sides[2].army
         state.alliances = {sides[1].alliance, sides[2].alliance}
