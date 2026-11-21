@@ -577,7 +577,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "ratshape", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow", "losfriend", "losrange", "losmove", "snipe",
               "hill", "flankslot", "flankslot2", "lobfriend", "forestwalk", "width", "reissue", "counter", "flank2v1",
               "counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01", "behind", "own", "behind2", "turn",
-              "duel", "roster", "behind3", "duel2", "side2r")
+              "duel", "roster", "behind3", "duel2", "side2r", "pick2")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ()     # (the magic probe is not carried over: no magic in the plan)
 # the tactician's first drill: through own shooters, arcs over own infantry (tools/nn/tactic_probe.py)
@@ -2140,7 +2140,7 @@ def run_config(plan, index):
         # A and B every 0.5 s (the clock lane keeps the poll going) - tmp/night_probes/design.md 1.2
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=105, mem_morale=True,
                       mem_extras=True)
-    if plan in ("turn", "duel", "duel2"):
+    if plan in ("turn", "duel", "duel2", "pick2"):
         # (game/probe/unit_probe.py, at once or in turn; the duel plan) health every 0.25 s; no soldier places, no memory
         # (the measures are losses, routs and rallies: the unit rows)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=0, men_near_m=0)
@@ -2431,7 +2431,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
             sides[roles["tg"]]["units"].append({"key": t2_key, "x": r2["x"] if r2 else s0[2]["x"] + spec.get("t2_dx", 0),
                                                 "z": r2["z"] if r2 else s0[2]["z"] + spec.get("t2_dz", 0),
                                                 "b": r2["b"] if r2 else s0[2]["b"],
-                                                "men": r2["men"] if r2 else UNITS[t2][1], "width": spec["t_width"],
+                                                "men": r2["men"] if r2 else UNITS[t2][1],
+                                                "width": spec.get("t2_width") or spec["t_width"],
                                                 "general": False, "name": "t2"})
         if spec.get("lord") and s0[3]:
             r = s0[3]
@@ -2451,9 +2452,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                                                "name": f"e{j}"})
         if spec.get("t_morale"):
             # the target can rout (the routmob plan): a far-off standing unit of its side keeps its battle going
-            sides[roles["tg"]]["units"].append({"key": spec["t_key"], "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
-                                                "b": s0[2]["b"], "men": s0[2]["men"], "width": spec["t_width"],
-                                                "general": False, "name": "keep"})
+            # (spec.keep_t, the pick2 plan: that card in every arm of a pair - the treatment must not change the army)
+            kk = spec.get("keep_t") or spec["t_key"]
+            sides[roles["tg"]]["units"].append({"key": kk, "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
+                                                "b": s0[2]["b"], "men": UNITS[kk][1] if spec.get("keep_t") else s0[2]["men"],
+                                                "width": spec["t_width"], "general": False, "name": "keep"})
         if spec.get("a_morale") or any(e.get("morale") for e in spec.get("extras") or []):
             # (the intercept plan) our units keep their morale: a far-off standing unit of our side keeps the battle going
             sides[roles["a"]]["units"].append({"key": spec["a_key"], "x": s0[1]["x"], "z": s0[1]["z"] + 400.0,
@@ -2484,6 +2487,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
     for b, ln in enumerate(meta):
         if ln["spec"].get("t_morale") and int(slot["tg"][b]) >= 0:
             keep[b, int(slot["tg"][b])] = True
+        if ln["spec"].get("t2_morale") and int(slot["t2"][b]) >= 0:
+            # (the pick2 plan) the second target keeps its morale too
+            keep[b, int(slot["t2"][b])] = True
         if ln["spec"].get("morale_both"):
             # (the wrap plan: both sides with their morale, as the entry left them)
             for r_ in ("a", "tg"):
@@ -2572,6 +2578,52 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                       "seen": False})
     ab_names = sim_abilities.keys(params)
 
+    def _seek(b, t, u, st_, sp, slot, kind, target, run_):
+        """(lane.seek, the pick2 plan; entries/charge_probe.lua seek) from the go: a unit of the lane that stands with no
+        live target - its target in force out (routing, shattered or dead), just rallied, or halted for want of one -
+        attacks at a run the nearest (centres) standing enemy unit of its lane; none standing - it halts. The orders it
+        gave stand from then on over the lane's own (the target's on its anvil, the attacker's on the target)."""
+        roles = {r: int(slot[r][b]) for r in ("a", "tg", "t2", "e1", "e2")}
+        sk = st_.setdefault("seek", {}).get(b)
+        if sk is None:
+            sk = st_["seek"][b] = {"aim": {"tg": "e1", "t2": "e2", "e1": "tg", "e2": "t2"}, "was": {}, "idle": set(),
+                                   "set": {}}
+        if st_["go"][b] is not None and "a" not in sk["aim"] and "a" not in sk["set"] and "a" not in sk["idle"]:
+            sk["aim"]["a"] = "tg"
+
+        def off(r):
+            i = roles[r]
+            return bool(u["r"][b, i]) or ("s" in u and bool(u["s"][b, i])) or float(u["men"][b, i]) <= 0
+        for mine, foes in ((("a", "e1", "e2"), ("tg", "t2")), (("tg", "t2"), ("a", "e1", "e2"))):
+            for r in mine:
+                o_ = off(r)
+                rallied = sk["was"].get(r, False) and not o_
+                sk["was"][r] = o_
+                aim = sk["aim"].get(r)
+                why = None
+                if not o_:
+                    why = "rally" if rallied else "out" if aim is not None and off(aim) else                         "idle" if r in sk["idle"] else None
+                if why is None:
+                    continue
+                i = roles[r]
+                cands = [(math.hypot(float(u["x"][b, i]) - float(u["x"][b, roles[f]]),
+                                     float(u["z"][b, i]) - float(u["z"][b, roles[f]])), f) for f in foes if not off(f)]
+                if cands:
+                    d_, f = min(cands)
+                    sk["aim"][r] = sk["set"][r] = f
+                    sk["idle"].discard(r)
+                    st_["phases"][b].append({"phase": "seek", "u": r, "tg": f, "why": why, "d": round(d_, 1),
+                                             "t": t * 1000})
+                elif r not in sk["idle"]:
+                    sk["aim"].pop(r, None)
+                    sk["set"].pop(r, None)
+                    sk["idle"].add(r)
+                    st_["phases"][b].append({"phase": "seek", "u": r, "tg": "", "why": why, "t": t * 1000})
+        for r, f in sk["set"].items():
+            kind[b, roles[r]], target[b, roles[r]], run_[b, roles[r]] = O.ATTACK, roles[f], True
+        for r in sk["idle"]:
+            kind[b, roles[r]], target[b, roles[r]], run_[b, roles[r]] = O.HOLD, -1, False
+
     def policy(st):
         u = st.u
         t = float(st.t.max())
@@ -2653,6 +2705,16 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 # extra, 't' the lane's target, absent the order's target (a_go_closest reads g_m still)
                 C = {"e1": int(slot["e1"][b]), "t": T}.get(sp.get("a_go_melee_of"), G)
                 c_m = bool(u["m"][b, C]) if C >= 0 else False
+                if sp.get("a_go_melee_of") == "e12":
+                    # (the pick2 plan) the later of the first two extras' first melee flags
+                    m0 = gs.setdefault("m0", {})
+                    for j_ in (1, 2):
+                        Ej_ = int(slot[f"e{j_}"][b])
+                        if j_ not in m0 and Ej_ >= 0 and bool(u["m"][b, Ej_]):
+                            m0[j_] = t          # the step that shows the flag (the entry's tick sees it then: clock_flag)
+                    c_m = len(m0) == 2
+                    if c_m and gs.get("melee") is None:
+                        gs["melee"] = max(m0.values())
                 if c_m and gs.get("melee") is None:
                     gs["melee"] = t - params.dt
                 why = None
@@ -2907,10 +2969,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                 # (lane.t2_run, the own plan: at a run)
                 kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = (
                     O.ATTACK, A, bool(sp.get("t2_run")))
-            if sp.get("t2_mode") == "attack_extra" and int(slot["t2"][b]) >= 0 and int(slot["e1"][b]) >= 0:
-                # (the intercept plan) the second target attacks the first extra at a run (t2_walk: at a walk)
+            E_t2 = int(slot[f"e{sp.get('t2_extra') or 1}"][b])
+            if sp.get("t2_mode") == "attack_extra" and int(slot["t2"][b]) >= 0 and E_t2 >= 0:
+                # (the intercept plan) the second target attacks the first extra at a run (t2_walk: at a walk; t2_extra:
+                # the extra of that index - the pick2 plan's second anvil)
                 T2_ = int(slot["t2"][b])
-                kind[b, T2_], target[b, T2_], run_[b, T2_] = O.ATTACK, int(slot["e1"][b]), not sp.get("t2_walk")
+                kind[b, T2_], target[b, T2_], run_[b, T2_] = O.ATTACK, E_t2, not sp.get("t2_walk")
             # the target
             if sp.get("t_at_leave") == "halt" and st_["phase"][b] == "out":
                 # the leave plan's 'stand': the target halts where it is at the withdraw (entries/charge_probe.lua)
@@ -3026,6 +3090,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0, 
                     else:
                         kind[b, i], target[b, i], run_[b, i] = O.MOVE, -1, True
                         x[b, i], z[b, i] = point(who, ti["leg"][who]) if ti["phase"] == "tire" else ti["start"][who]
+            if sp.get("seek"):
+                _seek(b, t, u, st_, sp, slot, kind, target, run_)
         # KEEP the orders in force (re-issuing every step would be a new order each time)
         key = torch.stack([kind.float(), target.float(), run_.float(), x, z, face], -1)
         last = st_["last"].get("key")

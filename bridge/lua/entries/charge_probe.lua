@@ -90,7 +90,14 @@
 -- (probe_phase 't2_after:attack_a').
 -- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one; lane.t2_run:
 -- at a run - the own plan);
--- 'attack_extra' (the intercept plan): it attacks the first extra at a run at the go (lane.t2_walk: at a walk).
+-- 'attack_extra' (the intercept plan): it attacks the first extra at a run at the go (lane.t2_walk: at a walk;
+-- lane.t2_extra: the extra of that index instead - the pick2 plan's second anvil). lane.t2_morale: the second target
+-- keeps its morale. lane.seek (the pick2 plan; needs target2 and two extras): from the go a unit of the lane standing
+-- with no live target (its target in force routing, shattered or dead, just rallied, or halted for want of one) attacks
+-- at a run the nearest standing enemy of its lane, both sides alike, or halts with none (probe_phase 'seek' {u, tg, why,
+-- d}); the quiet end then counts the second target on its side and needs quiet_end_s CONSECUTIVE seconds with a
+-- whole side out and no melee flag (the timer starts when both hold), fight_s counts from the later of the first two
+-- extras' first melee flags, and a dead unit no longer ends the lane.
 -- lane.damage (optional) {t = {method, share}, t2 = ..., a = ...}: once placed (settle_ms before the go) the unit is
 -- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
 -- (the engine's own calls); event probe_damage with the men and health before and after.
@@ -117,8 +124,8 @@
 -- attacker and its order's target are within lane.a_go_m (why 'gap'), until that target has been in melee
 -- lane.a_go_melee_s seconds (why 'melee'), or - lane.a_go_closest - once that distance grew 2 m past its least or the
 -- target is in melee before a_go_m was reached (why 'closest'; probe_phase 'a_go' {why, d, of}); lane.a_go_melee_of
--- ('e1' the first extra, 't' the lane's target; the tight plan) names whose melee flag starts that clock instead of the
--- order's target's. An extra with e.go_melee_s (the behind2 plan's second joiner) attacks the lane's target at a run
+-- ('e1' the first extra, 't' the lane's target; the tight plan; 'e12' the later of the first two extras' first flags -
+-- the pick2 plan) names whose melee flag starts that clock instead of the order's target's. An extra with e.go_melee_s (the behind2 plan's second joiner) attacks the lane's target at a run
 -- (e.walk: at a walk) once the first extra has been in melee that long (probe_phase 'e_go' {n}). lane.a_go_rout_of 'e1'
 -- (the turn plan) holds the order until the first extra routs (routing, shattered or dead: probe_phase 'e1_rout'; why
 -- 'rout'); lane.t_go_rout_of 'e1': then the target attacks the attacker at a run, once (probe_phase 't_go'), before the
@@ -585,6 +592,12 @@ function M.main(bm, config, globals)
         return (read(function() return u:number_of_men_alive() end) or 0) == 0
     end
 
+    -- Routing, shattered or dead (the turn plan's 'out').
+    local function gone(u)
+        return read(function() return u:is_routing() end) or read(function() return u:is_shattered() end)
+            or beaten(u)
+    end
+
     local function end_lane(lane, why)
         if not lane.running then return end
         lane.running = false
@@ -598,6 +611,50 @@ function M.main(bm, config, globals)
 
     local function attack(lane, it, enemy, walk)
         orders.attack_melee(it.uc, enemy.unit, walk)
+    end
+
+    -- (lane.seek, the pick2 plan) every tick from the go: a unit of the lane that stands and has no live target - its
+    -- target in force is out (routing, shattered or dead), it has just rallied, or it was halted for want of one - is
+    -- ordered to attack at a run the nearest (centres) standing enemy unit of its lane (ours: the attacker and the extras;
+    -- theirs: the target and the second target), both sides alike; with none standing it halts (no chase). Each such
+    -- order is probe_phase 'seek' {u, tg ('' the halt), why out | rally | idle, d}.
+    local function seek(lane, now)
+        local ours, theirs = {lane.a}, {lane.t, lane.t2}
+        for _, e in ipairs(lane.extras) do ours[#ours + 1] = state.units[e.name] end
+        for _, side in ipairs({{ours, theirs}, {theirs, ours}}) do
+            for _, it in ipairs(side[1]) do
+                local off = gone(it.unit)
+                local rallied = lane.was_out[it.name] and not off
+                lane.was_out[it.name] = off
+                local aim = lane.aim[it.name] and state.units[lane.aim[it.name]]
+                local why = nil
+                if not off then
+                    if rallied then why = 'rally'
+                    elseif aim and gone(aim.unit) then why = 'out'
+                    elseif lane.idle[it.name] then why = 'idle' end
+                end
+                if why then
+                    local best, bd = nil, 1e18     -- no math.huge in the game's Lua (it is nil there)
+                    for _, en in ipairs(side[2]) do
+                        if not gone(en.unit) then
+                            local d = dist(it.unit, en.unit)
+                            if d and d < bd then best, bd = en, d end
+                        end
+                    end
+                    if best then
+                        attack(lane, it, best, false)
+                        lane.aim[it.name], lane.idle[it.name] = best.name, nil
+                        emit('probe_phase', {lane = lane.name, phase = 'seek', u = it.name, tg = best.name, why = why,
+                            d = round(bd, 1), t = now - lane.t0})
+                    elseif not lane.idle[it.name] then
+                        orders.halt(it.uc)
+                        lane.aim[it.name], lane.idle[it.name] = nil, true
+                        emit('probe_phase', {lane = lane.name, phase = 'seek', u = it.name, tg = '', why = why,
+                            t = now - lane.t0})
+                    end
+                end
+            end
+        end
     end
 
     -- (the magic plan) one try of a 'cast' lane's cast i (module comment).
@@ -896,7 +953,17 @@ function M.main(bm, config, globals)
                     if lane.a_go_melee_of == 'e1' then ck = state.units[lane.extras[1].name]
                     elseif lane.a_go_melee_of == 't' then ck = lane.t end
                     local ck_m = gt_m
-                    if ck ~= gt then ck_m = read(function() return ck.unit:is_in_melee() end) end
+                    if lane.a_go_melee_of == 'e12' then
+                        -- (the pick2 plan) the later of the first two extras' first melee flags starts the clock
+                        lane.e_m0 = lane.e_m0 or {}
+                        for j = 1, 2 do
+                            local ej = state.units[lane.extras[j].name]
+                            if not lane.e_m0[j] and read(function() return ej.unit:is_in_melee() end) then
+                                lane.e_m0[j] = now
+                            end
+                        end
+                        ck_m = lane.e_m0[1] ~= nil and lane.e_m0[2] ~= nil
+                    elseif ck ~= gt then ck_m = read(function() return ck.unit:is_in_melee() end) end
                     if ck_m and not lane.go_melee_ms then lane.go_melee_ms = now end
                     if lane.a_go_rout_of == 'e1' and lane.e1_rout_ms then
                         go_why = 'rout'
@@ -921,6 +988,7 @@ function M.main(bm, config, globals)
                         orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
                     else
                         attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                        if lane.seek then lane.aim[lane.a.name] = lane.t.name end
                     end
                     emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0, why = go_why,
                         d = go_d and round(go_d, 1) or nil, of = lane.a_go_melee_of})
@@ -1189,6 +1257,7 @@ function M.main(bm, config, globals)
                         emit('probe_phase', {lane = lane.name, phase = 'friends', t = now - lane.t0, units = placed})
                     end
                 end
+                if lane.seek then seek(lane, now) end
                 local r = {lane = lane.name, t = now - lane.t0, a = lane_row(lane, 'a', lane.a.unit),
                     tg = lane_row(lane, 'tg', lane.t.unit)}
                 if lane.mode == 'laps' and lane.fat_found and #lane.fat_found > 0 then
@@ -1224,13 +1293,31 @@ function M.main(bm, config, globals)
                         if read(function() return u:is_in_melee() end) then any_m = true end
                         ours_out = ours_out and out(u)
                     end
+                    local theirs_out = out(lane.t.unit)
+                    if lane.seek then
+                        -- (the pick2 plan) their side is the second target too
+                        if read(function() return lane.t2.unit:is_in_melee() end) then any_m = true end
+                        theirs_out = theirs_out and out(lane.t2.unit)
+                    end
                     if any_m then lane.melee_last_ms = now end
-                    lane.side_out = ours_out or out(lane.t.unit)
+                    lane.side_out = ours_out or theirs_out
+                    if lane.seek then
+                        -- (the pick2 plan) quiet_end_s CONSECUTIVE seconds with a whole side out and no melee flag in
+                        -- the lane: the timer starts when both hold and restarts when either stops (a rally, a blow)
+                        if lane.side_out and not any_m then lane.quiet_ms = lane.quiet_ms or now
+                        else lane.quiet_ms = nil end
+                    end
                 end
-                if lane.quiet_end_s and lane.contact and lane.side_out
+                -- (the pick2 plan) the lane's fight_s clock: the later of the two anvils' first melee flags (the same
+                -- in both arms of a pair), not the joined fight's contact
+                local c_ref = lane.contact
+                if lane.seek then c_ref = lane.go_melee_ms end
+                if lane.seek and lane.quiet_ms and now - lane.quiet_ms >= lane.quiet_end_s * 1000 then
+                    end_lane(lane, 'quiet')
+                elseif not lane.seek and lane.quiet_end_s and lane.contact and lane.side_out
                         and now - (lane.melee_last_ms or lane.contact) >= lane.quiet_end_s * 1000 then
                     end_lane(lane, 'quiet')
-                elseif beaten(lane.a.unit) or beaten(lane.t.unit) then
+                elseif not lane.seek and (beaten(lane.a.unit) or beaten(lane.t.unit)) then
                     end_lane(lane, 'dead')
                 elseif lane.rally_ms and lane.after_rally_s and now - lane.rally_ms >= lane.after_rally_s * 1000 then
                     end_lane(lane, 'after_rally')
@@ -1239,7 +1326,7 @@ function M.main(bm, config, globals)
                     end_lane(lane, 'after_rout')
                 elseif lane.after2_s and lane.contact2 and now - lane.contact2 >= lane.after2_s * 1000 then
                     end_lane(lane, 'after_contact2')
-                elseif lane.contact and not lane.after2_s and now - lane.contact >= lane.fight_s * 1000 then
+                elseif c_ref and not lane.after2_s and now - c_ref >= lane.fight_s * 1000 then
                     end_lane(lane, 'fight_s')
                 elseif now - lane.t0 >= lane.max_s * 1000 then
                     end_lane(lane, 'max_s')
@@ -1408,9 +1495,17 @@ function M.main(bm, config, globals)
             end
             -- (lane.t2_run, the own plan: at a run)
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, lane.t2_run ~= true) end
-            if lane.t2 and lane.t2_mode == 'attack_extra' and lane.extras and lane.extras[1] then
-                -- (the intercept plan) the second target attacks the first extra at a run
-                attack(lane, lane.t2, state.units[lane.extras[1].name], lane.t2_walk == true)
+            if lane.t2 and lane.t2_mode == 'attack_extra' and lane.extras and lane.extras[lane.t2_extra or 1] then
+                -- (the intercept plan) the second target attacks the first extra at a run (lane.t2_extra: the extra
+                -- of that index - the pick2 plan's second anvil)
+                attack(lane, lane.t2, state.units[lane.extras[lane.t2_extra or 1].name], lane.t2_walk == true)
+            end
+            if lane.seek then
+                -- (lane.seek, the pick2 plan) each unit's target in force: the target and the second target their
+                -- anvils (extras 1, 2), the anvils their enemies, the attacker none until its go
+                local e1, e2 = lane.extras[1].name, lane.extras[2].name
+                lane.aim = {[lane.t.name] = e1, [lane.t2.name] = e2, [e1] = lane.t.name, [e2] = lane.t2.name}
+                lane.was_out, lane.idle = {}, {}
             end
             for _, e in ipairs(lane.extras or {}) do
                 -- (the busycharge plan's anvil) the extra attacks the target at a walk
@@ -1666,6 +1761,7 @@ function M.main(bm, config, globals)
         local keep_morale = {}
         for _, l in ipairs(config.lanes) do
             if l.t_morale then keep_morale[l.target] = true end
+            if l.t2_morale and l.target2 then keep_morale[l.target2] = true end
             if l.morale_both then keep_morale[l.target], keep_morale[l.attacker] = true, true end
             if l.a_morale then keep_morale[l.attacker] = true end
             for _, e in ipairs(l.extras or {}) do
@@ -1736,7 +1832,12 @@ function M.main(bm, config, globals)
                 assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))
             end
             assert(l.a_go_melee_of == nil or l.a_go_melee_of == 't' or (l.a_go_melee_of == 'e1' and l.extras
-                and l.extras[1]), 'a_go_melee_of is t, or e1 with an extra: ' .. tostring(l.a_go_melee_of))
+                and l.extras[1]) or (l.a_go_melee_of == 'e12' and l.extras and l.extras[2]),
+                'a_go_melee_of is t, e1 with an extra or e12 with two: ' .. tostring(l.a_go_melee_of))
+            assert(l.t2_extra == nil or (l.t2_mode == 'attack_extra' and l.extras and l.extras[l.t2_extra]),
+                't2_extra needs t2_mode attack_extra and that extra')
+            assert(not l.seek or (l.target2 and l.extras and l.extras[1] and l.extras[2]),
+                'seek needs target2 and two extras')
             for _, f in ipairs(l.rally_friends or {}) do
                 assert(state.units[f.name], 'scenario unit missing: ' .. tostring(f.name))
             end

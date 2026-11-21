@@ -111,6 +111,12 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             (tmp/night_probes/standk/men.py)
   duel2     attack on attack (DUEL2_* below; 16.11 night): the 12 blind pairs of the level, both units attack at a run
             from 60 m, else as duel - 4 battles; --duel2 game [runs] [--sim] | layout (beside the level's predictions)
+  pick2     which of two fights to join (PK_* below; 21.11 night): two turn fights 180 m apart, the free unit between
+            joins one 8 s after the later contact - doomed / even / won pairs, the winners seek the nearest standing enemy
+            - 16 battles of 4 lanes; --pick2 game [runs] [--sim] | layout [--copies 16]
+            Known limits (tmp/astra/pick2_review 6, 10, 11): seek's edge cases at a rally before B's go and at an exact
+            distance tie (Lua the joined enemy, the twin the other); tactic_read's twin has no men count for a depleted
+            first document; pair keys are the run folder's name and the battle (two archives of one name collide).
 
 All the units are fearless (but the t_morale targets); every lane's rows carry the morale fields with the active phases (fx)
 and the unit card's values (cs: leadership, speed, melee attack / defence, weapon and missile damage).
@@ -1131,6 +1137,73 @@ def turn_battles(n=TURN_BATTLES, e=None):
     return out
 
 
+# Plan 'pick2' (21.11 night; tmp/drill2/design_merged.md 'The spare candidate': one free unit, two fights at once - which
+# one to join?). A lane holds two of turn's fights side by side, PK_DX m either side of the lane's x (centres): in each a
+# Skaven unit attacks our anvil (TURN_A spearmen_0, an extra, never ordered by the plan) at a run from TG_GAP m front to
+# front at the go, both fronts on one line; our free unit B (TURN_B swordsmen) stands on the anvils' line at the lane's
+# x, PK_DX m from each anvil (turn's TURN_DX: the same geometry as turn's B), facing the enemy's side. B attacks the
+# fight it joins at a run TG_PIN_S after the later of the two anvils' first melee flags (a_go_melee_of 'e12'). The lane's
+# target is the enemy of the joined fight, its second target (target2, t2_morale) the other one; extra 1 the joined
+# fight's anvil, extra 2 the other's. Fight kinds by the enemy (PK_E): D 'doomed' stormvermin_1 (turn's s), E 'even'
+# clanrats_1 (turn's m), W 'won' skavenslave_spearmen_0 (PK_W_WHY). Every unit keeps its morale. After a fight ends
+# (lane.seek, entries/charge_probe.lua; the twin the same): a unit that stands with no live target - its target routing,
+# shattered or dead, just rallied, or halted for want of one - attacks at a run the nearest standing enemy of its lane,
+# both sides alike; none standing - it halts (no chase). A lane ends TURN_S after its contact, or 'quiet' (a side - all
+# three of ours or both of theirs - out, no melee flag for TURN_QUIET_S), or TURN_MAX_S. Kinds '<pair>_<joined>': ED_E,
+# ED_D, EW_E, EW_W - 4 lanes a battle on PK_PLACES (a lane 210 m wide, 380 m apart: the fights of two lanes 200 m apart
+# centre to centre, of one lane 180 m), rotated by (i - 1) // 2; E's fight on +x in odd battles, on -x in even ones (the
+# mirror: each kind and mirror on every place twice in 16 battles). (D, W) does not fit: a fifth lane would put two lanes' fights 125 m apart. 22 units (our lord + 12, the
+# Warlord + 8), ~2,700 men: the 100 ms step. No memory rows.
+PK_DX = TURN_DX
+PK_E = {"D": "wh2_main_skv_inf_stormvermin_1", "E": "wh2_main_skv_inf_clanrats_1",
+        "W": "wh2_main_skv_inf_skavenslave_spearmen_0"}
+PK_W_WHY = ("game/probe/evidence/duel_game.json sspear>spear0 (skavenslave_spearmen_0 attacks a standing spearmen_0 at a "
+            "run, morale on, 3 lanes): the spearmen lose 0.15 / 0.27 of their health by 120 / 240 s against 0.28 / 0.55, "
+            "the slaves rout at 259 s and the spearmen never do - the widest margin of the spearmen's eight duels as the "
+            "target (skavenslaves_0: 0.20 / 0.36 against 0.30 / 0.59; every other Skaven unit beats them)")
+PK_KINDS = ("ED_E", "ED_D", "EW_E", "EW_W")
+PK_PAIRS = (("ED_E", "ED_D"), ("EW_E", "EW_W"))
+PK_PLACES = tuple((float(x), -100.0) for x in (-570, -190, 190, 570))
+PK_BATTLES = 16
+PK_WINDOWS = (120, 240)
+PK_WHO_AT = (30, 60, 120)
+PK_FIGHT_M = 60.0          # B 'fights' a fight's enemy: B in melee and that enemy the nearer of the two within this (centres)
+
+
+def pick2_battles(n=PK_BATTLES):
+    """The pick2 plan's battles (comment above PK_*): 4 lanes and the lords' lane a battle."""
+    W = cp.WIDTH_M
+    ad, bd = cp.depth(*cp.UNITS[TURN_A][:2], W), cp.depth(*cp.UNITS[TURN_B][:2], W)
+    dep = {k: cp.depth(*cp.UNITS[key][:2], W) for k, key in PK_E.items()}
+    (gx, gz), (wx, wz) = TURN_LORDS
+    lords = cp.lane("general", "warlord", "hold", "hold", gap_m=round(abs(wx - gx)), fight_s=TURN_MAX_S,
+                    max_s=TURN_MAX_S, answer=False, kind="clock", a_at={"x": gx, "z": gz, "b": 0.0},
+                    t_at={"x": wx, "z": wz, "b": 0.0}, place=(wx, wz))
+    out = []
+    for i in range(1, n + 1):
+        m = 1 if i % 2 else -1                           # the side E's fight stands on (+x odd battles)
+        lanes = []
+        for kind, (x0, z0) in zip(cp.rotate(list(PK_KINDS), (i - 1) // 2), PK_PLACES):
+            pair, join = kind.split("_")
+            other = pair.replace(join, "", 1)
+            sj = m if join == "E" else -m                # the joined fight's side of B
+            tj, to = dep[join], dep[other]
+            anvil = dict(short=TURN_A, b=180.0, width=W, morale=True)
+            ex = [dict(anvil, dx=0.0, dz=round(tj / 2 + TG_GAP + ad / 2, 1)),
+                  dict(anvil, dx=round(-2 * sj * PK_DX, 1), dz=round(tj / 2 + TG_GAP + ad / 2, 1))]
+            lanes.append(cp.lane(TURN_B, PK_E[join], "attack_run", "hold", gap_m=round(TG_GAP + (ad - bd) / 2, 1),
+                                 a_dx=round(-sj * PK_DX, 1), extras=ex, t_attack_extra="run",
+                                 target2=PK_E[other], t2_place=(round(-2 * sj * PK_DX, 1), round((tj - to) / 2, 1)),
+                                 t2_width=W, t2_mode="attack_extra", t2_extra=2, t2_morale=True, a_go_melee_s=TG_PIN_S,
+                                 a_go_melee_of="e12", seek=True, fight_s=TURN_S, max_s=TURN_MAX_S, answer=False,
+                                 kind=kind, pair=pair, join=join, other=other, mirror=m, keep_t=PK_E["E"],
+                                 t_morale=True, at_rout="none",
+                                 after_rout_s=10 ** 4, a_morale=True, quiet_end_s=TURN_QUIET_S, morale_rows=True,
+                                 place=(round(x0 + sj * PK_DX, 1), z0), lane_x=x0))
+        out.append(lanes + [dict(lords)])
+    return out
+
+
 # Plan 'duel' (16.11 night; the turn probe's stormvermin_1 lanes: the twin's anvil lost 0.61-0.75 of its health where the
 # game's lost 0.36-0.38): which unit cards are off, pair by pair. The stage-0 melee infantry (net/config/stage0.json
 # roster: DUEL_EMP x DUEL_SKV), every cross-faction pair in both roles: X attacks at a run a standing Y never ordered
@@ -1451,6 +1524,8 @@ def battles(plan):
         return behind3_battles()
     if plan == "turn":
         return turn_battles()
+    if plan == "pick2":
+        return pick2_battles()
     if plan == "duel":
         return duel_battles()
     if plan == "roster":
@@ -4013,6 +4088,291 @@ def turn_report(runs=(), source="game", sim=False, copies=8, device="cpu", out=N
     return result
 
 
+# ---------------------------------------------------------------- the pick2 probe (PK_*: which of two fights to join)
+
+PK_ROLES = ("B", "AJ", "AO", "EJ", "EO")          # the free unit, the joined fight's anvil / enemy, the other fight's
+
+
+def _pick2_rows(lane):
+    """(t, {role: {key: array}}, {role: [ct]}) of a pick2 lane: B the attacker, EJ the target, EO the second target, AJ /
+    AO the extras 1 / 2; sh shattered (the game's sh, the twin's s); ct the engine's target (the game's rows only)."""
+    t = _t(lane)
+    s = lane["samples"]
+    ex = {round(tt, 3): r or [] for tt, r in lane.get("extras") or []}
+    t2 = {round(tt, 3): r for tt, r in lane.get("t2") or []}
+    rows = {"B": [x[1] for x in s], "EJ": [x[2] for x in s], "EO": [t2.get(round(tt, 3)) for tt in t],
+            "AJ": [(list(ex.get(round(tt, 3)) or []) + [None, None])[0] for tt in t],
+            "AO": [(list(ex.get(round(tt, 3)) or []) + [None, None])[1] for tt in t]}
+    out, ct = {}, {}
+    for role, rs in rows.items():
+        d = {k: np.array([np.nan if (r or {}).get(k) is None else float(r[k]) for r in rs])
+             for k in ("hp", "m", "r", "men", "x", "z")}
+        d["sh"] = np.array([np.nan if not r else float(bool(r.get("sh") or r.get("s"))) for r in rs])
+        out[role] = d
+        ct[role] = [(r or {}).get("ct") for r in rs]
+    return t, out, ct
+
+
+def pick2_measure(lane):
+    """The pick2 plan's lane (comment above PK_*): f the later of the two anvils' first melee flags (the lane's clock, the
+    same in both arms), o B's order ('a_go'); the lane's end by the entry's rule on the rows (f + TURN_S, max_s, or
+    TURN_QUIET_S consecutive seconds with a whole side out and no melee flag; the game's lanes: their own end event);
+    over [o, o + w] (w of PK_WINDOWS, past the end: the end) and [o, end]: each unit's health lost as a share of its
+    start (a unit confirmed dead - men 0 - has lost all from then, whatever its HP reading; a living router keeps its
+    reading), en = both enemies' lost over their start, own = our three's, trade = en - own; each unit's first rout,
+    routs, rallies, shattered (s from o; a dead unit counts as shattered from its death); who B fights at o + 30 / 60 /
+    120 s ('J' / 'O' the joined / other fight's enemy: B in melee and that enemy the nearer within PK_FIGHT_M; '-' not
+    in melee, 'out' B out; the game's engine target too: b_ct); b_no_melee - B never in melee from o to the end; the
+    seeks to the end; short - the log ends before min(o + 240 s, the end) or an HP stream of a living unit ends before
+    the end (its losses frozen there)."""
+    sp = lane["spec"]
+    t, R, CT = _pick2_rows(lane)
+    out = {"kind": sp["kind"], "pair": sp.get("pair"), "join": sp.get("join"), "other": sp.get("other"),
+           "mirror": sp.get("mirror"), "run": lane.get("run")}
+    for r in PK_ROLES:
+        # (a confirmed death: men 0 from then on - its health is 0, it is out for good, no rally)
+        d = R[r]
+        dead = np.maximum.accumulate(np.nan_to_num(d["men"], nan=1.0) <= 0)
+        d["dead"] = dead
+        d["hp"] = np.where(dead, 0.0, d["hp"])
+        d["sh"] = np.where(dead, 1.0, d["sh"])
+        d["r"] = np.where(dead, 1.0, d["r"])
+    fa = [_first(t, np.nan_to_num(R[r]["m"]) > 0) for r in ("AJ", "AO")]
+    if any(v is None for v in fa):
+        return out
+    out["fJ"], out["fO"] = fa
+    f = max(fa)
+    o = next((p["t"] / 1000 for p in lane.get("phases", []) if p["phase"] == "a_go"), None)
+    if o is None:
+        return out
+    out["order_s"] = o - f
+
+    def out_at(r):
+        d = R[r]
+        return (np.nan_to_num(d["r"]) > 0) | (np.nan_to_num(d["sh"]) > 0) | d["dead"]
+    any_m = np.zeros(len(t), bool)
+    for r in PK_ROLES:
+        any_m |= np.nan_to_num(R[r]["m"]) > 0
+    side_out = (out_at("B") & out_at("AJ") & out_at("AO")) | (out_at("EJ") & out_at("EO"))
+    rule = min(f + TURN_S, float(sp.get("max_s") or 1e9))
+    q0 = None
+    for k in range(int(np.searchsorted(t, f - 1e-6)), len(t)):
+        if t[k] > rule:
+            break
+        if side_out[k] and not any_m[k]:
+            q0 = float(t[k]) if q0 is None else q0
+            if t[k] - q0 >= TURN_QUIET_S - 1e-6:
+                rule = float(t[k])
+                break
+        else:
+            q0 = None
+    ev_end = (lane.get("end") or {}).get("t")
+    end = min(rule, float(t[-1])) if ev_end is None else min(ev_end / 1000, float(t[-1]))
+    out["end_s"] = end - o
+    out["end_why"] = (lane.get("end") or {}).get("why")
+    cut = ev_end is None and float(t[-1]) < min(o + PK_WINDOWS[-1], rule) - 1.0
+    h0, lost = {}, {}
+    early = False
+    for r in PK_ROLES:
+        hp = R[r]["hp"]
+        ok = np.isfinite(hp)
+        if ok.sum() < 2:
+            early = True
+            continue
+        h0[r] = float(hp[ok][0])
+        if float(t[ok][-1]) < end - 1.0:
+            early = True
+        hp_o = cp.at(t[ok], hp[ok], o)
+        for w in PK_WINDOWS + ("end",):
+            tt = end if w == "end" else min(o + w, end)
+            k = ok & (t <= tt + 1e-6)
+            v = float(hp[k][-1]) if k.any() else np.nan
+            lost[(r, w)] = hp_o - v if np.isfinite(v) and np.isfinite(hp_o) else None
+            out[f"{r}_{w}"] = None if lost[(r, w)] is None else lost[(r, w)] / h0[r]
+        upto = t <= end + 1e-6
+        rt, n_r, n_ral, sh_t = _episodes(t[upto], R[r]["r"][upto], R[r]["sh"][upto])
+        out[f"{r}_rout_s"] = None if rt is None else rt - o
+        out[f"{r}_routs"], out[f"{r}_rallies"] = n_r, n_ral
+        out[f"{r}_shatter_s"] = None if sh_t is None else sh_t - o
+    for w in PK_WINDOWS + ("end",):
+        if len(h0) < len(PK_ROLES) or any(lost.get((r, w)) is None for r in PK_ROLES):
+            continue
+        en = (lost[("EJ", w)] + lost[("EO", w)]) / (h0["EJ"] + h0["EO"])
+        own = sum(lost[(r, w)] for r in ("B", "AJ", "AO")) / sum(h0[r] for r in ("B", "AJ", "AO"))
+        out[f"en_{w}"], out[f"own_{w}"], out[f"trade_{w}"] = en, own, en - own
+    out["short"] = bool(cut or early)
+    out["b_no_melee"] = not bool((np.nan_to_num(R["B"]["m"]) > 0)[(t >= o - 1e-6) & (t <= end + 1e-6)].any())
+    names = {sp.get("target"): "J", sp.get("target2"): "O"}
+    for w in PK_WHO_AT:
+        k = int(np.searchsorted(t, o + w - 1e-6))
+        if k >= len(t) or t[k] > end + 1e-6:
+            out[f"b_{w}"] = "end"
+            continue
+        if out_at("B")[k]:
+            out[f"b_{w}"] = "out"
+        elif np.nan_to_num(R["B"]["m"][k]) > 0:
+            d = {r: math.hypot(R["B"]["x"][k] - R[r]["x"][k], R["B"]["z"][k] - R[r]["z"][k]) for r in ("EJ", "EO")}
+            r = min(d, key=lambda q: d[q] if np.isfinite(d[q]) else np.inf)
+            out[f"b_{w}"] = r[1] if np.isfinite(d[r]) and d[r] <= PK_FIGHT_M else "?"
+        else:
+            out[f"b_{w}"] = "-"
+        if CT["B"][k] is not None:
+            out[f"b_ct_{w}"] = names.get(CT["B"][k], CT["B"][k] or "-")
+    seeks = [p for p in lane.get("phases", []) if p["phase"] == "seek" and p["t"] / 1000 <= end + 1e-6]
+    out["seeks"] = len(seeks)
+    out["seek_halts"] = sum(1 for p in seeks if not p.get("tg"))
+    return out
+
+
+def pick2_lanes(source, runs=(), copies=16, device="cpu", params=None):
+    """The pick2 lanes measured: 'game' (the runs), 'twin' (the simulator on the runs' recorded starts) or 'layout' (the
+    simulator on the plan's own places: battles 1-2 - every kind in both mirrors -, `copies` each). A row's pair key: the
+    game's (run, battle) - a battle holds every kind once -, the twin's (mirror, copy)."""
+    if source == "game":
+        rows = []
+        for d in runs:
+            for ln in cp.load_run(d):
+                if ln.get("plan") != "pick2" or ln["spec"]["kind"] == "clock":
+                    continue
+                r = pick2_measure(ln)
+                r.update(plan="pick2", battle=ln.get("battle"), lane=ln["spec"]["name"], run=Path(d).name,
+                         pair_key=f"{Path(d).name}/{ln.get('battle')}")
+                rows.append(r)
+        return rows
+    if source == "twin":
+        lanes = [ln for d in runs for ln in cp.load_run(d) if ln.get("plan") == "pick2" and ln["spec"]["kind"] != "clock"]
+    else:
+        lanes = []
+        for i in (1, 2):
+            config, _, _ = cp.run_config("pick2", i)
+            for l in config["lanes"]:
+                if l["kind"] == "clock":
+                    continue
+                # the game's teleport puts a unit's FRONT at the point the entry passes (its centre in M.layout; the
+                # technical battles 20261121-031915 / 032201: the anvils' and the enemies' centres half a depth beyond
+                # it, 212-214 m front to front at the go): the twin starts the same
+                W = cp.WIDTH_M
+                dep = lambda key: cp.depth(key, cp.UNITS[key][1], W)
+                tz = l["z"] - l["t_depth"] / 2
+                a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] + l["gap_m"] + l["a_depth"], "b": 180.0,
+                     "men": cp.UNITS[cp.SHORT[l["a_key"]]][1]}
+                tg = {"x": l["x"], "z": tz - l["t_depth"] / 2, "b": 0.0, "men": cp.UNITS[cp.SHORT[l["t_key"]]][1]}
+                t2k = cp.UNITS[PK_E[l["other"]]][0]
+                t2 = {"x": l["x"] + l["t2_dx"], "z": tz + l["t2_dz"] - dep(t2k) / 2, "b": 0.0, "men": cp.UNITS[t2k][1]}
+                ek = cp.UNITS[TURN_A][0]
+                ex = [{"x": l["x"] + e["dx"], "z": tz + e["dz"] + dep(ek) / 2, "b": 180.0, "men": cp.UNITS[ek][1]}
+                      for e in l["extras"]]
+                lanes.append({"run": "layout", "plan": "pick2", "battle": i, "spec": l, "samples": [(0.0, a, tg, None)],
+                              "extras": [(0.0, ex)], "t2": [(0.0, t2)],
+                              "men": [], "contacts": {}, "end": {"t": l["max_s"] * 1000}, "abilities": [], "phases": []})
+    rows = []
+    sims = cp.sim_lanes(lanes, params=params, device=device, copies=copies, seed=0)
+    for k, (ln, s) in enumerate(zip([ln for ln in lanes for _ in range(copies)], sims)):
+        r = pick2_measure(dict(s, run="sim"))
+        key = f"{ln.get('run')}/{ln.get('battle')}" if source == "twin" else f"{ln['spec'].get('mirror')}"
+        r.update(plan="pick2", battle=ln.get("battle"), lane=ln["spec"]["name"], run="sim",
+                 pair_key=f"{key}/{k % copies}")
+        rows.append(r)
+    return rows
+
+
+PK_NUMS = tuple(f"{f}_{w}" for w in PK_WINDOWS + ("end",) for f in ("trade", "en", "own")) + tuple(
+    f"{r}_{w}" for w in PK_WINDOWS + ("end",) for r in PK_ROLES) + tuple(
+    f"{r}_{k}" for r in PK_ROLES for k in ("rout_s", "routs", "rallies", "shatter_s")) + (
+    "order_s", "fJ", "fO", "end_s", "seeks", "seek_halts")
+
+
+def _pk_paired(rows, a, b, key, mirror=None, full=False):
+    """The paired difference a - b of `key` by pair key: [mean, SE, n, mean - 2SE, mean + 2SE]; full: pairs without a
+    short row."""
+    va = {r["pair_key"]: r.get(key) for r in rows if r["kind"] == a and (mirror is None or r.get("mirror") == mirror)
+          and not (full and r.get("short"))}
+    vb = {r["pair_key"]: r.get(key) for r in rows if r["kind"] == b and (mirror is None or r.get("mirror") == mirror)
+          and not (full and r.get("short"))}
+    d = [va[k] - vb[k] for k in va if k in vb and va[k] is not None and vb[k] is not None]
+    if len(d) < 2:
+        return None
+    m, se = float(np.mean(d)), float(np.std(d, ddof=1) / math.sqrt(len(d)))
+    return [m, se, len(d), m - 2 * se, m + 2 * se]
+
+
+def pick2_summary(rows):
+    """{'kinds': {kind: {field: [mean, se, n] | {text: count}}}, 'pairs': {a-b: {window: {pooled | mirror +1 | -1: [mean,
+    se, n, lo, hi]}}}}."""
+    kinds = {}
+    for kind in PK_KINDS:
+        rs = [r for r in rows if r["kind"] == kind]
+        if not rs:
+            continue
+        row = {"n": len(rs), "short_n": int(sum(bool(r.get("short")) for r in rs)),
+               "b_no_melee_n": int(sum(bool(r.get("b_no_melee")) for r in rs)),
+               "no_trade_n": int(sum(r.get("trade_240") is None for r in rs))}
+        for f in PK_NUMS:
+            v = [r.get(f) for r in rs if isinstance(r.get(f), (int, float))]
+            if v:
+                row[f] = _ms(v)
+        for r_ in PK_ROLES:
+            row[f"{r_}_routed"] = _ms([float((r.get(f"{r_}_routs") or 0) > 0) for r in rs])
+        for f in [f"b_{w}" for w in PK_WHO_AT] + [f"b_ct_{w}" for w in PK_WHO_AT] + ["end_why"]:
+            v = [str(r.get(f)) for r in rs if f in r]
+            if v:
+                row[f] = {x: v.count(x) for x in sorted(set(v))}
+        kinds[kind] = row
+    pairs = {}
+    for a, b in PK_PAIRS:
+        for sfx, full in (("", False), (" (no short)", True)):
+            pairs[f"{a}-{b}{sfx}"] = {w: {name: p for name, m in (("pooled", None), ("mirror +1", 1), ("mirror -1", -1))
+                                          if (p := _pk_paired(rows, a, b, f"trade_{w}", m, full))}
+                                      for w in PK_WINDOWS + ("end",)}
+    return {"kinds": kinds, "pairs": pairs}
+
+
+PK_LINE = 0.03     # the orchestrator's line (written before the game): mean - 2SE of the 240 s trade, pooled over mirrors
+
+
+def pick2_report(runs=(), source="game", sim=False, copies=16, device="cpu", out=None):
+    """Prints the pick2 table (by kind: trades, losses, routs, who B fights; the contrasts ED_E - ED_D and EW_E - EW_W
+    paired by battle - the twin's by mirror and copy - at 120 / 240 s and the end, pooled and by mirror; the game's line
+    PK_LINE on the pooled 240 s lower bound) and writes build/charge-probe/pick2_<source>.json (not in Git)."""
+    rows = pick2_lanes(source, runs, copies=copies, device=device)
+    result = {"plan": "pick2", "source": source, "runs": [str(r) for r in runs], "lanes": rows,
+              "summary": pick2_summary(rows)}
+    if sim and source == "game":
+        trows = pick2_lanes("twin", runs, copies=copies, device=device)
+        result["twin"] = {"lanes": trows, "summary": pick2_summary(trows)}
+    for name, summ in (("", result["summary"]), (" twin", (result.get("twin") or {}).get("summary"))):
+        if not summ:
+            continue
+        print(f"== pick2 ({source}{name}): mean±se(n) over lanes; trade = enemies' lost - ours lost (shares of the "
+              f"start health, all five units) over [B's order, +w]")
+        for kind, r in summ["kinds"].items():
+            cells = [f"{f} {_mf_cell(r[f])}" for f in ("trade_120", "trade_240", "trade_end", "en_240", "own_240",
+                                                     "B_240", "AJ_240", "AO_240", "EJ_240", "EO_240", "order_s",
+                                                     "end_s", "seeks") if f in r]
+            cells += [f"{r_}_rout_s {_mf_cell(r[f'{r_}_rout_s'])} ({r[f'{r_}_routed'][0]:.2f})" for r_ in PK_ROLES
+                      if f"{r_}_rout_s" in r]
+            cells += [f"{f} {r[f]}" for f in [f"b_{w}" for w in PK_WHO_AT] + [f"b_ct_{w}" for w in PK_WHO_AT]
+                      + ["end_why"] if f in r]
+            print(f"  {kind} (n {r['n']}): " + "; ".join(cells) + f"; short {r['short_n']}; no trade {r['no_trade_n']}; "
+                  f"B never in melee {r['b_no_melee_n']}")
+        for k, by_w in summ["pairs"].items():
+            for w, cells in by_w.items():
+                print(f"  {k} trade_{w}: " + "; ".join(f"{name} {m:+.3f} SE {se:.3f} n {n} [-2SE {lo:+.3f}]"
+                                                       for name, (m, se, n, lo, hi) in cells.items()))
+        if not name:
+            p1 = (summ["pairs"].get("ED_E-ED_D") or {}).get(240, {}).get("pooled")
+            p2 = (summ["pairs"].get("EW_E-EW_W") or {}).get(240, {}).get("pooled")
+            if source == "game":
+                print(f"  LINE (game, 240 s pooled, mean - 2SE >= {PK_LINE}): candidate worth a drill - "
+                      f"{'YES' if p1 and p1[3] >= PK_LINE else 'NO' if p1 else 'n/a'}; 'won' a class of its own - "
+                      f"{'YES' if p2 and p2[3] >= PK_LINE else 'NO' if p2 else 'n/a'}")
+    out = Path(out) if out else cp.ROOT / f"pick2_{source}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
 # ---------------------------------------------------------------- the duel probe (DUEL_*: one on one, morale on)
 
 def _duel_rows(lane):
@@ -4959,13 +5319,13 @@ def main(argv=None):
                         help="the side2r plan's table (T0-2's kill check): 'game' the runs (+ the twin with --sim), "
                              "'layout' the twin on the plan's own places, 2 x --copies a lane and width")
     for plan in ("counterfar", "intercept", "tight", "walkout", "standk", "fill", "tight01", "standk01",
-                 "behind", "own", "behind2", "behind3", "turn", "duel", "duel2"):
+                 "behind", "own", "behind2", "behind3", "turn", "duel", "duel2", "pick2"):
         parser.add_argument(f"--{plan}", choices=("game", "layout"),
                             help=f"the {plan} probe's table (meetfar, night probes): 'game' the runs (+ the twin on "
                                  "their starts with --sim), 'layout' the twin on the plan's own places (the predictions, no game run)")
     args = parser.parse_args(argv)
     if args.copies is None:
-        args.copies = 16 if args.side2r else 4
+        args.copies = 16 if args.side2r or args.pick2 else 4
     sys.stdout.reconfigure(encoding="utf-8")
     if args.duel2:
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "duel2"]
@@ -4974,6 +5334,10 @@ def main(argv=None):
     if args.duel:
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "duel"]
         duel_report(runs, source=args.duel, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
+        return 0
+    if args.pick2:
+        runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "pick2"]
+        pick2_report(runs, source=args.pick2, sim=args.sim, copies=args.copies, device=args.device, out=args.out)
         return 0
     if args.turn:
         runs = args.runs or [d for d in cp.runs() if _plan_of(d) == "turn"]
