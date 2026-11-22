@@ -20,6 +20,10 @@
 --            (apps.battle.label_overlay); the person deploys as in the game (deploy_zones), the phase ends on his
 --            'Start battle'. config.free_speed = true: the battle starts at config.speed and the human may change the
 --            speed and pause it (no speed guard).
+-- config.lockstep = {timeout_ms, first_timeout_ms, spin_ms, strikes, strict} (own_ai 'net'; bridge.build --lockstep;
+-- absent: as before): a decision tick waits for its own answer - M.lockstep; events ls_start, ls_hold, ls_off; result
+-- ls_holds, ls_timeouts, ls_off, ls_why, ls_held_ms, ls_ok (no failed hold, lock never off, a normal end: status
+-- completed or timeout - the model time limit; deadline - the wall clock -, stalled, incomplete are not).
 -- config.skirmish (own_ai 'net'; bridge.build sets 'off' by default): 'off' turns the game's skirmish mode off for every
 -- unit the bridge commands, as the simulator's network units have it off (apps.bridge.adapter); 'game' or absent: the
 -- game's own setting. Every row of a
@@ -73,6 +77,70 @@ local function round(v, k)
     return math.floor(v * m + 0.5) / m
 end
 
+-- Lock-step (config.lockstep): hold(active) is called right after a decision tick's state is written, inside the
+-- decision callback; a bounded busy loop there - the game's thread, and so the model, stands - reads the orders file
+-- (net.poll), then spins ls.spin_ms of real time (os.clock) before the next read, until the answer for that very move
+-- is applied (net.answered >= net.written). Outcomes (ls_hold.how): 'answered'; 'timeout' - ls.timeout_ms passed
+-- (ls.first_timeout_ms for the battle's first decision: the companion may still be loading); 'late' - the answer was
+-- applied but the read itself ended past the budget; 'tries' - more reads than the budget allows (a bound that does not
+-- trust the clock); 'clock' - one spin ran M.LS_SPIN_CAP iterations without the clock reaching spin_ms; 'inactive' -
+-- the battle ended. All but 'answered' and 'inactive' are failed holds: ls.strict (bridge.build's setting) voids the
+-- battle at the first - the error '[LS_VOID]' goes to the caller's guard as any bridge error does (event 'error', the
+-- launcher's lua_error, no result); not strict, ls.strikes failed holds in a row switch the lock off (ls_off) and the
+-- battle goes on free. An error inside net.poll is raised as '[LS_POLL]': the bridge marks a move answered before it
+-- gives the orders, so a half-given answer must not pass as answered, and it is never read again. A read that blocks
+-- inside the engine cannot be interrupted here: the launcher's own timeout ends that run. Returns hold and counts
+-- {holds, timeouts, held_ms, off, why}; counts.off is set at once (why 'clock') when os.clock is missing or never moves.
+M.LS_SPIN_CAP = 2000000
+
+function M.lockstep(net, ls, emit, model_ms, clock)
+    clock = clock or os.clock
+    local counts = {holds = 0, timeouts = 0, held_ms = 0, off = false, why = nil}
+    local row = 0
+    local function wall() return clock() * 1000 end
+    local function moves()
+        if type(clock) ~= 'function' then return false end
+        local ok, a = pcall(clock)
+        if not ok or type(a) ~= 'number' then return false end
+        for _ = 1, M.LS_SPIN_CAP do
+            if clock() ~= a then return true end
+        end
+        return false
+    end
+    if not moves() then counts.off, counts.why = true, 'clock' end
+    local function hold(active)
+        if counts.off then return end
+        local budget = counts.holds == 0 and (ls.first_timeout_ms or ls.timeout_ms) or ls.timeout_ms
+        local max_tries = math.ceil(budget / math.max(ls.spin_ms, 1)) * 4 + 10
+        local move, t0, m0, tries, how = net.written, wall(), model_ms(), 0, nil
+        while true do
+            tries = tries + 1
+            local ok, err = pcall(net.poll)
+            if not ok then error('[LS_POLL] move ' .. tostring(move) .. ': ' .. tostring(err), 0) end
+            local over = wall() - t0 >= budget
+            if (net.answered or 0) >= move then how = over and 'late' or 'answered' break end
+            if not active() then how = 'inactive' break end
+            if over then how = 'timeout' break end
+            if tries >= max_tries then how = 'tries' break end
+            local t1, n = wall(), 0
+            while wall() - t1 < ls.spin_ms and n < M.LS_SPIN_CAP do n = n + 1 end
+            if n >= M.LS_SPIN_CAP then how = 'clock' break end
+        end
+        local held = wall() - t0
+        counts.holds, counts.held_ms = counts.holds + 1, counts.held_ms + held
+        local failed = how ~= 'answered' and how ~= 'inactive'
+        if failed then counts.timeouts, row = counts.timeouts + 1, row + 1 else row = 0 end
+        emit('ls_hold', {move = move, how = how, held_ms = round(held, 1), tries = tries, dm = model_ms() - m0})
+        if failed and (how == 'clock' or ls.strict or row >= ls.strikes) then
+            counts.off = true
+            counts.why = how == 'clock' and 'clock' or (ls.strict and 'void' or 'strikes')
+            emit('ls_off', {move = move, timeouts = counts.timeouts, why = counts.why})
+            if ls.strict then error('[LS_VOID] move ' .. tostring(move) .. ': ' .. how, 0) end
+        end
+    end
+    return hold, counts
+end
+
 -- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('net' | 'human'),
 -- units = {own = [...], enemy = [...]} (script names, slots, keys), factions = {own, enemy}, enemy_role, map;
 -- 'net' also: decide_ms, poll_ms, skirmish, deploy ('strategist'), deploy_zones, deploy_wait_s, deploy_settle_ms;
@@ -105,6 +173,9 @@ function M.main(bm, config, globals)
         cleanup()
         state.finished = true
         pcall(emit, 'error', {message = tostring(err)})
+        -- the companion's terminal state (done = true; the reason is in the 'error' event): [LS_VOID], [LS_POLL] and any
+        -- other stop of the bridge end a companion run with --exit-on-done
+        if state.net then pcall(state.net.finish) end
         pcall(flush)
         pcall(function() bm:out('[TWW3 BAI] STOP: ' .. tostring(err)) end)
     end
@@ -214,6 +285,13 @@ function M.main(bm, config, globals)
         if state.net then
             state.net.finish()
             for k, v in pairs(state.net.stats()) do row[k] = v end
+            if state.lockstep then
+                local c = state.lockstep
+                row.ls_holds, row.ls_timeouts, row.ls_off, row.ls_why = c.holds, c.timeouts, c.off, c.why
+                row.ls_held_ms = round(c.held_ms, 0)
+                row.ls_ok = c.holds > 0 and c.timeouts == 0 and not c.off
+                    and (status == 'completed' or status == 'timeout')
+            end
         end
         emit('result', row)
         cleanup()
@@ -515,8 +593,22 @@ function M.main(bm, config, globals)
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         if state.net then
-            state.net.decide()
-            bm:repeat_callback(guarded(function() if state.active then state.net.decide() end end),
+            local hold = nil
+            if config.lockstep then
+                local ls = config.lockstep
+                hold, state.lockstep = M.lockstep(state.net, ls, emit, function() return bm:time_elapsed_ms() end)
+                emit('ls_start', {timeout_ms = ls.timeout_ms, first_timeout_ms = ls.first_timeout_ms,
+                    spin_ms = ls.spin_ms, strikes = ls.strikes, strict = ls.strict == true,
+                    clock = state.lockstep.why ~= 'clock'})
+                flush()
+                if state.lockstep.off and ls.strict then error('[LS_VOID] os.clock is missing or does not move', 0) end
+            end
+            local function decide()
+                state.net.decide()
+                if hold then hold(function() return state.active end) end
+            end
+            decide()
+            bm:repeat_callback(guarded(function() if state.active then decide() end end),
                 config.decide_ms, DECIDE)
             bm:repeat_callback(guarded(function() if state.active then state.net.poll() end end),
                 config.poll_ms, POLL)

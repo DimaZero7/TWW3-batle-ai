@@ -175,6 +175,102 @@ class Strategist:
         return plan_text(doc["batch"], rows, think_ms), record
 
 
+class LinePlace:
+    """The place switch (companion --strategist <a .json>; drill S0-1's crest8 check, tmp/drill_s1/design_merged.md
+    section 6 (b)): no strategist - my infantry on the line the file gives, by the simulator's rule (net/strategist/
+    crest.places: the stage's rows, row_m apart, left to right in slot order own_u1, own_u2, ...), the lord lord_back_m
+    behind their middle (net/stage0/battle._lord_place's rule), each at the simulator's default frontage (laid_out).
+    The file: {"line": {"x", "z", "b"}, "n": my infantry count (asserted), ...} in the map's world metres (the finder's,
+    = the battle file's after its shift). The plan and the record as Strategist.decide's; the check (deploy.errors: a
+    formation not wholly in my zone, two overlapping) counted in the record, the plan written anyway."""
+
+    def __init__(self, path, device="cpu", params=None):
+        import json
+        from pathlib import Path
+        from sim.params import load
+        self.path = str(path)
+        self.spec = json.loads(Path(path).read_text(encoding="utf-8"))
+        self.P = params or load()
+        self.device, self.task, self.who = device, "hold", f"line:{Path(path).name}"
+        self.plans = {}
+
+    def places_of(self, doc):
+        from net.strategist import crest as CR
+        laid = laid_out_doc(doc, self.P, self.device)
+        own = [u for u in laid["units"] if int(u["side"]) == 1]
+        lords = [u for u in own if u["n"].endswith("_lord")]
+        inf = sorted([u for u in own if not u["n"].endswith("_lord")], key=lambda u: _slot_no(u["n"]))
+        line = self.spec["line"]
+        n = int(self.spec.get("n", len(inf)))
+        assert n == len(inf), f"the line file is for {n} units, the battle has {len(inf)} of mine (no lord)"
+        pts = CR.places({"x": float(line["x"]), "z": float(line["z"]), "b": float(line["b"])}, n)
+        places = {u["n"]: (x, z, b, float(u["ow"])) for u, (x, z, b) in zip(inf, pts)}
+        # (the lord: crest.lord_place - lord_back_m behind the line, kept inside my zone's rear; the simulator's rule too)
+        lx, lz, lb = CR.lord_place(pts, float(line["b"]), doc["zones"]["own"])
+        for u in lords:
+            places[u["n"]] = (lx, lz, lb, float(u["ow"]))
+        # (refused, not logged: a unit's footprint on blocked ground - crest.layout_ok on the line file's map)
+        mp = self.spec.get("map")
+        if mp and not CR.layout_ok(CR.ground(mp), pts):
+            raise ValueError(f"{self.who}: a unit of the line stands on blocked ground of {mp} - the plan is refused")
+        return laid, places
+
+    def decide(self, doc):
+        from sim import geometry
+        t0 = time.perf_counter()
+        laid, places = self.places_of(doc)
+        st, own_st, index = state_with(laid, places, self.P, self.device)
+        names = [u["n"] for u in laid["units"]]
+        member = torch.full(own_st.shape, -1, dtype=torch.long, device=self.device)
+        for i, nm in enumerate(names):
+            if nm in places:
+                member[0, index[i]] = 0          # (one group; the lord too: out of the zone counts, as the formula's)
+        zone = SI.zone_of(doc["zones"]["own"], self.device)
+        spacing = self.P.sim["formation"]["spacing_m"]
+        errors = int(DP.errors(st, own_st, member, zone, spacing).sum())
+        if errors:                                       # (the line's geometry breaks the deployment's rules: refused)
+            raise ValueError(f"{self.who}: {errors} deployment errors (net/strategist/deploy.errors) - the plan is refused")
+        _, depth = geometry.dims(st.u, spacing)
+        sent = {}
+        for i, nm in enumerate(names):
+            if nm in places:
+                k = index[i]
+                x, z, b, _ = places[nm]
+                px, pz = teleport_point(x, z, b, depth[0, k], st.u["men0"][0, k])
+                sent[nm] = (float(px), float(pz))
+        think_ms = (time.perf_counter() - t0) * 1000
+        rows = [(nm, *sent[nm], p[2], p[3], p[0], p[1]) for nm, p in places.items()]
+        record = {"batch": doc["batch"], "who": self.who, "task": self.task, "think_ms": round(think_ms, 1),
+                  "errors": errors, "line": self.spec.get("line"), "site": self.spec.get("site"),
+                  "groups": [{"units": [nm for nm in places if not nm.endswith("_lord")],
+                              "cx": round(float(self.spec["line"]["x"]), 1), "cz": round(float(self.spec["line"]["z"]), 1),
+                              "heading": round(float(self.spec["line"]["b"]), 2), "line": True}],
+                  "verb": "hold", "pace": "any",
+                  "places": {nm: [round(p[0], 2), round(p[1], 2), round(p[2], 4), round(p[3], 2)] for nm, p in places.items()},
+                  "sent": {nm: [round(v, 2) for v in xz] for nm, xz in sent.items()},
+                  "own": sum(1 for u in doc["units"] if int(u["side"]) == 1),
+                  "enemy": sum(1 for u in doc["units"] if int(u["side"]) == 2)}
+        return plan_text(doc["batch"], rows, think_ms), record
+
+
+def _slot_no(name):
+    import re
+    m = re.search(r"(\d+)$", name)
+    return int(m.group(1)) if m else 10 ** 6
+
+
+def laid_out_doc(doc, params, device="cpu"):
+    return SI.laid_out(doc, params, device)
+
+
+def make(who="default", task="hold", device="cpu"):
+    """The deployment's answerer of companion --strategist: a .json - the place switch (LinePlace), else Strategist."""
+    if str(who).endswith(".json"):
+        from bridge.config import resolve as _path
+        return LinePlace(str(_path(who)), device)
+    return Strategist(who, task, device)
+
+
 def describe(record):
     gs = " | ".join(f"g{i} [{', '.join(n.removeprefix('own_') for n in g['units'])}] at ({g['cx']:.0f}, {g['cz']:.0f})"
                     f" facing {g['heading']:.0f}{' line' if g['line'] else ''}" for i, g in enumerate(record["groups"]))

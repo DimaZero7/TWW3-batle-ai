@@ -96,6 +96,14 @@ SCENARIO_LUA = b"load_script_libraries()\n"
 MOVE_SETTLE_MS = 2000
 # nn-arena --own-ai net: how often the companion's orders file is read (model ms).
 NET_POLL_MS = 100
+# nn-arena --own-ai net --lockstep (bridge/lua/entries/nn_arena.lua M.lockstep): a decision tick waits for its answer at
+# most LOCKSTEP_TIMEOUT_MS of real time (LOCKSTEP_FIRST_TIMEOUT_MS for the first: the companion may still load its
+# networks), reading the orders file every LOCKSTEP_SPIN_MS; strict: the first failed hold voids the battle (an
+# unattended series takes only battles with result ls_ok). The deadline: as if the battle ran at LOCKSTEP_PACE model s
+# a wall s (deadline_seconds: doubled + 60 s) - lock-step realised 5.0-8.9 on an 8-unit scene (tmp/farm/l, 22.11), a
+# battle far slower than 1 is not a lock-step battle worth keeping.
+LOCKSTEP_TIMEOUT_MS, LOCKSTEP_FIRST_TIMEOUT_MS, LOCKSTEP_SPIN_MS, LOCKSTEP_STRIKES = 5000, 30000, 2, 3
+LOCKSTEP_PACE = 1
 # nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
 TIMEOUT_MARGIN_S = 60
 # nn-arena --deploy strategist: real seconds the deployment waits for the companion's plan (then as before: no plan),
@@ -240,6 +248,26 @@ def strategist_zone(arena, path=STRATEGIST_CONFIG):
     return dict(arena, deploy_zone={"front": float(front), "depth": float(depth), "gap": float(cases["gap_m"])})
 
 
+def east_zone_maps(args):
+    """--map-zones east: a maps folder (build/<target>/maps) where the map's meta.json has the game's east.xml zones
+    ("game_deployment_zones", the land battle's of a map without its own: sim/maps/__init__.py GAME_DIRECTIONS) taken
+    from a captured map that has them (they are the same file for every map); a map that has them itself: sim/maps as
+    is. For a map captured without them (kho_wastes_01: only its capture's 200 x 120 m zones at z = -190), so its battle
+    file declares the zones the other maps' battles have - sim/maps (frozen) unchanged."""
+    from sim import maps as arena_map
+    m = arena_map.meta(args.map)
+    if m.get("game_deployment_zones"):
+        return arena_map.MAPS
+    src = next(n for n in sorted(p.name for p in arena_map.MAPS.iterdir() if (p / "meta.json").exists())
+               if "east.xml" in str(arena_map.meta(n).get("game_deployment_source") or ""))
+    folder = (Path(args.out) if args.out else project.BUILD / args.target) / "maps" / args.map
+    folder.mkdir(parents=True, exist_ok=True)
+    m = dict(m, game_deployment_zones=arena_map.meta(src)["game_deployment_zones"],
+             game_deployment_source=f"terrain.pack terrain\deployment\east.xml, as {src}'s (bridge.build --map-zones east)")
+    (folder / "meta.json").write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
+    return folder.parent
+
+
 def nn_arena_config(args, run_config):
     """nn-arena / human: writes the battle file next to the build (build/<target>/<arena>.xml, --out) and fills run_config
     (units, roles, the generated armies). Returns the battle file's path."""
@@ -280,7 +308,7 @@ def nn_arena_config(args, run_config):
         # a captured map (sim/maps/<name>): its battle file, catchment and deployment zones; the places are moved onto
         # the zones after the battle file is written
         from sim import maps as arena_map
-        arena = arena_map.on_map(arena, args.map)
+        arena = arena_map.on_map(arena, args.map, maps=east_zone_maps(args) if args.map_zones == "east" else arena_map.MAPS)
     # The battle file goes next to the build: bridge/scenarios/nn_arena.xml stays as it is in git.
     out = Path(args.out) if args.out else project.BUILD / args.target
     path = out / f"{arena['name']}{'_strategist' if args.deploy == 'strategist' else ''}.xml"
@@ -312,6 +340,9 @@ def nn_arena_config(args, run_config):
         # skirmish: the game's skirmish mode off for every unit the bridge commands by default - the simulator's network
         # units have it off (sim/state.py "sk"; contract/parity.md); 'game': as the game sets it
         run_config.update(decide_ms=args.decide_ms, poll_ms=NET_POLL_MS, skirmish=args.skirmish or "off")
+        if getattr(args, "lockstep", False):
+            run_config["lockstep"] = {"timeout_ms": LOCKSTEP_TIMEOUT_MS, "first_timeout_ms": LOCKSTEP_FIRST_TIMEOUT_MS,
+                                      "spin_ms": LOCKSTEP_SPIN_MS, "strikes": LOCKSTEP_STRIKES, "strict": True}
     if getattr(args, "park_lords", False):
         # both lords parked in two far corners for the whole battle (bridge/lua/entries/nn_arena.lua park_lords): the
         # square - a captured map's frame (sim/maps/<name>/meta.json), else the flat map's edge (sim/config/sim.json
@@ -387,6 +418,12 @@ def parser_of():
                         help="nn-arena: the game's skirmish mode (a unit steps back from approaching enemies by itself, "
                              "over its order) off for every unit the bridge commands (default: as the simulator's "
                              "network units, sim/state.py 'sk') or as the game sets it ('game')")
+    parser.add_argument("--lockstep", action="store_true",
+                        help="nn-arena --own-ai net: each decision tick waits (the model stands) until the companion's "
+                             "answer for that move is applied, at most " + str(LOCKSTEP_TIMEOUT_MS) + " ms of real time "
+                             "(the first " + str(LOCKSTEP_FIRST_TIMEOUT_MS) + "); a failed wait voids the battle (no "
+                             "result; bridge/lua/entries/nn_arena.lua M.lockstep); the default deadline as at "
+                             + str(LOCKSTEP_PACE) + " model s a wall s")
     parser.add_argument("--park-lords", action="store_true",
                         help="nn-arena --own-ai net: both lords taken out of the fight - teleported to two far corners "
                              "at the start and held there by the script (no orders from the game's AI or the companion; "
@@ -411,6 +448,9 @@ def parser_of():
     parser.add_argument("--map", default=None, metavar="NAME",
                         help="a captured map (sim/maps/NAME: meta.json): the battle on it, its deployment zones "
                              "(sim/maps/__init__.py)")
+    parser.add_argument("--map-zones", choices=("map", "east"), default="map",
+                        help="with --map: 'map' - the map's own zones as sim/maps gives them (default); 'east' - the "
+                             "game's east.xml zones (416 x 176 m) also on a map captured without them (kho_wastes_01)")
     parser.add_argument("--extra-mod", action="append", default=[], metavar="WORKSHOP_ID",
                         help="human: one more Workshop mod for this battle (pinned by its SHA-256 now; the launcher "
                              "copies it into data/ and removes it after) - the person's own mods, never the network's")
@@ -469,6 +509,8 @@ def check_args(parser, args):
         parser.error("--own-role is for nn-arena and human")
     if args.skirmish is not None and args.target != "nn-arena":
         parser.error("--skirmish is for nn-arena (the bridge's units)")
+    if getattr(args, "lockstep", False) and not (args.target == "nn-arena" and args.own_ai == "net"):
+        parser.error("--lockstep is for nn-arena --own-ai net (only the companion's answers are waited for)")
     if args.park_lords and not (args.target == "nn-arena" and args.own_ai == "net"):
         parser.error("--park-lords is for nn-arena --own-ai net (the planner of 'ai' would order the lord again)")
     for flag, ok in (("live_label", args.target == "human"), ("live_test", args.live_label),
@@ -550,7 +592,8 @@ def main(argv=None):
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
             if not args.scenario:
                 args.scenario = str(path)
-        run_config["deadline_s"] = args.deadline or deadline_seconds(model_s, args.speed)
+        pace = LOCKSTEP_PACE if getattr(args, "lockstep", False) else args.speed
+        run_config["deadline_s"] = args.deadline or deadline_seconds(model_s, pace)
         run_config["stall_ms"] = stall_ms
     dependencies = None
     if args.extra_mod:

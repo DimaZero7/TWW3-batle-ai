@@ -1,8 +1,8 @@
 # bridge — мост между сетью и игрой
 
 Мод на Lua внутри Total War: WARHAMMER III и помощник в Docker. Мост раз в секунду боя пишет в папку игры документ
-(каждый отряд обеих сторон), берёт ответ помощника и отдаёт приказы своим отрядам. Сеть видит в игре то же, что в
-симуляторе: договор и таблица сверки — [contract/](../contract/README.md). Полная документация — [docs/](docs/README.md).
+(каждый отряд обеих сторон), берёт ответ помощника (сборка `--lockstep`: модель ждёт его, до 5 с на ход, первый — до 30 с) и
+отдаёт приказы своим отрядам. Сеть видит в игре то же, что в симуляторе: договор и таблица сверки — [contract/](../contract/README.md). Полная документация — [docs/](docs/README.md).
 
 | часть | что |
 |---|---|
@@ -10,7 +10,7 @@
 | `lua/entries/*` | 6 входов: `nn_arena` (бой цепочки, человека, ИИ против ИИ), `charge/missile/morale_probe` (пробы механик), `map_capture` (снять карту), `move_probe` (путь) |
 | `build.py`, `pack/` | `python -m bridge.build <цель>`: Lua в один скрипт и `.pack` в `build/<цель>/` (цели `nn-arena human charge-probe missile-probe morale-probe map-capture move-probe`) |
 | `launcher/` | `launch.ps1`: ставит пак в `data/` игры, «Нормальная», графика (`BAI_GRAPHICS`), запуск, уборка; `watch.ps1` — бой с помощником |
-| `companion/` | помощник (образ `snake-ai-trainer`): `--chain` (оперативник → тактики → сеть отряда; с `--chain-tactic` чекпойнта `tactic_v2` — «только тактик», `tactic_chain.py`: сеть тактика, скрипт отряда, одна группа), `--strategist` (расстановка); сети — через `net.<уровень>.ckpt` |
+| `companion/` | помощник (образ `snake-ai-trainer`): `--chain` (оперативник → тактики → сеть отряда; с `--chain-tactic` чекпойнта `tactic_v2` — «только тактик», `tactic_chain.py`: сеть тактика, скрипт отряда, одна группа), `--strategist` (расстановка; файл `.json` — переключатель мест: пехота на линии файла, `deploy.LinePlace`); сети — через `net.<уровень>.ckpt` |
 | `config.py`, `config/` | папка игры (`local.json` вне git поверх `default.json`), обязательный мод True Sight, memreader, планы `move-probe` |
 | `scenarios/` | файлы боя: `nn_arena.xml` (арена `sim/arena.py`), `map_capture.xml`, `move_probe.xml`, `lord_swarm.xml` (основа проб) |
 

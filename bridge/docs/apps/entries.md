@@ -35,7 +35,9 @@ python -m bridge.build nn-arena --own-ai net --deploy strategist --army-from-run
 - `net` — **цепочка** в помощнике вне игры: каждые `--decide-ms` (1 с) состояние уходит помощнику, его приказы
   (оперативник → тактики → сеть отряда, ответ со строкой `mode chain`) возвращаются и отдаются нашим отрядам
   ([bridge](bridge.md), [смотреть бой сети](../launch/watch.md)); ИИ игры атакует (по умолчанию). События
-  `nn_orders`, `nn_miss`; `nn_sample` пишется как всегда. Мост выключает режим застрельщиков у наших отрядов
+  `nn_orders`, `nn_miss`; `nn_sample` пишется как всегда. С `--lockstep` (`lockstep = {timeout_ms, first_timeout_ms,
+  spin_ms, strikes, strict}`) решение ждёт ответа на свой ход (`M.lockstep`, события `ls_start`, `ls_hold`, `ls_off`,
+  в итоге `ls_ok`; [bridge](bridge.md#как-это-работает)). Мост выключает режим застрельщиков у наших отрядов
   (по умолчанию; `--skirmish game` — не трогать) ([bridge](bridge.md#режим-застрельщиков));
 - `ai` (`--own-ai ai`) — нашей стороной командует **ИИ игры** через планировщик CA `script_ai_planner` («атаковать
   армию врага», [planner_adapter](orders.md#planner_adapter)): приказ повторяется каждые 15 с (`M.AI_REISSUE_MS`),

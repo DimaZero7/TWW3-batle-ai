@@ -18,6 +18,7 @@ groups when it decided. A new battle (a new batch in the state) starts the chain
 """
 import argparse
 import json
+import os
 import signal
 import sys
 import time
@@ -41,17 +42,79 @@ def describe(orders, limit=4):
     return ", ".join(parts) + more
 
 
+READY = "tww3_bai_nn_ready.json"   # the companion's readiness mark in the game folder (watch.ps1 waits for it)
 BUSY_S = 5.0     # after a state, look for the next one every poll_s; later (loading, menus) every idle_poll_s
 
 
 class Seat:
     """The side the companion answers: its state and orders files, who decides (chain.Chain), its log."""
 
-    def __init__(self, state, orders, owner, log=None):
+    def __init__(self, state, orders, owner, log=None, before_game=False):
         self.state, self.orders, self.owner, self.log = Path(state), Path(orders), owner, log
         first = exchange.read_state(self.state)
-        self.last = (first["batch"], first["move"]) if first else None   # a file of an earlier run: not answered
+        key = (first["batch"], first["move"]) if first else None
+        # a state already there: a battle that ended (done) or is dead (not written within LIVE_S) - never answered, its
+        # 'done' is not this run's end; a live battle whose move is answered (a restart) - not answered again, its
+        # 'done' ends this run; a live unanswered move (a companion started after the game wrote it) - answered
+        self.dead = first["batch"] if key is not None and before_game else None   # never answered at all
+        if key is None:
+            self.last = self.stale = None
+        elif before_game or first.get("done") or not live(self.state):
+            self.last = self.stale = key
+        else:
+            self.last = key if answered(self.orders, key) else None
+            self.stale = None
         self.done = False
+        self.pending = None                     # (key, text): orders computed but not yet published
+
+
+LIVE_S = 30.0     # a state file older than this when the companion starts is a dead battle's (the game writes it a second)
+
+
+def live(path):
+    """Was the state file written within LIVE_S of now (file time against the clock: a dead battle left it)?"""
+    try:
+        return time.time() - os.stat(path).st_mtime <= LIVE_S
+    except OSError:
+        return False
+
+
+def log_row(log, row, out):
+    """One JSON row appended to the log; a failing log never stops the companion (said on the console)."""
+    if not log:
+        return
+    try:
+        with open(log, "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError as e:
+        out(f"log row not written ({e})")
+
+
+def publish(seat, key, text, out):
+    """The orders text for (batch, move) key published (exchange.write_atomic); on failure kept in seat.pending and tried
+    again by the loop with the same text - the network is not asked twice. Returns the write's attempts or None."""
+    try:
+        attempts = exchange.write_atomic(seat.orders, text)
+    except OSError as e:
+        if seat.pending is None or seat.pending[0] != key:
+            out(f"move {key[1]}: orders not published ({e}); the same text is tried again")
+            log_row(seat.log, {"event": "write_failed", "batch": key[0], "move": key[1], "error": str(e)}, out)
+        seat.pending = (key, text)
+        return None
+    if seat.pending is not None and seat.pending[0] == key:
+        out(f"move {key[1]}: orders published on a retry")
+        log_row(seat.log, {"event": "write_retried", "batch": key[0], "move": key[1]}, out)
+    seat.pending = None
+    return attempts
+
+
+def answered(orders, key):
+    """Is there an orders file answering (batch, move) key?"""
+    try:
+        doc = exchange.parse_orders(Path(orders).read_text(encoding="utf-8"))
+    except (OSError, ValueError, IndexError):
+        return False
+    return bool(doc) and (doc.get("batch"), doc.get("move")) == key
 
 
 class DeploySeat:
@@ -71,12 +134,20 @@ class DeploySeat:
             return False
         self.last = doc["batch"]
         text, record = self.strategist.decide(doc)
-        attempts = exchange.write_atomic(self.plan, text)
+        for i in range(PLAN_TRIES):          # the same plan text until it lands; then fail loudly (no silent no_plan)
+            try:
+                attempts = exchange.write_atomic(self.plan, text)
+                break
+            except OSError:
+                if i == PLAN_TRIES - 1:
+                    raise
+                time.sleep(0.2)
         out(self.deploy.describe(record))
-        if self.log:
-            with open(self.log, "a", encoding="utf-8", newline="\n") as f:
-                f.write(json.dumps(dict(record, event="deploy", write_attempts=attempts)) + "\n")
+        log_row(self.log, dict(record, event="deploy", write_attempts=attempts), out)
         return True
+
+
+PLAN_TRIES = 10    # x write_atomic's 50 tries: ~4 s for the deployment's plan before the companion stops with the error
 
 
 def answer(seat, doc, out=print):
@@ -84,8 +155,8 @@ def answer(seat, doc, out=print):
     Returns (orders, think ms, write attempts)."""
     seen = time.perf_counter()
     orders, think_ms, uses = seat.owner.decide(doc)
-    attempts = exchange.write_atomic(seat.orders, exchange.orders_text(
-        doc["batch"], doc["move"], orders, think_ms, uses, mode=getattr(seat.owner, "MODE", None)))
+    attempts = publish(seat, (doc["batch"], doc["move"]), exchange.orders_text(
+        doc["batch"], doc["move"], orders, think_ms, uses, mode=getattr(seat.owner, "MODE", None)), out)
     turn_ms = (time.perf_counter() - seen) * 1000
     out(f"move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
         f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}")
@@ -101,42 +172,50 @@ def answer(seat, doc, out=print):
             from bridge.companion import chain as companion_chain
             out(f"  operative: {companion_chain.describe(chain['operative'])}")
     if seat.log:
-        with open(seat.log, "a", encoding="utf-8", newline="\n") as f:
-            row = {"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
-                   "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
-                   "write_attempts": attempts, "orders": orders, "abilities": uses}
-            if chain is not None:
-                row["chain"] = chain                     # the levels' ms, groups, areas, inside
-            f.write(json.dumps(row) + "\n")
+        row = {"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
+               "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
+               "write_attempts": attempts, "orders": orders, "abilities": uses}
+        if chain is not None:
+            row["chain"] = chain                     # the levels' ms, groups, areas, inside
+        log_row(seat.log, row, out)
     return orders, think_ms, attempts
 
 
 def run(game, chain=None, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False, idle_exit_s=0, out=print,
-        strategist=None):
+        strategist=None, before_game=False):
     """The loop. Returns when the battle is done (exit_on_done) or nothing new came for idle_exit_s.
     chain: who answers our side's state (chain.Chain), None: nobody (only the deployment); strategist: who answers
     the deployment document (deploy.Strategist), None: nobody. No clock of its own: a paused battle writes no state,
     which is only a long wait (idle_exit_s 0: forever)."""
-    seat = Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, chain, log) if chain is not None else None
+    seat = Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, chain, log,
+                before_game) if chain is not None else None
     deploy = DeploySeat(game, strategist, log) if strategist is not None else None
     assert seat or deploy, "nobody to answer"
     last_new, busy_until = time.monotonic(), 0.0
     while True:
         new = False
+        if seat is not None and seat.pending is not None:
+            publish(seat, seat.pending[0], seat.pending[1], out)
         if deploy is not None and deploy.poll(out):
             new, last_new = True, time.monotonic()
             busy_until = last_new + BUSY_S
         doc = exchange.read_state(seat.state) if seat is not None else None
-        if doc is not None and (doc["batch"], doc["move"]) != seat.last:
-            new = True
-            seat.last, last_new = (doc["batch"], doc["move"]), time.monotonic()
-            busy_until = last_new + BUSY_S
-            if doc.get("done"):
+        if doc is not None and doc["batch"] == seat.dead:
+            doc = None                       # (a dead battle's state: not this run's)
+        key = (doc["batch"], doc["move"]) if doc is not None else None
+        if doc is not None and doc.get("done"):
+            # the battle's last state has the same (batch, move) as its last decision (bridge adapter finish): the end
+            # is read apart from the decisions' dedup
+            if not seat.done and key != seat.stale:
+                new, seat.done, seat.last, last_new = True, True, key, time.monotonic()
                 out(f"battle {doc['batch']} done after move {doc['move']}")
-                seat.done = True
-            else:
-                seat.done = False
-                answer(seat, doc, out)
+        elif doc is not None and key != seat.last:
+            new = True
+            seat.last, last_new = key, time.monotonic()
+            busy_until = last_new + BUSY_S
+            seat.done = False
+            seat.pending = None              # (a newer move: an older unpublished answer is dropped)
+            answer(seat, doc, out)
         if exit_on_done and seat is not None and seat.done:
             return
         if not new:
@@ -196,14 +275,17 @@ def load_chain(op="formula", tactic="formula", unit=None, greedy=False, plans=No
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--game", required=True, help="the game folder (where the state file appears)")
-    parser.add_argument("--threads", type=int, default=4, help="CPU threads for torch")
+    parser.add_argument("--threads", type=int, default=2,
+                        help="CPU threads for torch (2: in a 4-CPU container on a loaded host 4 threads made the tactic "
+                             "tick 400-750 ms instead of 70-190 with the same orders; the log's first row records it)")
     parser.add_argument("--log", help="append every decision as a JSON line to this file")
     parser.add_argument("--exit-on-done", action="store_true", help="stop when the battle's last state comes")
     parser.add_argument("--idle-exit", type=float, default=0, help="stop after this many seconds without a state")
     parser.add_argument("--strategist", nargs="?", const="default",
                         help="the deployment by the strategist (bridge.build nn-arena --deploy strategist): no value or "
                              "'default' - net/config/strategist.json default, 'formula' or a strategist checkpoint, "
-                             "greedy; answers the deployment document once a battle (bridge/companion/deploy.py)")
+                             "greedy; answers the deployment document once a battle (bridge/companion/deploy.py); "
+                             "a .json - the place switch: my infantry on the file's line (deploy.LinePlace)")
     parser.add_argument("--strategist-task", choices=("hold", "destroy"), default="hold",
                         help="the battle's task the strategist is given (no level above it yet)")
     parser.add_argument("--chain", action="store_true",
@@ -233,8 +315,8 @@ def main(argv=None):
     torch.set_num_threads(args.threads)
     strategist = None
     if args.strategist:
-        from bridge.companion.deploy import Strategist
-        strategist = Strategist(args.strategist, args.strategist_task)
+        from bridge.companion.deploy import make
+        strategist = make(args.strategist, args.strategist_task)     # (a .json: the place switch, deploy.LinePlace)
         print(f"companion: the strategist ({args.strategist}, task {args.strategist_task}) answers "
               f"{Path(args.game) / 'tww3_bai_nn_deploy.json'}")
     chain = None
@@ -245,9 +327,15 @@ def main(argv=None):
               f"{Path(args.game) / exchange.STATE}")
     if args.log:
         Path(args.log).parent.mkdir(parents=True, exist_ok=True)
-    try:
+        with open(args.log, "a", encoding="utf-8", newline="\n") as f:     # (readers take rows with 'move' / 'event')
+            f.write(json.dumps({"event": "companion_start", "threads": args.threads, "torch": torch.__version__,
+                                "chain": what if chain is not None else None, "strategist": args.strategist}) + "\n")
+    # the readiness mark (watch.ps1 starts the game only once it is there with its run's token): the networks are loaded
+    exchange.write_atomic(Path(args.game) / READY, json.dumps({"token": os.environ.get("BAI_READY_TOKEN", ""),
+                                                             "threads": args.threads, "pid": os.getpid()}))
+    try:   # (started by watch.ps1 before the game - the token: whatever state is there belongs to a dead battle)
         run(args.game, chain, args.log, exit_on_done=args.exit_on_done, idle_exit_s=args.idle_exit,
-            strategist=strategist)
+            strategist=strategist, before_game=bool(os.environ.get("BAI_READY_TOKEN")))
     except KeyboardInterrupt:
         pass
     return 0

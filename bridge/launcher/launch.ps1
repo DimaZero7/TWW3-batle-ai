@@ -50,6 +50,7 @@ $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'event_log.ps1')
 . (Join-Path $PSScriptRoot 'preferences.ps1')
 . (Join-Path $PSScriptRoot 'installed.ps1')
+. (Join-Path $PSScriptRoot 'lockstep.ps1')
 $marker = Join-Path $repo 'build\launcher-installed.json'
 
 # Settings: bridge/config/default.json overridden by bridge/config/local.json.
@@ -157,6 +158,8 @@ $reader = $null
 $clearLog = $false
 $status = 'setup_failed'
 $done = 0
+$resultLine = $null
+$void = ''
 $runLog = Join-Path $run 'events.jsonl'
 $copiedLines = [long]0
 try {
@@ -227,11 +230,17 @@ $status = 'timeout'
                 Write-Output $line
                 if ($event -in $failEvents -or $event -eq 'skipped') { $status = 'lua_error' }
                 if ($event -in $doneEvents) { $done++ }
+                if ($event -eq 'result' -and -not $resultLine) { $resultLine = $line }
             }
         }
         if ($status -eq 'lua_error') { break }
         if ($done -ge 1) { $status = 'completed'; break }
         Start-Sleep -Seconds 1
+    }
+    # a lock-step build (manifest config.lockstep): completed only with a normal end (result status completed or timeout) and ls_ok true
+    if ($status -eq 'completed' -and $manifest.config.lockstep) {
+        $void = Get-LockstepVoid $resultLine
+        if ($void) { $status = 'void_lockstep'; Write-Output ('Lock-step battle void: ' + $void) }
     }
     if ($status -eq 'completed' -and $LingerSeconds -gt 0) {
         Write-Output ("Battle over: the game closes in {0} s (or close it yourself)." -f $LingerSeconds)
@@ -246,6 +255,7 @@ $status = 'timeout'
     }
 } finally {
     $cleanup = @{status = $status; completed_events = $done; game_left_running = $false; private_files_removed = $false}
+    if ($void) { $cleanup.lockstep_void = $void }
     $current = if ($process) { Get-Process -Id $process.Id -ErrorAction SilentlyContinue } else { $null }
     $ours = $current -and $current.Path -eq $exe -and [Math]::Abs(($current.StartTime - $started).TotalSeconds) -lt 15
     if ($ours -and $KeepGameOpen) {

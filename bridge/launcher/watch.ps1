@@ -14,6 +14,11 @@
 #                                          the simulator's network units: build --skirmish; with -NoBuild the build's)
 #   ... -Graphics low                     (a graphics preset for the run, launch.ps1 -Graphics; default: BAI_GRAPHICS)
 #   ... -Container agent-deploy           (the companion container's name; default tww3-bai-companion)
+#   ... -Chain -StepLock                  (lock-step: the build with --lockstep; with -NoBuild the build must be a strict
+#                                          lock-step one - bridge/launcher/lockstep.ps1 Test-LockstepBuild - or the run
+#                                          is refused; a lock-step build without -StepLock is refused too. The game
+#                                          starts only once the companion wrote its readiness mark for this run)
+#   ... -PyThreads 2                      (the companion's torch threads, written to the run's companion.json)
 param(
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
     [int]$DecideMs = 1000,
@@ -28,7 +33,10 @@ param(
     [string]$ChainTactic = 'formula',
     [switch]$ChainGreedy,
     [string]$Container = 'tww3-bai-companion',
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    # (declared last and named so that every older call form binds as before: -L, -T, the positional container)
+    [switch]$StepLock,
+    [int]$PyThreads = 2
 )
 $ErrorActionPreference = 'Stop'
 $Target = 'nn-arena'
@@ -38,7 +46,10 @@ $python = @((Join-Path $repo '.venv\Scripts\python.exe'), (Join-Path $repo '..\T
 if (-not $python) { $python = 'python' }
 $container = $Container
 $exchangeFiles = @('tww3_bai_nn_state.json', 'tww3_bai_nn_state.json.tmp', 'tww3_bai_nn_orders.txt', 'tww3_bai_nn_orders.txt.tmp',
-    'tww3_bai_nn_deploy.json', 'tww3_bai_nn_deploy.json.tmp', 'tww3_bai_nn_plan.txt', 'tww3_bai_nn_plan.txt.tmp')
+    'tww3_bai_nn_deploy.json', 'tww3_bai_nn_deploy.json.tmp', 'tww3_bai_nn_plan.txt', 'tww3_bai_nn_plan.txt.tmp',
+    'tww3_bai_nn_ready.json', 'tww3_bai_nn_ready.json.tmp')
+. (Join-Path $PSScriptRoot 'lockstep.ps1')
+$ReadySeconds = 180    # the companion loads its networks before it answers: the game waits for its mark this long
 
 $settings = Get-Content -LiteralPath (Join-Path $repo 'bridge\config\default.json') -Raw | ConvertFrom-Json
 $localConfig = Join-Path $repo 'bridge\config\local.json'
@@ -51,6 +62,9 @@ if (Test-Path -LiteralPath $localConfig) {
 $game = (Resolve-Path -LiteralPath $settings.game_dir).Path
 
 if (-not ($Chain -or $Strategist)) { throw 'Nobody to answer: give -Chain and / or -Strategist' }
+if ($StepLock -and -not $Chain) { throw '-StepLock waits for the chain''s answers: give -Chain' }
+# (the param block is not advanced: an unknown name lands in $args silently - refuse the lockstep2 names, never lose the mode)
+if (@($args | Where-Object { "$_" -match '^-(Lockstep|Threads)' }).Count) { throw "-Lockstep / -Threads are -StepLock / -PyThreads: $args" }
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
 docker image inspect snake-ai-trainer --format '{{.Id}}' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Docker image snake-ai-trainer not found (is Docker Desktop running?)' }
@@ -61,19 +75,25 @@ if (-not $NoBuild) {
     $buildArgs = @()
     if ($Skirmish) { $buildArgs += @('--skirmish', $Skirmish) }
     if ($Strategist) { $buildArgs += @('--deploy', 'strategist') }
+    if ($StepLock) { $buildArgs += @('--lockstep') }
     & $python -m bridge.build nn-arena --own-ai net --speed $Speed --decide-ms $DecideMs --timeout $TimeoutModelSeconds @buildArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
 $manifest = Get-Content -LiteralPath (Join-Path $repo ('build\' + $Target + '\manifest.json')) -Raw | ConvertFrom-Json
 if ($manifest.config.own_ai -ne 'net') { throw "build/$Target is not a net build: python -m bridge.build nn-arena --own-ai net ..." }
+if ($StepLock) {
+    $why = Test-LockstepBuild $manifest.config
+    if ($why) { throw "build/$Target is not a strict lock-step build ($why): python -m bridge.build nn-arena --lockstep ..." }
+}
+if (-not $StepLock -and $manifest.config.lockstep) { throw "build/$Target is a lock-step build: give -StepLock (or rebuild without --lockstep)" }
 if ($Strategist -and $manifest.config.deploy -ne 'strategist') { throw "build/$Target has no strategist deployment: python -m bridge.build nn-arena --deploy strategist ..." }
 if ($Strategist -and $Strategist -notin @('formula', 'default') -and -not (Test-Path -LiteralPath (Join-Path $repo $Strategist))) { throw "No strategist checkpoint $Strategist (a path inside the repository)" }
-Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms" -f $manifest.build, $manifest.config.arena, $manifest.config.speed, $manifest.config.decide_ms)
+Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms, lock-step {4}" -f $manifest.build, $manifest.config.arena, $manifest.config.speed, $manifest.config.decide_ms, $(if ($manifest.config.lockstep) { 'on' } else { 'off' }))
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logRel = "build/$Target/companion/$stamp.jsonl"
 $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${game}:/game`" -w /repo -e PYTHONPATH=/repo " +
-    "-e PYTHONUNBUFFERED=1 -e BAI_TICK_MS=$env:BAI_TICK_MS -e BAI_OP_SCRIPT=$env:BAI_OP_SCRIPT snake-ai-trainer python -m bridge.companion --game /game --log /repo/$logRel"
+    "-e PYTHONUNBUFFERED=1 -e BAI_TICK_MS=$env:BAI_TICK_MS -e BAI_OP_SCRIPT=$env:BAI_OP_SCRIPT -e BAI_READY_TOKEN=$stamp snake-ai-trainer python -m bridge.companion --game /game --log /repo/$logRel --threads $PyThreads"
 if ($Chain) {
     $dockerArgs += ' --chain --chain-op ' + ($ChainOp -replace '\\', '/') + ' --chain-tactic ' + ($ChainTactic -replace '\\', '/')
     if ($ChainGreedy) { $dockerArgs += ' --chain-greedy' }
@@ -86,12 +106,18 @@ if ($Strategist) {
 }
 $runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
+$ready = Join-Path $game 'tww3_bai_nn_ready.json'
+if (-not (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue)) {    # (a dead battle's exchange files: gone)
+    foreach ($name in $exchangeFiles) { $path = Join-Path $game $name; if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path } }
+}
+if (Test-Path -LiteralPath $ready) { Remove-Item -LiteralPath $ready }
 $companion = Start-Process -FilePath docker -ArgumentList $dockerArgs -NoNewWindow -PassThru
 $code = 1
 $run = $null
 try {
     for ($i = 0; $i -lt 30 -and -not (docker ps --filter "name=^$container$" --format '{{.Names}}'); $i++) { Start-Sleep -Seconds 1 }
     if ($companion.HasExited) { throw 'The companion did not start' }
+    if (-not (Wait-CompanionReady $ready $stamp $ReadySeconds $companion)) { throw ("The companion wrote no readiness mark for this run within {0} s: the game is not started" -f $ReadySeconds) }
     $graphicsArgs = @{}
     if ($Graphics) { $graphicsArgs['Graphics'] = $Graphics }
     & (Join-Path $PSScriptRoot 'launch.ps1') -Target $Target -LingerSeconds $LingerSeconds @graphicsArgs
@@ -110,6 +136,10 @@ try {
     if ($run -and $before -and $run.Name -eq $before.Name) { $run = $null }
     $log = Join-Path $repo ($logRel -replace '/', '\')
     if ($run -and (Test-Path -LiteralPath $log)) { Copy-Item -LiteralPath $log -Destination (Join-Path $run.FullName 'companion.jsonl') }
+    if ($run) {
+        @{threads = $PyThreads; lockstep = [bool]$manifest.config.lockstep; container = $container; chain = [bool]$Chain} |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run.FullName 'companion.json') -Encoding utf8
+    }
 }
 if ($run) { Write-Output ("Companion stopped. Run: {0}" -f $run.FullName) } else { Write-Output 'Companion stopped.' }
 exit $code
