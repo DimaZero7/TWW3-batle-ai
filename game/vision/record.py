@@ -158,6 +158,8 @@ def load(run):
             if '"chain"' not in line:
                 continue
             c = json.loads(line).get("chain") or {}
+            if not isinstance(c, dict):      # a companion row that only names the chain (a string)
+                continue
             if c.get("operative"):
                 groups.append((c["sec"], c["operative"]))
             if c.get("inside"):
