@@ -10,6 +10,8 @@ torch = pytest.importorskip("torch")
 from contract import test_tactic_bridge_parity_torch as TP  # noqa: E402
 from bridge.companion import operative_input as OPI  # noqa: E402
 from net.operative import frame as FR  # noqa: E402
+from net.operative import gframe as GF  # noqa: E402
+from net.operative import heads as HD  # noqa: E402
 from net.operative import groups as GR  # noqa: E402
 from net.operative import inputs as IN  # noqa: E402
 from sim import scenario, terrain  # noqa: E402
@@ -40,6 +42,48 @@ def groups_of(raw, place=None):
     return g
 
 
+def group_masks(raw, side):
+    """(mem, E) [1, N]: the own side's alive units, the other side's alive and seen ones (drill O0-1's group and E)."""
+    mine, enemy = FR.sides(raw, torch.full((1,), side, dtype=torch.long))
+    return mine, enemy
+
+
+def o1_parity(rs, rg, side, place):
+    """Drill O0-1's new input (tmp/engine/design_merged.md 5): gframe on both raw states (the game's in the map's
+    turned frame: a rotated moving twin, the velocities from the shared one-second history - view.shift_velocity on
+    both), the order tokens and candidates of a stand-off line shifted 37 m across (its zone given in each frame), and
+    the same with an enemy hidden: no row, out of E, gframe equal."""
+    I = TR.I
+    sd = torch.full((1,), side, dtype=torch.long)
+    for hide in (False, True):
+        a_raw, b_raw = rs.clone(), rg.clone()
+        if hide:
+            foe = ((a_raw[0, :, I["side"]] != side) & (a_raw[0, :, I["alive"]] > 0) & (a_raw[0, :, I["side"]] > 0) &
+                   (a_raw[0, :, I["vis"]] > 0)).nonzero()[:, 0]
+            j = int(foe[0])
+            a_raw[0, j, I["vis"]] = 0.0
+            b_raw[0, j, I["vis"]] = 0.0
+        sa, sb = IN.select(a_raw, sd)[0], IN.select(b_raw, sd)[0]
+        assert torch.equal(sa, sb)
+        ma, ea = group_masks(a_raw, side)
+        mb, eb = group_masks(b_raw, side)
+        assert torch.equal(ma, mb) and torch.equal(ea, eb)
+        if hide:
+            assert j not in sa[0].tolist() and not bool(ea[0, j])
+        ga, gb = GF.gframe(a_raw, sa, ma, ea), GF.gframe(b_raw, sb, mb, eb)
+        assert float(ga.abs().max()) > 0
+        assert torch.allclose(ga, gb, atol=2e-3), float((ga - gb).abs().max())
+        C = [(float(r[0, :, I["x"]][m[0]].mean()), float(r[0, :, I["z"]][m[0]].mean())) for r, m in ((a_raw, ma), (b_raw, mb))]
+        zone, ls = (C[0][0] + 10.0, C[0][1] - 20.0, 30.0), (C[0][0] + 37.0, C[0][1] + 140.0, 30.0)
+        ga_ = TP.to_game(zone[0], zone[1], place) + (zone[2],)
+        gl_ = TP.to_game(ls[0], ls[1], place) + (ls[2],)
+        oa = {"ptr": "LS", "zone": zone, "goal": C[0], "born": 30.0}
+        ob = {"ptr": "LS", "zone": ga_, "goal": C[1], "born": 30.0}
+        fa = HD.order_feats(oa, C[0], ls, 75.0) + sum(HD.cand_feats(oa, C[0], ls), [])
+        fb = HD.order_feats(ob, C[1], gl_, 75.0) + sum(HD.cand_feats(ob, C[1], gl_), [])
+        assert max(abs(x - y) for x, y in zip(fa, fb)) < 2e-3, (fa, fb)
+
+
 def parity(sim, game, st, place=None, bounds=None):
     card = T.cards(st, "cpu")[:1].float()
     cmd = DC.order_vec(1, "hold", "any")
@@ -60,6 +104,7 @@ def parity(sim, game, st, place=None, bounds=None):
             dd = (a["map"] - b["map"]).abs().amax((0, 2, 3))
             assert float(dd.max()) < 2e-3, (IN.LAYERS[int(dd.argmax())], float(dd.max()))
             assert torch.equal(a["members"], b["members"]) and torch.equal(a["targets"], b["targets"])
+            o1_parity(rs, rg, side, place)
             seen += 1
     return seen
 

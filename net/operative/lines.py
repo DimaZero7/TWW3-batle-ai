@@ -6,13 +6,13 @@ and decides nothing.
 
     E          the enemy piece (operative/teacher.pieces, no lord) nearest the members' centroid C, picked anew each tick
     POINTERS   deploy (the start's zone: the order in force before any decision), L0 (here: the zone placed on the
-               members where they stand - opside's HALT form), L60 (the zone moved rigidly so that our front is l60_m
-               from E's front on the axis C -> E, facing E), LM (the dumb move's line: onto E - opside's arm M bound;
-               not in the level's list)
+               members where they stand - opside's HALT form), LS (the stand-off line: the zone moved rigidly so that
+               our front is standoff_m from E's front on the axis C -> E, facing E), LM (the dumb move's line: onto E -
+               opside's arm M bound; not in the level's list)
     Level(B, att, blocked)   the batch's state: the order in force per battle (skill, pointer, zone, goal, born), the
                mission bit att [B], moved [B] (the zone moved once: the lord follows)
     level.facts(side, raw, card, b, sec)   the tick's facts of battle b (None: no standing member or no E) - the
-               teacher's scalars (att, sec, melee, comer, e_close_max, gap, l60_same) and the level's input row
+               teacher's scalars (att, sec, melee, comer, e_close_max, gap, ls_same) and the level's input row
     level.apply(side, raw, b, ptr, f, units, sec)   the pointer's zone given (KEEP is no call)
     level.lord(side, raw, b, f)   the lord's order of the tick after a zone move: ('move', x, z, h) | ('hold',) | None
     INPUT      the names of the level's input row (row()); MOTION - its motion columns (the leakage check zeroes them)
@@ -26,11 +26,11 @@ from net.operative import cfg
 from net.operative import opside as OPS
 from net.tactic import raw as TR
 
-POINTERS = ("deploy", "L0", "L60", "LM")
+POINTERS = ("deploy", "L0", "LS", "LM")
 SKILLS = ("hold", "attack", "reserve", "flank")      # (the head's four; only hold open in this drill)
 INPUT = ("att", "t", "own_n", "own_melee", "e_n", "gap", "e_right", "e_fwd", "u_sin", "u_cos",
-         "sk_hold", "sk_attack", "sk_reserve", "sk_flank", "p_deploy", "p_L0", "p_L60", "p_LM",
-         "order_dist", "order_age", "order_to_L60", "to_L60",
+         "sk_hold", "sk_attack", "sk_reserve", "sk_flank", "p_deploy", "p_L0", "p_LS", "p_LM",
+         "order_dist", "order_age", "order_to_LS", "to_LS",
          "own_v_mean", "own_v_max", "e_close_mean", "e_close_max", "e_v_mean", "e_v_max", "comer")
 MOTION = ("own_v_mean", "own_v_max", "e_close_mean", "e_close_max", "e_v_mean", "e_v_max", "comer")
 PLACE_M = 1024.0      # (operative.json place_m: positions / 1024 m)
@@ -42,17 +42,21 @@ def conf():
 
 
 def geo_conf():
-    """opside's numbers with the drill's own laid over (the comer's reach, the stand-off)."""
+    """opside's numbers with the drill's own laid over (the comer's reach, the lord's; the stand-off is the level's
+    own standoff_m - opside's l60_m stays the game probe's arm D)."""
     c = dict(OPS.conf())
     o = conf()
-    c.update(l60_m=o["l60_m"], comer_gap_m=o["comer_gap_m"], comes_ms=o["comes_ms"], still_ms=o["still_ms"],
+    c.update(comer_gap_m=o["comer_gap_m"], comes_ms=o["comes_ms"], still_ms=o["still_ms"],
              lord_back_m=o["lord_back_m"], lord_regive_m=o["lord_regive_m"])
     return c
 
 
 class Level:
-    def __init__(self, B, att, blocked=None):
+    def __init__(self, B, att, blocked=None, visible=None):
         self.B = B
+        # (the teacher's predicates on the seen foes only - the network's selection, design_merged 5; config
+        # o1.visible, default False: the legacy teacher of the 22.11 exams)
+        self.visible = bool(conf().get("visible", False)) if visible is None else bool(visible)
         self.att = [int(a) for a in att]
         self.geo = OPS.OpScript("D", B=B)
         self.geo.c = geo_conf()
@@ -69,12 +73,12 @@ class Level:
         return {"skill": 0, "ptr": "deploy", "zone": (float(tac.cx[b]), float(tac.cz[b]), float(tac.heading[b])),
                 "goal": (float(C[0]), float(C[1])), "born": 0.0}
 
-    def facts(self, side, raw, card, b, sec):
-        """(module doc) -> dict or None."""
+    def facts(self, side, raw, card, b, sec, visible=None):
+        """(module doc) -> dict or None. visible None: the level's own (self.visible)."""
         g = self.geo
         g.blocked = self.blocked[b]
         g.E[b], g.resel[b] = None, False                 # (E picked anew: the level keeps no memory but its order)
-        fc = g._facts(side, raw, card, b)
+        fc = g._facts(side, raw, card, b, visible=self.visible if visible is None else bool(visible))
         if fc is None:
             return None
         if self.order[b] is None:
@@ -88,17 +92,17 @@ class Level:
         tx, tz = C[0] - fc["x"], C[1] - fc["z"]
         tn = torch.sqrt(tx * tx + tz * tz).clamp(min=1e-6)
         close = (vx * tx + vz * tz) / tn
-        l60 = g._line(side, fc, b, float(self.c["l60_m"]))
+        ls = g._line(side, fc, b, float(self.c["standoff_m"]))
         L = g.last_L
         ex, ez = fc["Ec"]
         ux, uz = fc["u"]
-        g60 = (ex - L * ux, ez - L * uz)                   # (the members' frames' centroid on L60)
+        gls = (ex - L * ux, ez - L * uz)                   # (the members' frames' centroid on LS)
         o = self.order[b]
-        d_o60 = math.hypot(o["zone"][0] - l60[0], o["zone"][1] - l60[1])
+        d_ols = math.hypot(o["zone"][0] - ls[0], o["zone"][1] - ls[1])
         f = {"att": self.att[b], "sec": float(sec), "melee": bool(fc["melee"]), "comer": bool(fc["comer"]),
              "e_close_max": float(close[E].max()), "e_close_mean": float(close[E].mean()), "gap": float(fc["gap"]),
-             "l60_same": o["ptr"] == "L60" and d_o60 <= float(self.c["same_line_m"]),
-             "fc": fc, "l60": l60, "g60": g60}
+             "ls_same": o["ptr"] == "LS" and d_ols <= float(self.c["same_line_m"]),
+             "fc": fc, "ls": ls, "gls": gls}
         # the level's input row (INPUT)
         tac = side.tac
         zh = float(tac.heading[b]) * TR.DEG
@@ -110,11 +114,11 @@ class Level:
         pt = [0.0] * 4
         pt[POINTERS.index(o["ptr"])] = 1.0
         d_go = math.hypot(float(C[0]) - o["goal"][0], float(C[1]) - o["goal"][1])
-        d_60 = math.hypot(float(C[0]) - g60[0], float(C[1]) - g60[1])
+        d_ls = math.hypot(float(C[0]) - gls[0], float(C[1]) - gls[1])
         k = PLACE_M
         row = [float(self.att[b]), min(float(sec) / 600.0, 2.0), float(mem.sum()) / 10.0, float(fc["melee"]),
                float(E.sum()) / 10.0, f["gap"] / k, e_r / k, e_f / k, math.sin(rel), math.cos(rel), *sk, *pt,
-               d_go / k, min((float(sec) - o["born"]) / 60.0, 5.0), d_o60 / k, d_60 / k,
+               d_go / k, min((float(sec) - o["born"]) / 60.0, 5.0), d_ols / k, d_ls / k,
                float(sp[mem].mean()) / SPEED_MS, float(sp[mem].max()) / SPEED_MS,
                f["e_close_mean"] / SPEED_MS, f["e_close_max"] / SPEED_MS,
                float(sp[E].mean()) / SPEED_MS, float(sp[E].max()) / SPEED_MS, float(fc["comer"])]
@@ -128,8 +132,8 @@ class Level:
         g.blocked = self.blocked[b]
         fc = f["fc"]
         frames = None
-        if ptr == "L60":
-            zone = f["l60"]
+        if ptr == "LS":
+            zone = f["ls"]
         elif ptr == "LM":
             zone = g._line(side, fc, b, 0.0)
         elif ptr == "L0":

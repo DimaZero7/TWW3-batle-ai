@@ -30,7 +30,7 @@
   "verbs_open": ["hold"],
   "paces_open": ["any"],
   "_open_why": "глагол и темп — головы есть, но открыт один вариант: тактик-формула и сеть run4 глагола не читают, темп «любой» — как в упражнении тактика; открытый выбор без действия — шум в PPO",
-  "council_extra": {"hidden": 64, "keep_bias": 2.0},
+  "council_extra": {"hidden": 64, "keep_bias": 2.0, "pick": true, "_pick_why": "OpNet1's per-candidate-type state readout (net/operative/heads.py PICK_WHY), zero-initialised: a fresh network is still DEFAULT; on by the orchestrator 22.11 after the three-seed probe (tmp/engine/b/probe/probe.json)"},
   "_council_extra_why": "голова «оставить / сдвинуть / перекроить»: скрытый слой 64, уклон 2,0 на «оставить» на старте, как у головы тактика (zone_head.keep_bias)",
   "tactic_ckpt": "weights/tactic/run4/latest.pt",
   "_tactic_ckpt_why": "сеть тактика для сквозного прогона (обучена на первом упражнении: 2 пехоты + 1 стрелки, «сдержать»); по умолчанию под оперативником — формула tactic/teacher.drive",
@@ -138,14 +138,14 @@
     "_decide_s_why": "the operative's tick (decide_s above, METHOD.md level table)",
     "far_gap_m": 100.0,
     "_far_gap_why": "ASSUMPTION (tmp/op1/design_merged.md FINAL): ADVANCE only while our front is more than this from E's front - outside the sally gaps seen in the game (holder_game.json arm D, the AI's first move: 20 of 24 at 60-96 m front to front, median 83; the other 4 at 237-264 m came at once, not a sally)",
-    "l60_m": 60.0,
-    "_l60_why": "the zone's goal L60: our front 60 m from E's front, facing E (design_merged FINAL; holder_game.json: the AI came out before we arrived in 24 of 24, so the exact stand-off matters little); the geometry - opside's rigid line (o1_probe l60_m)",
+    "standoff_m": 45.0,
+    "_standoff_why": "the zone's goal LS (the stand-off line): our front 45 m from E's front, facing E; the geometry - opside's rigid line. Inside the least sally gap seen in the game (59.7 m: game/probe/evidence/holder_game.json, the AI's first move front to front, min of 24) less the line's stop error seen in the 22.11 exam (a 60 m line stopped at a front gap of 61-67 m, median 64.5: up to 7 m) and a margin of ~8 m. The old 60 m sat on the lower edge of the simulator's sally range (60-100 m): 51 of the exam's 55 stalls of 384 cause scenes had sally_m 60-70 m (tmp/o1/exam, the orchestrator's recount 22.11) - 'the exact stand-off matters little' was wrong at the range's edge",
     "comes_ms": 1.0,
     "_comes_ms_why": "E 'comes': one of its units (alive, not routing) closes on our centroid at >= this (o1_probe comes_ms: 2 x unit/scripts.APPROACH_MS; the AI's sally 2.4-3.5 m/s, design_opus 4)",
     "still_ms": 0.5,
     "_still_ms_why": "a unit 'stands' under this speed (o1_probe still_ms = unit/scripts.APPROACH_MS): the twins' check that a come-twin's enemy moves at the decision tick, the 'received from a stand' read",
     "same_line_m": 20.0,
-    "_same_line_why": "ASSUMPTION (tmp/op1/design_opus.md 4 'within 20 m of L60' = zone_stick_m): the order in force is 'already that line' when it is L60 and its zone centre is within this of the L60 computed now",
+    "_same_line_why": "ASSUMPTION (tmp/op1/design_opus.md 4 'within 20 m of the line' = zone_stick_m): the order in force is 'already that line' when it is LS and its zone centre is within this of the LS computed now",
     "comer_gap_m": 100.0,
     "_comer_gap_why": "a comer (an enemy unit coming at a standing member, unit/scripts Facts.comes) counts only within this edge gap (o1_probe comer_gap_m; tmp/astra/holder_review/out/REVIEW.md 3)",
     "lord_back_m": 20.0,
@@ -194,13 +194,13 @@
         "enemy_form": {"train": ["row", "rows2"], "held": ["shift100"]},
         "heading_deg": {"train": [[0.0, 360.0]]},
         "sally_m": {"train": [[60.0, 100.0]], "held": [[120.0, 120.0]]},
-        "comer": {"train": ["nearest", "human"]},
-        "_why": "tmp/op1/design_opus.md 5 (taught / held): map flat, plains / river; size 3-8 infantry + lord / 9; mirror; front gap at the decision tick 200-400 / 460 m; our form one row, two rows (5 + 3) / square; the enemy's form one row, two rows / one row shifted 100 m across; heading random; the sally gap from the game (holder_game.json arm D: 60-96 m) / 120 m (ASSUMPTION: above the taught range and above far_gap_m - E comes out while our line still walks); lat_m - the enemy's lateral offset (the coder's, variety); comer - the no-cause enemy's script from the decision tick (sim/scripts nearest; human as the attacker, Human.attack)"
+        "comer": {"train": ["nearest"]},
+        "_why": "tmp/op1/design_opus.md 5 (taught / held): map flat, plains / river; size 3-8 infantry + lord / 9; mirror; front gap at the decision tick 200-400 / 460 m; our form one row, two rows (5 + 3) / square; the enemy's form one row, two rows / one row shifted 100 m across; heading random; the sally gap from the game (holder_game.json arm D: 60-96 m) / 120 m (ASSUMPTION: above the taught range and above far_gap_m - E comes out while our line still walks); lat_m - the enemy's lateral offset (the coder's, variety); comer - the come twin's enemy script from the decision tick: sim/scripts nearest only (22.11: 'human' - Human.attack as the attacker - halts on its way: 16 of 94 human come twins of the exam got the teacher's ADVANCE while the enemy really stood > 100 m off, 0 of 98 nearest - such a twin is no no-cause scene; scenes_o1 still draws the old two-valued choice so that every layout stays the 22.11 exam's)"
       },
       "twin_come": 0.5,
       "_twin_why": "half the twins 'come' (the enemy back-placed so that it reaches the cause scene's poses at the decision tick, then attacks - Astra's rule tmp/astra/op1_design/out/DESIGN.md), half 'role' (att = 0, the same holder) - tmp/op1/design_opus.md 5 mix 50 / 25 / 25",
       "general_hold": 64,
-      "_general_hold_why": "G_hold: stage 0's general battles against a holder that never comes (sim/scripts hold) - reported, not gated: the teacher stops at L60 and the battle stalls (no Attack skill at this level; Attack(E) is O0-2)"
+      "_general_hold_why": "G_hold: stage 0's general battles against a holder that never comes (sim/scripts hold) - reported, not gated: the teacher stops at LS and the battle stalls (no Attack skill at this level; Attack(E) is O0-2)"
     },
     "probe": {
       "hidden": 64,

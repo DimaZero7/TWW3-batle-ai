@@ -9,7 +9,7 @@
     bash game/battle/aivai.sh [f1 .. k4]           # ИИ игры против планировщика CA, армии этапа 0; меры и двойник — game.battle.aivai
     python -m game.vision <прогон>...              # лента 6 кадров PNG + текст (бои и пробы), ~2,7 тыс. токенов (vision/README.md)
 М1, М2 — прогоны человека (`data/human/runs`, железнобокие → длинноствольные), М3 — seed 1000702112 v3; карта ksl_plains_01.
-Проба оперативника `holder`: `OP=holder:M|D bash game/battle/chain.sh tactic h01` (ИИ держит), `r01` — ответ (ИИ наступает), отчёт — `game.battle.holder_read`; `LORDS=park` — оба лорда в углах вне боя.
+Проба оперативника `holder`: `OP=holder:M|D bash game/battle/chain.sh tactic h01` (ИИ держит), `r01` — ответ (ИИ наступает), отчёт — `game.battle.holder_read`; `LORDS=park` — оба лорда в углах вне боя. Проба S0-1 `crest8`: `PLACE=build/crest8/cNN.place.json [ZONES=east] bash game/battle/chain.sh tactic cNN` (наша пехота на линии гребня; `ZONES=east` — зоны east.xml на kho), старты и отчёт — `game.battle.crest_read`.
 ## Проба механики
     bash game/probe/run.sh <план> [<план>...]       # по бою на план (BATTLE=N — его N-й бой), --mem, BAI_GRAPHICS=low
     python -m game.probe.charge_probe report <прогоны> [--sim]   # игра против двойника симулятора

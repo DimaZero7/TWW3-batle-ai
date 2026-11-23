@@ -1,0 +1,20 @@
+{
+  "schedule": {
+    "kind": "rounds",
+    "passes": 6,
+    "n_min": 2,
+    "n_max": 4,
+    "stop": "relative"
+  },
+  "_schedule_why": "tmp/engine/design_merged.md section 0 (the orchestrator 22.11 03:50 from tmp/method/e1/table.txt and the raw per-battle files): FAST (2 rounds x 6 passes) passes all six exam pieces written before T0-2's training, FULL (7 x 2) fails v; paired FAST - FULL at contact + 300 s and at the battle's end not worse anywhere; two rounds leave the marks slightly short (front recall on V's teacher path 0.944 vs 0.972, false flank on no-cause 0.061 vs 0.03) - so n_min 2, the marks' own lines decide a third round, n_max 4; R3 (3 x 2) failed by -0.063: passes matter more than rounds",
+  "ram_gb": 12,
+  "_ram_gb_why": "design section 9: the mixture lives in RAM, manifest bytes over ram_gb halt before the fit; T0-2's four collections ~5.2 GB (train.log line 7: 1.30 GB a round), the machine's 32 GB shared with the user and Docker's VM 15.9 GB",
+  "rebuild_max_diff": 0.001,
+  "_rebuild_max_diff_why": "the legacy bound, net/tactic/imitate.py:1015",
+  "census": {
+    "keep_min": 0.9,
+    "cell_min_n": 50,
+    "denominator": "weighted / (labels - don't-care)"
+  },
+  "_census_why": "binding (the coordinator 22.11, after design_opus.md section census): a class's labels that reach its head with weight > 0, over its labels less the don't-care ones (the dropped / through-own / band labels the mask removes by design), under 0.90 halts the fit - it catches a mask removing labels it should not; T0-2 round 1 keeps 0.9958-0.9995 a class (tmp/engine/a/cmp3a.json); cell_min_n: design section 4, class x start cell judged at n >= 50"
+}

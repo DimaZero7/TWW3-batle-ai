@@ -20,6 +20,11 @@
 #                 game's AI attacks, ours defends), the chain without the operative script (OP must be empty)
 #        LORDS=park bash game/battle/chain.sh tactic h01   both lords out of the fight (bridge.build --park-lords: two far
 #                 corners, held by the script; the manifest's config.park_lords); empty - as before
+#        PLACE=<line.json> [ZONES=east] bash game/battle/chain.sh tactic c01   the place switch (drill S0-1's crest8,
+#                 starts c01..c08 of game/battle/crest_read.py: the game's AI attacks, ours hold; any start takes it):
+#                 our infantry deployed on the file's line, the lord behind (bridge.build --deploy strategist, the
+#                 companion's --strategist <file>: bridge/companion/deploy.LinePlace); ZONES=east - bridge.build
+#                 --map-zones east (the game's east.xml zones on a map captured without them: kho_wastes_01); empty - as before
 cd "$(dirname "$0")/../.." || exit 1
 . ops/guard.sh
 . ops/python.sh
@@ -27,10 +32,14 @@ if [ "$1" = "tactic" ]; then
   b="${2:-f1}"
   MK=game.battle.aivai; MKA=make; AD=build/aivai
   case "$b" in h[0-9]*|r[0-9]*) MK=game.battle.holder_read; MKA=--make; AD=build/holder ;; esac
+  case "$b" in c[0-9]*) MK=game.battle.crest_read; MKA=--make; AD=build/crest8 ;; esac
   case "$b" in r[0-9]*) [ -n "$OP" ] && { echo "$b is the reference arm R: no OP" >&2; exit 1; } ;; esac
   if [ -n "$OP" ]; then export BAI_OP_SCRIPT="$OP"; else unset BAI_OP_SCRIPT; fi
   case "${LORDS:-}" in ""|park) ;; *) echo "LORDS must be empty or park" >&2; exit 1 ;; esac
-  tag="$b${OP:+_${OP#*:}}${LORDS:+_$LORDS}"
+  case "${ZONES:-}" in ""|east) ;; *) echo "ZONES must be empty or east" >&2; exit 1 ;; esac
+  [ -n "$PLACE" ] && { [ -f "$PLACE" ] || { echo "no place file $PLACE" >&2; exit 1; }; }
+  pt=""; [ -n "$PLACE" ] && pt="$(basename "$PLACE" .json)"
+  tag="$b${OP:+_${OP#*:}}${LORDS:+_$LORDS}${pt:+_$pt}"
   W=weights/tactic/attack1/final.pt
   [ -f "$W" ] || { echo "no $W" >&2; exit 1; }
   if [ -n "$DRY" ]; then why="$(guard_busy)" && { echo "not starting: $why" >&2; exit 1; }
@@ -45,11 +54,14 @@ if [ "$1" = "tactic" ]; then
   [ "$map" != "flat" ] && args+=(--map "$map")
   [ "$role" = "defend" ] && args+=(--own-role attack)
   [ "$LORDS" = "park" ] && args+=(--park-lords)
-  echo "=== tactic $b $map ai:$role men $men tick_ms ${BAI_TICK_MS:-engine}${OP:+ op $OP}${LORDS:+ lords $LORDS} $(date +%T)"
+  [ -n "$PLACE" ] && args+=(--deploy strategist)
+  [ "$ZONES" = "east" ] && args+=(--map-zones east)
+  wargs=(); [ -n "$PLACE" ] && wargs=(-Strategist "$PLACE" -StrategistTask hold)
+  echo "=== tactic $b $map ai:$role men $men tick_ms ${BAI_TICK_MS:-engine}${OP:+ op $OP}${LORDS:+ lords $LORDS}${PLACE:+ place $PLACE}${ZONES:+ zones $ZONES} $(date +%T)"
   "$PY" -m bridge.build nn-arena "${args[@]}" > "tmp/chain/tactic_$tag.build.log" 2>&1     || { echo "build failed (tmp/chain/tactic_$tag.build.log)"; exit 1; }
-  if [ -n "$DRY" ]; then echo "dry: built; watch.ps1 -NoBuild -Chain -ChainTactic $W"; exit 0; fi
+  if [ -n "$DRY" ]; then echo "dry: built; watch.ps1 -NoBuild -Chain -ChainTactic $W ${wargs[*]}"; exit 0; fi
   guard_human && { echo "the user plays: stop"; exit 1; }
-  powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/watch.ps1 -NoBuild -Chain -ChainTactic "$W"     > "tmp/chain/tactic_$tag.log" 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/watch.ps1 -NoBuild -Chain -ChainTactic "$W" "${wargs[@]}"     > "tmp/chain/tactic_$tag.log" 2>&1
   code=$?
   run=$(ls -t build/nn-arena/runs 2>/dev/null | head -1)
   echo "--- tactic $tag exit $code $(date +%T) $run; read: bash ops/dock.sh game.battle.tactic_read build/nn-arena/runs/$run"

@@ -1016,14 +1016,29 @@ def _speed(key, run):
 
 
 def side_scene(seed, held=None, twin=False):
-    """One S2 scene (twin: its S2N) of a seed (module doc above)."""
+    """One S2 scene (twin: its S2N) of a seed (module doc above). The base and its twin are drawn from the same state of
+    the seed's stream at the same try t, the first t at which BOTH lay out: a twin is its base with the one fact flipped
+    (METHOD step 4: twins differ only in the cause), never a redraw of its own."""
     rnd = random.Random(seed)
     for t in range(int(c()["redraw"])):
-        r2 = random.Random(seed * 7919 + 31 + t)
-        sp = _side_try(rnd, held, twin, r2)
-        if sp is not None:
-            sp.update(seed=int(seed), held=held, recipe="S2N" if twin else "S2", family="S2", s2_cause=not twin)
-            return sp
+        st = rnd.getstate()
+        sp = _side_try(rnd, held, False, random.Random(seed * 7919 + 31 + t))
+        if sp is None:
+            continue
+        after = rnd.getstate()
+        rnd.setstate(st)
+        tw = _side_try(rnd, held, True, random.Random(seed * 7919 + 31 + t))
+        rnd.setstate(after)
+        if tw is None:
+            continue
+        # (the lords stand where the base's do - placed from the enemies' middle they would move with the flipped
+        # fact; a base lord the twin's map cannot hold: redraw BOTH, never the twin alone)
+        if not all(can_stand(tw["map"], *sp["lords"][s]) for s in (1, 2)):
+            continue
+        tw["lords"] = copy.deepcopy(sp["lords"])
+        sp = tw if twin else sp
+        sp.update(seed=int(seed), held=held, recipe="S2N" if twin else "S2", family="S2", s2_cause=not twin)
+        return sp
     raise RuntimeError(f"S2 seed {seed}: no layout in {c()['redraw']} draws")
 
 
@@ -1146,7 +1161,8 @@ def _side_try(rnd, held, twin, r2):
     elif blk == "comer":
         comer(side_b)
     flip = None
-    if twin:
+    st_flip = rnd.getstate()                                        # (the flip's own draws leave the layout's stream as
+    if twin:                                                        # the base's: build's slot order the same)
         flip = r2.choice(S["flips"])
         if flip == "side_on" and (n_line > 1 or held in ("setback_m", "heading_deg")):
             # (side_on: the detachment only; not under a held setback / heading - its target starts aside, neither binds)
@@ -1175,6 +1191,7 @@ def _side_try(rnd, held, twin, r2):
         else:
             p = (hm[0] + m * r2.uniform(*S["threat_aside_m"]), hm[1] + ax["setback_m"] + r2.uniform(*S["threat_ahead_m"]))
             foe(p, hm, {"kind": "at", "k": 1, "run": True}, 1)
+    rnd.setstate(st_flip)
     if len(mine) > 8 or len(enemies) > 8:
         return None
     widths = [e.pop("width") for e in enemies]

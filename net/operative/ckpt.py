@@ -37,3 +37,31 @@ def restore(path, device="cpu"):
                 ck["padded"] = True
         mod.load_state_dict(sd)
     return net, critic, ck
+
+
+KIND_O1 = "operative_o1_v1"           # (heads.OpNet1: drill O0-1's network, tmp/engine/design_merged.md 5)
+
+
+def save_o1(path, net, extra=None):
+    """An OpNet1 checkpoint, atomic: a .part file, fsync on the written handle, os.replace."""
+    import os
+    tmp = str(path) + ".part"
+    with open(tmp, "wb") as fh:
+        torch.save({"kind": KIND_O1, "net": net.state_dict(), "pick": bool(getattr(net, "use_pick", False)),
+                    **(extra or {})}, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def restore_o1(path, device="cpu"):
+    """(OpNet1, ck) of a save_o1 checkpoint (another kind: ValueError); the card part stays frozen."""
+    from net.operative import heads as HD
+    ck = torch.load(path, map_location=device, weights_only=False)
+    if ck.get("kind") != KIND_O1:
+        raise ValueError(f"not a {KIND_O1} checkpoint: {path}")
+    net = HD.OpNet1(card=False, pick=bool(ck.get("pick", False))).to(device)      # (heads.PICK_WHY)
+    net.load_state_dict(ck["net"])
+    for p in net.analysis.parameters():
+        p.requires_grad_(False)
+    return net, ck

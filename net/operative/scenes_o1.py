@@ -8,7 +8,7 @@ in spec['o1'] (net/operative/sally.Enemy). The level decides first at o1.start_s
                  enemy a Sally holder (o1.sally_m drawn). Its twins differ ONLY by the cause (the same draws):
                  twin 'come' - the enemy moves: each unit back-placed along its line of march by its own run (passport
                  speed.run x t_dec) and kept on schedule by sally.WalkIn (a run while behind, else a walk) so that it
-                 passes the cause scene's pose at t_dec, moving, then attacks (o1.comer: nearest or human); twin 'role' - att 0, the same holder
+                 passes the cause scene's pose at t_dec, moving, then attacks (o1.comer: nearest only); twin 'role' - att 0, the same holder
     Axes (o1.scenes.axes; train / held): map, size (my infantry; the enemy's the same count, matched gold), factions,
                  mirror, gap_m (front to front at t_dec: the centres' gap less 2 x half_depth_m), lat_m (the enemy's
                  offset across), our_form (row | rows2: 5 + 3 | square), enemy_form (row | rows2 | shift100: a row 100 m
@@ -86,6 +86,12 @@ def _world(o, h, s, f):
     return SP.world({"x": o[0], "z": o[1], "b": h}, s, f)
 
 
+def _comer():
+    v = cs()["axes"]["comer"]["train"]
+    assert len(v) == 1, f"the comer axis is one value (nearest), not {v}"
+    return v[0]
+
+
 def _try(rnd, held, mp):
     S, C = cs(), c()
     fac = draw(rnd, "factions", held)
@@ -100,7 +106,8 @@ def _try(rnd, held, mp):
     en_form = draw(rnd, "enemy_form", held)
     h = float(draw(rnd, "heading_deg", held)) % 360.0
     sally = float(draw(rnd, "sally_m", held))
-    comer = draw(rnd, "comer", held)
+    rnd.choice((0, 1))                                 # (the 22.11 two-valued comer draw, kept: every layout stays the
+    comer = _comer()                                   # 22.11 exam's; the come twin's comer is nearest only - config _why)
     mine = SP.army(rnd, fac[0], n)
     theirs = SP.matched(rnd, fac[1], n, SP.gold(mine))
     r = float(S["place_r_m"])

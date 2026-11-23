@@ -127,8 +127,10 @@ class OpScript:
         k = min(range(len(ps)), key=lambda i: float(((cen[i] - C) ** 2).sum()))
         return list(ps[k])
 
-    def _facts(self, side, raw, card, b):
-        """The tick's facts of battle b (module doc) or None (no standing member or no standing E)."""
+    def _facts(self, side, raw, card, b, visible=False):
+        """The tick's facts of battle b (module doc) or None (no standing member or no standing E). visible: the foes
+        are only the seen ones (raw 'vis' - inputs.select's enemies; tmp/engine/design_merged.md 5); False - every foe,
+        seen or not (the game probe's and the legacy teacher's)."""
         from net.tactic import side as TS
         from net.unit import scripts as SC
         I = TR.I
@@ -141,6 +143,8 @@ class OpScript:
         own = int(round(float(S[mem.nonzero()[0, 0], I["side"]])))
         x, z = S[:, I["x"]], S[:, I["z"]]
         foe = ok & (S[:, I["side"]].round().long() != own) & (S[:, I["side"]] > 0)
+        if visible:
+            foe = foe & (S[:, I["vis"]] > 0)
         lord = card[b, :, TS.LORD_CARD] > 0.5 if card is not None else torch.zeros_like(foe)
         ef = foe & ~lord
         C = torch.stack([x[mem].mean(), z[mem].mean()])
