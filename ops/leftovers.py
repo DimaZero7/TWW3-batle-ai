@@ -171,8 +171,13 @@ def report(procs=None, min_age=10.0):
         lines.append("Warhammer3.exe is running")
     if guard.human():
         lines.append("state/HUMAN_PLAYING: the user plays")
-    if guard.owner() is not None:
-        lines.append(f"state/probe_game.lock: {guard.owner()!r}")
+    whole = guard.owner()
+    if whole is not None:
+        lines.append(f"state/probe_game.lock: {whole!r}")
+    for n in guard.SLOTS:
+        tok = guard.owner(guard.slot_lock(n))
+        if tok is not None and tok != whole:
+            lines.append(f"state/probe_game.{n}.lock: {tok!r}" + (" (dead holder)" if guard.dead(guard.slot_lock(n), tok) else ""))
     if cl["nn"]:
         lines.append("python of net / bridge / game: " + "; ".join(f"pid {p['pid']} {snippet(p['cmd'])}" for p in cl["nn"]))
     g = gpu()

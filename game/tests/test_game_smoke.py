@@ -79,6 +79,11 @@ def test_guard_py(tmp_path, monkeypatch):
     assert "user plays" in guard.busy(state=tmp_path)
     assert guard.busy("human", state=tmp_path) == ""            # the user's own battle (live labelling)
     (tmp_path / "HUMAN_PLAYING").unlink()
+    for n in (1, 2, 3):                                           # slot locks of a killed launcher are not busy
+        (tmp_path / f"probe_game.{n}.lock").write_text("x 2020-01-01T00:00:00 pid 999999 id deadbeef\n")
+    assert guard.busy(state=tmp_path) == "" and guard.busy("human", state=tmp_path) == ""
+    for n in (1, 2, 3):
+        (tmp_path / f"probe_game.{n}.lock").unlink()
     with guard.hold("smoke", state=tmp_path) as tok:
         assert guard.owner(tmp_path / "probe_game.lock") == tok == os.environ[guard.ENV]
         assert guard.busy(state=tmp_path) == ""                   # the holder's own launches pass
@@ -114,6 +119,11 @@ def test_guard_ps1(tmp_path):
             f"try {{ Assert-GameFree -State '{s}'; 'passed' }} catch {{ 'refused' }}; $env:BAI_LOCK_HELD=$t; "
             f"Exit-GameLock $t -State '{s}'; Test-Path (Join-Path '{s}' 'probe_game.lock')")
     assert r.stdout.split() == ["holder", "ok", "refused", "False"], r.stdout + r.stderr
+    for n in (1, 2, 3):                                           # slot locks of a killed launcher are not busy
+        (tmp_path / f"probe_game.{n}.lock").write_text("x 2020-01-01T00:00:00 pid 999999 id deadbeef\n")
+    r = _ps(f". '{g}'; $env:BAI_LOCK_HELD=''; Assert-GameFree -Target human -State '{s}'; "
+            f"Assert-GameFree -State '{s}'; 'dead ok'")
+    assert r.stdout.split() == ["dead", "ok"], r.stdout + r.stderr
 
 
 def _bash():
@@ -131,9 +141,11 @@ def test_guard_sh(tmp_path):
     env = dict(os.environ, GUARD_STATE=tmp_path.as_posix(), BAI_LOCK_HELD="")
     script = (f". '{g}'; guard_take smoke && echo took; BAI_LOCK_HELD=x guard_busy >/dev/null && echo held-for-others; "
               f"guard_busy >/dev/null || echo free-for-me; guard_release; [ -e \"$GUARD_STATE/probe_game.lock\" ] || echo freed; "
+              f"for n in 1 2 3; do echo 'x 2020-01-01T00:00:00 pid 999999 id deadbeef' > \"$GUARD_STATE/probe_game.$n.lock\"; done; "
+              f"guard_busy >/dev/null || echo dead-free; "
               f"touch \"$GUARD_STATE/HUMAN_PLAYING\"; guard_take smoke2 2>/dev/null || echo refused")
     r = subprocess.run([_bash(), "-c", script], capture_output=True, text=True, env=env, timeout=60)
-    assert r.stdout.split() == ["took", "held-for-others", "free-for-me", "freed", "refused"], r.stdout + r.stderr
+    assert r.stdout.split() == ["took", "held-for-others", "free-for-me", "freed", "dead-free", "refused"], r.stdout + r.stderr
 
 
 def test_launcher_checks_the_marks():

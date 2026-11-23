@@ -27,6 +27,12 @@
 #    the same backup (a battle a human plays: build human; ultrafull - full screen on the RTX, the live labelling);
 #    -Graphics low (or the environment variable BAI_GRAPHICS=low for every launch of a session) is the lightest run,
 #    for measurements.
+#  * -Slot N (1..3; bridge/docs/launch/slots.md): up to three SCRIPTED games at once, each with its own pack, mod list
+#    and game-folder files (bridge/pack/slot.py), its own lock state/probe_game.N.lock (or the caller's whole-game
+#    lock), its own private desktop and the game's own switch -multirun; the user's preferences and the Workshop
+#    packs are shared by the live slots (slots.ps1: the first in backs up and writes, the last out restores). Every
+#    launcher holds the mutex Global\tww3_bai_launcher while it checks, reserves, installs and starts and while it
+#    cleans up; the single launch holds it for its whole run. -ShowPlan prints the names a launch would use.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('nn-arena', 'human', 'charge-probe', 'missile-probe', 'morale-probe', 'map-capture', 'move-probe')][string]$Target,
     [int]$TimeoutSeconds = 0,
@@ -41,7 +47,12 @@ param(
     # (100 ms, 200 above 5000 men). -TickPlacement 'first' puts it before game_startup_mode, 'last' after the mod list.
     # Also the environment variables BAI_TICK_MS / BAI_TICK_PLACEMENT.
     [int]$TickMs = 0,
-    [ValidateSet('first', 'last')][string]$TickPlacement = 'first'
+    [ValidateSet('first', 'last')][string]$TickPlacement = 'first',
+    # A launcher slot (0: the single launch; 1..3: one of several scripted games at once) and its build (default
+    # build/<target>); -ShowPlan: print the launch's names and paths, touch nothing.
+    [ValidateRange(0, 3)][int]$Slot = 0,
+    [string]$BuildDir = '',
+    [switch]$ShowPlan
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Graphics -and $env:BAI_GRAPHICS) { $Graphics = $env:BAI_GRAPHICS }
@@ -51,6 +62,17 @@ $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'preferences.ps1')
 . (Join-Path $PSScriptRoot 'installed.ps1')
 . (Join-Path $PSScriptRoot 'lockstep.ps1')
+. (Join-Path $PSScriptRoot 'slots.ps1')
+. (Join-Path $repo 'ops\guard.ps1')
+$session = $null
+$sessionLeft = $false
+# Every way out - an error, exit, Ctrl+C (a stopped pipeline runs finally blocks, never a trap) - gives the launcher
+# mutex back: the finally at the end; there a slot's reservation is given back too when a failure came before its cleanup.
+try {
+if ($Slot -gt 0 -and $Target -eq 'human') { throw 'A battle the user plays never runs in a slot (-Slot is for scripted work).' }
+if ($Slot -eq 0 -and $BuildDir) { throw '-BuildDir is for a slot (-Slot 1..3); the single launch takes build/<target>.' }
+$askedBuild = $BuildDir                   # (PowerShell names are case-blind: $buildDir below is this parameter)
+if ($Slot -gt 0 -and $KeepGameOpen) { throw '-KeepGameOpen is not for a slot (the last slot out restores the user''s preferences).' }
 $marker = Join-Path $repo 'build\launcher-installed.json'
 
 # Settings: bridge/config/default.json overridden by bridge/config/local.json.
@@ -67,10 +89,26 @@ $exe = Join-Path $game 'Warhammer3.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Warhammer3.exe not found in $game (set game_dir in bridge/config/local.json)" }
 
 $buildDir = Join-Path $repo ('build\' + $Target)
+if ($Slot -gt 0) {
+    # a slot: the build of -BuildDir (default build/<target>), its manifest read ONCE (these bytes go to the run folder)
+    if ($askedBuild) { $buildDir = (Resolve-Path -LiteralPath $askedBuild).Path }
+    if ($buildDir.StartsWith((Join-Path $repo 'build\slots\'), [StringComparison]::OrdinalIgnoreCase)) { throw "$buildDir is under build/slots (a slot's own output): give the ordinary build" }
+    $manifestBytes = [IO.File]::ReadAllBytes((Join-Path $buildDir 'manifest.json'))
+    $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if ([string]$manifest.target -cne $Target) { throw ("{0} is a build of the target '{1}', not '{2}': not starting" -f $buildDir, $manifest.target, $Target) }
+    if ($manifest.slot) { throw "$buildDir is a slot build: give the ordinary build and -Slot" }
+    if ([string]$manifest.config.own_ai -in @('net', 'human') -or $manifest.config.lockstep) { throw ("{0}: own_ai '{1}' needs a companion or a player; slots are for scripted work only" -f $buildDir, $manifest.config.own_ai) }
+} else {
 $manifest = Get-Content -LiteralPath (Join-Path $buildDir 'manifest.json') -Raw | ConvertFrom-Json
+if ($manifest.target -and [string]$manifest.target -cne $Target) { throw ("{0} is a build of the target '{1}', not '{2}': not starting" -f $buildDir, $manifest.target, $Target) }
+}
 $sourcePack = Join-Path $buildDir $manifest.pack
 $installedPack = Join-Path $game ('data\' + $manifest.pack)
 $modList = Join-Path $game ('tww3_bai_' + ($Target -replace '-', '_') + '_mods.txt')
+# Every name this launch uses (slots.ps1); slot 0 - the single launch's names, unchanged.
+$plan = Get-SlotPlan -Repo $repo -Game $game -Target $Target -Pack $manifest.pack -Slot $Slot
+if ($ShowPlan) { $plan | ConvertTo-Json -Depth 3; exit 0 }
+if ($Slot -gt 0) { $marker = $plan.marker; $installedPack = $plan.pack; $modList = $plan.mod_list }
 
 # Where the entry writes its events and when the run is complete.
 if ($Target -eq 'map-capture') {
@@ -84,6 +122,7 @@ if ($Target -eq 'map-capture') {
     $failEvents = @('error')
     $outputs = @()
 }
+if ($Slot -gt 0) { $eventLog = $plan.event_log; $outputs = @($plan.outputs) }
 # Default wait: 4 minutes for loading plus the battle's in-game deadline.
 if ($TimeoutSeconds -le 0) {
     if ($manifest.config.deadline_s) { $TimeoutSeconds = 240 + [int]$manifest.config.deadline_s }
@@ -91,6 +130,12 @@ if ($TimeoutSeconds -le 0) {
 }
 Write-Output ("Launcher timeout: {0} s" -f $TimeoutSeconds)
 
+if ($Slot -eq 0) {
+# The single launch holds the launcher mutex for its whole run (slots.ps1): no slot starts or cleans up meanwhile.
+if (-not (Enter-LauncherMutex 0)) {
+    if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
+    if (-not (Enter-LauncherMutex 120)) { throw "Another launcher is starting or cleaning up a game ($SlotMutexName held for 120 s): not starting." }
+}
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
 # The user plays / the game is held (the header's rules): checked here, so no way to the game passes them by.
 $stateDir = Join-Path $repo 'state'
@@ -98,7 +143,26 @@ if ($Target -ne 'human' -and (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN
 $lockFile = Join-Path $stateDir 'probe_game.lock'
 if (Test-Path -LiteralPath $lockFile) {
     $held = ([string](Get-Content -LiteralPath $lockFile -Raw)).Trim()
-    if (-not $env:BAI_LOCK_HELD -or $env:BAI_LOCK_HELD.Trim() -ne $held) { throw ("The game is held: state/probe_game.lock says '{0}' (its holder passes BAI_LOCK_HELD)" -f $held) }
+    # a killed runner's lock (ops/guard.*: new-form token, no such process) is no one's: the next taker breaks it
+    if ((-not $env:BAI_LOCK_HELD -or $env:BAI_LOCK_HELD.Trim() -ne $held) -and -not (Test-GuardLockDead $lockFile (Read-GuardLock $lockFile))) { throw ("The game is held: state/probe_game.lock says '{0}' (its holder passes BAI_LOCK_HELD)" -f $held) }
+}
+# Slots (ops/guard.*, slots.ps1): a live slot lock that is not part of the caller's whole-game lock, a live session of
+# slots - no single launch; what a dead session left is put right first (the user's preferences, then its files).
+foreach ($n in $SlotIds) {
+    $slotLock = Join-Path $stateDir ('probe_game.' + $n + '.lock')
+    $slotHeld = Read-GuardLock $slotLock
+    if ($null -ne $slotHeld -and -not ($slotHeld -and $env:BAI_LOCK_HELD -and $slotHeld -ceq $env:BAI_LOCK_HELD.Trim()) -and -not (Test-GuardLockDead $slotLock $slotHeld)) {
+        throw ("Slot {0} is held (state/probe_game.{0}.lock: '{1}'): no single launch." -f $n, $slotHeld)
+    }
+}
+$slotSession = Read-SlotSession $plan.session
+if ($slotSession -and @($slotSession.members | Where-Object { Test-MemberLive $_ }).Count -gt 0) { throw 'Launcher slots are running (build/slot-session.json): no single launch.' }
+if ($slotSession -or @(@($plan.slots_backup, $plan.backup_tmp, $plan.shared_marker) + @($plan.slot_markers) | Where-Object { [IO.File]::Exists($_) }).Count -gt 0) {
+    $dead = Clear-DeadSlotSession $plan (Join-Path $env:APPDATA 'The Creative Assembly\Warhammer3\scripts\preferences.script.txt')
+    if ($dead.restored) { Write-Output 'The user''s preferences restored from what a dead session of slots left.' }
+    if ($dead.removed.Count -gt 0) { Write-Output ('Removed what a dead session of slots left in the game folder: ' + ($dead.removed -join ', ')) }
+    if ($dead.conflict) { throw ('Not starting: ' + $dead.conflict) }
+    if ($dead.kept.Count -gt 0) { throw ('Files a session of slots put into the game folder have changed since; not touching them: ' + ($dead.kept -join ', ')) }
 }
 # What an earlier run put into the game folder and never removed (crashed, killed): ours by the marker.
 $leftover = Remove-InstalledFiles -Marker $marker
@@ -114,6 +178,54 @@ foreach ($name in $outputs) {
 $run = Join-Path $buildDir ('runs\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $run | Out-Null
 Copy-Item -LiteralPath (Join-Path $buildDir 'manifest.json') -Destination $run
+} else {
+# A slot: everything up to its game's start under the launcher mutex; the slot is reserved before any file is made.
+if (-not (Enter-LauncherMutex 300)) { throw "Another launcher holds $SlotMutexName for 300 s: slot $Slot not started." }
+$stateDir = Join-Path $repo 'state'
+if (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN_PLAYING')) { throw 'The user plays (state/HUMAN_PLAYING): no game started.' }
+$held = Read-GuardLock (Join-Path $stateDir 'probe_game.lock')
+$wholeHeld = $false
+if ($null -ne $held) {
+    if (-not ($held -and $env:BAI_LOCK_HELD -and $env:BAI_LOCK_HELD.Trim() -ceq $held)) { throw ("The game is held: state/probe_game.lock says '{0}' (its holder passes BAI_LOCK_HELD)" -f $held) }
+    $wholeHeld = $true
+}
+if (-not $wholeHeld) {
+    $held = Read-GuardLock $plan.lock
+    $mine = ([string][Environment]::GetEnvironmentVariable('BAI_SLOT_LOCK_HELD_' + $Slot)).Trim()
+    if ($null -eq $held) { throw ("A slot launch needs a lock: state/probe_game.{0}.lock (ops/guard.*) or the caller's whole-game lock" -f $Slot) }
+    if (-not ($held -and $held -ceq $mine)) { throw ("Slot {0} is held: {1} says '{2}' (its holder passes BAI_SLOT_LOCK_HELD_{0})" -f $Slot, (Split-Path -Leaf $plan.lock), $held) }
+}
+$prefs = Join-Path $env:APPDATA 'The Creative Assembly\Warhammer3\scripts\preferences.script.txt'
+$slotDeps = @($manifest.dependencies | Where-Object { $_ } | ForEach-Object { @{path = (Join-Path $game ('data\' + $_.pack)); sha256 = [string]$_.sha256} })
+$session = Add-SlotMember -Plan $plan -Slot $Slot -Prefs $prefs -Graphics $Graphics -Deps $slotDeps
+if ($session.cleared.Count -gt 0) { Write-Output ('Removed what an earlier session left in the game folder: ' + ($session.cleared -join ', ')) }
+$leftover = Remove-SlotInstalledFiles $marker $game
+if ($leftover.removed.Count -gt 0) { Write-Output ("Removed what an earlier run of slot {0} left in the game folder: {1}" -f $Slot, ($leftover.removed -join ', ')) }
+if ($leftover.kept.Count -gt 0) { throw ("Files an earlier run put into the game folder have changed since; not touching them: " + ($leftover.kept -join ', ')) }
+if ((Test-Path -LiteralPath $installedPack) -or (Test-Path -LiteralPath $modList)) {
+    throw "Files of a previous run remain ($installedPack or $modList). Inspect them and remove manually."
+}
+foreach ($name in $outputs) {
+    if (Test-Path -LiteralPath (Join-Path $game $name)) { throw "Previous output $name remains in the game folder; preserve it first." }
+}
+$run = Join-Path $plan.runs ((Get-Date -Format 'yyyyMMdd-HHmmss') + $plan.run_suffix)
+New-Item -ItemType Directory -Path $run | Out-Null
+[IO.File]::WriteAllBytes((Join-Path $run 'manifest.json'), $manifestBytes)
+# The slot's pack: the build's pack (checked against the manifest read above) with the Lua file-name shim.
+$python = @((Join-Path $repo '.venv\Scripts\python.exe'), (Join-Path $repo '..\TWW3-batle-ai\.venv\Scripts\python.exe')) |
+    Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $python) { $python = 'python' }
+$pythonPath = $env:PYTHONPATH
+try { $env:PYTHONPATH = $repo; & $python -m bridge.pack.slot $buildDir $Slot $plan.slot_build --expect $manifest.pack_sha256 | Out-Null; $code = $LASTEXITCODE }
+finally { $env:PYTHONPATH = $pythonPath }
+if ($code -ne 0) { throw "bridge.pack.slot failed for slot $Slot" }
+$slotManifest = [IO.File]::ReadAllText((Join-Path $plan.slot_build 'manifest.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
+if ([string]$slotManifest.source_pack_sha256 -ne [string]$manifest.pack_sha256 -or [int]$slotManifest.slot -ne $Slot) { throw "the slot pack in $($plan.slot_build) is not made from $buildDir" }
+if ((Join-Path $game ('data\' + $slotManifest.pack)) -ne $installedPack) { throw "slot pack name differs from the plan: $($slotManifest.pack)" }
+Copy-Item -LiteralPath (Join-Path $plan.slot_build 'manifest.json') -Destination (Join-Path $run 'manifest.slot.json')
+$sourcePack = Join-Path $plan.slot_build $slotManifest.pack
+$manifest = $slotManifest
+}
 
 # Required mods come from bridge/config/mod-dependencies.json and must be baked into
 # the build: every battle runs with them, there is no vanilla fallback.
@@ -134,7 +246,9 @@ foreach ($dependency in $manifest.dependencies) {
     if (-not (Test-Path -LiteralPath $workshopPack)) { throw "Dependency not downloaded: $workshopPack" }
     if ((Get-FileHash -LiteralPath $workshopPack).Hash.ToLowerInvariant() -ne $dependency.sha256) { throw "Dependency hash differs: $workshopPack" }
     $dataPack = Join-Path $game ('data\' + $dependency.pack)
-    if (Test-Path -LiteralPath $dataPack) {
+    if ($Slot -gt 0) {
+        $toCopy += , @($workshopPack, $dataPack, [string]$dependency.sha256)     # a slot: the session copies it (the shared marker)
+    } elseif (Test-Path -LiteralPath $dataPack) {
         if ((Get-FileHash -LiteralPath $dataPack).Hash.ToLowerInvariant() -ne $dependency.sha256) { throw "A different $($dependency.pack) is already in data/; not overwriting it." }
         Write-Output ("Warning: {0} is in data/ and not ours by {1} - left there after the run; the game then loads it in every normal start too (remove it unless it is yours)." -f $dataPack, $marker)
     } else {
@@ -148,8 +262,10 @@ $modText = ($lines -join [Environment]::NewLine) + [Environment]::NewLine
 # Everything this run puts into the game folder goes to the marker first (installed.ps1): the
 # cleanup below, or the next launch after a crash, removes exactly these files.
 $entries = @(@{path = $installedPack; sha256 = $manifest.pack_sha256}, @{path = $modList; sha256 = (Get-TextSha256 $modText)})
+if ($Slot -gt 0) { Save-SlotMarker $marker $entries } else {
 foreach ($pair in $toCopy) { $entries += @{path = $pair[1]; sha256 = (Get-FileSha256 $pair[0])} }
 Save-InstalledMarker -Marker $marker -Entries $entries
+}
 
 $prefs = Join-Path $env:APPDATA 'The Creative Assembly\Warhammer3\scripts\preferences.script.txt'
 $prefsBackup = Join-Path $repo 'build\preferences.script.backup.txt'
@@ -162,15 +278,29 @@ $resultLine = $null
 $void = ''
 $runLog = Join-Path $run 'events.jsonl'
 $copiedLines = [long]0
+$deskHandle = [IntPtr]::Zero
+$restoreIncomplete = $false
 try {
-# Install dependencies, our pack and the private mod list.
+# Install dependencies, our pack and the private mod list (a slot: the dependencies through the session; its pack
+# under a copy-in-progress name first, slots.ps1 Copy-SlotFile).
+if ($Slot -gt 0) { Copy-SlotFile $sourcePack $installedPack $manifest.pack_sha256 } else {
 foreach ($pair in $toCopy) { Copy-Item -LiteralPath $pair[0] -Destination $pair[1] }
 Copy-Item -LiteralPath $sourcePack -Destination $installedPack
+}
 if ((Get-FileHash -LiteralPath $installedPack).Hash.ToLowerInvariant() -ne $manifest.pack_sha256) { throw 'Installed pack hash mismatch' }
 [IO.File]::WriteAllText($modList, $modText, [Text.UTF8Encoding]::new($false))
 
 # Fair difficulty. A backup left by an interrupted run is the user's file: put it back first.
 $fairDifficulty = 1
+if ($Slot -gt 0) {
+    # the session of slots: the first in backs up and writes Normal + the graphics; later ones joined with the same
+    if ($session.first) {
+        $shared = Initialize-SlotShared -Plan $plan -Run $session.run -Prefs $prefs -Graphics $Graphics -Deps @($toCopy | ForEach-Object { @{source = $_[0]; path = $_[1]; sha256 = $_[2]} })
+        $userDifficulty = $shared.user_difficulty
+        foreach ($w in $shared.warnings) { Write-Output $w }
+    } else { $userDifficulty = $session.user_difficulty }
+    Write-Output ("Slot {0}: {1} of the session of slots (Normal, graphics '{2}'; the last slot out restores the user's preferences)" -f $Slot, $(if ($session.first) { 'first' } else { 'joined' }), $Graphics)
+} else {
 if (Test-Path -LiteralPath $prefsBackup) {
     [IO.File]::WriteAllBytes($prefs, [IO.File]::ReadAllBytes($prefsBackup))
     Remove-Item -LiteralPath $prefsBackup
@@ -186,6 +316,7 @@ if ($Graphics) { foreach ($key in $GraphicsPresets[$Graphics].Keys) { $prefValue
 [IO.File]::WriteAllBytes($prefs, $latin.GetBytes((Set-PreferenceValues -Text $prefsText -Values $prefValues)))
 Write-Output ("Battle difficulty for this run: {0} (normal); the user's {1} is restored afterwards" -f $fairDifficulty, $userDifficulty)
 if ($Graphics) { Write-Output ("Graphics for this run: {0}; the user's are restored afterwards" -f $Graphics) }
+}
 
 # The shared log is cleared after every run; anything in it now came from outside a launcher
 # run (or a run whose log could not be cleared): keep it with this run, start from offset 0.
@@ -205,11 +336,31 @@ if ($TickMs -gt 0) {
     if ($TickPlacement -eq 'first') { $arguments = $tickCommand + ' ' + $arguments } else { $arguments = $arguments + ' ' + $tickCommand }
     Write-Output ('Engine step requested: ' + $tickCommand + ' (' + $TickPlacement + ')')
 }
+if ($Slot -gt 0) {
+    # still under the mutex: the marks once more right before the start, then the game's own switch that lets a second
+    # process past its instance check (never in a single launch or the user's battle), on a private desktop
+    if (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN_PLAYING')) { throw 'The user plays (state/HUMAN_PLAYING; it appeared during the setup): no game started.' }
+    $foreign = @(Get-ForeignGames (Read-SlotSession $plan.session))
+    if ($foreign.Count -gt 0) { throw ('WH3 is already running and is not a live slot of ours (PID {0}); not starting.' -f ($foreign.Id -join ', ')) }
+    $arguments = $arguments + ' ' + $plan.switch
+    $started = Get-Date
+    $d = Start-OnDesktop -Exe $exe -Arguments $arguments -Dir $game -Desktop $plan.desktop
+    $process = $d.process; $deskHandle = $d.desktop_handle
+    Set-SlotGame -Plan $plan -Run $session.run -Process $process
+    Exit-LauncherMutex
+    @{pid = $process.Id; started_utc = $started.ToUniversalTime().ToString('o'); target = $Target; build = $manifest.build;
+      pack_sha256 = $manifest.pack_sha256; log_offset = $offset; stale_log_bytes = $staleBytes; arguments = $arguments;
+      battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty; graphics = $Graphics;
+      slot = $Slot; run_id = $session.run; desktop = $plan.desktop; event_log = $eventLog; source_build = $buildDir
+      game_start_utc = $process.StartTime.ToUniversalTime().ToString('o')} |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'launch.json') -Encoding utf8
+} else {
 $process = Start-Process -FilePath $exe -WorkingDirectory $game -ArgumentList $arguments -PassThru
 @{pid = $process.Id; started_utc = $started.ToUniversalTime().ToString('o'); target = $Target; build = $manifest.build;
   pack_sha256 = $manifest.pack_sha256; log_offset = $offset; stale_log_bytes = $staleBytes; arguments = $arguments;
   battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty; graphics = $Graphics} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'launch.json') -Encoding utf8
+}
 Write-Output ("Started WH3 PID {0}; run folder {1}. Process start is not success: waiting for events." -f $process.Id, $run)
 
 $status = 'timeout'
@@ -217,7 +368,7 @@ $status = 'timeout'
         if ($process.HasExited) { $status = 'process_exited'; break }
         $crash = Get-ChildItem -LiteralPath "$env:APPDATA\The Creative Assembly\Warhammer3\crash_report" -Filter '*.stack.txt' -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -gt $started } | Select-Object -First 1
-        if ($crash) { Copy-Item -LiteralPath $crash.FullName -Destination $run; $status = 'crash_report'; break }
+        if ($crash -and $Slot -eq 0) { Copy-Item -LiteralPath $crash.FullName -Destination $run; $status = 'crash_report'; break }
         # Fast path: runs can write tens of thousands of large rows. Lines are
         # appended in one call per poll and only key events are parsed.
         $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
@@ -235,6 +386,9 @@ $status = 'timeout'
         }
         if ($status -eq 'lua_error') { break }
         if ($done -ge 1) { $status = 'completed'; break }
+        if ($Slot -gt 0 -and (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN_PLAYING'))) {
+            $status = 'human_playing'; Write-Output 'The user plays (state/HUMAN_PLAYING appeared): this slot stops its own game.'; break
+        }
         Start-Sleep -Seconds 1
     }
     # a lock-step build (manifest config.lockstep): completed only with a normal end (result status completed or timeout) and ls_ok true
@@ -256,6 +410,66 @@ $status = 'timeout'
 } finally {
     $cleanup = @{status = $status; completed_events = $done; game_left_running = $false; private_files_removed = $false}
     if ($void) { $cleanup.lockstep_void = $void }
+    if ($Slot -gt 0) {
+        $sessionLeft = $true
+        if ($process -and -not $process.HasExited) { try { $process.Kill() } catch { }; [void]$process.WaitForExit(20000) }
+        if ($process -and $status -eq 'process_exited') {
+            # the crash_report folder is shared by every game: a new report is kept with the run, never taken as this slot's
+            $stacks = @(Get-ChildItem -LiteralPath "$env:APPDATA\The Creative Assembly\Warhammer3\crash_report" -Filter '*.stack.txt' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $started })
+            if ($stacks.Count -gt 0) {
+                $cleanup.crash_reports_unattributed = @($stacks | ForEach-Object { $_.Name })
+                foreach ($st in $stacks) { try { Copy-Item -LiteralPath $st.FullName -Destination (Join-Path $run ('unattributed_' + $st.Name)) } catch { } }
+            }
+        }
+        if (-not (Enter-LauncherMutex 600)) {
+            $cleanup.session = "not cleaned: $SlotMutexName not taken in 600 s (the next launch or bridge/launcher/cleanup.ps1 cleans)"
+            $restoreIncomplete = $true
+        } else {
+            try {
+                $ownGone = (-not $process) -or $process.HasExited
+                $others = @(Get-ForeignGames (Read-SlotSession $plan.session))
+                if ($ownGone -and $others.Count -eq 0) {
+                    $gone = Remove-SlotInstalledFiles $marker $game
+                    $cleanup.removed = @($gone.removed)
+                    $cleanup.private_files_removed = ($gone.kept.Count -eq 0)
+                    if ($gone.kept.Count -gt 0) { $cleanup.changed_kept = @($gone.kept) }
+                    try {
+                        foreach ($name in $outputs) {
+                            $gamePath = Join-Path $game $name
+                            $savedPath = Join-Path $run $name
+                            if ((Test-Path -LiteralPath $gamePath) -and (Test-Path -LiteralPath $savedPath) -and
+                                (Get-FileHash -LiteralPath $gamePath).Hash -eq (Get-FileHash -LiteralPath $savedPath).Hash) {
+                                Remove-Item -LiteralPath $gamePath
+                            }
+                        }
+                    } catch { $cleanup.outputs = 'kept: ' + $_.Exception.Message }
+                    if ($clearLog -and $reader) {
+                        try {
+                            $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
+                            if ($reader.Pending.Length -gt 0) { $lines += $reader.Pending; $reader.Pending = '' }
+                            if ($lines.Count -gt 0) { [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false)); $copiedLines += $lines.Count }
+                            $cleanup.event_log = Remove-CopiedEventLog -Path $eventLog -State $reader -RunLog $runLog -CopiedLines $copiedLines
+                        } catch { $cleanup.event_log = 'kept: ' + $_.Exception.Message }
+                    }
+                } else {
+                    $cleanup.files_kept = 'a Warhammer3 that is not a live slot''s game runs (or this slot''s did not stop): its files are left to the last slot out'
+                }
+                if ($deskHandle -ne [IntPtr]::Zero -and $ownGone) { $cleanup.desktop_closed = [SlotDesk]::CloseDesktop($deskHandle) }
+                $x = Exit-SlotSession -Plan $plan -Run $session.run -Prefs $prefs
+                $cleanup.session_last_out = $x.last
+                $cleanup.preferences_restored = $x.preferences_restored
+                if ($x.deferred) { $cleanup.restore_deferred = $x.deferred }
+                if ($x.removed.Count -gt 0) { $cleanup.shared_removed = @($x.removed) }
+                if ($x.kept.Count -gt 0) { $cleanup.shared_kept = @($x.kept) }
+                if ($x.conflict) { $cleanup.session = 'conflict: ' + $x.conflict }
+                $restoreIncomplete = $x.last -and ([bool]$x.deferred -or [bool]$x.conflict -or $x.kept.Count -gt 0 -or [IO.File]::Exists($plan.slots_backup))
+            } catch {
+                $cleanup.session = 'failed: ' + $_.Exception.Message
+                $restoreIncomplete = $true
+            } finally { Exit-LauncherMutex }
+        }
+        if ($restoreIncomplete) { $cleanup.restore_incomplete = $true }
+    } else {
     $current = if ($process) { Get-Process -Id $process.Id -ErrorAction SilentlyContinue } else { $null }
     $ours = $current -and $current.Path -eq $exe -and [Math]::Abs(($current.StartTime - $started).TotalSeconds) -lt 15
     if ($ours -and $KeepGameOpen) {
@@ -303,7 +517,13 @@ $status = 'timeout'
             $cleanup.preferences_restored = $true
         }
     }
+    }
     $cleanup | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'status.json') -Encoding utf8
 }
 Write-Output ("Run finished: {0}. Results: {1}" -f $status, $run)
+if ($Slot -gt 0 -and $restoreIncomplete) { Write-Output 'The shared cleanup is NOT complete (status.json: session, restore_deferred, shared_kept): see bridge/docs/launch/slots.md'; exit 3 }
 if ($status -ne 'completed') { exit 1 }
+} finally {
+    if ($session -and -not $sessionLeft) { try { if (Enter-LauncherMutex 600) { [void](Exit-SlotSession $plan $session.run $prefs) } } catch { } }
+    while ($script:SlotMutexHeld -gt 0) { $script:SlotMutex.ReleaseMutex(); $script:SlotMutexHeld-- }
+}
