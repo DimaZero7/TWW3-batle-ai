@@ -65,7 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/launch.ps1 -
 | `launch.json` | PID, время, аргументы, смещение журнала, перенесённые байты старого журнала (`stale_log_bytes`), сложность боя, `graphics` |
 | `events.jsonl` | События этого запуска |
 | `events.before.jsonl` | Только если журнал в папке игры был не пуст при старте: его прежние строки |
-| `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, итог очистки и возврата настроек, `event_log` (`removed` / `absent` / `kept: <причина>`) |
+| `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, итог очистки и возврата настроек, `event_log` (`removed` / `absent` / `kept: <причина>`); у сборки `--no-draw` — `no_draw` {`on`, `off`, `off_failed`, `refused`, `drawn`, `unrestored`, `game_gone`, `patch_left`}, статус `no_draw_unrestored`, если возврат байт не подтверждён (игра закрыта сразу) ([без кадров](../apps/memreader.md#без-кадров-v2)) |
 | `tww3_bai_map_capture_*.{csv,xml,jsonl}` | Для `map-capture`: сетка, XML боя, события |
 
 Журнал событий в папке игры (`tww3_bai_events.jsonl`) общий для всех целей,

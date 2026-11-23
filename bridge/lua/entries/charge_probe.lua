@@ -179,6 +179,8 @@
 -- with lane.mem_morale_ours (the intercept plan) the lane's attacker and extras too (bound: config.mem_extras).
 -- config.mem_extras (with config.mem; the tacwalk plan): the lanes' extras (and second targets) are bound and polled like
 -- the attacker and the target.
+-- config.no_draw (bridge.build --no-draw): the game draws no frame while the battle runs - apps.battle.no_draw, ON after
+-- the start, OFF first thing in finish and fail; events v2_on, v2_off, v2_refused (drawn), v2_drawn; result v2.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -193,6 +195,7 @@ local memmorale = require('apps.mem.morale')
 local memproj = require('apps.mem.projectiles')
 local memhits = require('apps.mem.hits')
 local memorder = require('apps.mem.order')
+local no_draw = require('apps.battle.no_draw')
 
 local M = {}
 
@@ -398,6 +401,7 @@ function M.main(bm, config, globals)
         if state.mem then pcall(state.mem.unhook) end
     end
     local function fail(err)
+        if state.undrawn then pcall(state.undrawn.off, 'error') end
         state.active = false
         state.finished = true
         stop_timers()
@@ -573,11 +577,12 @@ function M.main(bm, config, globals)
 
     local function finish(status)
         if state.finished then return end
+        if state.undrawn then state.undrawn.off(status or 'completed') end
         state.active = false
         state.finished = true
         stop_timers()
         if state.cancel_deadline then state.cancel_deadline() end
-        emit('result', {status = status or 'completed', winner = 0})
+        emit('result', {status = status or 'completed', winner = 0, v2 = state.undrawn and (state.undrawn.used == true)})
         flush()
         bm:end_battle()
     end
@@ -1737,6 +1742,7 @@ function M.main(bm, config, globals)
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
             finish('deadline')
         end), 'tww3_bai_charge_probe_deadline')
+        if state.undrawn then state.undrawn.arm() end
         bm:add_infotext('BAI: MELEE PROBE')
         bm:callback(guarded(go), config.settle_ms, 'tww3_bai_charge_probe_go')
         flush()
@@ -1755,6 +1761,10 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
+        if config.no_draw then
+            state.undrawn = no_draw.new(config.no_draw, {bm = bm, emit = emit, flush = flush,
+                finished = function() return state.finished end})
+        end
         local sides = battle.read_sides(bm)
         state.armies = {sides[1].army, sides[2].army}
         state.alliances = {sides[1].alliance, sides[2].alliance}

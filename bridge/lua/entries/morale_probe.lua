@@ -27,6 +27,8 @@
 -- of battle 'mem_morale' {c, tick, cost, t, units = {name = morale row (apps.mem.morale) + mp, ms (CCO MoralePercent,
 -- MoraleState), w, r, s (wavering, routing, shattered), sn (men alive) read by the script in the same callback}}
 -- of the running lanes' units.
+-- config.no_draw (bridge.build --no-draw): the game draws no frame while the battle runs - apps.battle.no_draw, ON after
+-- the start, OFF first thing in finish and fail; events v2_on, v2_off, v2_refused (drawn), v2_drawn; result v2.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
@@ -36,6 +38,7 @@ local facing = require('apps.orders.facing')
 local map = require('apps.map.adapter')
 local services = require('apps.bridge.services')
 local memmorale = require('apps.mem.morale')
+local no_draw = require('apps.battle.no_draw')
 
 local M = {}
 
@@ -92,6 +95,7 @@ function M.main(bm, config, globals)
         pcall(function() bm:remove_process(MEM_TIMER) end)
     end
     local function fail(err)
+        if state.undrawn then pcall(state.undrawn.off, 'error') end
         state.active = false
         state.finished = true
         stop_timers()
@@ -163,11 +167,12 @@ function M.main(bm, config, globals)
 
     local function finish(status)
         if state.finished then return end
+        if state.undrawn then state.undrawn.off(status or 'completed') end
         state.active = false
         state.finished = true
         stop_timers()
         if state.cancel_deadline then state.cancel_deadline() end
-        emit('result', {status = status or 'completed', winner = 0})
+        emit('result', {status = status or 'completed', winner = 0, v2 = state.undrawn and (state.undrawn.used == true)})
         flush()
         bm:end_battle()
     end
@@ -343,6 +348,7 @@ function M.main(bm, config, globals)
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
             finish('deadline')
         end), 'tww3_bai_morale_probe_deadline')
+        if state.undrawn then state.undrawn.arm() end
         bm:add_infotext('BAI: MORALE PROBE')
         bm:callback(guarded(go), config.settle_ms, 'tww3_bai_morale_probe_go')
         flush()
@@ -358,6 +364,10 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
+        if config.no_draw then
+            state.undrawn = no_draw.new(config.no_draw, {bm = bm, emit = emit, flush = flush,
+                finished = function() return state.finished end})
+        end
         local fearless = {}
         for _, name in ipairs(config.fearless or {}) do fearless[name] = true end
         local sides = battle.read_sides(bm)

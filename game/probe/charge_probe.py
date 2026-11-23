@@ -2171,14 +2171,16 @@ def write_scenario(plan, index, path=None):
     return path
 
 
-def run(plan, which=None, python=sys.executable, dry=False, deadline=900, speed=None, mem=False):
+def run(plan, which=None, python=sys.executable, dry=False, deadline=900, speed=None, mem=False, no_draw=False):
     """Builds and launches each battle in turn (bridge/launcher/launch.ps1: Normal difficulty set and
     restored by the launcher; speed: bridge.build --speed, None its default; mem: built with --mem - the lanes' men from
-    the game's memory, memreader Plus, game/probe/mem_probe.py men)."""
+    the game's memory, memreader Plus, game/probe/mem_probe.py men; no_draw: built with --no-draw - no frames drawn, x40
+    by default, bridge/config/memreader.json)."""
     done = []
     for i in which or range(1, len(battles(plan)) + 1):
         build = [python, "-m", "bridge.build", "charge-probe", "--probe-plan", plan, "--probe-battle", str(i),
-                 "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else []) + (["--mem"] if mem else [])
+                 "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else []) + (["--mem"] if mem else []) \
+            + (["--no-draw"] if no_draw else [])
         launch = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER / "launch.ps1"),
                   "-Target", "charge-probe"]
         print(f"--- {plan} {i}", flush=True)

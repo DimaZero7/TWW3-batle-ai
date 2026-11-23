@@ -28,7 +28,7 @@ python -m bridge.build map-capture --step 3 --features
 
 | Параметр | Цели | Значение |
 |---|---|---|
-| `--speed 1/3/10/20` | все, кроме map-capture | Скорость боя (по умолчанию 20; у `human` — 1). Бой цепочки — ×10: на ×20 три сети не успевают за секунду боя |
+| `--speed 1/3/10/20/40` | все, кроме map-capture | Скорость боя (по умолчанию 20; у `human` — 1; с `--no-draw` — 40, и 40 только с ним). Бой цепочки — ×10: на ×20 три сети не успевают за секунду боя |
 | `--timeout 30..3600` | nn-arena, human | Лимит модельного времени боя, с (600; у `human` — 3600); из него считается срок боя |
 | `--tick-ms` | все, кроме map-capture | Период тика, мс (1000) |
 | `--deadline` | все, кроме map-capture | Лимит реального времени на бой, с (по умолчанию из длины сценария и скорости) |
@@ -59,6 +59,7 @@ python -m bridge.build map-capture --step 3 --features
 | `--mprobe-plan`, `--mprobe-battle N` | missile-probe | План [пробы стрельбы](../apps/entries.md#missile_probe) и номер боя |
 | `--morale-plan`, `--morale-battle N` | morale-probe | План [пробы морали](../apps/entries.md#morale_probe) и номер боя |
 | `--mem` | charge-, missile-, morale-probe | memreader Plus рядом с нашим паком: снаряды в полёте, бойцы, мораль из памяти игры ([memreader](../apps/memreader.md)); места — из `sites_file` в `bridge/config/memreader.json` |
+| `--no-draw` | charge-, missile-, morale-probe, nn-arena `--own-ai ai`, nn-arena `--own-ai net --lockstep`; никогда `human` и экзамен | Игра не рисует кадры, пока идёт бой (V2): memreader Plus рядом с нашим паком, один патч 5 байт ([no_draw](../apps/memreader.md#без-кадров-v2)); по умолчанию ×40, срок боя — как при ×20 (откажет патч — бой идёт с кадрами). В манифест — `no_draw: true` и `config.no_draw`; события `v2_on`, `v2_off`, `v2_refused`, `v2_drawn`, в итоге боя — `v2`; `watch.ps1 -Chain -StepLock -NoDraw` |
 | `--kv [SECTION.]KEY=VALUE\|xN` | charge-, missile-, morale-probe | Строка таблиц правил игры (`_kv_morale` / `_kv_rules` / `_kv_fatigue`: секции `morale` / `battle` / `fatigue`) — VALUE или N × значение игры, таблицей своего пака пробы (`bridge/pack/kvtable.py`); можно повторять. Никогда для боя, который пишет данные: правило не игры |
 | `--step 1/2/3/5` | map-capture | Размер клетки сетки, м |
 | `--nodes` | map-capture | Опрос в кратных шагу точках (узлы высот движка), а не в центрах клеток |

@@ -24,6 +24,9 @@
 -- absent: as before): a decision tick waits for its own answer - M.lockstep; events ls_start, ls_hold, ls_off; result
 -- ls_holds, ls_timeouts, ls_off, ls_why, ls_held_ms, ls_ok (no failed hold, lock never off, a normal end: status
 -- completed or timeout - the model time limit; deadline - the wall clock -, stalled, incomplete are not).
+-- config.no_draw (bridge.build --no-draw: own_ai 'ai', or 'net' with config.lockstep; never 'human'; absent: as before):
+-- the game draws no frame while the battle runs - apps.battle.no_draw, ON after the start, OFF first thing in finish
+-- and fail; events v2_on, v2_off, v2_refused (the battle goes on drawn), v2_drawn; result v2 = the patch was on.
 -- config.skirmish (own_ai 'net'; bridge.build sets 'off' by default): 'off' turns the game's skirmish mode off for every
 -- unit the bridge commands, as the simulator's network units have it off (apps.bridge.adapter); 'game' or absent: the
 -- game's own setting. Every row of a
@@ -55,6 +58,7 @@ local deploy = require('apps.bridge.deploy_adapter')
 local label_overlay = require('apps.battle.label_overlay')
 local live_label = require('apps.battle.live_label')
 local planner = require('apps.orders.planner_adapter')
+local no_draw = require('apps.battle.no_draw')
 
 local M = {}
 
@@ -170,6 +174,7 @@ function M.main(bm, config, globals)
         deploy.cancel(bm)
     end
     local function fail(err)
+        if state.undrawn then pcall(state.undrawn.off, 'error') end
         cleanup()
         state.finished = true
         pcall(emit, 'error', {message = tostring(err)})
@@ -274,6 +279,7 @@ function M.main(bm, config, globals)
 
     local function finish(status, winner)
         if state.finished then return end
+        if state.undrawn then state.undrawn.off(status) end
         if state.overlay then pcall(state.overlay.stop) end
         if state.live then pcall(state.live.finish) end
         if state.cancel_deadline then state.cancel_deadline() end
@@ -293,6 +299,7 @@ function M.main(bm, config, globals)
                     and (status == 'completed' or status == 'timeout')
             end
         end
+        if state.undrawn then row.v2 = state.undrawn.used end
         emit('result', row)
         cleanup()
         state.finished = true
@@ -591,6 +598,7 @@ function M.main(bm, config, globals)
             bm:force_battle_end(0, 'deadline', true)
         end), 'tww3_bai_nn_arena_deadline')
         state.active = true
+        if state.undrawn then state.undrawn.arm() end
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         if state.net then
             local hold = nil
@@ -627,6 +635,12 @@ function M.main(bm, config, globals)
         assert(common and vector_type, 'common and battle_vector globals required')
         assert(M.OWN_AI[config.own_ai], 'own_ai must be net, human or ai')
         assert(config.skirmish == nil or M.SKIRMISH[config.skirmish], 'skirmish must be absent, game or off')
+        assert(not config.no_draw or config.own_ai == 'ai' or (config.own_ai == 'net' and config.lockstep),
+            'no_draw is for own_ai ai, or net with lockstep')
+        if config.no_draw then
+            state.undrawn = no_draw.new(config.no_draw, {bm = bm, emit = emit, flush = flush,
+                finished = function() return state.finished end})
+        end
         local pl = config.park_lords
         assert(pl == nil or (type(pl.half) == 'number' and type(pl.margin) == 'number' and type(pl.min_m) == 'number'
             and type(pl.drift_m) == 'number' and pl.half > pl.margin), 'park_lords needs numbers half > margin, min_m, drift_m')

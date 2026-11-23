@@ -24,7 +24,7 @@
 Обмен в папке игры: `tww3_bai_nn_deploy.json` → `tww3_bai_nn_plan.txt` (расстановка), `tww3_bai_nn_state.json` →
 `tww3_bai_nn_orders.txt` (каждая секунда); запись через `.tmp`, приказы кончаются строкой `end`. По SHA-256 закреплены
 True Sight (`config/mod-dependencies.json`) и memreader Plus (`config/memreader.json`, места — `reverse/mem/sites_exe1103.json`).
+`--no-draw`: игра не рисует кадры (×40, патч 5 байт на время боя) — пробы, дорожки, ИИ против ИИ, бой сети с `--lockstep`.
 Лаунчер не запускает игру при `state/HUMAN_PLAYING` (кроме `human`) и при чужом `state/probe_game.lock` (`BAI_LOCK_HELD`).
-Тест (дымовой): `python -m pytest -q bridge/tests` — на хосте сборка пака и все входы Lua; в контейнере ещё помощник
-цепочки отвечает на записанный документ боя М1 (`tests/data/state_m1.json`). Нельзя: бои против ИИ игры не на
-«Нормальной»; memreader в бою сети; новое поле входа без строки в `contract/parity.md`.
+Тест (дымовой): `python -m pytest -q bridge/tests` — на хосте сборка и входы Lua; в контейнере ещё помощник на бое М1.
+Нельзя: бои против ИИ игры не на «Нормальной»; memreader в экзамене и в бою человека; поле входа без строки в `contract/parity.md`.

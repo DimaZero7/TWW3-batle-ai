@@ -63,6 +63,7 @@ $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'preferences.ps1')
 . (Join-Path $PSScriptRoot 'installed.ps1')
 . (Join-Path $PSScriptRoot 'lockstep.ps1')
+. (Join-Path $PSScriptRoot 'no_draw.ps1')
 . (Join-Path $PSScriptRoot 'slots.ps1')
 . (Join-Path $repo 'ops\guard.ps1')
 $session = $null
@@ -103,6 +104,13 @@ if ($Slot -gt 0) {
 $manifest = Get-Content -LiteralPath (Join-Path $buildDir 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.target -and [string]$manifest.target -cne $Target) { throw ("{0} is a build of the target '{1}', not '{2}': not starting" -f $buildDir, $manifest.target, $Target) }
 }
+# A no-draw build (bridge.build --no-draw; bridge/config/memreader.json): the patch lives in the game process only (it
+# goes with the process); never the user's battle, never left to a game that stays open.
+$noDraw = [bool]($manifest.no_draw -or $manifest.config.no_draw)
+if ($noDraw -and ($Target -eq 'human' -or [string]$manifest.config.own_ai -eq 'human')) { throw 'A no-draw build is never the user''s battle (bridge/config/memreader.json): not starting.' }
+if ($noDraw -and $KeepGameOpen) { throw '-KeepGameOpen is not for a no-draw build: the launcher closes the game it ran undrawn.' }
+# never left open after the battle: no linger (the game is closed at once; a restore not confirmed - status no_draw_unrestored)
+if ($noDraw -and $LingerSeconds -gt 0) { Write-Output 'A no-draw build never lingers: -LingerSeconds 0.'; $LingerSeconds = 0 }
 $sourcePack = Join-Path $buildDir $manifest.pack
 $installedPack = Join-Path $game ('data\' + $manifest.pack)
 $modList = Join-Path $game ('tww3_bai_' + ($Target -replace '-', '_') + '_mods.txt')
@@ -275,6 +283,7 @@ $reader = $null
 $clearLog = $false
 $status = 'setup_failed'
 $done = 0
+$v2 = New-NoDrawState
 $resultLine = $null
 $void = ''
 $runLog = Join-Path $run 'events.jsonl'
@@ -376,14 +385,17 @@ $status = 'timeout'
             [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false))
             $copiedLines += $lines.Count
             foreach ($line in $lines) {
-                if ($line -notmatch '"event":"(ready|start|result|error|frame|grid_done|probe_done|probe_error|skipped|speed_restored)"') { continue }
+                if ($line -notmatch '"event":"(ready|start|result|error|frame|grid_done|probe_done|probe_error|skipped|speed_restored|v2_on|v2_off|v2_refused)"') { continue }
                 $event = $Matches[1]
                 Write-Output $line
+                # (no_draw.ps1) only a v2_off that read the game's 5 bytes back counts as off; any other: the game is closed at once
+                if ($event -like 'v2_*') { Add-NoDrawEvent $v2 $event $line }
                 if ($event -in $failEvents -or $event -eq 'skipped') { $status = 'lua_error' }
                 if ($event -in $doneEvents) { $done++ }
                 if ($event -eq 'result' -and -not $resultLine) { $resultLine = $line }
             }
         }
+        if ($v2.unrestored) { break }
         if ($status -eq 'lua_error') { break }
         if ($done -ge 1) { $status = 'completed'; break }
         if ($Slot -gt 0 -and (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN_PLAYING'))) {
@@ -393,6 +405,18 @@ $status = 'timeout'
             $status = 'human_playing'; Write-Output 'The user plays (state/HUMAN_PLAYING appeared): this launch stops its own game.'; break
         }
         Start-Sleep -Seconds 1
+    }
+    # a no-draw build: the battle ended (result or error) with a v2_on and no restoring v2_off - not a clean end; the
+    # game is closed at once (no linger). Restored: a short look (<= 4 s) for v2_drawn, the game is not waited for.
+    if ($noDraw -and (Test-NoDrawEnd $v2 $status)) { $status = 'no_draw_unrestored'; Write-Output ('No-draw restore not confirmed (' + $v2.unrestored + '): the game is closed now.') }
+    if ($noDraw -and $status -eq 'completed' -and $v2.on -gt 0) {
+        $drawnEnd = (Get-Date).AddSeconds(4)
+        while ($null -eq $v2.drawn -and (Get-Date) -lt $drawnEnd -and -not $process.HasExited) {
+            Start-Sleep -Milliseconds 250
+            $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
+            if ($lines.Count -gt 0) { [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false)); $copiedLines += $lines.Count }
+            foreach ($line in $lines) { if ($line -match '"event":"v2_drawn"') { Add-NoDrawEvent $v2 'v2_drawn' $line; Write-Output $line } }
+        }
     }
     # a lock-step build (manifest config.lockstep): completed only with a normal end (result status completed or timeout) and ls_ok true
     if ($status -eq 'completed' -and $manifest.config.lockstep) {
@@ -520,6 +544,13 @@ $status = 'timeout'
             if ($back.conflict) { $cleanup.preferences_conflict = $back.conflict; $restoreIncomplete = $true }
         } catch { $cleanup.preferences_conflict = 'failed: ' + $_.Exception.Message; $restoreIncomplete = $true }
     }
+    }
+    if ($noDraw) {
+        # the patch is in the game process's memory only: once that process is gone nothing of it is left anywhere
+        $gone = (-not $process) -or $process.HasExited
+        # off: v2_off rows with restored true only; drawn: v2_drawn's verdict when it came in time (null: not seen)
+        $cleanup.no_draw = @{on = $v2.on; off = $v2.off; off_failed = $v2.off_failed; refused = $v2.refused;
+            drawn = $v2.drawn; unrestored = $v2.unrestored; game_gone = $gone; patch_left = ($v2.on -gt $v2.off) -and -not $gone}
     }
     $cleanup | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'status.json') -Encoding utf8
 }

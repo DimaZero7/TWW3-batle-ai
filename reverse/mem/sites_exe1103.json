@@ -23,6 +23,23 @@
    "rva": "0x448f180",
    "sig": "",
    "expect": ""
+  },
+  "no_draw": {
+   "_why": "the only call site of view / present (tmp/farm/h1/REPORT.md: 14134f8b0); the pattern has 1 hit in this exe, the call at pattern + 14 (static scan 23.11.2026, tmp/farm/v/scan_v2.py); the patch (bridge/lua/apps/battle/no_draw.lua, policy bridge/config/memreader.json): the 5-byte call -> the 5-byte nop",
+   "rva": "0x134f8b0",
+   "sig": "",
+   "expect": "e8 17 18 ff ff",
+   "patch": "0f 1f 44 00 00",
+   "pattern": "44 8b cb 4c 8d 44 24 20 49 8b d6 48 8b ce e8 ?? ?? ?? ?? 48 8b 86 80 00 00 00 48 8b 08 48 8b 01 ff 90 a8 08 00 00",
+   "pattern_at": 14
+  },
+  "frame_count": {
+   "_why": "the app loop counter (H1 called it the frame counter, tmp/farm/h1/REPORT.md; it runs ~27,000 a second undrawn, ~190 drawn: game check 23.11, tmp/farm/v), read only; its incrementing instruction add [rip+0x313fb3e], r15d at ins_rva checked first (the displacement points at rva)",
+   "rva": "0x448f254",
+   "sig": "int32",
+   "expect": "",
+   "ins_rva": "0x134f70f",
+   "ins": "44 01 3d 3e fb 13 03"
   }
  },
  "layout": {

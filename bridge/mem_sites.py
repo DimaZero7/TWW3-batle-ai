@@ -8,7 +8,13 @@ reverse/mem/sites_exe1103.json, the exe of 03.11.2026; the environment variable 
                            when the file has them):
                            the probe's config.mem (a relative address split hi * 2^20 + lo: the game's Lua numbers are
                            32-bit floats, exact only to 2^24)
+    no_draw_config(path=None, exe=None)
+                           the no-draw mode's config.no_draw (bridge/lua/apps/battle/no_draw.lua; bridge.build --no-draw):
+                           {site = {name, hi, lo, at, pattern, before, after} of the site no_draw | None, why, frames =
+                           the read-only frame counter (site frame_count) | None}; no site, or an exe of another build
+                           than the file's: site None and why - the battle then goes on drawn (event v2_refused)
 """
+import functools
 import hashlib
 import json
 import os
@@ -32,6 +38,10 @@ MORALE_LAYOUT = ("u_morale", "o_unit", "o_state", "o_points", "o_target", "o_fx_
                  "o_bytes")
 OPTIONAL_SITES = ("dir_table",)
 SNAPSHOT_MAX = 300
+# the no-draw mode (bridge/config/memreader.json: the ONE code patch allowed): the site's 5 bytes must be a call (e8) and
+# the patch exactly the 5-byte nop, whatever the sites file says - another patch needs a new review, not a new file
+NO_DRAW_SITE, FRAMES_SITE = "no_draw", "frame_count"
+NOP5 = "0f 1f 44 00 00"
 
 
 def pin():
@@ -59,6 +69,15 @@ def split(rva):
     return rva >> 20, rva & 0xFFFFF
 
 
+@functools.lru_cache(maxsize=4)
+def exe_sha256(exe):
+    h = hashlib.sha256()
+    with open(exe, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def lua_config(path=None, exe=None):
     """The probe's config.mem from the sites file; checks every name the Lua side needs and (exe given) the game's
     build by the file's SHA-256."""
@@ -67,11 +86,7 @@ def lua_config(path=None, exe=None):
         raise FileNotFoundError(f"{path}: the sites file is missing - see bridge/docs/apps/memreader.md")
     raw = json.loads(path.read_text(encoding="utf-8"))
     if exe is not None and raw.get("exe_sha256"):
-        h = hashlib.sha256()
-        with open(exe, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 22), b""):
-                h.update(chunk)
-        if h.hexdigest() != raw["exe_sha256"]:
+        if exe_sha256(exe) != raw["exe_sha256"]:
             raise ValueError(f"{exe}: another game build than the sites file's (exe_sha256) - redo the sites")
     sites = {}
     for name in SITES + tuple(n for n in OPTIONAL_SITES if n in raw["sites"]):
@@ -92,3 +107,39 @@ def lua_config(path=None, exe=None):
         layout["form"] = {name: ([_int(x) for x in v] if isinstance(v, list) else _int(v))
                           for name, v in raw["layout"]["form"].items()}
     return {"sites": sites, "layout": layout, "snapshot_max": int(raw.get("snapshot_max", SNAPSHOT_MAX))}
+
+
+def _hex(text):
+    return " ".join(str(text).lower().split())
+
+
+def no_draw_config(path=None, exe=None):
+    """config.no_draw without delay_ms / safety_ms (bridge/build.py adds them): the site no_draw of the sites file, or
+    site None and why (the battle goes on drawn: the Lua refuses with no_site). A malformed site raises: the file needs a
+    fix, not a battle."""
+    path = Path(path or sites_path())
+    if not path.is_file():
+        return {"site": None, "why": f"no sites file {path.name}", "frames": None}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if exe is not None and raw.get("exe_sha256") and exe_sha256(exe) != raw["exe_sha256"]:
+        return {"site": None, "why": f"the game's exe is another build than {path.name}'s (exe_sha256)", "frames": None}
+    s = raw["sites"].get(NO_DRAW_SITE)
+    if not s:
+        return {"site": None, "why": f"{path.name} has no site {NO_DRAW_SITE}", "frames": None}
+    before, after, pattern, at = _hex(s["expect"]), _hex(s["patch"]), _hex(s["pattern"]), int(s["pattern_at"])
+    if len(before.split()) != 5 or before.split()[0] != "e8":
+        raise ValueError(f"{path.name} {NO_DRAW_SITE}: expect must be the 5 bytes of a call (e8 ..), not {before!r}")
+    if after != NOP5:
+        raise ValueError(f"{path.name} {NO_DRAW_SITE}: the patch must be the 5-byte nop {NOP5!r} (memreader.json)")
+    toks = pattern.split()
+    if not (0 <= at <= len(toks) - 5) or any(t != "??" and t != b for t, b in zip(toks[at:at + 5], before.split())):
+        raise ValueError(f"{path.name} {NO_DRAW_SITE}: pattern_at {at} does not point at the expected bytes")
+    hi, lo = split(_int(s["rva"]) - at)
+    site = {"name": NO_DRAW_SITE, "hi": hi, "lo": lo, "at": at, "pattern": pattern, "before": before, "after": after}
+    frames = None
+    f = raw["sites"].get(FRAMES_SITE)
+    if f and f.get("ins_rva") and f.get("ins"):
+        fhi, flo = split(f["rva"])
+        ihi, ilo = split(f["ins_rva"])
+        frames = {"hi": fhi, "lo": flo, "ins_hi": ihi, "ins_lo": ilo, "ins": _hex(f["ins"])}
+    return {"site": site, "why": None, "frames": frames}

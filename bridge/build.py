@@ -8,6 +8,7 @@ Usage:
     python -m bridge.build human --army-seed 1000900014 --army-swap --live-label --free-speed   # the person plays
     python -m bridge.build charge-probe --probe-plan hit --probe-battle 1 --mem   # the melee probe (game/probe)
     python -m bridge.build missile-probe --mprobe-plan dist --mprobe-battle 1     # the missile probe
+    python -m bridge.build charge-probe --probe-plan duel --no-draw              # no frames drawn, x40 (V2)
     python -m bridge.build morale-probe --morale-plan timer --kv waver_base_timeout=x10   # a probe with game rules changed
     python -m bridge.build map-capture --step 3 --nodes --features      # a map captured once (game/maps/map_grid.py)
     python -m bridge.build move-probe --plan ksl_detour                 # bridge/config/move-plans/<plan>.json
@@ -122,6 +123,13 @@ KV_TARGETS = ("charge-probe", "missile-probe", "morale-probe")
 # --mem (memreader Plus: the game's memory read in a probe; bridge/docs/apps/memreader.md): probes whose entry reads it.
 # Never the network's battles or exams.
 MEM_TARGETS = ("missile-probe", "charge-probe", "morale-probe")
+# --no-draw (bridge/lua/apps/battle/no_draw.lua; the policy bridge/config/memreader.json, decided 23.11.2026): the probes
+# and lanes, and nn-arena under the game's planner ('ai') or the network with --lockstep - not an exam; never 'human'.
+# ON NO_DRAW_DELAY_MS of model time after the start; the Lua's own safety net turns it off NO_DRAW_SAFETY_S of real time
+# after the battle's deadline. Its deadline is reckoned at NO_DRAW_PACE (a refused patch: the battle runs drawn, which is
+# frame-bound at x20 and x40 alike - tmp/farm/l/REPORT.md); x40 only with it.
+NO_DRAW_TARGETS = ("charge-probe", "missile-probe", "morale-probe", "nn-arena")
+NO_DRAW_DELAY_MS, NO_DRAW_SAFETY_S, NO_DRAW_PACE, NO_DRAW_SPEED = 3000, 60, 20, 40
 # the probes' modules (game/probe): their PLANS, run_config, write_scenario
 PROBES = {"charge-probe": ("charge_probe", "probe_plan", "probe_battle"),
           "missile-probe": ("missile_probe", "mprobe_plan", "mprobe_battle"),
@@ -229,6 +237,8 @@ def build(target, run_config, dependencies=None, scenario=None, kv=None, out=Non
     }
     if kv:
         manifest["kv_override"] = kv
+    if (run_config or {}).get("no_draw"):
+        manifest["no_draw"] = True
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
 
@@ -387,7 +397,8 @@ def probe_module(target):
 def parser_of():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", choices=sorted(TARGETS))
-    parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), help="battle speed (default 20; human: 1)")
+    parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20, 40),
+                        help="battle speed (default 20; human: 1; --no-draw: 40, and 40 only with it)")
     parser.add_argument("--timeout", type=int, help="model seconds, 30..3600 (default 600; human: 3600)")
     parser.add_argument("--tick-ms", type=int, help="ms between samples (default 1000; the probes 500)")
     parser.add_argument("--step", type=int, choices=(1, 2, 3, 5), default=5, help="map-capture: cell size, m")
@@ -477,6 +488,12 @@ def parser_of():
                              "(missile-probe), the men of the lanes' units (charge-probe) or the units' morale "
                              "(morale-probe) from the game's memory; the code sites: memreader.json sites_file "
                              "(reverse/mem/sites_exe1103.json; BAI_MEM_SITES to try another)")
+    parser.add_argument("--no-draw", action="store_true",
+                        help="the game draws no frame while the battle runs (V2; " + ", ".join(NO_DRAW_TARGETS) + "; "
+                             "nn-arena: --own-ai ai, or net with --lockstep; never human nor an exam): memreader Plus "
+                             "next to our pack turns the view / present call into a nop after the start and back at "
+                             "the end (bridge/lua/apps/battle/no_draw.lua; site no_draw of memreader.json sites_file); "
+                             "refused in the game - drawn, event v2_refused; speed 40 by default")
     parser.add_argument("--kv", action="append", metavar="[SECTION.]KEY=VALUE|xN",
                         help="a probe only: a row of the game's rule tables (_kv_morale/_kv_rules/_kv_fatigue: section "
                              "morale/battle/fatigue) set to VALUE or N times the game's value, by a table of the probe's "
@@ -501,8 +518,17 @@ def check_args(parser, args):
         args.own_ai = args.own_ai or "net"
     elif args.own_ai is not None:
         parser.error("--own-ai is for nn-arena")
+    if args.no_draw:
+        if args.target == "human":
+            parser.error("--no-draw is never for the human target (the owner's own battle: bridge/config/memreader.json)")
+        if args.target not in NO_DRAW_TARGETS:
+            parser.error(f"--no-draw is for {', '.join(NO_DRAW_TARGETS)}")
+        if args.target == "nn-arena" and (args.own_ai or "net") == "net" and not args.lockstep:
+            parser.error("--no-draw with nn-arena --own-ai net needs --lockstep (the model must wait for the companion)")
+    if args.speed == NO_DRAW_SPEED and not args.no_draw:
+        parser.error(f"--speed {NO_DRAW_SPEED} is only with --no-draw (drawn, the game is frame-bound at x20)")
     if args.speed is None:
-        args.speed = 1 if args.target == "human" else 20
+        args.speed = 1 if args.target == "human" else (NO_DRAW_SPEED if args.no_draw else 20)
     if args.timeout is None:
         args.timeout = 3600 if args.target == "human" else 600
     if args.own_role and not arena:
@@ -592,7 +618,8 @@ def main(argv=None):
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
             if not args.scenario:
                 args.scenario = str(path)
-        pace = LOCKSTEP_PACE if getattr(args, "lockstep", False) else args.speed
+        pace = LOCKSTEP_PACE if getattr(args, "lockstep", False) else (
+            min(args.speed, NO_DRAW_PACE) if args.no_draw else args.speed)
         run_config["deadline_s"] = args.deadline or deadline_seconds(model_s, pace)
         run_config["stall_ms"] = stall_ms
     dependencies = None
@@ -603,6 +630,17 @@ def main(argv=None):
         exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"
         run_config["mem"] = mem_sites.lua_config(exe=exe if exe.is_file() else None)
         dependencies = project.required_mods() + [mem_sites.dependency()]
+    if args.no_draw:
+        from bridge import mem_sites
+        exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"
+        nd = mem_sites.no_draw_config(exe=exe if exe.is_file() else None)
+        if nd["site"] is None:
+            print(f"--no-draw: {nd['why']} - the battle will go on drawn (v2_refused)", file=sys.stderr)
+        # (the bundle takes no None: an absent key is the Lua's nil)
+        run_config["no_draw"] = dict({k: v for k, v in nd.items() if v is not None}, delay_ms=NO_DRAW_DELAY_MS,
+                                     safety_ms=(run_config["deadline_s"] + NO_DRAW_SAFETY_S) * 1000)
+        if not args.mem:
+            dependencies = (dependencies or project.required_mods()) + [mem_sites.dependency()]
     manifest = build(args.target, run_config, scenario=args.scenario, **({"kv": kv} if kv else {}),
                      **({"dependencies": dependencies} if dependencies else {}), out=args.out)
     print(json.dumps(manifest, indent=2))

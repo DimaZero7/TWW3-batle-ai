@@ -19,6 +19,10 @@
 #                                          is refused; a lock-step build without -StepLock is refused too. The game
 #                                          starts only once the companion wrote its readiness mark for this run)
 #   ... -PyThreads 2                      (the companion's torch threads, written to the run's companion.json)
+#   ... -Chain -StepLock -NoDraw          (no frames drawn, always x40 - -Speed with it is refused -, never lingers: the
+#                                          build with --no-draw --speed 40; only with -StepLock, never an exam -
+#                                          bridge/config/memreader.json; with -NoBuild the build must be a no-draw one,
+#                                          and a no-draw build without -NoDraw is refused)
 param(
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
     [int]$DecideMs = 1000,
@@ -36,7 +40,8 @@ param(
     [switch]$NoBuild,
     # (declared last and named so that every older call form binds as before: -L, -T, the positional container)
     [switch]$StepLock,
-    [int]$PyThreads = 2
+    [int]$PyThreads = 2,
+    [switch]$NoDraw
 )
 $ErrorActionPreference = 'Stop'
 $Target = 'nn-arena'
@@ -63,6 +68,10 @@ $game = (Resolve-Path -LiteralPath $settings.game_dir).Path
 
 if (-not ($Chain -or $Strategist)) { throw 'Nobody to answer: give -Chain and / or -Strategist' }
 if ($StepLock -and -not $Chain) { throw '-StepLock waits for the chain''s answers: give -Chain' }
+if ($NoDraw -and -not $StepLock) { throw '-NoDraw runs the model at x40 undrawn: only with -StepLock (bridge.build --no-draw)' }
+if ($NoDraw -and $PSBoundParameters.ContainsKey('Speed')) { throw '-NoDraw is always x40: no -Speed with it' }
+# a no-draw battle is never left open after its end (launch.ps1 forces it too)
+if ($NoDraw) { $LingerSeconds = 0 }
 # (the param block is not advanced: an unknown name lands in $args silently - refuse the lockstep2 names, never lose the mode)
 if (@($args | Where-Object { "$_" -match '^-(Lockstep|Threads)' }).Count) { throw "-Lockstep / -Threads are -StepLock / -PyThreads: $args" }
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
@@ -79,7 +88,9 @@ if (-not $NoBuild) {
     if ($Skirmish) { $buildArgs += @('--skirmish', $Skirmish) }
     if ($Strategist) { $buildArgs += @('--deploy', 'strategist') }
     if ($StepLock) { $buildArgs += @('--lockstep') }
-    & $python -m bridge.build nn-arena --own-ai net --speed $Speed --decide-ms $DecideMs --timeout $TimeoutModelSeconds @buildArgs | Out-Null
+    if ($NoDraw) { $buildArgs += @('--no-draw') }
+    $buildSpeed = if ($NoDraw) { 40 } else { $Speed }
+    & $python -m bridge.build nn-arena --own-ai net --speed $buildSpeed --decide-ms $DecideMs --timeout $TimeoutModelSeconds @buildArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
 $manifest = Get-Content -LiteralPath (Join-Path $repo ('build\' + $Target + '\manifest.json')) -Raw | ConvertFrom-Json
@@ -89,6 +100,8 @@ if ($StepLock) {
     if ($why) { throw "build/$Target is not a strict lock-step build ($why): python -m bridge.build nn-arena --lockstep ..." }
 }
 if (-not $StepLock -and $manifest.config.lockstep) { throw "build/$Target is a lock-step build: give -StepLock (or rebuild without --lockstep)" }
+if ($NoDraw -and -not $manifest.no_draw) { throw "build/$Target is not a no-draw build: python -m bridge.build nn-arena --lockstep --no-draw ..." }
+if (-not $NoDraw -and $manifest.no_draw) { throw "build/$Target is a no-draw build: give -NoDraw (or rebuild without --no-draw)" }
 if ($Strategist -and $manifest.config.deploy -ne 'strategist') { throw "build/$Target has no strategist deployment: python -m bridge.build nn-arena --deploy strategist ..." }
 if ($Strategist -and $Strategist -notin @('formula', 'default') -and -not (Test-Path -LiteralPath (Join-Path $repo $Strategist))) { throw "No strategist checkpoint $Strategist (a path inside the repository)" }
 Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms, lock-step {4}" -f $manifest.build, $manifest.config.arena, $manifest.config.speed, $manifest.config.decide_ms, $(if ($manifest.config.lockstep) { 'on' } else { 'off' }))
