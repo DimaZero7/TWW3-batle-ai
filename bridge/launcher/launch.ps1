@@ -8,6 +8,7 @@
 #  * refuses to start while the user plays (state/HUMAN_PLAYING; not for the target 'human': the user plays it
 #    himself) and while the game is held by another run (state/probe_game.lock: its holder - a probe series, the
 #    chain's battles - passes the lock's text in the environment variable BAI_LOCK_HELD to the launches it makes);
+#    a HUMAN_PLAYING that appears during the battle stops our own game (status human_playing; not the target 'human');
 #  * uses its own mod list file; the user's used_mods.txt is never touched;
 #  * stops only the process it started (same PID, path and start time);
 #  * removes only its own pack, mod list and the Workshop packs it copied into data/ (True Sight),
@@ -301,19 +302,18 @@ if ($Slot -gt 0) {
     } else { $userDifficulty = $session.user_difficulty }
     Write-Output ("Slot {0}: {1} of the session of slots (Normal, graphics '{2}'; the last slot out restores the user's preferences)" -f $Slot, $(if ($session.first) { 'first' } else { 'joined' }), $Graphics)
 } else {
-if (Test-Path -LiteralPath $prefsBackup) {
-    [IO.File]::WriteAllBytes($prefs, [IO.File]::ReadAllBytes($prefsBackup))
-    Remove-Item -LiteralPath $prefsBackup
-}
-$prefsBytes = [IO.File]::ReadAllBytes($prefs)
+$left = Restore-SinglePreferences $prefs $prefsBackup @{battle_difficulty = $fairDifficulty}
+if ($left.conflict) { throw ('Not starting: ' + $left.conflict) }
 $latin = [Text.Encoding]::GetEncoding(28591)
-$prefsText = $latin.GetString($prefsBytes)
+$prefsText = $latin.GetString([IO.File]::ReadAllBytes($prefs))
 if ($prefsText -notmatch 'battle_difficulty (\d+);') { throw "battle_difficulty not found in $prefs" }
 $userDifficulty = [int]$Matches[1]
-[IO.File]::WriteAllBytes($prefsBackup, $prefsBytes)
 $prefValues = [ordered]@{battle_difficulty = $fairDifficulty}
 if ($Graphics) { foreach ($key in $GraphicsPresets[$Graphics].Keys) { $prefValues[$key] = $GraphicsPresets[$Graphics][$key] } }
-[IO.File]::WriteAllBytes($prefs, $latin.GetBytes((Set-PreferenceValues -Text $prefsText -Values $prefValues)))
+$normalText = Set-PreferenceValues -Text $prefsText -Values $prefValues      # (a missing key throws before any change)
+$prefsBytes = Backup-SinglePreferences $prefs $prefsBackup
+if ($latin.GetString($prefsBytes) -cne $prefsText) { throw "$prefs changed while it was read: the backup kept, not starting" }
+Set-SingleNormal $prefs $prefsBackup $latin.GetBytes($normalText)
 Write-Output ("Battle difficulty for this run: {0} (normal); the user's {1} is restored afterwards" -f $fairDifficulty, $userDifficulty)
 if ($Graphics) { Write-Output ("Graphics for this run: {0}; the user's are restored afterwards" -f $Graphics) }
 }
@@ -388,6 +388,9 @@ $status = 'timeout'
         if ($done -ge 1) { $status = 'completed'; break }
         if ($Slot -gt 0 -and (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN_PLAYING'))) {
             $status = 'human_playing'; Write-Output 'The user plays (state/HUMAN_PLAYING appeared): this slot stops its own game.'; break
+        }
+        if ($Slot -eq 0 -and $Target -ne 'human' -and (Test-Path -LiteralPath (Join-Path $stateDir 'HUMAN_PLAYING'))) {
+            $status = 'human_playing'; Write-Output 'The user plays (state/HUMAN_PLAYING appeared): this launch stops its own game.'; break
         }
         Start-Sleep -Seconds 1
     }
@@ -472,7 +475,7 @@ $status = 'timeout'
     } else {
     $current = if ($process) { Get-Process -Id $process.Id -ErrorAction SilentlyContinue } else { $null }
     $ours = $current -and $current.Path -eq $exe -and [Math]::Abs(($current.StartTime - $started).TotalSeconds) -lt 15
-    if ($ours -and $KeepGameOpen) {
+    if ($ours -and $KeepGameOpen -and $status -ne 'human_playing') {
         $cleanup.game_left_running = $true
     } elseif ($ours) {
         Stop-Process -Id $current.Id
@@ -510,18 +513,19 @@ $status = 'timeout'
         }
     }
     # The user's preferences back, byte for byte, once our game is gone.
-    if (-not $cleanup.game_left_running -and (Test-Path -LiteralPath $prefsBackup)) {
-        [IO.File]::WriteAllBytes($prefs, [IO.File]::ReadAllBytes($prefsBackup))
-        if ((Get-FileHash -LiteralPath $prefs).Hash -eq (Get-FileHash -LiteralPath $prefsBackup).Hash) {
-            Remove-Item -LiteralPath $prefsBackup
-            $cleanup.preferences_restored = $true
-        }
+    if (-not $cleanup.game_left_running -and ((Test-Path -LiteralPath $prefsBackup) -or (Test-Path -LiteralPath ($prefsBackup + '.tmp')))) {
+        try {
+            $back = Restore-SinglePreferences $prefs $prefsBackup $(if ($prefValues) { $prefValues } else { @{battle_difficulty = $fairDifficulty} })
+            if ($back.restored) { $cleanup.preferences_restored = $true }
+            if ($back.conflict) { $cleanup.preferences_conflict = $back.conflict; $restoreIncomplete = $true }
+        } catch { $cleanup.preferences_conflict = 'failed: ' + $_.Exception.Message; $restoreIncomplete = $true }
     }
     }
     $cleanup | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'status.json') -Encoding utf8
 }
 Write-Output ("Run finished: {0}. Results: {1}" -f $status, $run)
 if ($Slot -gt 0 -and $restoreIncomplete) { Write-Output 'The shared cleanup is NOT complete (status.json: session, restore_deferred, shared_kept): see bridge/docs/launch/slots.md'; exit 3 }
+if ($Slot -eq 0 -and $restoreIncomplete) { Write-Output ('The user''s preferences are NOT restored: ' + $cleanup.preferences_conflict); exit 3 }
 if ($status -ne 'completed') { exit 1 }
 } finally {
     if ($session -and -not $sessionLeft) { try { if (Enter-LauncherMutex 600) { [void](Exit-SlotSession $plan $session.run $prefs) } } catch { } }

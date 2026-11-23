@@ -66,6 +66,9 @@ if ($StepLock -and -not $Chain) { throw '-StepLock waits for the chain''s answer
 # (the param block is not advanced: an unknown name lands in $args silently - refuse the lockstep2 names, never lose the mode)
 if (@($args | Where-Object { "$_" -match '^-(Lockstep|Threads)' }).Count) { throw "-Lockstep / -Threads are -StepLock / -PyThreads: $args" }
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
+# the user plays / another run holds the game (ops/guard.ps1): refused before the build and the exchange files
+. (Join-Path $repo 'ops\guard.ps1')
+Assert-GameFree -Target $Target
 docker image inspect snake-ai-trainer --format '{{.Id}}' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Docker image snake-ai-trainer not found (is Docker Desktop running?)' }
 $running = docker ps -a --filter "name=^$container$" --format '{{.Names}}'
@@ -107,6 +110,8 @@ if ($Strategist) {
 $runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
 $ready = Join-Path $game 'tww3_bai_nn_ready.json'
+Assert-GameFree -Target $Target       # once more after the build, right before the first file of the game folder
+if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
 if (-not (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue)) {    # (a dead battle's exchange files: gone)
     foreach ($name in $exchangeFiles) { $path = Join-Path $game $name; if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path } }
 }

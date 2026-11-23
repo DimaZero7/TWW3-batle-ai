@@ -197,6 +197,77 @@ function Copy-SlotFile([string]$Source, [string]$Dest, [string]$Sha256) {
     [IO.File]::Move($part, $Dest)
 }
 
+# --- the single launch's preferences backup ------------------------------------------------------------------------------
+# build/preferences.script.backup.txt as the session of slots keeps its own: the user's bytes into a temp file (flushed,
+# read back, compared), their SHA-256 into the journal build/preferences.script.backup.json, then the rename; the
+# journal gets the SHA-256 of our Normal before it is written. The backup goes back only when its hash is the journal's
+# (a backup without a journal - left by a launcher before this scheme - is taken as it is) and the user's file now is
+# the backup itself, our Normal, or still carries our values (the game rewrites other lines of the file); anything
+# else is the user's own change: both files kept, a refusal that says so.
+function Get-SingleJournal([string]$Backup) { return [IO.Path]::ChangeExtension($Backup, '.json') }
+
+function Write-SingleJournal([string]$Backup, [string]$BackupSha, [string]$NormalSha) {
+    $j = Get-SingleJournal $Backup
+    Write-DurableBytes ($j + '.tmp') ([Text.UTF8Encoding]::new($false).GetBytes((@{v = 1; backup_sha256 = $BackupSha; normal_sha256 = $NormalSha} | ConvertTo-Json)))
+    if ([IO.File]::Exists($j)) { [IO.File]::Replace($j + '.tmp', $j, [NullString]::Value) } else { [IO.File]::Move($j + '.tmp', $j) }
+}
+
+# The user's bytes into the backup (returns them); nothing is changed when any step fails.
+function Backup-SinglePreferences([string]$Prefs, [string]$Backup) {
+    $bytes = [IO.File]::ReadAllBytes($Prefs)
+    $h = Get-BytesSha256 $bytes
+    $tmp = $Backup + '.tmp'
+    Write-DurableBytes $tmp $bytes
+    if ((Get-BytesSha256 ([IO.File]::ReadAllBytes($tmp))) -ne $h) { Remove-Item -LiteralPath $tmp; throw "The preferences backup $tmp did not read back as written: nothing changed, not starting." }
+    Write-SingleJournal $Backup $h ''
+    [IO.File]::Move($tmp, $Backup)
+    return $bytes
+}
+
+# Our Normal into the user's file, its hash into the journal first.
+function Set-SingleNormal([string]$Prefs, [string]$Backup, [byte[]]$Normal) {
+    $j = [IO.File]::ReadAllText((Get-SingleJournal $Backup), [Text.Encoding]::UTF8) | ConvertFrom-Json
+    Write-SingleJournal $Backup ([string]$j.backup_sha256) (Get-BytesSha256 $Normal)
+    Write-DurableBytes $Prefs $Normal
+}
+
+# Returns @{restored; conflict} ('' or the refusal); $Values: the values our run wrote (Normal + its graphics).
+function Restore-SinglePreferences([string]$Prefs, [string]$Backup, $Values) {
+    $r = @{restored = $false; conflict = ''}
+    $j = Get-SingleJournal $Backup
+    if (-not [IO.File]::Exists($Backup)) {
+        # a temp backup alone: the user's file was never changed
+        foreach ($t in ($Backup + '.tmp'), $j, ($j + '.tmp')) { if ([IO.File]::Exists($t)) { Remove-Item -LiteralPath $t } }
+        return $r
+    }
+    $bytes = [IO.File]::ReadAllBytes($Backup)
+    $h = Get-BytesSha256 $bytes
+    $normalSha = ''
+    if ([IO.File]::Exists($j)) {
+        $jo = $null
+        try { $jo = [IO.File]::ReadAllText($j, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { }
+        if (-not $jo -or [string]$jo.backup_sha256 -ne $h) {
+            $r.conflict = ("conflict: {0} is not the backup its journal {1} wrote down; both kept, put it right by hand" -f $Backup, $j)
+            return $r
+        }
+        $normalSha = [string]$jo.normal_sha256
+    }
+    if ([IO.File]::Exists($Prefs)) {
+        $now = [IO.File]::ReadAllBytes($Prefs)
+        $hn = Get-BytesSha256 $now
+        if ($hn -ne $h -and -not ($normalSha -and $hn -eq $normalSha) -and -not (Test-PreferenceValues ([Text.Encoding]::GetEncoding(28591).GetString($now)) $Values)) {
+            $r.conflict = ("conflict: {0} changed since our run wrote Normal (not our values any more - the user's own change?); both it and {1} kept, put it right by hand" -f $Prefs, $Backup)
+            return $r
+        }
+    }
+    Write-DurableBytes $Prefs $bytes
+    if ((Get-BytesSha256 ([IO.File]::ReadAllBytes($Prefs))) -ne $h) { $r.conflict = "preferences not restored: $Prefs differs from the backup $Backup (both kept)"; return $r }
+    Remove-Item -LiteralPath $Backup
+    foreach ($t in $j, ($j + '.tmp')) { if ([IO.File]::Exists($t)) { Remove-Item -LiteralPath $t } }
+    $r.restored = $true
+    return $r
+}
+
 # --- the user's preferences --------------------------------------------------------------------------------------------
 # The backup back into the user's file: only when its SHA-256 is the one the session wrote down before the change; the
 # file written and flushed, read back and compared; the backup removed only then. A temp backup alone means the
@@ -241,17 +312,12 @@ function Clear-DeadSlotSession($Plan, [string]$Prefs, [switch]$AlsoSingle) {
     $r = @{restored = $false; removed = @(); kept = @(); conflict = ''}
     $s = $null
     try { $s = Read-SlotSession $Plan.session } catch { $r.conflict = $_.Exception.Message; return $r }
-    if ($AlsoSingle -and [IO.File]::Exists($Plan.single_backup)) {
-        # as the next single launch would - but not over the user's own later change: the file must still be the
-        # backup itself or carry our Normal (battle_difficulty 1), else both are kept
+    if ($AlsoSingle) {
+        # as the next single launch would (Restore-SinglePreferences): not over the user's own later change
         try {
-            $back = [IO.File]::ReadAllBytes($Plan.single_backup)
-            $now = if ([IO.File]::Exists($Prefs)) { [IO.File]::ReadAllBytes($Prefs) } else { [byte[]]@() }
-            if ((Get-BytesSha256 $now) -ne (Get-BytesSha256 $back) -and -not (Test-PreferenceValues ([Text.Encoding]::GetEncoding(28591).GetString($now)) @{battle_difficulty = 1})) {
-                $r.conflict = ("conflict: {0} is neither the single launch's backup nor Normal (the user's own change?); both it and {1} kept" -f $Prefs, $Plan.single_backup)
-                return $r
-            }
-            [IO.File]::WriteAllBytes($Prefs, $back); Remove-Item -LiteralPath $Plan.single_backup; $r.restored = $true
+            $one = Restore-SinglePreferences $Prefs $Plan.single_backup @{battle_difficulty = 1}
+            if ($one.conflict) { $r.conflict = $one.conflict; return $r }
+            if ($one.restored) { $r.restored = $true }
         } catch { $r.conflict = 'the single launch''s backup: ' + $_.Exception.Message; return $r }
     }
     try { if (Restore-SlotPreferences $Plan $Prefs $s) { $r.restored = $true } } catch { $r.conflict = $_.Exception.Message }
