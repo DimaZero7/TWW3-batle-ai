@@ -142,7 +142,41 @@ def _m2(tables, probe=None):
     return pieces_after(tables, probe)
 
 
-# ------------------------------------------------------------------ the verdicts (net/drill/verdict.py entries)
+# ------------------------------------------------------------------ the gate by the new recipe (METHOD 4 and 6, 23.11)
+PROBE = "tmp/drill_s1/c/probe/probe.json"
+BRIDGE = "tmp/drill_s1/c2/key_bridge.json"
+EXAM_DIR = "tmp/drill_s1/c/exam"
+_GATE_WHY = ("the training opens only when the label probe passed AND the teacher passes METHOD step 4 by behaviour "
+             "(exam_s1.teacher_verdict, tmp/drill_s1/c2/LINES_s1.md) on the exam's arms, both bound to today's tree "
+             "through the key bridge (its file sha per arm, the probe's rows re-observed; tmp/drill_s1/c2/key_bridge.json); "
+             "the engine requires --probe because PROBE is set (net/drill/run.probe_of)")
+
+
+def gates_open(card=None):
+    """(ok, {why}) of the training's gate (_GATE_WHY): recomputed now, no stored verdict trusted."""
+    import json
+    from pathlib import Path
+    from net import ROOT
+    from net.strategist import exam_s1 as EX
+    why = {}
+    pr = json.loads((ROOT / PROBE).read_text(encoding="utf-8"))
+    v = pr.get("verdict") or {}
+    why["probe"] = bool(v.get("pass") and v.get("n_ok"))
+    b = json.loads((ROOT / BRIDGE).read_text(encoding="utf-8"))
+    why["bridge"] = bool(b.get("ok"))
+    import hashlib
+    why["bridge_probe"] = bool((b.get("probe") or {}).get("ok")) and (b.get("probe") or {}).get(
+        "probe_json_sha256") == hashlib.sha256((ROOT / PROBE).read_bytes()).hexdigest()
+    why["bridge_code"] = b.get("code_now") == EX._tree_sha(EX.KEY_TREES)
+    t = EX.teacher_verdict(ROOT / EXAM_DIR, ROOT / BRIDGE)
+    why["teacher"] = t["verdict"]
+    why["teacher_auth"] = t["auth"]
+    ok = why["probe"] and why["bridge"] and why["bridge_probe"] and why["bridge_code"] and t["verdict"] == "PASSED"
+    return ok, why
+
+
+# ------------------------------------------------------------------ the old verdicts (net/drill/verdict.py entries;
+# the OLD lines of exam_s1.table - kept printed only: the card's gate is gates_open, the acceptance exam_s1 accept)
 GATE_FILE = "value_gate.json"
 
 

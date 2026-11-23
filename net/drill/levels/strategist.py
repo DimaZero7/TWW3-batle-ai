@@ -154,9 +154,41 @@ def net_parent(card, path, device):
     return SN.restore(path, device)[0]
 
 
-def specs_of_round(card, s0, n, gs0, n_general):
+def _identities(s0, n, gs0, n_general, split):
     from net.strategist import s1_scenes as SS
-    return SS.scenes_at(s0, n, "train") + [SS.general(gs0 + i, "train") for i in range(n_general)]
+    return ([("s1.scene", None, s0 + i) for i in range(n)] + [("s1.scene", SS.twin_kind(s0 + i), s0 + i) for i in range(n)]
+            + [("s1.general", None, gs0 + i) for i in range(n_general)])
+
+
+def spec_cache_file(s0, n, gs0, n_general, split):
+    """build/s1_specs/<split>_<s0>_<n>_<gs0>_<ng>__<code>.pkl: a round's (or V's) specs built once - by the CPU preflight
+    before the GPU lock (tmp/drill_s1/c2/pre_train_s1.py) - keyed by the generator's code (exam_s1 KEY_TREES)."""
+    from net import ROOT
+    from net.strategist import exam_s1 as EX
+    return ROOT / "build" / "s1_specs" / f"{split}_{s0}_{n}_{gs0}_{n_general}__{EX._tree_sha(EX.KEY_TREES)}.pkl"
+
+
+def specs_of_round(card, s0, n, gs0, n_general, split="train", cache=True):
+    """n cause scenes + n twins from s0 and n_general general battles from gs0 (module doc); with cache, read from
+    spec_cache_file when its identities and digest hold (else built and written there)."""
+    import pickle
+    from net.strategist import exam_s1 as EX
+    from net.strategist import s1_scenes as SS
+    f = spec_cache_file(s0, n, gs0, n_general, split) if cache else None
+    want = _identities(s0, n, gs0, n_general, split)
+    if f is not None and f.exists():
+        d = pickle.loads(f.read_bytes())
+        specs = d["specs"]
+        if [SS.identity(s) for s in specs] != [tuple(x) for x in want] or EX.spec_sha(specs) != d["sha"]:
+            raise SystemExit(f"{f}: a specs cache whose identities or digest differ - refused (remove it by hand)")
+        return specs
+    specs = SS.scenes_at(s0, n, split) + [SS.general(gs0 + i, split) for i in range(n_general)]
+    if f is not None:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        part = f.with_suffix(".part")
+        part.write_bytes(pickle.dumps({"sha": EX.spec_sha(specs), "specs": specs}))
+        part.replace(f)
+    return specs
 
 
 def collect_round(card, r, net, ctx, store_dir):
@@ -242,8 +274,11 @@ def census_classes(card, batch, w, meta):
     out = {}
     for name, sel in (("KEEP", t == 0), ("CREST", t > 0), ("POINTER", (t > 0) & ptr)):
         lab = dec & sel
-        out[name] = CN.Cls(labels=lab, dont_care=torch.zeros_like(lab), weighted=lab & ww, grad=lab & ww & two,
-                           removed={"one_legal": lab & ~two, "no_weight": lab & ~ww})
+        # (a row with ONE legal choice - KEEP alone: flat twins, flat general battles - is out of the loss by design
+        # (balanced weighs it 0, no logit moves): don't-care, not a lost label - else the census' kept share counts
+        # it and halts round 1 at 422 / 777 = 0.54 < keep_min; review of the S0-1 chain, 23.11)
+        out[name] = CN.Cls(labels=lab, dont_care=lab & ~two, weighted=lab & ww & two, grad=lab & ww & two,
+                           removed={"one_legal": lab & ~two, "no_weight": lab & two & ~ww})
     return {"strat": out}
 
 
@@ -251,13 +286,17 @@ def census_extra(card, batch, rows, meta, w):
     return {"census": census(rows)}
 
 
-def v_key(card, ctx):
+def v_key(card, ctx, chunk=None):
+    """V's play key - the engine calls it as v_key(card, args, chunk) (net/drill/run.py), v_read as v_key(card, ctx);
+    the key reads neither (V is no play: the inputs at tick 0), so both give the same dict."""
     from net.drill import store as ST
     from net.drill.cards import s0_1 as CARD
     from net.strategist import exam_s1 as EX
+    from net import ROOT
     v = (card.sets or {}).get("V")
-    return {"files": {f: ST.sha256(f)[:16] for f in CARD.FILES}, "code": EX._tree_sha(EX.KEY_TREES),
-            "sim": sim_key(), "V": None if v is None else [v.seed0, v.n]}
+    return {"files": {f: ST.sha256(ROOT / f)[:16] for f in CARD.FILES}, "code": EX._tree_sha(EX.KEY_TREES),
+            "sim": sim_key(), "V": None if v is None else [v.seed0, v.n, CARD.SETS["V_general"]],
+            "device": str(getattr(ctx, "device", "cpu")).split(":")[0]}
 
 
 def v_read(card, net, ctx, cache):
@@ -277,7 +316,15 @@ def v_read(card, net, ctx, cache):
     key = hashlib.sha256(json.dumps(v_key(card, ctx), sort_keys=True, default=str).encode()).hexdigest()[:16]
     d = root / (key + ("" if nv == int(v.n) else f"_smoke{nv}"))
     if not (d / "key.json").exists():
-        specs = SS.scenes_at(v.seed0, nv, "V") + [SS.general(CARD.SETS["V_general"] + i, "V") for i in range(nv // 2)]
+        if d.exists():                         # (an unfinished cache - shards without key.json: moved aside whole,
+            k = 0                              # never appended to; Astra o1_train_review3 7)
+            while d.with_name(f"{d.name}.stale{k}").exists():
+                k += 1
+            d.rename(d.with_name(f"{d.name}.stale{k}"))
+        specs = specs_of_round(card, v.seed0, nv, CARD.SETS["V_general"], nv // 2, "V")
+        chk = getattr(ctx, "check_starts_v", None)
+        if chk is not None:                    # (V's realised starts against the registry's V ranges: o1 review 3, visible)
+            chk([CARD.start_of(s) for s in specs])
         obs = SN.observe(specs, dev)
         labels = [SS.label(s) for s in specs]
         ST.Store(d).put("V", rows_of(specs, obs, labels), [{"seed": s["seed"]} for s in specs], cards=None)
