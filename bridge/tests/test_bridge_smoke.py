@@ -57,10 +57,15 @@ def test_the_chain_battle_pack_builds(tmp_path, capsys):
     assert c["own_ai"] == "net" and c["deploy"] == "strategist" and c["map_name"] == "ksl_plains_01"
     assert c["decide_ms"] == 1000 and set(c["deploy_zones"]) == {"own", "enemy"}
     assert c["skirmish"] == "off"                                   # as the simulator's network units (parity)
+    assert c["lockstep"]["strict"] is True                          # lock-step on by default under the network
     names = [u["script_name"] for side in ("own", "enemy") for u in c["units"][side]]
     assert names and all(n in xml for n in names)
     assert manifest["syntax_checked"] in (True, False)
     assert "entries.nn_arena" in manifest["modules"] and "apps.bridge.deploy_adapter" in manifest["modules"]
+    off = tmp_path / "off"
+    assert build.main(CHAIN_BUILD + ["--no-lockstep", "--out", str(off)]) == 0
+    capsys.readouterr()
+    assert json.loads((off / "manifest.json").read_text(encoding="utf-8"))["config"]["lockstep"] is False
 
 
 def the_chain():

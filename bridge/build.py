@@ -97,12 +97,13 @@ SCENARIO_LUA = b"load_script_libraries()\n"
 MOVE_SETTLE_MS = 2000
 # nn-arena --own-ai net: how often the companion's orders file is read (model ms).
 NET_POLL_MS = 100
-# nn-arena --own-ai net --lockstep (bridge/lua/entries/nn_arena.lua M.lockstep): a decision tick waits for its answer at
-# most LOCKSTEP_TIMEOUT_MS of real time (LOCKSTEP_FIRST_TIMEOUT_MS for the first: the companion may still load its
-# networks), reading the orders file every LOCKSTEP_SPIN_MS; strict: the first failed hold voids the battle (an
-# unattended series takes only battles with result ls_ok). The deadline: as if the battle ran at LOCKSTEP_PACE model s
-# a wall s (deadline_seconds: doubled + 60 s) - lock-step realised 5.0-8.9 on an 8-unit scene (tmp/farm/l, 22.11), a
-# battle far slower than 1 is not a lock-step battle worth keeping.
+# nn-arena --own-ai net - lock-step (bridge/lua/entries/nn_arena.lua M.lockstep), on in every build where the network
+# drives our side (--no-lockstep: off); a build with no network side (the probes, 'ai', human) has none. A decision tick
+# waits for its answer at most LOCKSTEP_TIMEOUT_MS of real time (LOCKSTEP_FIRST_TIMEOUT_MS for the first: the companion
+# may still load its networks), reading the orders file every LOCKSTEP_SPIN_MS; strict: the first failed hold voids the
+# battle (an unattended series takes only battles with result ls_ok). The deadline: as if the battle ran at
+# LOCKSTEP_PACE model s a wall s (deadline_seconds: doubled + 60 s) - lock-step realised 5.0-8.9 on an 8-unit scene
+# (tmp/farm/l, 22.11), a battle far slower than 1 is not a lock-step battle worth keeping.
 LOCKSTEP_TIMEOUT_MS, LOCKSTEP_FIRST_TIMEOUT_MS, LOCKSTEP_SPIN_MS, LOCKSTEP_STRIKES = 5000, 30000, 2, 3
 LOCKSTEP_PACE = 1
 # nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
@@ -124,7 +125,7 @@ KV_TARGETS = ("charge-probe", "missile-probe", "morale-probe")
 # Never the network's battles or exams.
 MEM_TARGETS = ("missile-probe", "charge-probe", "morale-probe")
 # --no-draw (bridge/lua/apps/battle/no_draw.lua; the policy bridge/config/memreader.json, decided 23.11.2026): the probes
-# and lanes, and nn-arena under the game's planner ('ai') or the network with --lockstep - not an exam; never 'human'.
+# and lanes, and nn-arena under the game's planner ('ai') or the network under lock-step - not an exam; never 'human'.
 # ON NO_DRAW_DELAY_MS of model time after the start; the Lua's own safety net turns it off NO_DRAW_SAFETY_S of real time
 # after the battle's deadline. Its deadline is reckoned at NO_DRAW_PACE (a refused patch: the battle runs drawn, which is
 # frame-bound at x20 and x40 alike - tmp/farm/l/REPORT.md); x40 only with it.
@@ -350,7 +351,9 @@ def nn_arena_config(args, run_config):
         # skirmish: the game's skirmish mode off for every unit the bridge commands by default - the simulator's network
         # units have it off (sim/state.py "sk"; contract/parity.md); 'game': as the game sets it
         run_config.update(decide_ms=args.decide_ms, poll_ms=NET_POLL_MS, skirmish=args.skirmish or "off")
-        if getattr(args, "lockstep", False):
+        # lock-step: the dict when on, false with --no-lockstep (the manifest says either way)
+        run_config["lockstep"] = False
+        if args.lockstep:
             run_config["lockstep"] = {"timeout_ms": LOCKSTEP_TIMEOUT_MS, "first_timeout_ms": LOCKSTEP_FIRST_TIMEOUT_MS,
                                       "spin_ms": LOCKSTEP_SPIN_MS, "strikes": LOCKSTEP_STRIKES, "strict": True}
     if getattr(args, "park_lords", False):
@@ -430,11 +433,13 @@ def parser_of():
                              "over its order) off for every unit the bridge commands (default: as the simulator's "
                              "network units, sim/state.py 'sk') or as the game sets it ('game')")
     parser.add_argument("--lockstep", action="store_true",
-                        help="nn-arena --own-ai net: each decision tick waits (the model stands) until the companion's "
-                             "answer for that move is applied, at most " + str(LOCKSTEP_TIMEOUT_MS) + " ms of real time "
-                             "(the first " + str(LOCKSTEP_FIRST_TIMEOUT_MS) + "); a failed wait voids the battle (no "
-                             "result; bridge/lua/entries/nn_arena.lua M.lockstep); the default deadline as at "
-                             + str(LOCKSTEP_PACE) + " model s a wall s")
+                        help="nn-arena --own-ai net: lock-step, the default (kept so that older calls work)")
+    parser.add_argument("--no-lockstep", action="store_true",
+                        help="nn-arena --own-ai net: lock-step off (by default each decision tick waits - the model "
+                             "stands - until the companion's answer for that move is applied, at most "
+                             + str(LOCKSTEP_TIMEOUT_MS) + " ms of real time (the first " + str(LOCKSTEP_FIRST_TIMEOUT_MS)
+                             + "); a failed wait voids the battle (no result; bridge/lua/entries/nn_arena.lua "
+                             "M.lockstep); the default deadline as at " + str(LOCKSTEP_PACE) + " model s a wall s)")
     parser.add_argument("--park-lords", action="store_true",
                         help="nn-arena --own-ai net: both lords taken out of the fight - teleported to two far corners "
                              "at the start and held there by the script (no orders from the game's AI or the companion; "
@@ -490,7 +495,7 @@ def parser_of():
                              "(reverse/mem/sites_exe1103.json; BAI_MEM_SITES to try another)")
     parser.add_argument("--no-draw", action="store_true",
                         help="the game draws no frame while the battle runs (V2; " + ", ".join(NO_DRAW_TARGETS) + "; "
-                             "nn-arena: --own-ai ai, or net with --lockstep; never human nor an exam): memreader Plus "
+                             "nn-arena: --own-ai ai, or net under lock-step; never human nor an exam): memreader Plus "
                              "next to our pack turns the view / present call into a nop after the start and back at "
                              "the end (bridge/lua/apps/battle/no_draw.lua; site no_draw of memreader.json sites_file); "
                              "refused in the game - drawn, event v2_refused; speed 40 by default")
@@ -518,13 +523,22 @@ def check_args(parser, args):
         args.own_ai = args.own_ai or "net"
     elif args.own_ai is not None:
         parser.error("--own-ai is for nn-arena")
+    net = args.target == "nn-arena" and args.own_ai == "net"
+    if (args.lockstep or args.no_lockstep) and not net:
+        parser.error("--lockstep / --no-lockstep are for nn-arena --own-ai net (only the companion's answers are "
+                     "waited for)")
+    if args.lockstep and args.no_lockstep:
+        parser.error("--lockstep (the default) and --no-lockstep: give one")
+    # lock-step on in every build where the network drives our side, unless --no-lockstep
+    args.lockstep = net and not args.no_lockstep
     if args.no_draw:
         if args.target == "human":
             parser.error("--no-draw is never for the human target (the owner's own battle: bridge/config/memreader.json)")
         if args.target not in NO_DRAW_TARGETS:
             parser.error(f"--no-draw is for {', '.join(NO_DRAW_TARGETS)}")
-        if args.target == "nn-arena" and (args.own_ai or "net") == "net" and not args.lockstep:
-            parser.error("--no-draw with nn-arena --own-ai net needs --lockstep (the model must wait for the companion)")
+        if net and not args.lockstep:
+            parser.error("--no-draw with nn-arena --own-ai net needs lock-step (the model must wait for the companion): "
+                         "no --no-lockstep")
     if args.speed == NO_DRAW_SPEED and not args.no_draw:
         parser.error(f"--speed {NO_DRAW_SPEED} is only with --no-draw (drawn, the game is frame-bound at x20)")
     if args.speed is None:
@@ -535,8 +549,6 @@ def check_args(parser, args):
         parser.error("--own-role is for nn-arena and human")
     if args.skirmish is not None and args.target != "nn-arena":
         parser.error("--skirmish is for nn-arena (the bridge's units)")
-    if getattr(args, "lockstep", False) and not (args.target == "nn-arena" and args.own_ai == "net"):
-        parser.error("--lockstep is for nn-arena --own-ai net (only the companion's answers are waited for)")
     if args.park_lords and not (args.target == "nn-arena" and args.own_ai == "net"):
         parser.error("--park-lords is for nn-arena --own-ai net (the planner of 'ai' would order the lord again)")
     for flag, ok in (("live_label", args.target == "human"), ("live_test", args.live_label),
@@ -618,7 +630,7 @@ def main(argv=None):
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
             if not args.scenario:
                 args.scenario = str(path)
-        pace = LOCKSTEP_PACE if getattr(args, "lockstep", False) else (
+        pace = LOCKSTEP_PACE if args.lockstep else (
             min(args.speed, NO_DRAW_PACE) if args.no_draw else args.speed)
         run_config["deadline_s"] = args.deadline or deadline_seconds(model_s, pace)
         run_config["stall_ms"] = stall_ms

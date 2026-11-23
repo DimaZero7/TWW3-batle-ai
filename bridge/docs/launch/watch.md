@@ -50,7 +50,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bridge/launcher/watch.ps1 -N
 | `-ChainOp formula\|net\|<чекпойнт>` | `formula` | Оперативник цепочки: формула (сети на 40 групп пока нет; `run8` из `net/config/strategist.json` `operative_ckpt` собрана на 6 и не грузится) или путь к весам |
 | `-ChainTactic formula\|net\|<чекпойнт>` | `formula` | Тактики цепочки: формула (как в симуляторе), сеть `run4` или путь |
 | `-ChainGreedy` | нет | Все уровни цепочки берут лучший выбор (по умолчанию — по вероятностям, как цепочка симулятора) |
-| `-StepLock` | нет | Шаг в шаг (с `-Chain`): без `-NoBuild` сборка с `--lockstep`; с `-NoBuild` сборка должна быть строгой (`config.lockstep.strict`), иначе отказ; сборку с ним без `-StepLock` тоже не запускает; игра стартует после метки готовности помощника (до 180 с) ([bridge](../apps/bridge.md#как-это-работает)) |
+| `-NoStepLock` | нет | Без шага в шаг (по умолчанию с `-Chain` бой идёт шаг в шаг, без `-Chain` — нет: ходы некому отвечать). Без `-NoBuild` сборка с `--no-lockstep`; с `-NoBuild` сборку с `lockstep` не запускает. Сборку с `lockstep` не строгую (`config.lockstep.strict`) или без `-Chain` тоже не запускает; старая сборка без ключа идёт без шага в шаг. Игра стартует после метки готовности помощника (до 180 с) ([bridge](../apps/bridge.md#как-это-работает)) |
+| `-StepLock` | нет | Оставлен: шаг в шаг и так по умолчанию; с `-NoBuild` не запускает сборку без строгого `lockstep` |
 | `-PyThreads` | 2 | Потоки torch помощника (`--threads`); число — в `companion.json` папки прогона |
 | `-Container` | `tww3-bai-companion` | Имя контейнера помощника (`agent-<задача>` для агента) |
 | `-Graphics` | `BAI_GRAPHICS` | Набор графики на этот запуск (`launch.ps1 -Graphics`: `low`, `ultra`, `ultrafull`) |
