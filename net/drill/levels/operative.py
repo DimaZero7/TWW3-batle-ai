@@ -15,7 +15,8 @@ the greedy replay. One decision unit a battle (G = 1, the own group); candidates
                  map handle re-resolved by the battle's map name (duel.map_id) - another process registers maps in
                  another order (a fresh process gave a max diff 5.07 without it, tmp/engine/b/milestone2.log)
     census(rows)           eligible decided KEEP / LS labels, delegated, battles, distinct battles with a first LS
-    balanced(rows) -> [M, 1]  LS half the mass, KEEP's half split equally over the teacher's KEEP reasons
+    balanced(rows) -> [M, 1]  LS half the mass (equal per battle), KEEP's half split equally over the teacher's KEEP reasons
+                 x the order in force (deploy / moved)
     LEVEL                  the adapter (record.Level): tick_s, play, rebuild, losses, ask, save, load
     marks(net, rows)       V's followed / false (the stop: validate.relative_stop on the card's marks)
     the engine's level interface (net/drill/levels/__init__.py): NAME, tick_s, IMPL_FILES, conf, sim_key, net_new,
@@ -228,13 +229,28 @@ def balanced(rows, forced=False):
     te, rs = rows["teacher"], rows["reason"]
     w = torch.zeros(len(te))
     m = el & (te == LS)
-    if bool(m.any()):
-        w[m] = 0.5 / float(m.sum())
-    ks = [k for k in range(len(AD.REASONS)) if bool((el & (te == KEEP) & (rs == k)).any())]
-    for k in ks:
-        m = el & (te == KEEP) & (rs == k)
+    if bool(m.any()):                                     # (LS_PER_BATTLE_WHY: the LS half equal per battle, then over
+        _, inv, cnt = torch.unique(rows["b"][m], return_inverse=True, return_counts=True)   # its LS rows)
+        w[m] = 0.5 / float(cnt.numel()) / cnt[inv].float()
+    moved = rows["o_ptr"] != 0                            # (the order in force: the deploy one or a moved zone)
+    ks = [(k, mv) for k in range(len(AD.REASONS)) for mv in (False, True)
+          if bool((el & (te == KEEP) & (rs == k) & (moved == mv)).any())]
+    for k, mv in ks:
+        m = el & (te == KEEP) & (rs == k) & (moved == mv)
         w[m] = 0.5 / len(ks) / float(m.sum())
     return (w * float(el.sum()))[:, None]
+
+
+LS_PER_BATTLE_WHY = (
+    "O0-1 attempt 1 failed the quiet line (come twins moved in 32 / 384 against the teacher's 9; tmp/engine/o1/fix1): "
+    "on the network-driven come twins of round 2 the network kept still while the teacher labelled its late advance "
+    "(one survivor, the deploy order in force) at EVERY tick - 8 such LS rows in round 1, 32 in round 2 (24 net-driven), "
+    "each weighed as a cause scene's first advance, while its KEEP rows near / comer under the deploy order (109 + 209 "
+    "rows in two rounds) were a sliver of their reasons' mass; the late deploy-order region flipped to LS (round_01.pt: "
+    "0 / 192 come twins moved, final.pt 37 / 192). Now one battle's LS labels share one battle's part of the LS half, "
+    "and the KEEP half is split over reason x the order in force (deploy / moved). The CPU two-round chain on attempt "
+    "1's shards (tmp/engine/o1/fix1/c4b.log, c6.log): come twins moved 10 / 192 (A0 36), cause first LS 382 / 382, "
+    "G 128 / 128, G_def 0 / 128 (A0 11), V come_any_false 1 / 64 (A0 12, the LS-per-battle part alone 4 / 64)")
 
 class OperativeLevel:
     tick_s = 15.0
@@ -324,12 +340,15 @@ def marks(net, rows, device="cpu", kinds=None):
                                (no teacher LS on the path), 'no_move', 'early' (tN < t0 - decide_s), 'late'
         come_first_false       a come twin's first decided row: the network LS
         role_false             a role twin: the network LS on any decided row
+        come_any_false         a come twin: the network LS (legal) on any eligible row the teacher labels KEEP - the
+                               episode's false move at any second (come_first_false reads the first row only:
+                               attempt 1's late moves, tmp/engine/o1/fix1)
     beside (printed, not gating): followed / false on every eligible tick."""
     el = eligible(rows)
     idx = el.nonzero()[:, 0]
     if not idx.numel():
         return {"followed": None, "false": None, "cause_first_followed": None, "come_first_false": None,
-                "role_false": None}
+                "role_false": None, "come_any_false": None}
     k = _pred(net, rows, idx, device)
     te = rows["teacher"][idx]
     out = {"followed": _sh(te == LS, k == LS), "false": _sh(te == KEEP, k == LS)}
@@ -341,7 +360,7 @@ def marks(net, rows, device="cpu", kinds=None):
     by = {}
     for j, i in enumerate(dec.tolist()):
         by.setdefault(int(rows["b"][i]), []).append((int(rows["sec"][i]), i, int(kd[j]), bool(leg_ls[j])))
-    cf, cfh, mf, mfh, rf, rfh = [], [], [], [], [], []
+    cf, cfh, mf, mfh, rf, rfh, ma = [], [], [], [], [], [], []
     dt = int(LN.conf()["decide_s"])                      # (one operative tick, seconds)
     extra = {"no_label": 0, "no_move": 0, "early": 0, "late": 0, "no_rows": 0}
     for b, kind in enumerate(kinds):                     # (every battle of the path's list, rows or not)
@@ -367,12 +386,14 @@ def marks(net, rows, device="cpu", kinds=None):
         elif kind == "come":
             mf.append(True)
             mfh.append(rs[0][2] == LS)
+            ma.append(any(k_ == LS and leg and bool(el[i]) and int(rows["teacher"][i]) == KEEP for _, i, k_, leg in rs))
         elif kind == "role":
             rf.append(True)
             rfh.append(any(r[2] == LS for r in rs))
     T = lambda x: torch.tensor(x, dtype=torch.bool)                     # noqa: E731
     out.update(cause_first_followed=_sh(T(cf), T(cfh)) if cf else None,
                come_first_false=_sh(T(mf), T(mfh)) if mf else None, role_false=_sh(T(rf), T(rfh)) if rf else None,
+               come_any_false=_sh(T(mf), T(ma)) if mf else None,
                cause_first_extra=dict(extra, battles=len(cf)))
     return out
 
@@ -576,8 +597,8 @@ def weights(card, rows, meta):
                "forced_KEEP_rows": int(forced.sum()),
                "forced_weight_share_before": round(float(w0[forced].sum() / w0.sum().clamp(min=1e-9)), 4),
                "forced_weight_share_now": round(float(w[:, 0][forced].sum() / w.sum().clamp(min=1e-9)), 4),
-               "mass": "LS half; KEEP half split equally over the teacher's KEEP reasons; rows with only KEEP legal "
-                       "out (teaches)"}
+               "mass": "LS half equal per battle; KEEP half split equally over the teacher's KEEP reasons x the "
+                       "order in force (deploy / moved); rows with only KEEP legal out (teaches)"}
 
 
 def batch_of(rows, cards, idx):
@@ -741,7 +762,7 @@ def v_read(card, net, ctx, cache):
 
 def brief(v):
     """V's numbers in one log row: the gating marks and the per-tick rates, both paths."""
-    ks = ("cause_first_followed", "come_first_false", "role_false", "followed", "false")
+    ks = ("cause_first_followed", "come_first_false", "come_any_false", "role_false", "followed", "false")
     return {p: {k: (v.get(p) or {}).get(k) for k in ks} for p in ("T", "N")}
 
 

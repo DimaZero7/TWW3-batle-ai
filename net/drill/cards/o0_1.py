@@ -24,14 +24,18 @@ PARENT = None
 ARMS = {"DEFAULT": "the stack without the operative (KEEP)", "DUMB": "Hold(LM) once", "TEACH": "advance.teach"}
 BELOW = {"tactic": "TEACH"}
 OPPONENT = ("sally.Sally", "sally.WalkIn", "sally.Enemy")
-SETS = {"taught": 71000, "held": 72000, "G": 73000, "G_hold": 73500,
-        "train": 40_000_000, "dev": 50_000_000, "V": 60_000_000, "probe_train": 70_000_000, "probe_held": 80_000_000,
+SETS = {"taught": 20_000_000, "held": 20_100_000, "G": 75_000, "G_hold": 75_500,
+        "train": 40_000_000, "dev": 50_000_000, "V": 60_100_000, "probe_train": 70_000_000, "probe_held": 80_000_000,
         "probe_held2": 80_500_000}
 _HELD2_WHY = ("fresh probe families (Astra's second o1 review 2: the earlier held families were used for recipe "
               "selection) inside the registered probe_held range 80,000,000-81,000,000")
 _SETS_WHY = ("the named exam sets are scenes_o1's (operative.json o1.scenes); the fresh ranges 10e6 apart: a seed's "
              "substitutes (+ k x 1e6, k <= 5, scenes_o1.SUBSTITUTE) never reach the next range, clear of the tactic's "
-             "train.log line 2 and the exam seeds")
+             "train.log line 2 and the exam seeds. Attempt 2 (the coordinator 23.11, METHOD step 6 fresh seeds): the "
+             "exam sets moved to operative.json o1.scenes' new seeds (taught 20,000,000, held 20,100,000, G 75,000, "
+             "G_hold 75,500; G_def attack.SEED 76,000); V to 60,100,000 (attempt 1's V 60,000,000 chose the fix's "
+             "variant); the rounds from TRAIN_SEED0 40,100,000 (attempt 1's rounds 40,000,000 + 10,000 r)")
+TRAIN_SEED0 = 40_100_000
 DISTURB_SHARE = 0.25
 DELAYS = (1, 2)
 _DISTURB_WHY = "design_merged 3 (O0-1): the first L60 delayed one or two ticks in 25 % of the teacher-driven cause battles"
@@ -303,12 +307,19 @@ def _classes(batch):
 
 MARKS = {"cause first advance followed": ("cause_first_followed", ">=", 0.90),
          "come twin first decision false": ("come_first_false", "<=", 0.03),
-         "role twin false advance": ("role_false", "<=", 0.03)}
+         "role twin false advance": ("role_false", "<=", 0.03),
+         "come twin false advance at any decision": ("come_any_false", "<=", 0.05)}
 _MARKS_WHY = ("the decisions that matter, per battle on V (Astra's o1 review 6, the orchestrator 22.11 F3): a cause "
               "scene's first advance taken at the teacher's tick or within one tick >= 0.90, a come twin's first "
               "decision advanced <= 0.03, a role twin advanced at all <= 0.03, each n >= 50 (V: 128 cause, 64 come, "
               "64 role); the per-tick followed / false printed beside (levels/operative.brief) - missing all 64 come "
-              "twins costs only 1.66 % of ticks")
+              "twins costs only 1.66 % of ticks; come_any_false (O0-1 attempt 1, tmp/engine/o1/fix1): a come twin with "
+              "the network's LS on any row the teacher labels KEEP <= 0.03 - the exam's quiet line counts a twin's move "
+              "at any second, the first-row mark missed the late moves of round 2; its line 0.05 (<= 3 of 64; a stop mark, "
+              "not an acceptance line - set BEFORE attempt 2 after the outside review, 23.11): the acceptance's quiet line "
+              "tolerates about (TEACH 0.023 + 0.03) x 2 = 0.107 on come twins when role twins are quiet, minus one "
+              "two-error band of a share near 0.05 on n = 64 (about 0.055) = 0.05; not derived from which variant "
+              "passes (at 0.03 = 1 of 64 a true 2-3 % fails a round with chance 37-58 %)")
 
 
 def _marks(v):
@@ -326,7 +337,7 @@ def _m2(tables, probe=None):
     return pieces_after(tables, probe)
 
 
-PROBE_FILE = "tmp/engine/b/probe4/" + PROBE     # (probe3 re-collected under the 23.11 gate key: the adapter and ROUND_N changed; same scenes)      # (the accepted three-seed result of net/drill/probe.py, copied there)
+PROBE_FILE = "tmp/engine/o1/probe6/" + PROBE     # (O0-1 attempt 2: re-collected under the gate key of the fix (BP weights, the fresh seeds, the V line come_any_false 0.05; probe5 = the same before that line); attempt 1: probe4 = probe3 re-collected under the 23.11 gate key: the adapter and ROUND_N changed; same scenes)      # (the accepted three-seed result of net/drill/probe.py, copied there)
 
 
 TEACHER_FILE = "tmp/o1/exam3/verdict_before.json"   # (the teacher's exam on the fair starts: verdict_before writes it)
@@ -479,7 +490,7 @@ def card():
                               "place, gframe.g_right / g_fwd / g_near"),
                 lane="holder_game", files=FILES,
                 level_args={"pick": True, "lr": 1e-3, "minibatch": 256, "max_grad": 1.0, "tseed": 11, "chunk": 256},
-                stages={"n": ROUND_N, "net_share": 0.5, "seed0": SETS["train"], "stride": ROUND_STRIDE,
+                stages={"n": ROUND_N, "net_share": 0.5, "seed0": TRAIN_SEED0, "stride": ROUND_STRIDE,
                         "general_share": GENERAL_SHARE},
                 masks={"op": "operative"}, census={"op": {"KEEP": 50, "LS": 50, "LS:first": FIRST_MIN,
                                                            **{"KEEP:" + k: 50 for k in REASONS_MIN}}},

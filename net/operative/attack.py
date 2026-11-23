@@ -17,8 +17,9 @@ from sim import orders as O
 from sim import scripts as SS
 
 KINDS = ("human", "nearest")
-SEED = 74000              # (G_def's draw: SP.seeded(SEED), the script's draw Random(SEED + 1); clear of G 73000, G_hold
-#                           73500 and every registry range - to register: tmp/engine/b/NEEDS_A.md)
+SEED = 76000              # (G_def's draw: SP.seeded(SEED), the script's draw Random(SEED + 1); O0-1 attempt 2's fresh
+#                           seed (attempt 1: 74000, kept registered - net/drill/seeds.py _o1_a1); clear of G 75000,
+#                           G_hold 75500 and every registry range)
 N = 256                   # (the orchestrator 22.11: 256 battles)
 
 

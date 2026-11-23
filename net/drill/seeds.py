@@ -191,6 +191,7 @@ def _t0():
 
 
 def _o1():
+    from net.operative import attack as AT
     from net.operative import cfg as ocfg
     from net.operative import scenes_o1 as SO
     S = ocfg()["o1"]["scenes"]
@@ -205,8 +206,9 @@ def _o1():
     out += [E("O0-1 G", "o0_1", "exam:G", "random.general", g, g + 2, why="scenes_o1.general_set: SP.seeded(seed), "
               "Random(seed + 1)"),
             E("O0-1 G_hold", "o0_1", "exam:G", "random.general", g + 500, g + 502),
-            E("O0-1 G_def", "o0_1", "exam:G_def", "random.general", 74000, 74002,
-              why="net/operative/attack.py G_def (the orchestrator 22.11): SP.seeded(74000), Random(74001) - B's NEEDS_A 3"),
+            E("O0-1 G_def", "o0_1", "exam:G_def", "random.general", AT.SEED, AT.SEED + 2,
+              why="net/operative/attack.py G_def (the orchestrator 22.11): SP.seeded(SEED), Random(SEED + 1) - B's "
+                  "NEEDS_A 3; attempt 2: SEED 76,000"),
             E("O0-1 train generals", "o0_1", "train", "random.general", 46_000_000, 47_000_000,
               why="levels/operative.py GENERAL_SEED (the orchestrator 22.11 F4): round r mission attack SP.seeded("
                   "46,000,000 + 10,000 r), battle i 46,000,000 + 10,000 r + i; mission hold the same + 5,000 (n <= 5,000"
@@ -225,7 +227,35 @@ def _o1():
         out.append(E(f"O0-1 torch chunks {nm}", "o0_1", nm, "torch.chunk", lo, lo + B_BLOCK,
                      why="levels/operative.train: the chunk seeds s0 + k of the round's first scene seed s0 (train: "
                          "SETS['train'] + 10,000 r; V: SETS['V'], + 1 the network's path)"))
+    return out + _o1_a1() + _o1_a2()
+
+
+def _o1_a1():
+    """O0-1 attempt 1's exam sets (exam3, 23.11), played: kept registered after the exam moved to fresh seeds
+    (attempt 2, the coordinator 23.11 - METHOD step 6 'the same set is not played twice'); split exam_a1."""
+    out = [E("O0-1 taught (attempt 1)", "o0_1", "exam_a1:taught", "o1.scene", 71000, 71192, subs=5,
+             why="exam3 (23.11): scenes_o1.taught_set at seed 71,000")]
+    for j, ax in enumerate(("map", "size", "gap_m", "our_form", "enemy_form", "sally_m")):
+        lo = 72000 + 10000 * j
+        out.append(E(f"O0-1 held {ax} (attempt 1)", "o0_1", "exam_a1:held", "o1.scene", lo, lo + 32, subs=5,
+                     why="exam3 (23.11): scenes_o1.held_set at held_seed 72,000"))
+    out += [E("O0-1 G (attempt 1)", "o0_1", "exam_a1:G", "random.general", 73000, 73002, why="exam3 (23.11)"),
+            E("O0-1 G_hold (attempt 1)", "o0_1", "exam_a1:G", "random.general", 73500, 73502, why="exam3 (23.11)"),
+            E("O0-1 G_def (attempt 1)", "o0_1", "exam_a1:G_def", "random.general", 74000, 74002, why="exam3 (23.11)"),
+            E("O0-1 torch chunks (attempt 1)", "o0_1", "exam_a1:taught", "torch.chunk", 173000, 173500,
+              why="exam3 (23.11): tseed 173,000 + 100 x the set's place (taught, held, G, G_hold, G_def)")]
     return out
+
+
+def _o1_a2():
+    """O0-1 attempt 2's training rounds and V inside the train / V blocks (the coordinator 23.11: fresh seeds - the
+    rounds from cards/o0_1.TRAIN_SEED0 + 10,000 r, r < 4; V from SETS['V'] 60,100,000, 128 scenes + their twins)."""
+    from net.drill.cards import o0_1 as C
+    t0, v0 = int(C.TRAIN_SEED0), int(C.SETS["V"])
+    return [E("O0-1 train (attempt 2)", "o0_1", "train", "o1.scene", t0, t0 + 4 * int(C.ROUND_STRIDE), subs=5,
+              why="cards/o0_1.TRAIN_SEED0: rounds 1-4 of attempt 2 (attempt 1: 40,000,000 + 10,000 r, r < 2)"),
+            E("O0-1 V (attempt 2)", "o0_1", "V", "o1.scene", v0, v0 + 128, subs=5,
+              why="cards/o0_1.SETS['V'] 60,100,000 (attempt 1's V 60,000,000 chose the fix's variant)")]
 
 
 def _twins(name, split, rec, lo, m):

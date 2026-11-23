@@ -72411,28 +72411,28 @@
    "split": "exam:taught",
    "gen": "o1.scene",
    "key": null,
-   "lo": 71000,
-   "hi": 71192,
+   "lo": 20000000,
+   "hi": 20000192,
    "subs": [
     [
-     1071000,
-     1071192
+     21000000,
+     21000192
     ],
     [
-     2071000,
-     2071192
+     22000000,
+     22000192
     ],
     [
-     3071000,
-     3071192
+     23000000,
+     23000192
     ],
     [
-     4071000,
-     4071192
+     24000000,
+     24000192
     ],
     [
-     5071000,
-     5071192
+     25000000,
+     25000192
     ]
    ],
    "why": "scenes_o1.taught_set (twins share the cause scene's seed)"
@@ -72443,28 +72443,28 @@
    "split": "exam:held",
    "gen": "o1.scene",
    "key": null,
-   "lo": 72000,
-   "hi": 72032,
+   "lo": 20100000,
+   "hi": 20100032,
    "subs": [
     [
-     1072000,
-     1072032
+     21100000,
+     21100032
     ],
     [
-     2072000,
-     2072032
+     22100000,
+     22100032
     ],
     [
-     3072000,
-     3072032
+     23100000,
+     23100032
     ],
     [
-     4072000,
-     4072032
+     24100000,
+     24100032
     ],
     [
-     5072000,
-     5072032
+     25100000,
+     25100032
     ]
    ],
    "why": "scenes_o1.held_set"
@@ -72475,28 +72475,28 @@
    "split": "exam:held",
    "gen": "o1.scene",
    "key": null,
-   "lo": 82000,
-   "hi": 82032,
+   "lo": 20110000,
+   "hi": 20110032,
    "subs": [
     [
-     1082000,
-     1082032
+     21110000,
+     21110032
     ],
     [
-     2082000,
-     2082032
+     22110000,
+     22110032
     ],
     [
-     3082000,
-     3082032
+     23110000,
+     23110032
     ],
     [
-     4082000,
-     4082032
+     24110000,
+     24110032
     ],
     [
-     5082000,
-     5082032
+     25110000,
+     25110032
     ]
    ],
    "why": "scenes_o1.held_set"
@@ -72507,28 +72507,28 @@
    "split": "exam:held",
    "gen": "o1.scene",
    "key": null,
-   "lo": 92000,
-   "hi": 92032,
+   "lo": 20120000,
+   "hi": 20120032,
    "subs": [
     [
-     1092000,
-     1092032
+     21120000,
+     21120032
     ],
     [
-     2092000,
-     2092032
+     22120000,
+     22120032
     ],
     [
-     3092000,
-     3092032
+     23120000,
+     23120032
     ],
     [
-     4092000,
-     4092032
+     24120000,
+     24120032
     ],
     [
-     5092000,
-     5092032
+     25120000,
+     25120032
     ]
    ],
    "why": "scenes_o1.held_set"
@@ -72539,28 +72539,28 @@
    "split": "exam:held",
    "gen": "o1.scene",
    "key": null,
-   "lo": 102000,
-   "hi": 102032,
+   "lo": 20130000,
+   "hi": 20130032,
    "subs": [
     [
-     1102000,
-     1102032
+     21130000,
+     21130032
     ],
     [
-     2102000,
-     2102032
+     22130000,
+     22130032
     ],
     [
-     3102000,
-     3102032
+     23130000,
+     23130032
     ],
     [
-     4102000,
-     4102032
+     24130000,
+     24130032
     ],
     [
-     5102000,
-     5102032
+     25130000,
+     25130032
     ]
    ],
    "why": "scenes_o1.held_set"
@@ -72571,28 +72571,28 @@
    "split": "exam:held",
    "gen": "o1.scene",
    "key": null,
-   "lo": 112000,
-   "hi": 112032,
+   "lo": 20140000,
+   "hi": 20140032,
    "subs": [
     [
-     1112000,
-     1112032
+     21140000,
+     21140032
     ],
     [
-     2112000,
-     2112032
+     22140000,
+     22140032
     ],
     [
-     3112000,
-     3112032
+     23140000,
+     23140032
     ],
     [
-     4112000,
-     4112032
+     24140000,
+     24140032
     ],
     [
-     5112000,
-     5112032
+     25140000,
+     25140032
     ]
    ],
    "why": "scenes_o1.held_set"
@@ -72603,28 +72603,28 @@
    "split": "exam:held",
    "gen": "o1.scene",
    "key": null,
-   "lo": 122000,
-   "hi": 122032,
+   "lo": 20150000,
+   "hi": 20150032,
    "subs": [
     [
-     1122000,
-     1122032
+     21150000,
+     21150032
     ],
     [
-     2122000,
-     2122032
+     22150000,
+     22150032
     ],
     [
-     3122000,
-     3122032
+     23150000,
+     23150032
     ],
     [
-     4122000,
-     4122032
+     24150000,
+     24150032
     ],
     [
-     5122000,
-     5122032
+     25150000,
+     25150032
     ]
    ],
    "why": "scenes_o1.held_set"
@@ -72635,8 +72635,8 @@
    "split": "exam:G",
    "gen": "random.general",
    "key": null,
-   "lo": 73000,
-   "hi": 73002,
+   "lo": 75000,
+   "hi": 75002,
    "subs": [],
    "why": "scenes_o1.general_set: SP.seeded(seed), Random(seed + 1)"
   },
@@ -72646,8 +72646,8 @@
    "split": "exam:G",
    "gen": "random.general",
    "key": null,
-   "lo": 73500,
-   "hi": 73502,
+   "lo": 75500,
+   "hi": 75502,
    "subs": [],
    "why": ""
   },
@@ -72657,10 +72657,10 @@
    "split": "exam:G_def",
    "gen": "random.general",
    "key": null,
-   "lo": 74000,
-   "hi": 74002,
+   "lo": 76000,
+   "hi": 76002,
    "subs": [],
-   "why": "net/operative/attack.py G_def (the orchestrator 22.11): SP.seeded(74000), Random(74001) - B's NEEDS_A 3"
+   "why": "net/operative/attack.py G_def (the orchestrator 22.11): SP.seeded(SEED), Random(SEED + 1) - B's NEEDS_A 3; attempt 2: SEED 76,000"
   },
   {
    "name": "O0-1 train generals",
@@ -72839,8 +72839,8 @@
    "split": "exam:G_def",
    "gen": "torch.chunk",
    "key": null,
-   "lo": 173400,
-   "hi": 173500,
+   "lo": 174400,
+   "hi": 174500,
    "subs": [],
    "why": "exam_o1.sets_of: tseed + 100 x 4 (G_def) - B's NEEDS_A 3"
   },
@@ -72850,8 +72850,8 @@
    "split": "exam:taught",
    "gen": "torch.chunk",
    "key": null,
-   "lo": 173000,
-   "hi": 173100,
+   "lo": 174000,
+   "hi": 174100,
    "subs": [],
    "why": "exam_o1.sets_of: tseed + 100 x the set's place in SETS (taught, held, G, G_hold)"
   },
@@ -72861,8 +72861,8 @@
    "split": "exam:held",
    "gen": "torch.chunk",
    "key": null,
-   "lo": 173100,
-   "hi": 173200,
+   "lo": 174100,
+   "hi": 174200,
    "subs": [],
    "why": "exam_o1.sets_of: tseed + 100 x the set's place in SETS (taught, held, G, G_hold)"
   },
@@ -72872,8 +72872,8 @@
    "split": "exam:G",
    "gen": "torch.chunk",
    "key": null,
-   "lo": 173200,
-   "hi": 173300,
+   "lo": 174200,
+   "hi": 174300,
    "subs": [],
    "why": "exam_o1.sets_of: tseed + 100 x the set's place in SETS (taught, held, G, G_hold)"
   },
@@ -72883,8 +72883,8 @@
    "split": "exam:G_hold",
    "gen": "torch.chunk",
    "key": null,
-   "lo": 173300,
-   "hi": 173400,
+   "lo": 174300,
+   "hi": 174400,
    "subs": [],
    "why": "exam_o1.sets_of: tseed + 100 x the set's place in SETS (taught, held, G, G_hold)"
   },
@@ -72909,6 +72909,338 @@
    "hi": 61000000,
    "subs": [],
    "why": "levels/operative.train: the chunk seeds s0 + k of the round's first scene seed s0 (train: SETS['train'] + 10,000 r; V: SETS['V'], + 1 the network's path)"
+  },
+  {
+   "name": "O0-1 taught (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:taught",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 71000,
+   "hi": 71192,
+   "subs": [
+    [
+     1071000,
+     1071192
+    ],
+    [
+     2071000,
+     2071192
+    ],
+    [
+     3071000,
+     3071192
+    ],
+    [
+     4071000,
+     4071192
+    ],
+    [
+     5071000,
+     5071192
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.taught_set at seed 71,000"
+  },
+  {
+   "name": "O0-1 held map (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:held",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 72000,
+   "hi": 72032,
+   "subs": [
+    [
+     1072000,
+     1072032
+    ],
+    [
+     2072000,
+     2072032
+    ],
+    [
+     3072000,
+     3072032
+    ],
+    [
+     4072000,
+     4072032
+    ],
+    [
+     5072000,
+     5072032
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.held_set at held_seed 72,000"
+  },
+  {
+   "name": "O0-1 held size (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:held",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 82000,
+   "hi": 82032,
+   "subs": [
+    [
+     1082000,
+     1082032
+    ],
+    [
+     2082000,
+     2082032
+    ],
+    [
+     3082000,
+     3082032
+    ],
+    [
+     4082000,
+     4082032
+    ],
+    [
+     5082000,
+     5082032
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.held_set at held_seed 72,000"
+  },
+  {
+   "name": "O0-1 held gap_m (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:held",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 92000,
+   "hi": 92032,
+   "subs": [
+    [
+     1092000,
+     1092032
+    ],
+    [
+     2092000,
+     2092032
+    ],
+    [
+     3092000,
+     3092032
+    ],
+    [
+     4092000,
+     4092032
+    ],
+    [
+     5092000,
+     5092032
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.held_set at held_seed 72,000"
+  },
+  {
+   "name": "O0-1 held our_form (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:held",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 102000,
+   "hi": 102032,
+   "subs": [
+    [
+     1102000,
+     1102032
+    ],
+    [
+     2102000,
+     2102032
+    ],
+    [
+     3102000,
+     3102032
+    ],
+    [
+     4102000,
+     4102032
+    ],
+    [
+     5102000,
+     5102032
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.held_set at held_seed 72,000"
+  },
+  {
+   "name": "O0-1 held enemy_form (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:held",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 112000,
+   "hi": 112032,
+   "subs": [
+    [
+     1112000,
+     1112032
+    ],
+    [
+     2112000,
+     2112032
+    ],
+    [
+     3112000,
+     3112032
+    ],
+    [
+     4112000,
+     4112032
+    ],
+    [
+     5112000,
+     5112032
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.held_set at held_seed 72,000"
+  },
+  {
+   "name": "O0-1 held sally_m (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:held",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 122000,
+   "hi": 122032,
+   "subs": [
+    [
+     1122000,
+     1122032
+    ],
+    [
+     2122000,
+     2122032
+    ],
+    [
+     3122000,
+     3122032
+    ],
+    [
+     4122000,
+     4122032
+    ],
+    [
+     5122000,
+     5122032
+    ]
+   ],
+   "why": "exam3 (23.11): scenes_o1.held_set at held_seed 72,000"
+  },
+  {
+   "name": "O0-1 G (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:G",
+   "gen": "random.general",
+   "key": null,
+   "lo": 73000,
+   "hi": 73002,
+   "subs": [],
+   "why": "exam3 (23.11)"
+  },
+  {
+   "name": "O0-1 G_hold (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:G",
+   "gen": "random.general",
+   "key": null,
+   "lo": 73500,
+   "hi": 73502,
+   "subs": [],
+   "why": "exam3 (23.11)"
+  },
+  {
+   "name": "O0-1 G_def (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:G_def",
+   "gen": "random.general",
+   "key": null,
+   "lo": 74000,
+   "hi": 74002,
+   "subs": [],
+   "why": "exam3 (23.11)"
+  },
+  {
+   "name": "O0-1 torch chunks (attempt 1)",
+   "card": "o0_1",
+   "split": "exam_a1:taught",
+   "gen": "torch.chunk",
+   "key": null,
+   "lo": 173000,
+   "hi": 173500,
+   "subs": [],
+   "why": "exam3 (23.11): tseed 173,000 + 100 x the set's place (taught, held, G, G_hold, G_def)"
+  },
+  {
+   "name": "O0-1 train (attempt 2)",
+   "card": "o0_1",
+   "split": "train",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 40100000,
+   "hi": 40140000,
+   "subs": [
+    [
+     41100000,
+     41140000
+    ],
+    [
+     42100000,
+     42140000
+    ],
+    [
+     43100000,
+     43140000
+    ],
+    [
+     44100000,
+     44140000
+    ],
+    [
+     45100000,
+     45140000
+    ]
+   ],
+   "why": "cards/o0_1.TRAIN_SEED0: rounds 1-4 of attempt 2 (attempt 1: 40,000,000 + 10,000 r, r < 2)"
+  },
+  {
+   "name": "O0-1 V (attempt 2)",
+   "card": "o0_1",
+   "split": "V",
+   "gen": "o1.scene",
+   "key": null,
+   "lo": 60100000,
+   "hi": 60100128,
+   "subs": [
+    [
+     61100000,
+     61100128
+    ],
+    [
+     62100000,
+     62100128
+    ],
+    [
+     63100000,
+     63100128
+    ],
+    [
+     64100000,
+     64100128
+    ],
+    [
+     65100000,
+     65100128
+    ]
+   ],
+   "why": "cards/o0_1.SETS['V'] 60,100,000 (attempt 1's V 60,000,000 chose the fix's variant)"
   },
   {
    "name": "S0-1 train",
