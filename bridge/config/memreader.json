@@ -8,6 +8,12 @@
     "never": ["human", "exams", "anything the owner watches", "a game left open with the call patched out"],
     "decided": "23.11.2026, the coordinator; the owner's word 23.11.2026: decide yourself"
   },
+  "mem_diag": {
+    "target": "nn-arena --own-ai net --mem-diag",
+    "what": "ONE diagnostic exception to 'probes only', by name: bridge.build nn-arena --mem-diag (entries/nn_arena_memdiag.lua) - the same battle, read only beside it (apps.mem.entities as in the probes: the enemy lord's unit fields and current order, the men near him); off by default, the default builds byte-equal; config.mem_diag and manifest mem_diag true, every row it writes mem_diag true",
+    "never": ["a series or a measure counted in one", "exams", "human", "anything the owner watches"],
+    "decided": "27.11.2026, the orchestrator (question A of tmp/lordwin)"
+  },
   "workshop_id": "3811098873",
   "title": "memreader Plus",
   "author": "Druwski (PKozdra)",

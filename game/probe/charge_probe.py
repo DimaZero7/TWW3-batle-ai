@@ -588,7 +588,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire", "globes", "globes2", "dglobes", "stormfiend", "lordring") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire", "globes", "globes2", "dglobes", "stormfiend", "lordring", "lordswap") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -610,6 +610,13 @@ CROWD = {"small": (5, 15, 25), "flank_gap_m": 2.0, "fight_s": 60, "max_s": 75}
 # (front + left, right, back, their fronts edge_m from his body); the General with clanrat spearmen and the Warlord with
 # Empire swordsmen in each battle (one lord a side); 2 repeats an arm
 LORDRING = {"run_gap_m": 30, "walk_gap_m": 3, "edge_m": 3.0, "fight_s": 35, "ring_w": 14, "pairs": (("general", "cspear"), ("warlord", "swords"))}
+# the lordswap plan (tmp/lordwin): a foot lord attacks infantry E1 (it attacks him at a run from gap_m), a second unit E2 of
+# the same kind stands t2_gap_m beside E1 and attacks him at a run at the go (two touch him); at_s after the first contact
+# arm X re-orders him to attack E2 (at a walk), arm S gives the same attack on E1 again, arm C nothing; the men from
+# memory every 0.1 s, the lord's own unit fields every 0.5 s (mem_morale_ours: the break-off timer +0x3254 with a sites
+# file that names it - BAI_MEM_SITES). Battles 1-4: General / Warlord X-C, C-X, X-C, C-X; 5-6: both S
+LORDSWAP = {"gap_m": 3, "fight_s": 50, "w": 14, "t2_gap_m": 1, "at_s": 10, "pairs": (("general", "cspear"), ("warlord", "swords")),
+            "arms": (("X", "C"), ("C", "X"), ("X", "C"), ("C", "X"), ("S", "S"), ("S", "S"))}
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -972,6 +979,16 @@ def battles(plan):
             return lane(inf, lord, "attack_walk", "hold", gap_m=g["walk_gap_m"], fight_s=g["fight_s"], kind=f"C_{lord}",
                         extras=ex, a_w=w)
         return [[ring(lo, inf, arm) for lo, inf in g["pairs"]] for _ in range(2) for arm in "ABC"]
+    if plan == "lordswap":
+        g = LORDSWAP
+        kinds = {"X": "attack_t2", "S": "attack_same", "C": "none"}
+
+        def swap(lord, inf, arm):
+            af = {"at_s": g["at_s"], "kind": kinds[arm], "dx": 0, "dz": 0, "walk": True}
+            return lane(lord, inf, "attack_walk", "both", gap_m=g["gap_m"], fight_s=g["fight_s"], target2=inf,
+                        t2_gap_m=g["t2_gap_m"], t2_mode="attack", t2_run=True, t_w=g["w"], t2_width=g["w"], after=af,
+                        mem_morale_ours=True, kind=f"{arm}_{lord}")
+        return [[swap(lo, inf, arm) for (lo, inf), arm in zip(g["pairs"], arms)] for arms in g["arms"]]
     if plan == "crowd":
         def cut(n, flanks=False):
             t_men = UNITS["clanrat"][1]
@@ -2068,6 +2085,11 @@ def run_config(plan, index):
     if plan == "lordring":
         # health every 0.1 s; the men of the lane's units and extras from memory every 0.1 s within 60 m all the fight
         config.update(tick_ms=SWING_MS, men_ms=1000, men_after_s=LORDRING["fight_s"] + 10, men_near_m=60, mem_extras=True)
+    if plan == "lordswap":
+        # as lordring (the men of the lord, E1 and E2 every 0.1 s within 60 m all the fight), and the lord's and E1's unit
+        # rows every 0.5 s (mem_morale; with lane.mem_morale_ours the lord's)
+        config.update(tick_ms=SWING_MS, men_ms=1000, men_after_s=LORDSWAP["fight_s"] + 10, men_near_m=60, mem_extras=True,
+                      mem_morale=True)
     if plan in ("memmelee", "memrunners"):
         # the men from memory every 0.1 s all the fight (dense to men_after_s after the contact)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=MEMMELEE["fight_s"] + 5, men_near_m=60)

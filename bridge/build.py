@@ -124,6 +124,11 @@ KV_TARGETS = ("charge-probe", "missile-probe", "morale-probe")
 # --mem (memreader Plus: the game's memory read in a probe; bridge/docs/apps/memreader.md): probes whose entry reads it.
 # Never the network's battles or exams.
 MEM_TARGETS = ("missile-probe", "charge-probe", "morale-probe")
+# --mem-diag (bridge/config/memreader.json 'mem_diag'): ONE diagnostic exception - nn-arena --own-ai net built with the
+# entry entries.nn_arena_memdiag (the same battle, the enemy lord and our men read from memory beside it, read only);
+# mem_diag = true in the manifest (and config.mem_diag) and on every row the diagnosis writes: never a series, an exam
+# or the owner's battle
+MEM_DIAG_ENTRY = "entries.nn_arena_memdiag"
 # --no-draw (bridge/lua/apps/battle/no_draw.lua; the policy bridge/config/memreader.json, decided 23.11.2026): the probes
 # and lanes, and nn-arena under the game's planner ('ai') or the network under lock-step - not an exam; never 'human'.
 # ON NO_DRAW_DELAY_MS of model time after the start; the Lua's own safety net turns it off NO_DRAW_SAFETY_S of real time
@@ -176,7 +181,7 @@ def check_syntax(script):
     return True
 
 
-def build(target, run_config, dependencies=None, scenario=None, kv=None, out=None):
+def build(target, run_config, dependencies=None, scenario=None, kv=None, out=None, entry=None, mem_diag=False):
     """dependencies defaults to the required mods; every battle loads them.
     scenario overrides the target's scenario file (a name in bridge/scenarios/, or a path).
     kv ({section: {key: value}}, a probe only): the pack carries its own rule tables with these rows
@@ -188,6 +193,8 @@ def build(target, run_config, dependencies=None, scenario=None, kv=None, out=Non
         assert target in KV_TARGETS, f"--kv is for the probes {KV_TARGETS}"
         run_config = dict(run_config, kv=kv, kv_label=kvtable.label(kv))
     spec = dict(TARGETS[target])
+    if entry:                                # (--mem-diag only)
+        spec["entry"] = entry
     if scenario:
         spec["scenario"] = scenario
     scenario_xml = (project.SCENARIOS / spec["scenario"]).read_bytes()
@@ -236,6 +243,8 @@ def build(target, run_config, dependencies=None, scenario=None, kv=None, out=Non
         "syntax_checked": syntax_checked,
         "engine_tested": False,
     }
+    if mem_diag:                             # (--mem-diag: the mark on the build itself, beside config.mem_diag)
+        manifest["mem_diag"] = True
     if kv:
         manifest["kv_override"] = kv
     if (run_config or {}).get("no_draw"):
@@ -500,6 +509,11 @@ def parser_of():
                              "(missile-probe), the men of the lanes' units (charge-probe) or the units' morale "
                              "(morale-probe) from the game's memory; the code sites: memreader.json sites_file "
                              "(reverse/mem/sites_exe1103.json; BAI_MEM_SITES to try another)")
+    parser.add_argument("--mem-diag", action="store_true",
+                        help="nn-arena --own-ai net only, a DIAGNOSTIC build (bridge/config/memreader.json mem_diag): "
+                             "the same battle with the enemy lord and our men read from memory every 0.1 s, read only "
+                             "(entries/nn_arena_memdiag.lua); the manifest and the diagnosis' rows say mem_diag - never a series, "
+                             "an exam or the owner's battle")
     parser.add_argument("--no-draw", action="store_true",
                         help="the game draws no frame while the battle runs (V2; " + ", ".join(NO_DRAW_TARGETS) + "; "
                              "nn-arena: --own-ai ai, or net under lock-step; never human nor an exam): memreader Plus "
@@ -588,6 +602,8 @@ def check_args(parser, args):
         parser.error("--decide-ms must be between 250 and 5000")
     if args.mem and args.target not in MEM_TARGETS:
         parser.error(f"--mem is for the probes: {', '.join(MEM_TARGETS)}")
+    if args.mem_diag and not net:
+        parser.error("--mem-diag is for nn-arena --own-ai net only (bridge/config/memreader.json mem_diag)")
     if args.kv and args.target not in KV_TARGETS:
         parser.error(f"--kv is for the probes: {', '.join(KV_TARGETS)}")
     if args.target in PROBES:
@@ -666,6 +682,12 @@ def main(argv=None):
         exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"
         run_config["mem"] = mem_sites.lua_config(exe=exe if exe.is_file() else None)
         dependencies = project.required_mods() + [mem_sites.dependency()]
+    if args.mem_diag:
+        from bridge import mem_sites
+        exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"
+        run_config["mem"] = mem_sites.lua_config(exe=exe if exe.is_file() else None)
+        run_config["mem_diag"] = True
+        dependencies = (dependencies or project.required_mods()) + [mem_sites.dependency()]
     if args.no_draw:
         from bridge import mem_sites
         exe = Path(project.load()["game_dir"]) / "Warhammer3.exe"
@@ -675,10 +697,11 @@ def main(argv=None):
         # (the bundle takes no None: an absent key is the Lua's nil)
         run_config["no_draw"] = dict({k: v for k, v in nd.items() if v is not None}, delay_ms=NO_DRAW_DELAY_MS,
                                      safety_ms=(run_config["deadline_s"] + NO_DRAW_SAFETY_S) * 1000)
-        if not args.mem:
+        if not (args.mem or args.mem_diag):
             dependencies = (dependencies or project.required_mods()) + [mem_sites.dependency()]
     manifest = build(args.target, run_config, scenario=args.scenario, **({"kv": kv} if kv else {}),
-                     **({"dependencies": dependencies} if dependencies else {}), out=args.out)
+                     **({"dependencies": dependencies} if dependencies else {}), out=args.out,
+                     **({"entry": MEM_DIAG_ENTRY, "mem_diag": True} if args.mem_diag else {}))
     print(json.dumps(manifest, indent=2))
     return 0
 
