@@ -41,7 +41,9 @@ never read. Distances are centre to centre, strictly below the radius (the game'
               [N's t, N's t + 1 s)) -> took (a phase of the key ABSENT on a card read at the request - the lord's or a
               recipient's < AURA_M for an aura button - and PRESENT on that same unit's card within CONFIRM_S model s
               of the call; the deadline is checked first; took['late'] False - the smoke's line). Only a took starts
-              the cooldown (passport active_s + recharge_s from the call); a newly readable card is not a new phase.
+              the cooldown: ready again at the call + passport active_s + recharge_s + READY_PAD_S (the game refused
+              all 37 of 114 presses made at exactly call + active + recharge, none later: tmp/gate_press/
+              evidence_draft.md); a newly readable card is not a new phase.
               Not took -> 'unknown', the call still watched until active_s and retried only after RETRY_S and that
               window (one phase never answers two calls of a key): a phase seen
               later is a took with its real delay (late True), the cooldown from its call, and the misses requested
@@ -102,6 +104,7 @@ RESEND_S = 6.0
 RESENDS = 3
 STUCK_S = 20.0
 ADV_MPS, ADV_TICKS, LEAD_M, ADV_REORDER_M, FACE_NUDGE_DEG = 1.5, 2, 4.5, 1.0, 1.5
+READY_PAD_S = 1.0       # a button is ready again at call + active_s + recharge_s + this (module doc 'buttons')
 SYG = "wh_main_character_abilities_stand_your_ground"
 RALLY = "wh_main_character_abilities_rally"
 FOE_SEEKER = "wh_main_character_abilities_foe_seeker"
@@ -333,7 +336,7 @@ class LordScript:
         game refused because it had in fact taken) are not failures."""
         p = self.passports[key]
         c = r["call"]
-        b["st"], b["cd_end"] = "cooldown", c + float(p["active_s"]) + float(p["recharge_s"])
+        b["st"], b["cd_end"] = "cooldown", c + float(p["active_s"]) + float(p["recharge_s"]) + READY_PAD_S
         b["misses"] = [m for m in b["misses"] if not (r["t"] - 1e-6 <= m < b["cd_end"])]
         b["tries"], b["watch"] = len(b["misses"]), []
         if b.get("req") is not None and b["req"] is not r:      # (a request made inside the real cooldown: dropped)

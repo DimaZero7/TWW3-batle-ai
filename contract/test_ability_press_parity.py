@@ -167,7 +167,7 @@ def test_the_bridge_presses_once(case, tmp_path):
     assert trace == [(5, "own_lord", key, "own_lord")]
     b = script.btn[key]
     p = MA.load()[key]
-    assert b["st"] == "cooldown" and b["cd_end"] == 5 + p["active_s"] + p["recharge_s"]
+    assert b["st"] == "cooldown" and b["cd_end"] == 5 + p["active_s"] + p["recharge_s"] + LS.READY_PAD_S
     assert script.press == sim_slots(lord_key) and not script.failed
 
 

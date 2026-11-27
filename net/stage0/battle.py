@@ -7,7 +7,8 @@ behaviour on top (behave.py), the enemy a script or the formula chain, the readi
                   its places; each side's lord (the general first: slot 0 of its side) lord_back_m behind its units'
                   middle, away from the enemy, out of every group; the named reserve [B, N]
     StageChain    matchup/duel.Chain under the behaviour: its lord hidden from the chain (its row of the raw state not
-                  alive: no group, no tile) and holding; the behaviour's orders over the chain's
+                  alive: no group, no tile) and holding; the behaviour's orders over the chain's (the lord keys below
+                  are not built here: on, it refuses)
     play(specs, behaviour, unit_net, P, device, unit_level=None, gate=False, unit_greedy=True) -> (measures {name: [B]},
                   stats): the specs in batches of every enemy kind together (Mixed: the chain plays all, the scripts'
                   orders where theirs), each padded to a multiple of PAD (few shapes of the compiled step), the
@@ -16,6 +17,13 @@ behaviour on top (behave.py), the enemy a script or the formula chain, the readi
                   orders to the game re-issued only when they change (net/common/reissue.py: watch's game_orders_min)
     play_units / play_tactic   the general battles of the unit level (UnitSide: each frame its slot of the deployment)
                   / through the tactic level (TacticSide: one group, its zone by formation, a player of tactic/pin.py)
+
+The lords (config stage0.json; both off by default - the lords stand lord_back_m behind their side holding, the path bit
+for bit as before): lord_script - my lord (UnitSide, TacticSide) played by the T2 lord script at the unit level
+(net/unit/lord.T2: his orders land on the units' own landing step, his press on that step only), deployed
+lord_script.POST_BACK_M behind my units (unit_battles); enemy_lord_fights - the enemy's lord by its script's own lord
+rules (Scripts: sim/scripts.py ai_game / human / nearest ... each moves its lord; SceneEnemy: ai_game's lord rule),
+deployed the same (unit_battles, Prep). The tactic level still does not see my lord (his row hidden).
 """
 import copy
 import math
@@ -47,9 +55,13 @@ def _zone_t(sp, k, device):
     return {n: torch.tensor([float(s[k][n]) for s in sp], device=device) for n in ("x", "z", "b", "front", "depth")}
 
 
-def _lord_place(zone, pts):
-    """(x, z, b) lord_back_m behind the middle of pts [(x, z)] along the zone's facing."""
+def _lord_place(zone, pts, script=False):
+    """(x, z, b) lord_back_m behind the middle of pts [(x, z)] along the zone's facing (script: the lord plays - the
+    T2 post's distance, lord_script.POST_BACK_M)."""
     back = float(cfg()["lord_back_m"])
+    if script:
+        from bridge.companion import lord_script as LS
+        back = float(LS.POST_BACK_M)
     mx = sum(p[0] for p in pts) / max(len(pts), 1)
     mz = sum(p[1] for p in pts) / max(len(pts), 1)
     a = math.radians(zone["b"])
@@ -85,7 +97,8 @@ class Prep:
             mine = [_unit(k, *p) for k, p in zip(s["mine"], mine_places[b])]
             theirs = [_unit(k, *p) for k, p in zip(s["theirs"], s["places_theirs"])]
             l1 = _unit(cfg()["lords"][s["fac"][1]], *_lord_place(mz, [(u["x"], u["z"]) for u in mine]), general=True)
-            l2 = _unit(cfg()["lords"][s["fac"][2]], *_lord_place(ez, [(u["x"], u["z"]) for u in theirs]), general=True)
+            l2 = _unit(cfg()["lords"][s["fac"][2]], *_lord_place(ez, [(u["x"], u["z"]) for u in theirs],
+                                                                 bool(cfg().get("enemy_lord_fights"))), general=True)
             self.battles.append({1: [l1] + mine, 2: [l2] + theirs, "factions": dict(s["factions"])})
         self.reserve = torch.zeros((B, 2 * H), dtype=torch.bool, device=device)
         for b, r in enumerate(reserve):
@@ -183,6 +196,9 @@ class StageChain(DU.Chain):
         self.over = None
 
     def start(self, st, P, device, card, unit_net):
+        if (self.side == 1 and cfg().get("lord_script")) or (self.side == 2 and cfg().get("enemy_lord_fights")):
+            raise NotImplementedError("stage0.json lord_script / enemy_lord_fights: the chain of play() keeps its lord "
+                                      "hidden and holding - the lord keys run in UnitSide / TacticSide and Scripts")
         super().start(st, P, device, card, unit_net)
         u = st.u
         self.hide = u["lord"] & (u["side"] == self.side)
@@ -213,17 +229,21 @@ class StageChain(DU.Chain):
 
 
 class Scripts(DU.Script):
-    """The enemy's script per battle (opponents.<name>), its lord holding."""
+    """The enemy's script per battle (opponents.<name>), its lord holding (lord_fights - config enemy_lord_fights when
+    None: the lord by the script's own lord rules)."""
 
-    def __init__(self, names, device, side=2):
+    def __init__(self, names, device, side=2, lord_fights=None):
         self.side = side
         self.masks = [(n, torch.tensor([m == n for m in names], device=device)) for n in dict.fromkeys(names)]
+        self.lord_fights = bool(cfg().get("enemy_lord_fights")) if lord_fights is None else bool(lord_fights)
 
     def orders(self, st, j):
         out = None
         for name, m in self.masks:
             o = getattr(opponents, name)(st)
             out = o if out is None else O.merge(out, o, m[:, None].expand(st.B, st.N))
+        if self.lord_fights:
+            return out
         lord = st.u["lord"] & (st.u["side"] == self.side)
         return O.merge(out, O.hold(st.B, st.N, st.device), lord)
 
@@ -315,8 +335,10 @@ class UnitSide(DU.Chain):
     the start, the zone's course, enemy_row_m across x enemy_rank_m deep - the rows' spacing); the frames never move;
     the lord holds."""
 
-    def __init__(self, unit_level=None, gate=True, unit_greedy=False):
+    def __init__(self, unit_level=None, gate=True, unit_greedy=False, lord_script=None):
         super().__init__(1, "formula", unit_level=unit_level, gate=gate, unit_greedy=unit_greedy)
+        self.lord_script = bool(cfg().get("lord_script")) if lord_script is None else bool(lord_script)
+        self.lexe = None
 
     def start(self, st, P, device, card, unit_net):
         from net.operative import lower as LW
@@ -334,6 +356,22 @@ class UnitSide(DU.Chain):
                            "sb": u["b"].clone(), "sw": torch.zeros((B, N), device=device), "on": own.clone()}
         self.hide = u["lord"] & own
         self.stats = {"parcels": 0, "parcel_errors": 0, "errors": [], "groups": 0.0, "decisions": 0}
+        if self.lord_script:
+            self._lord_start(st, device)
+
+    def _lord_start(self, st, device):
+        """The T2 lord script on my lord (module doc 'The lords'): one lord a battle, his order in force kept."""
+        from net.unit import lord as LD
+        B, N = st.B, st.N
+        assert bool((self.hide.sum(1) == 1).all()), "lord_script: one lord of mine in every battle"
+        li = self.hide.float().argmax(1)
+        keys = [st.keys[b][int(li[b])] for b in range(B)]
+        rank = torch.arange(N, dtype=torch.float64, device=device)[None, :].expand(B, N)
+        self.lexe = LD.T2(li, keys, rank, device)
+        self.l_int = O.hold(B, N, device)
+        self.l_int.kind[:] = O.KEEP
+        self.l_force = self.l_int.clone()
+        self.l_ab = torch.full((B,), -1, dtype=torch.long, device=device)
 
     def decide(self, st, raw, K):
         pass
@@ -343,10 +381,41 @@ class UnitSide(DU.Chain):
 
     def second(self, st):
         self.lands = self.units.second(st)
+        if self.lexe is not None:
+            self._lord_second(st)
+
+    def _lord_second(self, st):
+        """The lord's decision of this second on the input's columns (lord.lord_inputs_sim) -> self.l_int, self.l_ab
+        (a KEEP: his order in force goes on, as the bridge's)."""
+        from net.unit import lord as LD
+        raw, tgt, a_on, a_cd = LD.lord_inputs_sim(st, self.setup.P, self.units.ubuf[-1])
+        d = self.lexe.decide(raw, tgt, a_on, a_cd, self.units.intended.kind, st.t.float(), ~st.done)
+        lm, f = self.hide, self.l_force
+        new = lm & (d["kind"] != O.KEEP)[:, None]
+        col = lambda v: v[:, None].expand_as(lm)                                         # noqa: E731
+        self.l_int = O.Orders(kind=torch.where(new, col(d["kind"]), f.kind),
+                              x=torch.where(new, col(d["x"]).to(f.x.dtype), f.x),
+                              z=torch.where(new, col(d["z"]).to(f.z.dtype), f.z),
+                              target=torch.where(new, col(d["target"]), f.target),
+                              run=torch.where(new, col(d["run"]), f.run),
+                              face=torch.where(new, col(d["face"]).to(f.face.dtype), f.face))
+        self.l_ab = d["press"]
 
     def orders(self, st, j):
         o = self.units.orders(st, j, self.lands, lambda s_: O.hold(st.B, st.N, st.device))
-        return O.merge(o, O.hold(st.B, st.N, st.device), self.hide)
+        if self.lexe is None:
+            return O.merge(o, O.hold(st.B, st.N, st.device), self.hide)
+        # the lord: his decision on the units' landing step, the order in force before it; a press on that step only
+        land = (self.lands <= j)[:, None]
+        mine = O.Orders(*(torch.where(land, getattr(self.l_int, k), getattr(self.l_force, k)) for k in O.FIELDS))
+        mine.ability = torch.where((self.lands == j)[:, None] & self.hide, self.l_ab[:, None].expand_as(self.hide),
+                                   torch.full_like(mine.ability, -1))
+        return O.merge(o, mine, self.hide)
+
+    def end_second(self):
+        super().end_second()
+        if self.lexe is not None:
+            self.l_force = self.l_int.clone()
 
 
 class TacticSide(UnitSide):
@@ -366,9 +435,11 @@ class TacticSide(UnitSide):
     get leadership and morale + 1e4 at start, as charge_probe.sim_lanes makes its twin fearless. At start: the men of
     each battle, both sides with lords, at most config step.men_max (the 100 ms step)."""
 
-    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None, worn=None, fearless=None):
+    def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None, worn=None, fearless=None,
+                 lord_script=None):
         from net.unit import scripts as SC
-        super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False)
+        super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False,
+                         lord_script=lord_script)
         self.player, self.hygiene = player, hygiene
         self.zones, self.seed, self.worn = zones, seed, worn
         self.fearless = fearless
@@ -606,6 +677,7 @@ class SceneEnemy(DU.Script):
         for b, s in enumerate(specs):
             for j, p in enumerate(s["plan_theirs"]):
                 self.stay[b, PER_SIDE + 1 + j] = bool(p.get("stay", False))
+        self.lord_fights = bool(cfg().get("enemy_lord_fights"))
         self.scripts = {}
         for b, s in enumerate(specs):
             for j, p in enumerate(s["plan_theirs"]):
@@ -645,15 +717,19 @@ class SceneEnemy(DU.Script):
         wait = (t[:, None] if t.dim() else t) < self.from_s
         o = O.merge(o, O.hold(st.B, st.N, st.device), wait | (self.kind == 0) | (self.halted & (self.kind == 4)))
         lord = u["lord"] & (u["side"] == self.side)
+        if self.lord_fights:                      # (config enemy_lord_fights: the lord by ai_game's lord rule)
+            return O.merge(o, opponents.ai_game(st), lord)
         return O.merge(o, O.hold(st.B, st.N, st.device), lord)
 
 
 def unit_battles(specs):
     """The battles of specs for play_units: my units in rows across my zone (specs.rows, as the enemy's; centred; a
     spec's perm - slot i stands at the rows' place perm[i], specs.drill_general's shuffled slots), the enemy at its
-    places, each lord lord_back_m behind its side."""
+    places, each lord lord_back_m behind its side (a lord that plays - config lord_script, enemy_lord_fights - the T2
+    post's distance)."""
     from net.stage0 import specs as SP
     out = []
+    ls, ef = bool(cfg().get("lord_script")), bool(cfg().get("enemy_lord_fights"))
     for s in specs:
         mz, ez = s["mine_zone"], s["enemy_zone"]
         pl = SP.rows(mz, len(s["mine"]))
@@ -661,8 +737,8 @@ def unit_battles(specs):
             pl = [pl[p] for p in s["perm"]]
         mine = [_unit(k, *p) for k, p in zip(s["mine"], pl)]
         theirs = [_unit(k, *p) for k, p in zip(s["theirs"], s["places_theirs"])]
-        l1 = _unit(cfg()["lords"][s["fac"][1]], *_lord_place(mz, [(u["x"], u["z"]) for u in mine]), general=True)
-        l2 = _unit(cfg()["lords"][s["fac"][2]], *_lord_place(ez, [(u["x"], u["z"]) for u in theirs]), general=True)
+        l1 = _unit(cfg()["lords"][s["fac"][1]], *_lord_place(mz, [(u["x"], u["z"]) for u in mine], ls), general=True)
+        l2 = _unit(cfg()["lords"][s["fac"][2]], *_lord_place(ez, [(u["x"], u["z"]) for u in theirs], ef), general=True)
         out.append({1: [l1] + mine, 2: [l2] + theirs, "factions": dict(s["factions"])})
     return out
 

@@ -158,8 +158,8 @@ class O1Side(BA.TacticSide):
 
     def orders(self, st, j):
         o = super().orders(st, j)
-        if not bool(self.moved_t.any()):
-            return o
+        if not bool(self.moved_t.any()) or self.lexe is not None:
+            return o                                       # (stage0.json lord_script: the T2 lord script has him)
         hide = self.hide & self.moved_t[:, None]
         o.kind = torch.where(hide, torch.full_like(o.kind, O.KEEP), o.kind)
         if j == 0 and any(p is not None for p in self.lord_new):

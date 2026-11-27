@@ -26,8 +26,11 @@ What each drill's lines read (its own exam code, its own set's recipe):
           held_out.taught (B1), after.*
 
     python -m net.drill.reexam [--drills T0-1,O0-1,S0-1] [--n N] [--device cuda] [--out tmp/reexam/<stamp>]
-                               [--sim-set contact.lord_strikers=0 ...]
+                               [--sim-set contact.lord_strikers=0 ...] [--lords on]
 --sim-set changes sim.json's value in this process only (the cached sim.params.load() object; the file untouched).
+--lords on: the re-exam "with lords on" - net/config/stage0.json lord_script and enemy_lord_fights on in this process
+only (my lord by the T2 lord script, net/unit/lord.py; the enemy's by its script's lord rules; stage0/battle.py
+'The lords'); off (the default) - the lords as the rows were accepted.
 Exit 0: every drill PASS; 1: a FAIL; 2: only INSIDE NOISE.
 """
 import argparse
@@ -365,6 +368,8 @@ def main(argv=None):
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="", help="default tmp/reexam/<date-time>")
     ap.add_argument("--sim-set", action="append", default=[], help="sim.json path=value in this process only")
+    ap.add_argument("--lords", default="off", choices=("off", "on"),
+                    help="on: stage0.json lord_script and enemy_lord_fights on in this process only")
     a = ap.parse_args(argv)
     import torch
     from net import ROOT
@@ -372,6 +377,9 @@ def main(argv=None):
     D = Path(a.out or ROOT / "tmp" / "reexam" / time.strftime("%Y%m%d-%H%M%S"))
     D.mkdir(parents=True, exist_ok=True)
     changed = sim_set(a.sim_set)
+    if a.lords == "on":
+        from net.stage0 import cfg as scfg
+        scfg()["lord_script"] = scfg()["enemy_lord_fights"] = True
     rows = accepted_rows()
     want = [x for x in a.drills.split(",") if x]
     not_covered = sorted(set(rows) - set(RUN))
@@ -382,10 +390,11 @@ def main(argv=None):
     chunk_of = {dr: CHUNK[dr] for dr in want}
     est = estimate(want, n_of, chunk_of, a.device)
     head = {"start": time.strftime("%Y-%m-%d %H:%M"), "device": a.device, "sim_key": EP.sim_key(), "sim_set": changed,
+            "lords": a.lords,
             "n": n_of, "chunk": chunk_of, "gpu_minutes_estimate": est, "estimate_why": _MIN_WHY, "n_why": _N_WHY,
             "tolerances": {**TOL, "orders_cap": ORDERS_CAP}, "tol_why": _TOL_WHY, "seeds": SEEDS,
             "accepted_rows": sorted(rows), "not_covered": not_covered}
-    print(json.dumps({k: head[k] for k in ("sim_key", "sim_set", "n", "gpu_minutes_estimate", "not_covered")}),
+    print(json.dumps({k: head[k] for k in ("sim_key", "sim_set", "lords", "n", "gpu_minutes_estimate", "not_covered")}),
           flush=True)
     res = {}
     for dr in want:
