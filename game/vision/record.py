@@ -69,7 +69,7 @@ class Battle:
         a = math.atan2(ex - ox, ez - oz)                              # bearing own -> enemy (sin, cos) in (x, z)
         a = round(a / (math.pi / 2)) * (math.pi / 2)                  # snapped to the map's axes
         self.fwd = (round(math.sin(a)), round(math.cos(a)))
-        self.rgt = (-round(math.cos(a)), round(math.sin(a)))          # facing +x the +z is on the right
+        self.rgt = (round(math.cos(a)), -round(math.sin(a)))          # facing +x the -z is on the right (tmp/leftright)
         self.fwd_deg = math.degrees(a) % 360
 
     def view(self, x, z):

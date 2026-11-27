@@ -1,7 +1,7 @@
 """The page's background of a captured map (numpy + Pillow, no torch): sim/maps/<name>/ -> a PNG over the map's
-height grid (x0..x0 + (C - 1) step, z0..; the top row the smallest z: the game's view from above - its axes x,
-height y, z are right-handed, facing +x the +z is on the right; with the largest z on top the map was a mirror),
-cached in data/label/maps/<name>_game.png.
+height grid (x0..x0 + (C - 1) step, z0..; x right, the top row the largest z: the game's view from above - facing +z
+the +x is on the right, a unit's right is (cos b, -sin b) (the game's flank flags, CA's scripts: tmp/leftright 27.11);
+with the smallest z on top, as before 27.11, the map was a mirror), cached in data/label/maps/<name>_zup.png.
 
     the ground's height as grey (low dark, high light) with a light hill shade, contour lines every 10 m,
     forest green, shallow water light blue, deep water blue, 'cannot stand' (passable.npz) dark red, the trunks dots
@@ -18,7 +18,7 @@ from game.label import matchup as MU
 from game.label import pool as PL
 
 SIZE = 768
-VIEW = "_game"         # (the cache's mark: the pictures since 08.11 are in the game's view, z down - before mirrored)
+VIEW = "_zup"          # (the cache's mark: z up since 27.11; the "_game" pictures of 08.11-27.11 had z down - a mirror)
 COLORS = {"forest": (60, 110, 50), "shallow_water": (110, 160, 210), "deep_water": (40, 80, 160),
           "mud": (120, 100, 70), "snow": (235, 235, 240), "rock": (140, 130, 120), "sharp_stones": (150, 140, 120)}
 
@@ -57,7 +57,7 @@ def _render(folder):
         iz = ((t["z"] - float(d["z0"])) / (step * k)).astype(int)
         ok = (ix >= 0) & (ix < rgb.shape[1]) & (iz >= 0) & (iz < rgb.shape[0])
         rgb[iz[ok], ix[ok]] = (25, 60, 25)
-    img = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8))           # the top row: the smallest z (the game's view)
+    img = Image.fromarray(np.clip(rgb[::-1], 0, 255).astype(np.uint8))     # the top row: the largest z (the game's view)
     buf = io.BytesIO()
     img.save(buf, "PNG")
     ext = {"min_x": float(d["x0"]), "max_x": float(d["x0"]) + (cols - 1) * step, "min_z": float(d["z0"]),

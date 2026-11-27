@@ -8,7 +8,7 @@ range of 250 m or more: jezzails, long rifles), shooters (other missile infantry
 monster (monsters and monstrous infantry), beasts (war beasts: wolf rats). fast: a run of 5 m/s or more.
 
 The army's frame at the battle's first second: forward = from my units' centre to the enemy's, right = the person's right
-(Frame.local: facing +x, +z); the line = my melee infantry: its forward (the mean) and its width (across).
+(Frame.local: (f_z, -f_x) - facing +x, -z); the line = my melee infantry: its forward (the mean) and its width (across).
 """
 import json
 import math
@@ -63,11 +63,11 @@ class Frame:
         self.gap = d
 
     def local(self, x, z):
-        """(right, forward) m of a world point. The game's axes x, height y, z are right-handed: facing
-        +x, +z is on the right - the person's own words agree (M1: "shooters on the right flank, the forest on the
-        left": the shooters stood at +z, the forest at -z)."""
+        """(right, forward) m of a world point. Right = (f_z, -f_x): facing +x the -z is on the right (the game's
+        flank flags and CA's scripts, tmp/leftright 27.11). The person's words in M1 ("shooters on the right flank,
+        the forest on the left") are the mirror of the records: the shooters stood at +z = our left."""
         dx, dz = x - self.cx, z - self.cz
-        return -dx * self.fz + dz * self.fx, dx * self.fx + dz * self.fz
+        return dx * self.fz - dz * self.fx, dx * self.fx + dz * self.fz
 
 
 def deployment(rec):

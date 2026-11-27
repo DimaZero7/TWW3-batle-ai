@@ -178,7 +178,7 @@ def test_vision(tmp_path):
     text = (tmp_path / "20261107-220829.txt").read_text(encoding="utf-8")
     assert (tmp_path / "20261107-220829.png").stat().st_size > 0
     assert 1000 < res["tokens"]["image"] + res["tokens"]["text"] < 5000
-    row = next(line for line in text.splitlines() if line.startswith("long_rifles_2 S | +55,-78 f0"))
+    row = next(line for line in text.splitlines() if line.startswith("long_rifles_2 S | -55,-78 f0"))
     assert "| 0/0/0 | 97 | 108 |" in row and "our routs: 108 long_rifles_2" in text
     assert text.count("\n g") == 7
 

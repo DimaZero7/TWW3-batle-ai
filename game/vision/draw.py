@@ -107,7 +107,7 @@ class Canvas:
         fr, dp = max(fr, 7 / self.s), max(dp, 4 / self.s)        # not smaller than a few pixels
         b = math.radians(u.get("b") or 0)
         fx, fz = math.sin(b), math.cos(b)
-        rx, rz = -math.cos(b), math.sin(b)
+        rx, rz = math.cos(b), -math.sin(b)
         out = []
         for a, c in ((-1, 1), (1, 1), (1, -1), (-1, -1)):
             out.append(self.px(u["x"] + a * fr / 2 * rx + c * dp / 2 * fx, u["z"] + a * fr / 2 * rz + c * dp / 2 * fz))

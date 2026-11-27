@@ -256,8 +256,8 @@ def _forest(fx, n, u):
     k = tot = 0
     for a in np.linspace(-fr / 2, fr / 2, 7):
         for c in np.linspace(-dp / 2, dp / 2, 4):
-            x = u["x"] - a * math.cos(b) + c * math.sin(b)
-            z = u["z"] + a * math.sin(b) + c * math.cos(b)
+            x = u["x"] + a * math.cos(b) + c * math.sin(b)
+            z = u["z"] - a * math.sin(b) + c * math.cos(b)
             k += g[min(max(int(round(z + 512)), 0), g.shape[0] - 1), min(max(int(round(x + 512)), 0), g.shape[1] - 1)] == code
             tot += 1
     return round(100 * k / tot)

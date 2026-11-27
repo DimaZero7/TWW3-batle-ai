@@ -39,8 +39,8 @@ def _rgb(hexs):
 
 
 class View:
-    """World -> picture: the box of every unit's place over the battle (or at the seconds secs only), a margin, y up =
-    z."""
+    """World -> picture: the box of every unit's place over the battle (or at the seconds secs only), a margin, x right,
+    z up."""
 
     def __init__(self, rec, secs=None, margin=160, names=None):
         xs, zs = [], []
@@ -58,9 +58,9 @@ class View:
         self.cx, self.cz, self.s = cx, cz, (W - 40) / span
 
     def __call__(self, x, z):
-        # (z down the picture: the game's view from above - its axes x, height y, z are right-handed, facing +x the +z
-        # is on the right; with z up the picture would be the battle in a mirror)
-        return (W / 2 + (x - self.cx) * self.s, H / 2 + (z - self.cz) * self.s)
+        # (x right, z up the picture: the game's view from above - facing +z the +x is on the right, a unit's right is
+        # (cos b, -sin b): the game's own flank flags and CA's scripts, tmp/leftright 27.11; z down was a mirror)
+        return (W / 2 + (x - self.cx) * self.s, H / 2 - (z - self.cz) * self.s)
 
 
 def dims(key, men, width):
