@@ -370,6 +370,10 @@ def nn_arena_config(args, run_config):
             half, cx, cz = float(sim_cfg["map_half_m"]["value"]), 0.0, 0.0
         run_config["park_lords"] = {"half": float(half), "cx": float(cx), "cz": float(cz), "margin": PARK_MARGIN_M,
                                     "min_m": PARK_MIN_M, "drift_m": PARK_DRIFT_M}
+        if args.park_lords == "enemy":
+            # only the enemy's lord (side 2) parked; ours stays in play (the lord line's lane E). 'both' writes no
+            # 'sides': the config and the pack's config as before
+            run_config["park_lords"]["sides"] = [2]
     if args.own_ai == "human":
         run_config["soldiers_every"] = HUMAN_SOLDIERS_EVERY if args.soldiers_every is None else args.soldiers_every
         if args.free_speed:
@@ -440,10 +444,13 @@ def parser_of():
                              + str(LOCKSTEP_TIMEOUT_MS) + " ms of real time (the first " + str(LOCKSTEP_FIRST_TIMEOUT_MS)
                              + "); a failed wait voids the battle (no result; bridge/lua/entries/nn_arena.lua "
                              "M.lockstep); the default deadline as at " + str(LOCKSTEP_PACE) + " model s a wall s)")
-    parser.add_argument("--park-lords", action="store_true",
-                        help="nn-arena --own-ai net: both lords taken out of the fight - teleported to two far corners "
-                             "at the start and held there by the script (no orders from the game's AI or the companion; "
-                             "bridge/lua/entries/nn_arena.lua): the infantry alone")
+    parser.add_argument("--park-lords", action="store_const", const="both", default=None,
+                        help="nn-arena --own-ai net: both lords taken out of the fight - teleported to two far corners at "
+                             "the start and held there by the script (no orders from the game's AI or the companion; "
+                             "bridge/lua/entries/nn_arena.lua): the infantry alone. '--park-lords enemy' (the word right "
+                             "after it; main() reads it as --park-side enemy): only the enemy's lord parked, ours in play "
+                             "(the state's lords 'park_enemy'); '--park-lords both' = the bare flag")
+    parser.add_argument("--park-side", choices=("both", "enemy"), default=None, help=argparse.SUPPRESS)
     parser.add_argument("--soldiers-every", type=int,
                         help=f"human: every soldier's position every this many ticks (0: never; default "
                              f"{HUMAN_SOLDIERS_EVERY})")
@@ -590,9 +597,26 @@ def check_args(parser, args):
             parser.error(f"{args.target}: no plan {plan!r} ({', '.join(plans)})")
 
 
+def park_words(argv):
+    """'--park-lords enemy|both' -> '--park-lords --park-side <word>' (any other next word - the target nn-arena, an
+    option - stays as it was: the bare flag is 'both', as before)."""
+    out, i = [], 0
+    while i < len(argv):
+        out.append(argv[i])
+        if argv[i] == "--park-lords" and i + 1 < len(argv) and argv[i + 1] in ("both", "enemy"):
+            out += ["--park-side", argv[i + 1]]
+            i += 1
+        i += 1
+    return out
+
+
 def main(argv=None):
     parser = parser_of()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(park_words(list(sys.argv[1:] if argv is None else argv)))
+    if args.park_side is not None:
+        if not args.park_lords:
+            parser.error("--park-side comes only with --park-lords")
+        args.park_lords = args.park_side
     check_args(parser, args)
     kv = None
     if args.kv:

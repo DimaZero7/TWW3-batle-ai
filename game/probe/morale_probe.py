@@ -30,6 +30,12 @@ Plans (battles):
   strong2 the strong-enemy scale (build/open_battle/spec.md 4; 2 battles): skavenslaves stand, a fearless enemy
           from 200 m stops at 120 / 90 / 70 / 50 / 30 m (centre to centre): spearmen, swordsmen, flagellants |
           greatswords, the General, swordsmen + spearmen side by side;
+  lordp3  a press in melee (the lord line's probe P3, tmp/lordline/pipe/PROBES.md; 2 battles): the lord L attacks a
+          fearless enemy unit E 40 m away and E attacks him (the General vs clanrats, the Warlord vs Empire spearmen);
+          PRESS_S after L's contact L presses (Stand Your Ground / Rally) with his attack order unchanged, or not
+          (control); battle 1: the General presses, the Warlord not; battle 2 the other way. Read: E's men lost to L in
+          the PRESS_WIN_S after the press time against the control's same window (does a press cost the ~24 s
+          break-off?), the key's phase on L
   rally2  the rally clock (1 battle): as rally, the enemy keeps 150 m (twice), or keeps 60 m and halts 20 / 28 / 36 s
           after the rout (the router then runs clear of 95 m): rally at once, 7 s later, or at an 18 s cycle?
   timer   the timer before a rout (2 battles of 6 lanes on a 3 x 2 grid, 0.25 s samples, speed 10): skavenslaves or
@@ -107,7 +113,7 @@ TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
 PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer",
-         "hyp", "mem", "runners")
+         "hyp", "mem", "runners", "lordp3")
 PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
 HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
                    "wh_main_character_abilities_rally")
@@ -344,6 +350,22 @@ def aura_lane(kind):
                z=round(20 * math.cos(math.radians(af)), 1)),
              s("go", "end", delay_s=AURA_END_S)]
     return {"kind": kind, "units": units, "steps": steps, "max_s": AURA_END_S + 5}
+
+
+P3_PRESS_S, P3_WIN_S, P3_END_S = 15, 25, 60
+
+
+def lordp3_lane(kind):
+    """lordp3 (the module doc): kind '<lord>:press' or '<lord>:none' (lord general | warlord)."""
+    lord, what = kind.split(":")
+    foe, key = {"general": ("clanrat", SYG), "warlord": ("spear", RALLY)}[lord]
+    dE = depth(foe)
+    units = [u("L", lord, 0, 0, 0), u("E", foe, 0, 40 + dE / 2, 180, True)]
+    steps = [s("go", "attack", "L", target="E"), s("go", "attack", "E", target="L")]
+    if what == "press":
+        steps.append(s("contact", "ability", "L", of="L", delay_s=P3_PRESS_S, key=key))
+    steps.append(s("contact", "end", of="L", delay_s=P3_END_S))
+    return {"kind": kind, "units": units, "steps": steps, "max_s": P3_END_S + 90}
 
 
 TIMER_KINDS = ("front", "rear", "flank_cr", "leave", "kill_fast", "kill")
@@ -656,6 +678,9 @@ def battles(plan):
         return [[penitent_lane(k) for k in ("win", "lose", "even", "none")]]
     if plan == "aura":
         return [[aura_lane(k) for k in ("htl", "rally")]]
+    if plan == "lordp3":
+        return [[lordp3_lane(k) for k in ("general:press", "warlord:none")],
+                [lordp3_lane(k) for k in ("general:none", "warlord:press")]]
     if plan == "strong2":
         return [[strong2_lane(k) for k in ("slave:spear", "slave:swords", "slave:flag")],
                 [strong2_lane(k) for k in ("slave:gs", "slave:general", "slave:swords+spear")]]
@@ -1081,6 +1106,42 @@ def measure_aura(lane, out):
     return out
 
 
+def measure_lordp3(lane, out):
+    """lordp3: tp = the press second (the press lane: its ability step's time; the control: L's contact + P3_PRESS_S).
+    E fights only L, so E's health (unary, 0.5 s samples) falling is L's strikes landing on the SAME target. Read: the
+    first sample after tp with E's health below its tp value (first_hit_after_s), E's health lost in [tp, tp + P3_WIN_S]
+    and its rate in [tp - 15, tp], L in melee over the window (continued contact), the key's phase onset on L after tp.
+    No health falling in [tp - 15, tp + P3_WIN_S] in a lane: its numbers are None (nothing to read)."""
+    t = np.array(lane["t"])
+    kind = lane["spec"]["kind"]
+    key = SYG if kind.startswith("general") else RALLY
+    c = lane["events"]["contact"].get("L")
+    tp = lane["steps"].get(3) if kind.endswith(":press") else (None if c is None else c + P3_PRESS_S)
+    out["contact_s"] = None if c is None else round(float(c), 1)
+    out["press_s"] = None if tp is None else round(float(tp), 1)
+    if tp is None:
+        return out
+    hp = col(lane, "E", "hp")
+    ok = np.isfinite(hp)                    # (unrounded: the first hit is looked for against the raw health)
+    raw = lambda w: (None if ok.sum() < 2 or w < t[ok][0] or w > t[ok][-1]   # noqa: E731
+                     else float(np.interp(w, t[ok], hp[ok])))
+    h0, hb, h1 = raw(tp), raw(tp - 15), raw(tp + P3_WIN_S)
+    if h0 is None or hb is None or h1 is None or not (hb - h1 > 1e-4):
+        out["readable"] = False
+        return out
+    out["readable"] = True
+    out["hp_lost_before_15_per_s"] = round((hb - h0) / 15.0, 5)
+    out["hp_lost_after_25"] = round(h0 - h1, 4)
+    after = np.where((t > tp) & np.isfinite(hp) & (hp < h0 - 1e-4))[0]
+    out["first_hit_after_s"] = round(float(t[after[0]] - tp), 1) if len(after) else None
+    win = (t >= tp) & (t < tp + P3_WIN_S)
+    out["melee_share_after"] = round(float(flag(lane, "L", "m")[win].mean()), 2) if win.any() else None
+    on = has_fx(lane, "L", key)
+    onset = np.where((t >= tp) & on)[0]
+    out["phase_onset_s"] = round(float(t[onset[0]] - tp), 1) if len(onset) and kind.endswith(":press") else None
+    return out
+
+
 def measure(lane):
     """One lane's numbers (game or simulator: the same row format)."""
     spec, t = lane["spec"], np.array(lane["t"])
@@ -1092,6 +1153,8 @@ def measure(lane):
         return measure_penitent(lane, out)
     if plan == "aura":
         return measure_aura(lane, out)
+    if plan == "lordp3":
+        return measure_lordp3(lane, out)
     if plan == "flank":
         pts, lab = points(lane, "U"), labels(lane, "U")
         c = ev["contact"].get("U")

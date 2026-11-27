@@ -325,8 +325,22 @@ function M.main(bm, config, globals)
         end
         return best or 0
     end
+    -- the sides whose lord is parked (config.park_lords.sides: bridge.build --park-lords enemy gives {2}; absent: both)
+    local function park_sides()
+        local on = {}
+        for _, s in ipairs((config.park_lords and config.park_lords.sides) or {1, 2}) do on[s] = true end
+        return on
+    end
+    -- the state's lords flag: 'park' (both, as before), 'park_enemy' (only side 2's), nil (none)
+    local function lords_flag()
+        if not config.park_lords then return nil end
+        local on = park_sides()
+        if on[1] and on[2] then return 'park' end
+        return on[2] and 'park_enemy' or 'park_own'
+    end
     local function park_lords()
         local pc = config.park_lords
+        local on = park_sides()
         local c = pc.half - pc.margin
         local cx, cz = pc.cx or 0, pc.cz or 0
         local corners = {{cx - c, cz - c}, {cx - c, cz + c}, {cx + c, cz - c}, {cx + c, cz + c}}
@@ -334,7 +348,9 @@ function M.main(bm, config, globals)
         for i, a in ipairs(corners) do
             for j, b in ipairs(corners) do
                 if i ~= j then
-                    local s = math.min(least_to(a[1], a[2], 2), least_to(b[1], b[2], 1))
+                    -- (one side parked: only its corner's least gap to the other side's infantry counts)
+                    local s = (on[1] and on[2]) and math.min(least_to(a[1], a[2], 2), least_to(b[1], b[2], 1))
+                        or (on[1] and least_to(a[1], a[2], 2) or least_to(b[1], b[2], 1))
                     local k = {math.min(s, pc.min_m), math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2), s}
                     local better = pick == nil
                     if not better then
@@ -353,7 +369,7 @@ function M.main(bm, config, globals)
             local army = side == 1 and state.own_army or state.enemy_army
             local at = side == 1 and pick.own or pick.enemy
             for _, it in ipairs(state.sides[side]) do
-                if it.slot == 'lord' then
+                if it.slot == 'lord' and on[side] then
                     local fx, fz = xz_of(it.unit)
                     local b = math.deg((math.atan2 or math.atan)(cx - at[1], cz - at[2])) % 360
                     local uc = orders.take_control(army, it.unit)
@@ -365,7 +381,7 @@ function M.main(bm, config, globals)
                 end
             end
         end
-        emit('lords_park', {units = rows, half = pc.half, margin = pc.margin, min_m = pc.min_m,
+        emit('lords_park', {units = rows, half = pc.half, margin = pc.margin, min_m = pc.min_m, lords = lords_flag(),
             least_m = round(pick.k[3]), apart_m = round(pick.k[2])})
     end
     local function keep_parked()
@@ -483,7 +499,7 @@ function M.main(bm, config, globals)
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
                 attacker = config.enemy_role == 'defend' and 1 or 2, map = config.map,
-                lords = config.park_lords and 'park' or nil}})
+                lords = lords_flag()}})
         emit('own_ai', {mode = 'net', own_ai = config.own_ai, decide_ms = config.decide_ms,
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
     end
@@ -590,7 +606,7 @@ function M.main(bm, config, globals)
         if state.observer then state.observer.changes() end
         state.stall = battle_services.new_stall_detector(config.stall_ms)
         emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s,
-            free_speed = config.free_speed == true, lords = config.park_lords and 'park' or nil})
+            free_speed = config.free_speed == true, lords = lords_flag()})
         snapshot('nn_sample')
         flush()
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()

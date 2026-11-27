@@ -460,7 +460,7 @@ game` режим не трогает. В боях М1–М3 07.11 без фла�
 | `nn_formation` | `u`, `k`, `face`, `width` — приказ строя отдан (`goto_location_angle_width`) |
 | `nn_hold` | `u`, `action` (`aim`, `none`, `halt`, `keep` — HOLD оставил цель движка целью стрелка, без остановки), `tg` — цель стоящего стрелка |
 | `nn_stall` | `u`, `k` (`attack`, `move`, `withdraw`), `tg` — потерянный движком приказ, отданный снова |
-| `nn_ability` | `move`, `u`, `key`, `tg` (цель заклинания), `w` (свои ветра перед заклинанием), `status`: `used`, `not_ready` (`can_perform_special_ability` ответила «нет»: в игре только если способности нет), `down` (отряд не стоит), `unknown_unit` (не наш), `unknown_target`, `error` |
+| `nn_ability` | `move`, `u`, `key`, `tg` (цель заклинания), `w` (свои ветра перед заклинанием), `status`: `used` (вызов `perform_special_ability` вернулся без ошибки — это «вызвано», а не «сработало»: сработало — только новая фаза ключа на карточке, `nn_effects`; то же время пишется в `abilities_used`), `not_ready` (`can_perform_special_ability` ответила «нет»: в игре только если способности нет), `down` (отряд не стоит), `unknown_unit` (не наш), `unknown_target`, `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), при изменении |
 | `nn_effects` | `u`, `fx` (фазы на отряде или `unknown`), при изменении |
 | `nn_skirmish` | только при `skirmish = 'off'`: `action` `off` (при старте; `units` — у кого выключен, `was` — был ли включён до того) или `again` (`u`: на решении режим оказался включён и выключен снова) |

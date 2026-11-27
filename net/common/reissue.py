@@ -62,7 +62,12 @@ class Gate:
         self.prev = intended.clone()
         keep = intended.kind == O.KEEP
         out = O.Orders(*(torch.where(new | keep, getattr(intended, f), getattr(self.last, f)) for f in O.FIELDS))
+        # the gate caches motion only: a press (ability, cast_target) is the decision's own - an unchanged order does
+        # not swallow it, a stored one is never repeated (no network sets one yet: -1 everywhere, as before)
+        out.ability, out.cast_target = intended.ability.clone(), intended.cast_target.clone()
         self.last = O.Orders(*(torch.where(new, getattr(intended, f), getattr(self.last, f)) for f in O.FIELDS))
+        self.last.ability.fill_(-1)
+        self.last.cast_target.fill_(-1)
         self.sent += (new & live).float()
         self.live_s += live.float() * seconds
         return out

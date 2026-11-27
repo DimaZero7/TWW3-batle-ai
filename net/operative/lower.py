@@ -721,6 +721,7 @@ class Units:
         now_in = lands <= j
         mine = O.Orders(*(torch.where(now_in[:, None], getattr(self.intended, f), getattr(self.in_force, f))
                           for f in O.FIELDS))
+        O.press_on_landing(mine, self.intended, lands, j)      # (a press reaches physics once: its landing step)
         if not hasattr(self.net, "intend"):          # (the unit's script: its skills say where it goes - no leash)
             mine = self.leash.apply(st, mine, self.area, self.setup.own)
         return O.merge(script(st), mine, self.setup.own)

@@ -816,6 +816,10 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             unlift = torch.where(single_i, torch.ones_like(F), (fill_b / fill.clamp(min=1e-12)).expand_as(F))
         F = torch.where(single_i, F, F * fill)
     lord_max = knobs.get(u, "lord_max_attackers", float(cc["lord_max_attackers"]), 3)
+    if cc.get("lord_strikers"):
+        # (contact.lord_strikers; 0 / absent: off) the men swinging at a lone man (a lord), counted in the lordring
+        # probe (sim/evidence/lordring), in place of lord_max_attackers
+        lord_max = float(cc["lord_strikers"])
     F = torch.where(single_j, torch.minimum(men_i, knobs.full_like(F, lord_max)), F)
     ring_on = bool((cc.get("ring_big") or {}).get("on"))
     if ring_on:
@@ -1201,6 +1205,28 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
     defence = directional_defence(u["defence"][:, None, :].expand_as(coef), 1 - w * (1 - coef))
     p = hit_chance(attack, defence, B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"],
                    B["melee_hit_chance_min"], B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+    rs = cc.get("lord_ring_sides") or {}
+    if rs.get("on"):
+        # (contact.lord_ring_sides; sim/config/sim.json contact.lord_ring_sides_why) the game decides the side of every
+        # blow by where the striker stands against the struck man's facing (reverse/notes/melee_cycle.md 2.2,
+        # 1430a6380): the men of a formation round a standing lone man (a lord) strike him from his front / flank / rear
+        # in the shares of their places round him (the lord swarm probe) - the chance is the mix of the three sectors'
+        # chances (each rounded and clamped as the rule's); a lone man striking a standing lone man (lord against
+        # lord) takes the rule of his own side in full (one man: his centre is where he stands)
+        stand_j = single_j & ~routing_j
+        hc = (B["melee_hit_chance_normalisation_coefficient"], B["melee_hit_chance_base"], B["melee_hit_chance_min"],
+              B["melee_hit_chance_max"], float(cal.get("hit_roll_offset", 0.0)))
+        D0 = u["defence"][:, None, :].expand_as(coef)
+        p_fr = hit_chance(attack, D0, *hc)
+        p_fl_ = hit_chance(attack, directional_defence(D0, torch.full_like(coef, float(
+            B["melee_defence_direction_penalty_coefficient_flank"]))), *hc)
+        p_re = hit_chance(attack, directional_defence(D0, torch.full_like(coef, float(
+            B["melee_defence_direction_penalty_coefficient_rear"]))), *hc)
+        p_ring = float(rs["front"]) * p_fr + float(rs["flank"]) * p_fl_ + float(rs["rear"]) * p_re
+        p = torch.where(stand_j & ~single_i, p_ring, p)
+        if rs.get("lone_v_lone"):
+            p_own = hit_chance(attack, directional_defence(D0, coef), *hc)
+            p = torch.where(stand_j & single_i, p_own, p)
     # (melee.side_cadence) the chance of the same blow from the front: a man's swings come at the same cadence whichever
     # side he strikes from, hit or miss (below)
     side_cad = bool(cal.get("side_cadence"))
@@ -1516,6 +1542,11 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None, late=None
             # body in seconds, not the lord's 20 s of men walking round a small one
             grow_big = (u["contact_s"] / max(float(g_big), 1e-6)).clamp(0, 1)[:, :, None]
             grow = torch.where(big_lone(u)[:, None, :], grow_big, grow)
+        if cc.get("lord_gather_standing") and "ran_in" in u:
+            # (contact.lord_gather_standing; sim/config/sim.json contact.lord_gather_standing_why) a formation that stood
+            # when the lord ran into it strikes him in full at once: only one that came into this fight moving itself
+            # (its own ran_in) gathers round him
+            ran_j = ran_j & u["ran_in"][:, :, None]
         rate = torch.where(single_j & ~single_i & ran_j, rate * grow, rate)
     if pursuit is not None:
         share = knobs.full_like(rate, knobs.get(u, "pursuit_rate", float(pursuit), 3))

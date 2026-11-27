@@ -16,7 +16,9 @@ Every state document (one a battle second):
                / note_sent, one code), no leash; the order gate reissue.Gate (a
                changed order only); the lord: hold once, then keep (the simulator's merge of hold over the hidden lord);
                with the state's lords = 'park' (bridge.build --park-lords) the lord gets no order at all (marked out,
-               no op MOVE): the game's script holds him in a corner
+               no op MOVE): the game's script holds him in a corner; with BAI_LORD_SCRIPT=T (the lord line's lane
+               instrument, off by default) the lord's line and his `ability` lines come from lord_script.LordScript
+               (the levels' input unchanged: he stays hidden from them)
 A tactic_v3 checkpoint (heads.TacticNet3, drill T0-2 'side of the strike') runs the same chain: the network's approach
 goes through the level's masks into the unit's order; the record adds own() of 19, the S2 row columns, the side head's
 columns and the approach.
@@ -111,6 +113,12 @@ class TacticChain:
         env = tick_ms if tick_ms is not None else os.environ.get("BAI_TICK_MS")
         self.tick_ms = int(env) if env not in (None, "") else None
         self.op_arm, self.op = OPS.parse(os.environ.get("BAI_OP_SCRIPT")), None     # (off: None - no hook runs)
+        # the lord line's lane instrument (lord_script.py; BAI_LORD_SCRIPT=T, watch.ps1 -LordScript T): our lord by fixed
+        # rules; unset or empty - off, and lord_script is never imported
+        arm = os.environ.get("BAI_LORD_SCRIPT") or None
+        if arm not in (None, "T"):
+            raise ValueError(f"BAI_LORD_SCRIPT={arm!r}: 'T' or unset")
+        self.lord_arm, self.lord_script = arm, None
         self.batch, self.parked = None, False
         self.times, self.extra = {}, None
 
@@ -135,7 +143,8 @@ class TacticChain:
         self.units.gate = reissue.Gate(1, N, dev)
         _frame0(self.units, self.units.setup.own)
         self.hide, self.lord_held = hide, torch.zeros_like(hide)
-        self.parked = doc.get("lords") == "park"       # (bridge.build --park-lords: the lords held by the game's script)
+        # (bridge.build --park-lords: the lords held by the game's script; 'park_enemy' - only the enemy's, ours in play)
+        self.parked = doc.get("lords") == "park"
         self.next_tac = None
         self.n_ticks = 0
         men = float((r[..., TR.I["men"]] * (r[..., TR.I["alive"]] > 0)).sum())
@@ -144,8 +153,19 @@ class TacticChain:
         self.op = None if self.op_arm is None else OPS.OpScript(self.op_arm, self.names, blocked=OPS.blocked_of(doc.get("map")))
         if self.op is not None:
             self.start_info["op"] = "holder:" + self.op_arm
-        if self.parked:
-            self.start_info["lords"] = "park"
+        if doc.get("lords"):
+            self.start_info["lords"] = doc.get("lords")
+        self.lord_script = None
+        if self.lord_arm is not None:
+            # (lane T: our lord in play by the script; both lords parked contradicts it - refused loudly)
+            if self.parked:
+                raise ValueError("BAI_LORD_SCRIPT with both lords parked (bridge.build --park-lords): our lord is the "
+                                 "script's - build with --park-lords enemy or none")
+            from bridge.companion import lord_script as LS
+            self.lord_script = LS.LordScript(self.names, self.keys, [int(u["side"]) for u in doc["units"]],
+                                             self.own, self.lord_arm)
+            self.start_info["lord_script"] = {"arm": self.lord_arm, "lord": self.lord_script.lord,
+                                              "press": self.lord_script.press}
 
     def script_second(self, raw_u, sec=0.0):
         """lower.Units.second's script branch on the unit level's raw [1, N, RAW] at battle second sec -> (the gated
@@ -218,11 +238,23 @@ class TacticChain:
         ctrl = {n for i, n in enumerate(self.names)
                 if side[i] == self.own and float(self.raw_u[0, i, I["alive"]]) > 0
                 and not float(self.raw_u[0, i, I["r"]]) > 0 and not (self.parked and bool(self.hide[0, i]))}
+        uses = []
+        if self.lord_script is not None:
+            # (lord_script.py) the lord's line replaced by the script's (after the Gate); its button as an `ability`
+            # line; what the reply does not carry (a lord marked out) is not cached as sent (commit)
+            lo, uses = self.lord_script.decide(doc, [x for x in out if x["unit"] in ctrl])   # (the run-in's onset)
+            out = [dict(lo) if x["unit"] == self.lord_script.lord else x for x in out]
+            delivered = self.lord_script.lord in ctrl
+            self.lord_script.commit(delivered)
+            if not delivered:
+                uses = []
         for x in out:
             if x["unit"] not in ctrl:
                 x["out"] = True
         self.extra = self._extra(doc, rec, new)
-        return out, (time.perf_counter() - t0) * 1000, []
+        if self.lord_script is not None:
+            self.extra["lord"] = self.lord_script.note
+        return out, (time.perf_counter() - t0) * 1000, uses
 
     # -- the log
     def _name(self, i):

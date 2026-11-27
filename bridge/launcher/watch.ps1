@@ -24,6 +24,8 @@
 #                                          is refused. Without -Chain the build is always without lock-step: nobody
 #                                          would answer the moves)
 #   ... -PyThreads 2                      (the companion's torch threads, written to the run's companion.json)
+#   ... -Chain -LordScript T              (the lord line's series T: our lord by bridge/companion/lord_script.py;
+#                                          default '' - off, whatever BAI_LORD_SCRIPT the caller's shell has)
 #   ... -Chain -NoDraw                    (no frames drawn, always x40 - -Speed with it is refused -, never lingers: the
 #                                          build with --no-draw --speed 40; only under lock-step, never an exam -
 #                                          bridge/config/memreader.json; with -NoBuild the build must be a no-draw one,
@@ -47,7 +49,10 @@ param(
     [switch]$StepLock,
     [int]$PyThreads = 2,
     [switch]$NoDraw,
-    [switch]$NoStepLock
+    [switch]$NoStepLock,
+    # the lord line's lane instrument (bridge/companion/lord_script.py): 'T' only by this parameter - an inherited
+    # BAI_LORD_SCRIPT of the caller's shell never reaches the companion
+    [ValidateSet('', 'T')][string]$LordScript = ''
 )
 $ErrorActionPreference = 'Stop'
 $Target = 'nn-arena'
@@ -74,6 +79,7 @@ $game = (Resolve-Path -LiteralPath $settings.game_dir).Path
 
 if (-not ($Chain -or $Strategist)) { throw 'Nobody to answer: give -Chain and / or -Strategist' }
 if ($StepLock -and -not $Chain) { throw '-StepLock waits for the chain''s answers: give -Chain' }
+if ($LordScript -and -not $Chain) { throw '-LordScript drives our lord inside the chain: give -Chain' }
 if ($StepLock -and $NoStepLock) { throw '-StepLock (the default with -Chain) and -NoStepLock: give one' }
 # lock-step: on whenever the chain answers the moves (bridge.build's default for --own-ai net), unless -NoStepLock
 $lock = $Chain -and -not $NoStepLock
@@ -118,7 +124,7 @@ Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms, lock-s
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logRel = "build/$Target/companion/$stamp.jsonl"
 $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${game}:/game`" -w /repo -e PYTHONPATH=/repo " +
-    "-e PYTHONUNBUFFERED=1 -e BAI_TICK_MS=$env:BAI_TICK_MS -e BAI_OP_SCRIPT=$env:BAI_OP_SCRIPT -e BAI_READY_TOKEN=$stamp snake-ai-trainer python -m bridge.companion --game /game --log /repo/$logRel --threads $PyThreads"
+    "-e PYTHONUNBUFFERED=1 -e BAI_TICK_MS=$env:BAI_TICK_MS -e BAI_OP_SCRIPT=$env:BAI_OP_SCRIPT -e BAI_LORD_SCRIPT=$LordScript -e BAI_READY_TOKEN=$stamp snake-ai-trainer python -m bridge.companion --game /game --log /repo/$logRel --threads $PyThreads"
 if ($Chain) {
     $dockerArgs += ' --chain --chain-op ' + ($ChainOp -replace '\\', '/') + ' --chain-tactic ' + ($ChainTactic -replace '\\', '/')
     if ($ChainGreedy) { $dockerArgs += ' --chain-greedy' }

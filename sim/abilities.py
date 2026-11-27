@@ -125,6 +125,31 @@ def slot_keys(unit_key, units, passports):
     return own + [""] * (SLOTS - len(own))
 
 
+def press_map(unit_key, units, passports):
+    """{slot: ability key} of the unit's buttons an order can press: the ONE slot <-> key map of a cast by order -
+    the simulator's Orders.ability = slot fires that key (step() below), the companion's lord script sends the game
+    `ability <unit> <key>` for the same slot (bridge/companion/lord_script.py; contract test_ability_slots_bridge_parity).
+    Only self-cast actives. Fails closed (ValueError): a key of the unit with no passport that is not a passive by
+    name, an active the order cannot reach (past the SLOTS timer slots, or not a self-cast) - an unmapped button is
+    an error, never silently dropped. "Engine commandable" only: whether the simulator models the effect is the
+    passport's `model` (sim/config/sim.json abilities.model), apart from this map."""
+    own = list((units.get(unit_key) or {}).get("abilities") or ())
+    for key in own:
+        if key not in passports and "_passive_" not in key:
+            raise ValueError(f"{unit_key}: ability {key} has no passport (sim/config/abilities.json)")
+    slots = slot_keys(unit_key, units, passports)
+    out = {}
+    for key in own:
+        p = passports.get(key)
+        if p is None or p.get("passive") or p.get("auto"):
+            continue
+        if key not in slots or not p.get("self_cast"):
+            raise ValueError(f"{unit_key}: active {key} not pressable by slot (slots {slots}, self_cast "
+                             f"{p.get('self_cast')})")
+        out[slots.index(key)] = key
+    return dict(sorted(out.items()))
+
+
 def slots_of(params, unit_key):
     """Indices of the unit's abilities in the table (-1: none), SLOTS of them."""
     names = keys(params)

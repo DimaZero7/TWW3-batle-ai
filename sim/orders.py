@@ -121,6 +121,16 @@ def hold(B, N, device="cpu"):
                   width=torch.full((B, N), -1.0, device=device))
 
 
+def press_on_landing(orders, intended, lands, j):
+    """A decision's press (ability, cast_target) on the physics step it lands only (lands [B] == j), -1 on every other
+    step and in the orders carried in force - the motion fields as they are (in place; returns orders). Every caller
+    without a press (-1 everywhere) is unchanged."""
+    land = (lands == j)[:, None]
+    orders.ability = torch.where(land, intended.ability, torch.full_like(intended.ability, -1))
+    orders.cast_target = torch.where(land, intended.cast_target, torch.full_like(intended.cast_target, -1))
+    return orders
+
+
 def snap_face(face):
     """[B, N] the facing the game stands at for an ordered one (degrees): the middle of its 64-sector
     (facing.lua engine: 0..5.62 -> 2.81, 90..95.62 -> 92.81); < 0 (none) stays -1."""

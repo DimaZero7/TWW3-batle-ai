@@ -179,7 +179,8 @@ class LinePlace:
     """The place switch (companion --strategist <a .json>; drill S0-1's crest8 check, tmp/drill_s1/design_merged.md
     section 6 (b)): no strategist - my infantry on the line the file gives, by the simulator's rule (net/strategist/
     crest.places: the stage's rows, row_m apart, left to right in slot order own_u1, own_u2, ...), the lord lord_back_m
-    behind their middle (net/stage0/battle._lord_place's rule), each at the simulator's default frontage (laid_out).
+    behind their middle (net/stage0/battle._lord_place's rule; the file's own lord_back_m only with BAI_LORD_SCRIPT=T), each at the
+    simulator's default frontage (laid_out).
     The file: {"line": {"x", "z", "b"}, "n": my infantry count (asserted), ...} in the map's world metres (the finder's,
     = the battle file's after its shift). The plan and the record as Strategist.decide's; the check (deploy.errors: a
     formation not wholly in my zone, two overlapping) counted in the record, the plan written anyway."""
@@ -206,13 +207,20 @@ class LinePlace:
         pts = CR.places({"x": float(line["x"]), "z": float(line["z"]), "b": float(line["b"])}, n)
         places = {u["n"]: (x, z, b, float(u["ow"])) for u, (x, z, b) in zip(inf, pts)}
         # (the lord: crest.lord_place - lord_back_m behind the line, kept inside my zone's rear; the simulator's rule too)
-        lx, lz, lb = CR.lord_place(pts, float(line["b"]), doc["zones"]["own"])
+        # (the file's lord_back_m: that far instead - only under the lord line's lane T, BAI_LORD_SCRIPT=T; with T off
+        # the file's key is ignored and LinePlace is as before for every caller)
+        import os
+        back = self.spec.get("lord_back_m") if os.environ.get("BAI_LORD_SCRIPT") == "T" else None
+        self.lord_back = back
+        lx, lz, lb = CR.lord_place(pts, float(line["b"]), doc["zones"]["own"], None if back is None else float(back))
         for u in lords:
             places[u["n"]] = (lx, lz, lb, float(u["ow"]))
         # (refused, not logged: a unit's footprint on blocked ground - crest.layout_ok on the line file's map)
         mp = self.spec.get("map")
         if mp and not CR.layout_ok(CR.ground(mp), pts):
             raise ValueError(f"{self.who}: a unit of the line stands on blocked ground of {mp} - the plan is refused")
+        if mp and back is not None and lords and not CR.layout_ok(CR.ground(mp), [(lx, lz, lb)]):
+            raise ValueError(f"{self.who}: the lord's point ({lx:.1f}, {lz:.1f}) is on blocked ground of {mp} - refused")
         return laid, places
 
     def decide(self, doc):
@@ -242,6 +250,7 @@ class LinePlace:
         rows = [(nm, *sent[nm], p[2], p[3], p[0], p[1]) for nm, p in places.items()]
         record = {"batch": doc["batch"], "who": self.who, "task": self.task, "think_ms": round(think_ms, 1),
                   "errors": errors, "line": self.spec.get("line"), "site": self.spec.get("site"),
+                  **({"lord_back_m": self.lord_back} if getattr(self, "lord_back", None) is not None else {}),
                   "groups": [{"units": [nm for nm in places if not nm.endswith("_lord")],
                               "cx": round(float(self.spec["line"]["x"]), 1), "cz": round(float(self.spec["line"]["z"]), 1),
                               "heading": round(float(self.spec["line"]["b"]), 2), "line": True}],
