@@ -76,6 +76,7 @@ replaced as soon as the run-in ends; ADV_REORDER_M 1 - above that jitter's 0.3 m
 """
 import copy
 import math
+import os
 
 from net.cards import abilities as model_abilities
 from net.cards import passport
@@ -298,6 +299,8 @@ class LordScript:
         self.fast, self.led = 0, False             # (seconds in a row the pair went > ADV_MPS; the last point led)
         self.failed = []                  # the run fails (the reader and the series stop): causes
         self.note, self._saved = None, None
+        # BAI_LORD_PRESS=0 (the lord line's arm N, tmp/lordline/t2): no button ever pressed; unset / anything else - on
+        self.buttons = os.environ.get("BAI_LORD_PRESS", "") != "0"
 
     # -- delivery
     def commit(self, delivered):
@@ -669,6 +672,9 @@ class LordScript:
 
     def _press(self, rows, t, note, melee, n_melee, n_waver, near, move):
         """At most one button (module doc's priority) -> [] or [{unit, key}]."""
+        if not self.buttons:
+            note["buttons"] = "off"
+            return []
         want = []
         if self.valour_due and not self.out:
             want.append((VALOUR, "step_out"))
