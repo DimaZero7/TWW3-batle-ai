@@ -594,7 +594,8 @@ def marks(mN, mT, setname):
         c.index_add_(0, dN["b"][sel], torch.ones(int(sel.sum()), dtype=torch.long))
         return c.tolist()
     out["per_battle"] = {"uncaused": per_b(dN["unc"] & pick), "false": per_b(ok & (dN["code"].long() == 3)),
-                         "yes_labels": per_b(lab & n2), "labels": per_b(lab), "nocause": nc.tolist()}
+                         "yes_labels": per_b(lab & n2), "labels": per_b(lab), "followed": per_b(fol & lab),
+                         "nocause": nc.tolist()}
     if mT is not None:
         dT = mT.data()
         okT = ~dT["drop"]

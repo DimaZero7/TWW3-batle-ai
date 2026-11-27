@@ -305,7 +305,8 @@ def registry():
     if f and Path(f).is_file():
         _MEMO.update(pickle.loads(Path(f).read_bytes()))
     try:
-        return _t0() + _o1() + _s1()
+        from net.drill import reexam as RX
+        return _t0() + _o1() + _s1() + RX.registry_entries()
     finally:
         if f:
             Path(f).write_bytes(pickle.dumps(dict(_MEMO)))
