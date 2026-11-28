@@ -694,15 +694,22 @@ def plan(u, need, gx, gz, front, cfg):
     u["pa_nf"] = u["pa_nf"].index_put((b, n), nf.to(u["pa_nf"].dtype), accumulate=True)
 
 
-def steer(u, params, gx, gz, follow, front, dt, clock=None):
+def steer(u, params, gx, gz, follow, front, dt, clock=None, bounds=None):
     """The goal of each unit this step: its next corner where it walks a way round closed ground, else gx, gz as they
     are. follow [B, N]: the units heading for a point (a move / withdraw order) or closing on an attack's target, out of
     melee; front [B, N] their formations' fronts (W); clock [B] the battles' clocks (None: a plan every step) - new ways are
     planned every plan_every_s of a battle's time (from its start), a unit given a new goal meanwhile walks straight to it
-    or on its old way. Returns (gx, gz, has [B, N] on a way, the way left to the goal
-    [B, N]: movement.velocity brakes on it, not on the corner)."""
+    or on its old way; bounds - the battle's exit square (st.bounds; the escape's routers; None: params.map_half).
+    Returns (gx, gz, has [B, N] on a way, the way left to the goal [B, N]: movement.velocity brakes on it, not on the
+    corner)."""
     cfg = cfg_of(params)
     B, N = gx.shape
+    ec = escape_of(cfg)
+    if ec is not None:
+        # (the escape, below: a unit walking to its escape point neither plans nor walks a way meanwhile)
+        add_escape_state(u)
+        esc, hold = _escape_on(u, ec, params, gx, gz, follow, dt, clock, bounds)
+        follow = follow & ~esc & ~hold
     ok = u["pa_ok"] & follow
     dx, dz = gx - u["x"], gz - u["z"]
     tol = torch.clamp(float(cfg["replan_share"]) * torch.sqrt(dx * dx + dz * dz), min=float(cfg["goal_m"]))
@@ -743,10 +750,169 @@ def steer(u, params, gx, gz, follow, front, dt, clock=None):
     u["pa_i"] = torch.where(has & (d <= reach), u["pa_i"] + 1, u["pa_i"])
     has = follow & u["pa_ok"] & (u["pa_i"] < u["pa_n"])
     wx, wz, wr, d = corner()
-    return torch.where(has, wx, gx), torch.where(has, wz, gz), has, d + wr
+    ox, oz, left = torch.where(has, wx, gx), torch.where(has, wz, gz), d + wr
+    if ec is not None:
+        ox, oz = torch.where(esc, u["es_x"], ox), torch.where(esc, u["es_z"], oz)
+        # (a holding follower: its own place - it stands, no plan, until its goal moves)
+        ox, oz = torch.where(hold, u["x"], ox), torch.where(hold, u["z"], oz)
+        has = has & ~esc & ~hold
+        left = torch.where(esc, torch.sqrt((u["es_x"] - u["x"]) ** 2 + (u["es_z"] - u["z"]) ** 2), left)
+        left = torch.where(hold, torch.zeros_like(left), left)
+    return ox, oz, has, left
 
 
-def spoil(u, stopped):
+# --- the escape of a refused unit (terrain.passable.detour.escape) ---
+
+ESCAPE = {"on": 0, "routers": 1, "m": 2.0, "heads": 16, "sub": 8, "margin_m": 1.0, "reach_m": 0.5, "hold_s": 4.0,
+          "clear_w": 0.01, "clear_cap_m": 50.0, "keep_w": 1.0, "forget_s": 30.0, "fruitless_n": 10, "improve_m": 2.0}
+ESC_STATE = ("es_x", "es_z", "es_t", "es_dx", "es_dz", "es_ht", "es_on", "es_rt", "es_gx", "es_gz", "es_best",
+             "es_ref", "es_n", "es_hold")
+
+
+def escape_of(cfg):
+    """terrain.passable.detour.escape over ESCAPE, or None when the detour or the escape is off."""
+    if cfg is None:
+        return None
+    e = cfg.get("escape") or {}
+    if not e.get("on"):
+        return None
+    out = dict(ESCAPE)
+    out.update({k: v for k, v in e.items() if not k.endswith("why")})
+    return out
+
+
+def add_escape_state(u):
+    """The escape's records (made by battle.step before its snapshot the first time the switch is on - a battle with
+    it off has none, bit for bit; add_state, from terrain.set_map, has no parameters): the escape point es_x, es_z (the
+    battle's frame), the time since it was taken es_t, the slide's heading es_dx, es_dz and its age es_ht, whether the
+    unit walks to its point es_on; es_rt - the clock of the unit's last step the stop refused (set by spoil; -1e9
+    none); the bound on fruitless escapes: the goal counted es_gx, es_gz, the unit's best distance to it es_best, that
+    best at the last meaningful improvement es_ref, the escapes asked since es_n, and es_hold - it holds."""
+    if "es_on" in u:
+        return
+    for k in ("es_x", "es_z", "es_t", "es_dx", "es_dz", "es_ht", "es_gx", "es_gz", "es_n"):
+        u[k] = torch.zeros_like(u["x"])
+    for k in ("es_best", "es_ref"):
+        u[k] = torch.full_like(u["x"], 1e9)
+    u["es_rt"] = torch.full_like(u["x"], -1e9)
+    u["es_on"] = torch.zeros_like(u["x"], dtype=torch.bool)
+    u["es_hold"] = torch.zeros_like(u["x"], dtype=torch.bool)
+
+
+def _in_field(u, x, z, margin, routers, bounds):
+    """[B, ...] bool: points inside the field less margin (terrain.FRAMES of the battle's map, the map's frame); a
+    router: inside its exit square +-bounds less margin (movement.clamp_to_map: routers leave beyond it - the battle's
+    own bounds, st.bounds; the map's coordinates on a map, the battle's frame off one); a battle off a map: its square
+    +-bounds less margin."""
+    from sim import terrain
+    mx, mz = terrain.to_map(u, x, z)
+    mid = u["terr"][:, 0] if "terr" in u else torch.full((x.shape[0],), -1, dtype=torch.int64, device=x.device)
+    sh = (-1,) + (1,) * (x.dim() - 1)
+    tab = torch.tensor([terrain.FRAMES.get(k, (-bounds, bounds, -bounds, bounds))
+                        for k in range(max(len(terrain._MAPS), 1))], dtype=x.dtype, device=x.device)
+    f = tab[mid.clamp(min=0)]
+    lo_x, hi_x, lo_z, hi_z = (f[:, i].view(sh) for i in range(4))
+    field = (mx >= lo_x + margin) & (mx <= hi_x - margin) & (mz >= lo_z + margin) & (mz <= hi_z - margin)
+    on_map = (mid >= 0).view(sh)
+    ax, az = torch.where(on_map, mx, x), torch.where(on_map, mz, z)
+    square = (ax.abs() <= bounds - margin) & (az.abs() <= bounds - margin)
+    return torch.where(on_map & ~routers, field, square)
+
+
+@_eager
+def _escape_on(u, ec, params, gx, gz, follow, dt, clock=None, bounds=None):
+    """(on, hold) [B, N]: the units walking to an escape point this step, the followers that hold (sim/config/sim.json
+    terrain.passable.detour.escape_why; sim/evidence/detour_escape/rows.md). Eligible: a follower, or a router when
+    `routers`. A unit whose LAST STEP WAS REFUSED by the 'cannot stand' stop (es_rt = that step's clock, set by spoil -
+    not a probe of a step to come, and only the step just before this one) takes a new escape point: of `heads`
+    headings at `m` metres, those whose `sub` sub-steps all land on free nodes (ground.blocked, the stop's own test)
+    inside the field less margin_m (a router: its exit square less margin_m; _in_field), the one most along its goal's
+    way, the clearance there (clear_w a metre, up to clear_cap_m) and keep_w x the cosine to the slide's heading added
+    (a wall straight across the way: the slide goes on along the same side, not back and forth); none such - no
+    escape. It walks there until within reach_m, a new refusal (a new point), hold_s, or it is no longer eligible; then
+    it plans as usual. The slide's heading is set by an escape taken without one and lives forget_s from then (a later
+    escape does not renew it), or until the unit is no longer eligible. A follower's escapes are bounded: each escape
+    asked (a refusal) without its best distance to its goal improved by improve_m since the last improvement counts;
+    at fruitless_n it holds (stands, no plan) until its goal moves by more than the detour's replan tolerance
+    (max(goal_m, replan_share x its distance)), when the count starts anew."""
+    from sim import ground
+    cfg = cfg_of(params)
+    x, z = u["x"], u["z"]
+    bounds = float(params.map_half) if bounds is None else float(bounds)
+    routers = u["r"] & (u["men"] > 0)
+    elig = follow | routers if ec["routers"] else follow
+    # the goal counted: a new one (moved over the replan tolerance) starts the count anew
+    d_now = torch.sqrt((gx - x) ** 2 + (gz - z) ** 2)
+    tol = torch.clamp(float(cfg["replan_share"]) * d_now, min=float(cfg["goal_m"]))
+    reset = follow & (((gx - u["es_gx"]) ** 2 + (gz - u["es_gz"]) ** 2) > tol * tol)
+    u["es_gx"], u["es_gz"] = torch.where(reset, gx, u["es_gx"]), torch.where(reset, gz, u["es_gz"])
+    u["es_best"] = torch.where(reset, d_now, torch.where(follow, torch.minimum(u["es_best"], d_now), u["es_best"]))
+    u["es_ref"] = torch.where(reset, d_now, u["es_ref"])
+    u["es_n"] = torch.where(reset, torch.zeros_like(u["es_n"]), u["es_n"])
+    u["es_hold"] = u["es_hold"] & ~reset
+    hold = u["es_hold"] & follow
+    # the refusal of the step just before this one (a stale one - the detour off meanwhile - is not taken)
+    if clock is not None:
+        ref = (u["es_rt"] - (clock[:, None] - float(dt))).abs() < 0.25 * float(dt)
+    else:
+        ref = u["es_rt"] > -1e8
+        u["es_rt"] = torch.full_like(u["es_rt"], -1e9)
+    # the slide's heading expires before it is scored
+    live_h = elig & (u["es_ht"] < float(ec["forget_s"]))
+    u["es_dx"] = torch.where(live_h, u["es_dx"], torch.zeros_like(u["es_dx"]))
+    u["es_dz"] = torch.where(live_h, u["es_dz"], torch.zeros_like(u["es_dz"]))
+    had_h = (u["es_dx"] != 0) | (u["es_dz"] != 0)
+    on = u["es_on"] & elig & ~hold & ~ref & (u["es_t"] < float(ec["hold_s"]))
+    on = on & (((u["es_x"] - x) ** 2 + (u["es_z"] - z) ** 2) > float(ec["reach_m"]) ** 2)
+    new = ref & elig & ~hold
+    if bool(new.any()):
+        # the bound: a follower's escape asked without a meaningful improvement since the last one counts
+        ask = new & follow
+        better = u["es_best"] < u["es_ref"] - float(ec["improve_m"])
+        u["es_ref"] = torch.where(ask & better, u["es_best"], u["es_ref"])
+        u["es_n"] = torch.where(ask, torch.where(better, torch.zeros_like(u["es_n"]), u["es_n"] + 1), u["es_n"])
+        stop = ask & (u["es_n"] >= float(ec["fruitless_n"]))
+        u["es_hold"] = u["es_hold"] | stop
+        hold = hold | stop
+        new = new & ~stop
+        H, S, m = int(ec["heads"]), int(ec["sub"]), float(ec["m"])
+        ang = torch.arange(H, device=x.device, dtype=x.dtype) * (2 * math.pi / H)
+        ux, uz = torch.sin(ang), torch.cos(ang)
+        t = torch.arange(1, S + 1, device=x.device, dtype=x.dtype) * (m / S)
+        sx = x[:, :, None, None] + ux[None, None, :, None] * t[None, None, None, :]          # [B, N, H, S]
+        sz = z[:, :, None, None] + uz[None, None, :, None] * t[None, None, None, :]
+        rt = routers[:, :, None, None].expand_as(sx)
+        free = ~ground.blocked(u, sx, sz) & _in_field(u, sx, sz, float(ec["margin_m"]), rt, bounds)
+        ok = free.all(3) & new[:, :, None]                                                    # [B, N, H]
+        ex, ez = sx[..., -1], sz[..., -1]
+        wx, wz = (gx - x)[:, :, None], (gz - z)[:, :, None]
+        wn = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
+        along = (ux[None, None, :] * wx + uz[None, None, :] * wz) / wn
+        clr = clear_here(u, ex, ez, cfg).clamp(max=float(ec["clear_cap_m"]))
+        keep = ux[None, None, :] * u["es_dx"][:, :, None] + uz[None, None, :] * u["es_dz"][:, :, None]
+        score = torch.where(ok, along + float(ec["clear_w"]) * clr + float(ec["keep_w"]) * keep,
+                            torch.full_like(along, -1e9))
+        k = score.argmax(2, keepdim=True)
+        got = ok.any(2)
+        u["es_x"] = torch.where(got, ex.gather(2, k).squeeze(2), u["es_x"])
+        u["es_z"] = torch.where(got, ez.gather(2, k).squeeze(2), u["es_z"])
+        u["es_t"] = torch.where(got, torch.zeros_like(u["es_t"]), u["es_t"])
+        start = got & ~had_h                   # (a slide begins: its heading and its age; a later escape keeps both)
+        u["es_dx"] = torch.where(start, ux[k.squeeze(2)], u["es_dx"])
+        u["es_dz"] = torch.where(start, uz[k.squeeze(2)], u["es_dz"])
+        u["es_ht"] = torch.where(start, torch.zeros_like(u["es_ht"]), u["es_ht"])
+        on = torch.where(new, got, on)
+    on = on & ~hold
+    u["es_on"] = on
+    u["es_t"] = torch.where(elig, u["es_t"] + float(dt), u["es_t"])
+    u["es_ht"] = torch.where(elig, u["es_ht"] + float(dt), u["es_ht"])
+    return on, hold
+
+
+def spoil(u, stopped, clock=None):
     """The ways of the units whose step was not made (stopped [B, N]: the 'cannot stand' stop) go bad: new ones next
-    step (the game's 'path invalid' -> a new path, pathing.md rule 5)."""
+    step (the game's 'path invalid' -> a new path, pathing.md rule 5); with the escape on the refused step's clock
+    (clock [B], the step's start) is kept for the next step's escape (es_rt)."""
     u["pa_ok"] = u["pa_ok"] & ~stopped
+    if "es_rt" in u and clock is not None:
+        u["es_rt"] = torch.where(stopped, clock[:, None].to(u["es_rt"].dtype).expand_as(stopped), u["es_rt"])

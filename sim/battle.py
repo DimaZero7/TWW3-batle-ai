@@ -59,6 +59,8 @@ def step(st, orders, params=None, dt=None):
     u = st.u
     if core.on(params, "share") or core.on(params, "shared_front_cap"):
         core.ensure(u)              # (melee.core: the ledger before the snapshot - a state built with share off)
+    if "pa_n" in u and detour.escape_of(detour.cfg_of(params)) is not None:
+        detour.add_escape_state(u)  # (the escape's records before the snapshot: detour.steer; switch off - none)
     old = dict(u)
     live = ~st.done
     cal = params.sim
@@ -1638,7 +1640,7 @@ def step(st, orders, params=None, dt=None):
     fgx, fgz, has_way = gx, gz, None
     if passable and "pa_n" in u and detour.cfg_of(params) is not None:
         follow = standing & (point | close_in) & ~routing & ~engaged & ~sk_run & ~closing & ~retarget & ~push
-        gx, gz, has_way, way_d = detour.steer(u, params, gx, gz, follow, pw["front"], dt, st.t)
+        gx, gz, has_way, way_d = detour.steer(u, params, gx, gz, follow, pw["front"], dt, st.t, st.bounds)
     # Turning on the move (turn.move_turn; the database's battle_entities turn_rate, the turning probe
     # tmp/old-build/movelords): a unit heading for a point off its facing turns towards it at its men's turn rate (a formation's
     # men about-face where they stand: its front becomes the old back rank) and runs only the way it faces - its speed
@@ -1723,7 +1725,7 @@ def step(st, orders, params=None, dt=None):
         if "blk_s" in u:
             u["blk_s"] = u["blk_s"] + into.float() * dt
         if has_way is not None:
-            detour.spoil(u, into)
+            detour.spoil(u, into, st.t)
 
     # --- facing and the observed flags ---
     spd = torch.sqrt(vx * vx + vz * vz)
