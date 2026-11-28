@@ -588,7 +588,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
          "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
-         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire", "globes", "globes2", "dglobes", "stormfiend", "lordring", "lordswap") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
+         "brace", "meleeturn", "meleeturn2", "meleewidth", "terrain", "terrain2", "wrap", "ground", "manfields", "ranks", "cover", "cavrun", "cavcharge", "cavcheck", "memform", "memmelee", "memshot", "monster", "artillery", "pusbags", "grinder", "memrunners", "triads", "warpfire", "globes", "globes2", "dglobes", "stormfiend", "lordring", "lordswap", "lordsweep", "lordnb") + UNIT_PLANS + MAGIC_PLANS + TACTIC_PLANS
 # the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
 # gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
 FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
@@ -617,6 +617,29 @@ LORDRING = {"run_gap_m": 30, "walk_gap_m": 3, "edge_m": 3.0, "fight_s": 35, "rin
 # file that names it - BAI_MEM_SITES). Battles 1-4: General / Warlord X-C, C-X, X-C, C-X; 5-6: both S
 LORDSWAP = {"gap_m": 3, "fight_s": 50, "w": 14, "t2_gap_m": 1, "at_s": 10, "pairs": (("general", "cspear"), ("warlord", "swords")),
             "arms": (("X", "C"), ("C", "X"), ("X", "C"), ("C", "X"), ("S", "S"), ("S", "S"))}
+# the lordsweep plan (tmp/probeprep, tmp/lordstrike/STRIKE.md): how many men one swing of a foot lord hits (2.42 in the
+# lordring lanes, 1.28 in whole battles). Arms: 'solo' he runs into a held unit from run_gap_m (lordring A); 'flank' his
+# infantry (the anvil, an extra) attacks the held unit at a walk from anvil_gap_m at the go and a_go_s later he runs into
+# its right flank from run_gap_m; 'front' he walks into it from anvil_gap_m between two narrow anvils of his (front_w
+# wide, front_gap_m apart) attacking it at a walk at the go. The General with clanrat spearmen (anvil swordsmen), the
+# Warlord with Empire swordsmen (anvil clanrats); one lord a side: a battle holds a General lane and a Warlord lane of two
+# arms, places swapped, reps lanes an arm and lord in battles 1-12; battles 13-16 solo for both (the speed arm: play them
+# at x20, as the whole battles ran)
+LORDSWEEP = {"run_gap_m": 30, "anvil_gap_m": 1.5, "a_go_s": 6, "fight_s": 90, "front_w": 12, "front_gap_m": 3,
+             "lords": (("general", "cspear", "swords"), ("warlord", "swords", "clanrat")),
+             "arms": ("solo", "flank", "front"), "reps": 4, "speed_battles": 4}
+# the lordnb plan (tmp/drill_lord_t1/DRILL_v2.md 7, tmp/probeprep): does an enemy unit near the lord's target turn on him?
+# Our U1 (an extra) and E1 (the lane's target) attack each other at a walk from anvil_gap_m at the go; a_go_s later our
+# lord attacks E1 at a run from run_gap_m beyond its front, lord_dx m right of its right edge (+x, E2's side): down the
+# seam beside U1 onto E1's front-right corner. E2 (target2, E1's kind) beside E1 (+x) at edge gap g: 'busy' - E2 attacks
+# our U2 (extra 2, U1's kind, at E2's front as U1 at E1's) at a walk at the go; 'free' - E2 held, never ordered, no U2;
+# 'ctl' - no E2. The General: E clanrat spearmen, U swordsmen; the Warlord: E swordsmen, U clanrats. Stages, each can
+# be the last (tmp/probeprep/RUNBOOK.md): battles 1-16 ctl / busy2 (ON or OFF for busy neighbours), 17-24 free2 (free
+# ones), 25-40 busy8 / free8, 41-56 busy15 / free15 (R); a battle a General lane and a Warlord lane - of a stage's two
+# cells crosswise, or both of its one cell - places swapped; reps lanes a cell and lord
+LORDNB = {"run_gap_m": 30, "anvil_gap_m": 1.5, "a_go_s": 6, "fight_s": 25, "lord_dx": 1.0, "reps": 8,
+          "lords": (("general", "cspear", "swords"), ("warlord", "swords", "clanrat")),
+          "stages": ((("ctl", 0), ("busy", 2)), (("free", 2),), (("busy", 8), ("free", 8)), (("busy", 15), ("free", 15)))}
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -989,6 +1012,64 @@ def battles(plan):
                         t2_gap_m=g["t2_gap_m"], t2_mode="attack", t2_run=True, t_w=g["w"], t2_width=g["w"], after=af,
                         mem_morale_ours=True, kind=f"{arm}_{lord}")
         return [[swap(lo, inf, arm) for (lo, inf), arm in zip(g["pairs"], arms)] for arms in g["arms"]]
+    if plan == "lordsweep":
+        g = LORDSWEEP
+
+        def sweep(lord, inf, anvil, arm):
+            t_depth = depth(UNITS[inf][0], UNITS[inf][1], WIDTH_M)
+            kind = f"{arm}_{lord}"
+            if arm == "solo":
+                return lane(lord, inf, "attack_run", "hold", gap_m=g["run_gap_m"], fight_s=g["fight_s"], kind=kind)
+            if arm == "flank":
+                e_depth = depth(UNITS[anvil][0], UNITS[anvil][1], WIDTH_M)
+                ex = [{"short": anvil, "dx": 0.0, "dz": round(t_depth / 2 + g["anvil_gap_m"] + e_depth / 2, 1), "b": 180,
+                       "width": WIDTH_M, "attack": True}]
+                return lane(lord, inf, "attack_run", "hold", gap_m=g["run_gap_m"], fight_s=g["fight_s"], answer=False,
+                            a_side=90, a_go_s=g["a_go_s"], contact_a_only=True, extras=ex, kind=kind,
+                            max_s=round(g["a_go_s"] + g["run_gap_m"] / 1.4 + g["fight_s"] + 20))
+            w = g["front_w"]                     # 'front': two narrow anvils, the lord in the gap between them
+            e_depth = depth(UNITS[anvil][0], UNITS[anvil][1], w)
+            dz = round(t_depth / 2 + g["anvil_gap_m"] + e_depth / 2, 1)
+            dx = round(g["front_gap_m"] / 2 + w / 2, 1)
+            ex = [{"short": anvil, "dx": -dx, "dz": dz, "b": 180, "width": w, "attack": True},
+                  {"short": anvil, "dx": dx, "dz": dz, "b": 180, "width": w, "attack": True}]
+            return lane(lord, inf, "attack_walk", "hold", gap_m=g["anvil_gap_m"], fight_s=g["fight_s"], answer=False,
+                        contact_a_only=True, extras=ex, kind=kind)
+        (gl, gi, ga), (wl, wi, wa) = g["lords"]
+        arms, out = g["arms"], []
+        for b in range(len(arms) * g["reps"]):
+            pair = [sweep(gl, gi, ga, arms[b % len(arms)]), sweep(wl, wi, wa, arms[(b + 1) % len(arms)])]
+            out.append(pair[::-1] if b % 2 else pair)
+        for b in range(g["speed_battles"]):
+            pair = [sweep(gl, gi, ga, "solo"), sweep(wl, wi, wa, "solo")]
+            out.append(pair[::-1] if b % 2 else pair)
+        return out
+    if plan == "lordnb":
+        g = LORDNB
+
+        def nb(lord, inf, ours, cell, gap):
+            t_depth = depth(UNITS[inf][0], UNITS[inf][1], WIDTH_M)
+            u_depth = depth(UNITS[ours][0], UNITS[ours][1], WIDTH_M)
+            dz = round(t_depth / 2 + g["anvil_gap_m"] + u_depth / 2, 1)
+            ex = [{"short": ours, "dx": 0.0, "dz": dz, "b": 180, "width": WIDTH_M, "attack": True}]
+            extra = {}
+            if cell == "busy":
+                ex.append({"short": ours, "dx": round(WIDTH_M + gap, 1), "dz": dz, "b": 180, "width": WIDTH_M})
+                extra = dict(target2=inf, t2_gap_m=gap, t2_width=WIDTH_M, t2_mode="attack_extra", t2_extra=2, t2_walk=True)
+            elif cell == "free":
+                extra = dict(target2=inf, t2_gap_m=gap, t2_width=WIDTH_M)
+            return lane(lord, inf, "attack_run", "hold", gap_m=g["run_gap_m"], fight_s=g["fight_s"], answer=False,
+                        a_dx=round(WIDTH_M / 2 + g["lord_dx"], 1), a_go_s=g["a_go_s"], contact_a_only=True, extras=ex,
+                        t_attack_extra=True, kind=f"{cell}{gap if cell != 'ctl' else ''}_{lord}",
+                        max_s=round(g["a_go_s"] + g["run_gap_m"] / 1.4 + g["fight_s"] + 20), **extra)
+        (gl, gi, gu), (wl, wi, wu) = g["lords"]
+        out = []
+        for cells in g["stages"]:
+            n = len(cells)
+            for j in range(n * g["reps"]):
+                pair = [nb(gl, gi, gu, *cells[j % n]), nb(wl, wi, wu, *cells[(j + 1) % n])]
+                out.append(pair[::-1] if (j // n) % 2 else pair)      # (one cell: both lanes of it, n * reps battles)
+        return out
     if plan == "crowd":
         def cut(n, flanks=False):
             t_men = UNITS["clanrat"][1]
@@ -2090,6 +2171,11 @@ def run_config(plan, index):
         # rows every 0.5 s (mem_morale; with lane.mem_morale_ours the lord's)
         config.update(tick_ms=SWING_MS, men_ms=1000, men_after_s=LORDSWAP["fight_s"] + 10, men_near_m=60, mem_extras=True,
                       mem_morale=True)
+    if plan in ("lordsweep", "lordnb"):
+        # as lordring: health every 0.1 s; the men of the lanes' units, extras and second targets from memory every 0.1 s
+        # within 60 m all the fight (tmp/probeprep/sweep.py, nb.py read them)
+        fs = (LORDSWEEP if plan == "lordsweep" else LORDNB)["fight_s"]
+        config.update(tick_ms=SWING_MS, men_ms=1000, men_after_s=fs + 10, men_near_m=60, mem_extras=True)
     if plan in ("memmelee", "memrunners"):
         # the men from memory every 0.1 s all the fight (dense to men_after_s after the contact)
         config.update(tick_ms=TURN_TICK_MS, men_ms=1000, men_after_s=MEMMELEE["fight_s"] + 5, men_near_m=60)
