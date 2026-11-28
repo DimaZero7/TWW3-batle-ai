@@ -26,11 +26,16 @@ What each drill's lines read (its own exam code, its own set's recipe):
           held_out.taught (B1), after.*
 
     python -m net.drill.reexam [--drills T0-1,O0-1,S0-1] [--n N] [--device cuda] [--out tmp/reexam/<stamp>]
-                               [--sim-set contact.lord_strikers=0 ...] [--lords on]
+                               [--sim-set contact.lord_strikers=0 ...] [--lord-mode off|post|t2] [--buttons on|off]
+                               [--ckpt <a candidate's weights>]
 --sim-set changes sim.json's value in this process only (the cached sim.params.load() object; the file untouched).
---lords on: the re-exam "with lords on" - net/config/stage0.json lord_script and enemy_lord_fights on in this process
-only (my lord by the T2 lord script, net/unit/lord.py; the enemy's by its script's lord rules; stage0/battle.py
-'The lords'); off (the default) - the lords as the rows were accepted.
+--lord-mode: the re-exam with lords in play - net/config/stage0.json lord_script = the mode (net/unit/lord.MODES: post -
+my lord at the T2 post, never fighting; t2 - the T2 lord script) and enemy_lord_fights on, lord_buttons by --buttons,
+in this process only; the scene lords of T0-1 / O0-1 / S0-1 then start at the T2 post (stage0/battle.lord_back), not
+lord_back_m back; off (the default) - the lords as the rows were accepted. --lords on = --lord-mode t2 --buttons on.
+With a lord mode the report adds the aura exposure: the share of the tactic level's infantry decisions (my able units
+at its ticks) with lord_near on and with hold_the_line on (net/tactic/raw.py effects).
+--ckpt: a candidate's weights in place of the journal row's (one drill; its sha256 printed, the row's sha not checked).
 Exit 0: every drill PASS; 1: a FAIL; 2: only INSIDE NOISE.
 """
 import argparse
@@ -216,7 +221,7 @@ def _sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def run_t01(row, n, device, chunk):
+def run_t01(row, n, device, chunk, ckpt=None):
     from types import SimpleNamespace
     from sim.params import load
     from net.tactic import ckpt as TK
@@ -224,7 +229,7 @@ def run_t01(row, n, device, chunk):
     from net.tactic import imitate as IM
     from net.tactic import learn as LN
     P = load()
-    net, _, _ = TK.restore(row["weights"]["path"], device)
+    net, _, _ = TK.restore(ckpt or row["weights"]["path"], device)
     net.eval()
     specs = t1_specs(n)
     ch = min(chunk, len(specs))
@@ -247,7 +252,7 @@ def run_t01(row, n, device, chunk):
             "battles": len(specs)}
 
 
-def run_o01(row, n, device, chunk):
+def run_o01(row, n, device, chunk, ckpt=None):
     from net.operative import ckpt as CK
     from net.operative import exam_o1 as EX
     from net.operative import heads as HD
@@ -256,7 +261,7 @@ def run_o01(row, n, device, chunk):
     ch = min(chunk, len(specs))
     seeds = [SEEDS["O0-1"]["torch"] + k for k in range((len(specs) + ch - 1) // ch)]
     check_starts("O0-1", specs, seeds)
-    net = CK.restore_o1(row["weights"]["path"], device)[0]
+    net = CK.restore_o1(ckpt or row["weights"]["path"], device)[0]
     d = EX.play("NET", specs, seeds, ch, device, tactic="TEACH", make_player=lambda ci, ii: HD.NetPlayer(net),
                 visible=True)
     R = EX.reads(d, int(LL.conf()["limit_s"]))
@@ -276,14 +281,14 @@ def run_o01(row, n, device, chunk):
             "printed": {"B1_misses": cnt}, "battles": len(specs)}
 
 
-def run_s01(row, n, device, chunk):
+def run_s01(row, n, device, chunk, ckpt=None):
     from net.strategist import exam_s1 as EX
     from net.strategist import s1_net as SN
     specs = s1_specs(n)
     ch = min(chunk, len(specs))
     tseed = SEEDS["S0-1"]["torch"]
     check_starts("S0-1", specs, [tseed + k for k in range((len(specs) + ch - 1) // ch)])
-    net, _ = SN.restore(row["weights"]["path"], device)
+    net, _ = SN.restore(ckpt or row["weights"]["path"], device)
     k = [int(x) for x in SN.choose(net, SN.observe(specs, device), device)]
     sr = EX.spec_rows(specs)
     cause = [i for i, r in enumerate(sr) if r["cause"]]
@@ -305,6 +310,55 @@ def run_s01(row, n, device, chunk):
 
 
 RUN = {"T0-1": run_t01, "O0-1": run_o01, "S0-1": run_s01}
+
+
+class Aura:
+    """The aura exposure (module doc): lower.Tacticians._tick_player wrapped for the run - after each tick, my able
+    units of its rows counted with the raw's e_lord_near / e_hold_the_line on (the level's own raw: the lord's row
+    hidden, the effects observed before)."""
+
+    def __init__(self):
+        self.n = {"decisions": 0, "lord_near": 0, "hold_the_line": 0}
+
+    def __enter__(self):
+        from net.operative import lower as LW
+        from net.tactic import raw as TR
+        self.orig = orig = LW.Tacticians._tick_player
+        n = self.n
+
+        def wrapped(tac, *a, **k):
+            out = orig(tac, *a, **k)
+            v = (tac.view or {}).get("view")
+            if v is not None and v.raw is not None:
+                fx = v.fx
+                my = fx.my.clamp(min=0)
+                ok = fx.able & (fx.my >= 0)
+                for key, col in (("lord_near", "e_lord_near"), ("hold_the_line", "e_hold_the_line")):
+                    on = v.raw[..., TR.I[col]].gather(1, my) > 0
+                    n[key] += int((on & ok).sum())
+                n["decisions"] += int(ok.sum())
+            return out
+        LW.Tacticians._tick_player = wrapped
+        return self
+
+    def __exit__(self, *e):
+        from net.operative import lower as LW
+        LW.Tacticians._tick_player = self.orig
+
+    def shares(self):
+        d = self.n["decisions"]
+        return {"decisions": d, **{k: (round(self.n[k] / d, 4) if d else None) for k in ("lord_near", "hold_the_line")}}
+
+
+def lords(mode, buttons):
+    """stage0.json's lord keys for the run (module doc --lord-mode); {mode, buttons} for the report."""
+    from net.stage0 import cfg as scfg
+    if mode == "off":
+        return {"mode": "off"}
+    scfg()["lord_script"] = mode
+    scfg()["enemy_lord_fights"] = True
+    scfg()["lord_buttons"] = buttons == "on"
+    return {"mode": mode, "buttons": buttons}
 
 
 # ------------------------------------------------------------------ the command
@@ -358,6 +412,10 @@ def table_lines(res):
     L.append("")
     for dr, r in res.items():
         L.append(f"{dr}: {r.get('verdict', 'ERROR')}  ({r.get('battles', 0)} battles, {r.get('min', '?')} min)")
+        if r.get("aura"):
+            au = r["aura"]
+            L.append(f"{dr}: aura exposure - lord_near {au['lord_near']}, hold_the_line {au['hold_the_line']} of "
+                     f"{au['decisions']} infantry decisions")
     return L
 
 
@@ -368,20 +426,33 @@ def main(argv=None):
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default="", help="default tmp/reexam/<date-time>")
     ap.add_argument("--sim-set", action="append", default=[], help="sim.json path=value in this process only")
-    ap.add_argument("--lords", default="off", choices=("off", "on"),
-                    help="on: stage0.json lord_script and enemy_lord_fights on in this process only")
+    ap.add_argument("--lords", default=None, choices=("off", "on"),
+                    help="on: = --lord-mode t2 --buttons on (the old switch)")
+    ap.add_argument("--lord-mode", default=None, choices=("off", "post", "t2"),
+                    help="stage0.json lord_script in this process only (module doc)")
+    ap.add_argument("--buttons", default=None, choices=("on", "off"), help="the lord's buttons (default on)")
+    ap.add_argument("--ckpt", default="", help="a candidate's weights instead of the journal row's (one drill)")
     a = ap.parse_args(argv)
+    if a.lords is not None:
+        if a.lord_mode is not None or a.buttons is not None:
+            raise SystemExit("--lords is the alias of --lord-mode t2 --buttons on: not with them")
+        a.lord_mode, a.buttons = ("t2", "on") if a.lords == "on" else ("off", "on")
+    a.lord_mode, a.buttons = a.lord_mode or "off", a.buttons or "on"
     import torch
     from net import ROOT
     from net.tactic import exam_pin as EP
     D = Path(a.out or ROOT / "tmp" / "reexam" / time.strftime("%Y%m%d-%H%M%S"))
     D.mkdir(parents=True, exist_ok=True)
     changed = sim_set(a.sim_set)
-    if a.lords == "on":
-        from net.stage0 import cfg as scfg
-        scfg()["lord_script"] = scfg()["enemy_lord_fights"] = True
+    lk = lords(a.lord_mode, a.buttons)
     rows = accepted_rows()
     want = [x for x in a.drills.split(",") if x]
+    ck_sha = None
+    if a.ckpt:
+        if len(want) != 1:
+            raise SystemExit("--ckpt: one drill (--drills X)")
+        ck_sha = _sha(a.ckpt)
+        print(json.dumps({"ckpt": a.ckpt, "sha256": ck_sha}), flush=True)
     not_covered = sorted(set(rows) - set(RUN))
     n_of = {dr: (a.n or N[dr]) for dr in want}
     for dr in want:
@@ -390,7 +461,7 @@ def main(argv=None):
     chunk_of = {dr: CHUNK[dr] for dr in want}
     est = estimate(want, n_of, chunk_of, a.device)
     head = {"start": time.strftime("%Y-%m-%d %H:%M"), "device": a.device, "sim_key": EP.sim_key(), "sim_set": changed,
-            "lords": a.lords,
+            "lords": lk, "ckpt": {"path": a.ckpt, "sha256": ck_sha} if a.ckpt else None,
             "n": n_of, "chunk": chunk_of, "gpu_minutes_estimate": est, "estimate_why": _MIN_WHY, "n_why": _N_WHY,
             "tolerances": {**TOL, "orders_cap": ORDERS_CAP}, "tol_why": _TOL_WHY, "seeds": SEEDS,
             "accepted_rows": sorted(rows), "not_covered": not_covered}
@@ -402,13 +473,16 @@ def main(argv=None):
             res[dr] = {"error": "not an accepted row of net/drills.json"}
             continue
         row = rows[dr]
-        sha = _sha(ROOT / row["weights"]["path"])
-        if sha != row["weights"]["sha256"]:
+        sha = ck_sha if a.ckpt else _sha(ROOT / row["weights"]["path"])
+        if not a.ckpt and sha != row["weights"]["sha256"]:
             res[dr] = {"error": f"weights {row['weights']['path']} sha {sha[:16]} != the row's"}
             continue
         t0 = time.time()
         torch.manual_seed(0)
-        r = RUN[dr](row, n_of[dr], a.device, chunk_of[dr])
+        with Aura() as au:
+            r = RUN[dr](row, n_of[dr], a.device, chunk_of[dr], ckpt=a.ckpt or None)
+        if a.lord_mode != "off":
+            r["aura"] = au.shares()
         r["status"] = {ln: judge(ln, r["lines"][ln], r["accepted"].get(ln)) for ln in r["lines"]}
         sts = [s for s, _ in r["status"].values()]
         r["verdict"] = ("FAIL" if "fail" in sts else "NOT JUDGED" if "NOT JUDGED" in sts else
@@ -416,7 +490,7 @@ def main(argv=None):
         r["min"] = round((time.time() - t0) / 60, 1)
         r["weights_sha256"] = sha
         res[dr] = r
-        print(json.dumps({"drill": dr, "verdict": r["verdict"], "min": r["min"]}), flush=True)
+        print(json.dumps({"drill": dr, "verdict": r["verdict"], "min": r["min"], "aura": r.get("aura")}), flush=True)
         (D / "reexam.json").write_text(json.dumps({**head, "drills": res}, indent=1, default=str), encoding="utf-8")
         if a.device.startswith("cuda"):
             torch.cuda.empty_cache()

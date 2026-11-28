@@ -152,9 +152,12 @@ def _try(rnd, held, mp):
     if not all(TS.can_stand(mp, x, z, hb) for x, z in starts):
         return None
     lb = float(S["lord_back_m"])
+    from net.stage0 import battle as BA                    # (a lord that plays: at the T2 post's distance)
+    l1b, l2b = BA.lord_back(1), BA.lord_back(2)
+    l1b, l2b = lb if l1b is None else l1b, lb if l2b is None else l2b
     mx, mz = sum(p[0] for p in snapped) / n, sum(p[1] for p in snapped) / n
     ex, ez = sum(p[0] for p in pt) / n, sum(p[1] for p in pt) / n
-    lords = {1: (mx - lb * fwd[0], mz - lb * fwd[1], h), 2: (ex + lb * fwd[0], ez + lb * fwd[1], hb)}
+    lords = {1: (mx - l1b * fwd[0], mz - l1b * fwd[1], h), 2: (ex + l2b * fwd[0], ez + l2b * fwd[1], hb)}
     if not all(TS.can_stand(mp, *lords[s]) for s in (1, 2)):
         return None
     goals = [(x - 300.0 * fwd[0], z - 300.0 * fwd[1]) for x, z, _ in pt]

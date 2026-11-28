@@ -10,7 +10,11 @@ HEAD and is judged by the move marks M3, M4, M5, M7; the outcome N - C, TEACH - 
                 facts (head-free, dropped / don't-care label, kinds, trivial, near2) and the don't-care keys. A tick
                 whose head-free units are all trivial keeps is kept one in loss.trivial_every with that weight (as
                 learn.Buffer). check - the first ticks with the level's own input (a network driving) rebuilt and
-                compared
+                compared. With our lord in the level (View.lord, tactic/lordtac.py) a tick is also kept when he is
+                eligible - never thinned as trivial; the infantry's own selection and its thinning counter are as
+                without him (inf_sel; a tick kept for the lord alone has head all off) - and LORD_KEYS ride along
+                (his raw row, slot, issued order, eligible, engaged, legal / bound / dist over the rows, the lord
+                labeller's label - -1 KEEP or none - and its weight lord_w = eligible)
     Disturb     the teacher with its battles' disturbances (section 7 'Who drives'): a free unit sent at a random open
                 enemy within orders.reach_m, or one of the teacher's new attack orders held back 2-6 ticks
     Marks       the read of a set (section 8 'followed'): path N - the network drives (greedy), the labeller labels its
@@ -68,6 +72,9 @@ NET_KEYS = ("raw", "command", "cols", "own", "g_row", "g_on", "open", "pair", "l
 # drill T0-2 (side=True): own() of 19, the S2 row columns, the side label (approach, -1 none) and the side head's columns
 # at the label's target (heads.side_feats + held) - learn.side_label_inputs
 SIDE_KEYS = ("s2", "ap", "x_k")
+# our lord's (NetBuffer with View.lord; net/drill/record.py carries them in Batch.aux)
+LORD_KEYS = ("lord_raw", "lord_slot", "lord_skill", "lord_tgt", "lord_age", "lord_eligible", "lord_engaged",
+             "lord_legal", "lord_bound", "lord_dist", "lord_label", "lord_w", "inf_sel")
 # drill T0-2's side marks on V (config tactic.json drills.side.marks): followed per class on the teacher's path,
 # false flank on the no-cause scenes S2N
 SIDE_MARKS = tcfg()["drills"]["side"]["marks"]
@@ -172,7 +179,9 @@ class NetBuffer:
             c[1] += int(d_)
         head = T["head_free"] & ~dn[:, None]
         sel = head.any(1)
-        if not bool(sel.any()):
+        lv = getattr(v, "lord", None)
+        lel = None if lv is None else (lv["eligible"] & ~dn)
+        if not bool(sel.any()) and (lel is None or not bool(lel.any())):
             return
         triv = sel & ~(head & ~T["trivial"]).any(1)
         tw = torch.ones(sel.shape, device=sel.device)
@@ -182,6 +191,11 @@ class NetBuffer:
                 sel[r] = False
             else:
                 tw[r] = float(self.every)
+        inf_sel = sel.clone()
+        if lel is not None:
+            # (the lord's eligible ticks kept, never thinned; the infantry's selection above untouched: BUILD_NOTES 1)
+            sel = sel | lel
+            head = head & inf_sel[:, None]
         if not bool(sel.any()):
             return
         fx = v.fx
@@ -224,6 +238,14 @@ class NetBuffer:
         if self.side:
             # (dc_thr: the labels T0-1 drops as through own - kept to read the F1 share with and without the lift)
             st.update(s2=x["s2"], ap=si["ap"], x_k=si["x_k"], dc_thr=T["dc_thr"])
+        if lv is not None:
+            lab_l = lv.get("label")
+            lab_l = torch.full_like(lv["slot"], -1) if lab_l is None else lab_l
+            o = lv["order"]
+            st.update(lord_raw=lv["raw"].float(), lord_slot=lv["slot"], lord_skill=o["skill"], lord_tgt=o["tgt"],
+                      lord_age=o["age"].float(), lord_eligible=lel, lord_engaged=lv["engaged"], lord_legal=lv["legal"],
+                      lord_bound=lv["bound"], lord_dist=lv["dist"].float(), lord_label=lab_l,
+                      lord_w=lel.float(), inf_sel=inf_sel)
         for k in P_KEYS:
             st["p_" + k] = getattr(p, k)
         for k in T_KEYS:

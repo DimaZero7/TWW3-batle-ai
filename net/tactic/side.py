@@ -4,7 +4,10 @@ same way - one group = my units but the lord, the lord's raw row hidden (not ali
 zone from the spec or tactic/zfit.zone_for, a single lower.Tacticians.apply and shape at the first tick, then every
 decide_s (5 s) Tacticians.tick(raw, card, bounds, now) under a player of tactic/pin.py (TEACH, C, pin.NetPlayer, ...).
 
-    Side(player, hygiene=True, device)
+    Side(player, hygiene=True, device, lord_player=None, lord_labeller=None)   lord_player: our lord commanded by the
+              level too (tactic/lordtac.py; the first hidden row of each battle is his): the tick keeps his raw row
+              unhidden and hands it down (lower.Tacticians lord_raw), pass 1 still gets the raw with him hidden; None -
+              the level as before
     start(x, z, b, mine, hide, zones=None)   [B, N]: the slots' places and facings at the start, in the raw state's frame
               (the simulator's battle frame; the game's map coordinates), mine - my units but the lord, hide - the rows
               hidden from the level (my lord); zones [B] the spec's {cx, cz, heading, line, rows, cols, worst} or None
@@ -54,8 +57,9 @@ def zone_of(places, course, spec_zone=None):
 class Side:
     """(module doc)"""
 
-    def __init__(self, player, hygiene=True, device="cpu"):
+    def __init__(self, player, hygiene=True, device="cpu", lord_player=None, lord_labeller=None):
         self.player, self.hygiene, self.device = player, hygiene, device
+        self.lord_player, self.lord_labeller = lord_player, lord_labeller
         self.tac = None
 
     def start(self, x, z, b, mine, hide, zones=None):
@@ -65,7 +69,11 @@ class Side:
         B, N = mine.shape
         dev = self.device
         self.mine, self.hide = mine.to(dev), hide.to(dev)
-        self.tac = LW.Tacticians(B, N, 1, dev, player=self.player, hygiene=self.hygiene)
+        self.tac = LW.Tacticians(B, N, 1, dev, player=self.player, hygiene=self.hygiene, lord_player=self.lord_player,
+                                 lord_labeller=self.lord_labeller)
+        if self.lord_player is not None:
+            self.tac.lord_start(torch.where(self.hide.any(1), self.hide.float().argmax(1).long(),
+                                            torch.full((B,), -1, dtype=torch.long, device=dev)))
         g = GR.Groups.empty(B, N, 1, dev)
         g.member = torch.where(self.mine, torch.zeros_like(g.member), g.member)
         g.on[:, 0] = self.mine.any(1)
@@ -96,11 +104,12 @@ class Side:
         return r
 
     def tick(self, raw, card, bounds=None, now=None, sim=None):
+        full = raw if self.lord_player is not None else None
         raw = self.hidden(raw)
         if not self.applied:
             self.applied = True
             on = self.groups0.on
             self.tac.apply(self.groups0, on, torch.zeros_like(on), raw)
             self.tac.shape(*self.shape0)
-        self.tac.tick(raw, card, bounds, now=now, sim=sim)
+        self.tac.tick(raw, card, bounds, now=now, sim=sim, lord_raw=full)
         return self.tac

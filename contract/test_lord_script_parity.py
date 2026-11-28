@@ -23,6 +23,14 @@ ticks from >= 6 runs; every disagreement in a named class:
     other       anything else - none expected
 With READY_PAD_S 0 - the documents' own script - every tick agrees and the replayed bridge decisions are the recorded
 ones (order line and press) - the rebuilt documents' check.
+
+The tactic mode (the executor commanded by the tactic level, net/unit/lord.py / lord_script.py 'modes'): the recorded
+runs never carried a tactic lord command, so the replay builds one from the recorded states - the tactic level
+(tactic/side.Side, the infantry player K that keeps, the lord player LT of tactic/lordtac.py) ticked every 5 s on the
+documents' raw, its lord store's target fed to both executors each second (the bridge's by name), net/unit/lord.engaged_of
+of the document's raw as the bridge's 'engaged', the torch executor's drop mirrored into the store (and the bridge's
+drop must be the same); buttons off in both (the button classes above are the t2 mode's). The same lines: agreement
+(kind, target, point, drop) >= 0.98 of >= 2000 ticks from >= 6 runs, no 'other'.
 """
 import json
 import math
@@ -198,3 +206,88 @@ def test_on_the_documents_own_script_all_agree():
         assert not bad, (run.name, bad[:3])
         nrec = [r for r in recs if not r["rec_ok"]]
         assert not nrec, (run.name, len(nrec), nrec[:2])
+
+
+def replay_tactic(run):
+    """Per tick {ok, why, tick, bridge, torch} of one run in mode tactic (module doc)."""
+    import torch
+    from bridge.companion import lord_script as LS
+    from bridge.companion import tactic_input as TI
+    from net.tactic import lordtac as LT
+    from net.tactic import pin as PN
+    from net.tactic import raw as TR
+    from net.tactic import side as TS
+    from net.unit import lord as L
+    from sim import orders as O
+    kind_of = {"keep": O.KEEP, "move": O.MOVE, "attack": O.ATTACK, "withdraw": O.WITHDRAW, "hold": O.HOLD}
+    rows = [(d, real, rep) for d, real, rep in rebuild(run) if rep is not None]
+    d0 = rows[0][0]
+    names = [u["n"] for u in d0["units"]]
+    keys = [u.get("key") or "" for u in d0["units"]]
+    ls = LS.LordScript(names, keys, [int(u["side"]) for u in d0["units"]], mode="tactic", buttons=False)
+    li = names.index(ls.lord)
+    seer = TI.TacticSeer(device="cpu", allow_flat=True)
+    ex = L.T2(torch.tensor([li]), [keys[li]], L.rank_of_names(names), "cpu", buttons=False, mode="tactic")
+    side, nxt, out = None, None, []
+    for doc, real, rep in rows:
+        r = seer.raw(doc)
+        sec = int(round(doc["t"] / 1000.0))
+        if side is None:
+            x, z, b, mine, hide = TS.of_raw(r, seer.card, 1)
+            hide = torch.zeros_like(hide)
+            hide[0, li] = True
+            mine = mine & ~hide
+            side = TS.Side(PN.Keep(), True, "cpu", lord_player=LT.player("LT")).start(x, z, b, mine, hide)
+            nxt = sec
+        if sec >= nxt:
+            side.tick(r, seer.card, seer.P.map_half, now=float(sec))
+            while nxt <= sec:
+                nxt += 5
+        tac = side.tac
+        t = int(tac.l_tgt[0])
+        cmd = names[t] if t >= 0 else None
+        eng = bool(L.engaged_of(r[..., :TR.BASE], torch.tensor([li]), 1)[0])
+        lines = [o for o in rep["orders"] if not o.get("out")]
+        lo, _ = ls.decide(doc, lines, cmd=cmd, engaged=eng)
+        ls.commit(ls.lord in {o["unit"] for o in lines})
+        raw, tgt, a_on, a_cd = L.lord_inputs_doc(doc, names, r)
+        kinds = torch.full((1, len(names)), O.KEEP, dtype=torch.long)
+        for o in lines:
+            kinds[0, names.index(o["unit"])] = kind_of[o["kind"]]
+        d = ex.decide(raw, tgt, a_on, a_cd, kinds, torch.tensor([doc["t"] / 1000.0]), torch.tensor([True]),
+                      cmd=tac.l_tgt.clone())
+        for code in (L.DROP_GONE, L.DROP_STEP):
+            tac.lord_drop(ex.drop == code, code)
+        tac.l_busy = ex.busy.clone()
+        k = int(d["kind"][0])
+        b_ = {"kind": kind_of[lo["kind"]], "target": lo.get("target"), "p": (lo["x"], lo["z"]) if "x" in lo else None,
+              "drop": ls.drop}
+        t_ = {"kind": k, "target": names[int(d["target"][0])] if k == O.ATTACK else None,
+              "p": (float(d["x"][0]), float(d["z"][0])) if k in (O.MOVE, O.WITHDRAW) else None,
+              "drop": None if int(ex.drop[0]) == L.DROP_NONE else L.DROP_NAMES[int(ex.drop[0])]}
+        ok = b_["kind"] == t_["kind"] and b_["target"] == t_["target"] and b_["drop"] == t_["drop"]
+        if ok and b_["p"] is not None:
+            ok = math.hypot(b_["p"][0] - t_["p"][0], b_["p"][1] - t_["p"][1]) <= POINT_M
+        st = LS.standing({u["n"]: u for u in doc["units"]}.get(ls.lord))
+        out.append({"t": doc["t"] / 1000.0, "tick": st, "ok": ok, "why": None if ok else "other", "cmd": cmd,
+                    "bridge": b_, "torch": t_})
+    return out
+
+
+def test_the_tactic_mode_sim_equals_bridge():
+    """Mode tactic on the replayed LT commands (module doc): the lines; the commands' count printed."""
+    runs = _have()
+    ticks = agree = cmds = drops = 0
+    per = {}
+    for run in runs:
+        recs = [r for r in replay_tactic(run) if r["tick"]]
+        per[run.name] = (sum(r["ok"] for r in recs), len(recs))
+        ticks += len(recs)
+        agree += sum(r["ok"] for r in recs)
+        cmds += sum(r["cmd"] is not None for r in recs)
+        drops += sum(r["torch"]["drop"] is not None for r in recs)
+    print(json.dumps({"ticks": ticks, "agree": agree, "share": round(agree / ticks, 4), "runs": len(per),
+                      "ticks_with_command": cmds, "drops": drops, "per_run": per}))
+    assert len(per) >= MIN_RUNS and ticks >= TICKS
+    assert cmds > 0, "no LT command in the replay: the tactic mode not exercised"
+    assert agree / ticks >= SHARE, (agree, ticks)

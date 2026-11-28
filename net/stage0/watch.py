@@ -30,6 +30,20 @@ The drills' own:
                   flank_window_s of the first contact
     trade_after   T0-2: the trade trade_after_s after the first contact (the end's when the battle ended sooner)
     reserve_early O0-3: the reserve in melee before early_s after the first contact and before my first rout
+My lord's own (only when my side plays him - chain.lexe, stage0/battle.py 'The lords'; LordMeter):
+    lord_orders_min       his new orders to the game (the executor's decisions other than KEEP) a minute he stands
+    lord_engaged_s        his seconds engaged (net/unit/lord.engaged_of on the state: his melee flag or an edge gap
+                          <= scripts.TOUCH_M to a seen standing enemy - the contact gap, not the flag)
+    lord_melee_ma_min     his new MOVE + ATTACK orders a minute engaged (NaN: never engaged): an order counts when he
+                          was engaged at its decision - the state the second started from (the last reading's), what
+                          the executor saw; lord_melee_ma_end - the same by the state at the second's end
+    lord_touch20          enemy units touching him (edge gap <= TOUCH_M, standing) a second, over his first 20 s
+                          engaged (NaN: never); lord_ring2 - the share of his engaged seconds with >= 2 touching
+    lord_routed           1 when he routed or fell (r on or no men) during the battle
+    lord_near35_pre       my standing units (not him) within 35 m of him (centre to centre, lord_script.AURA_M), a
+                          second, over the 10 s before his first engaged second (NaN: never engaged)
+hp_trade_in (PinWatch: hp_trade_lords, hp_series_lords): hp_trade with the lords IN - their cost in the budget and
+their health lost in the losses (the same trajectory, the same anchor); hp_trade / hp_series stay lords out.
 """
 import math
 
@@ -97,6 +111,7 @@ class Watch:
         self.hp = u["hp_abs"].clone()
         self.last_kind = None
         self.t_end = f(-1.0)
+        self.lm = LordMeter(st) if getattr(chain, "lexe", None) is not None else None
 
     def __call__(self, sec, st):
         if self.st is None:
@@ -186,6 +201,8 @@ class Watch:
             scored = alive & ~u["m"]
             self.exec_ok += (scored & ins & face).float().sum(1)
             self.exec_n += scored.float().sum(1)
+        if self.lm is not None:
+            self.lm(st, self.chain, live, self.spacing)
         self.touch = touch
 
     def _gap(self, st, out):
@@ -257,7 +274,85 @@ class Watch:
         m["lord_moved_m"] = (moved * my_lord).sum(1)          # (my lord holds 150 m behind: a check of the rule)
         if w is not None:
             m["win"] = torch.where(w == 1, 1.0, torch.where(w == 2, -1.0, 0.0)).float()
+        if self.lm is not None:
+            m.update(self.lm.measures())
         return m
+
+
+class LordMeter:
+    """My lord's meters (module doc), every second from the simulator's state and the side's executor decision
+    (chain.l_dec: this second's decision kind, sim/orders KEEP none)."""
+    PRE_S, FIRST_S, NEAR_M = 10, 20, 35.0
+
+    def __init__(self, st):
+        u = st.u
+        B, dev = st.B, st.device
+        self.li = (u["lord"] & (u["side"] == 1)).float().argmax(1)
+        z = lambda: torch.zeros(B, device=dev)                                         # noqa: E731
+        self.orders, self.up_s, self.eng_s, self.eng_ma = z(), z(), z(), z()
+        self.t20_sum, self.t20_n, self.ring2 = z(), z(), z()
+        self.routed = torch.zeros(B, dtype=torch.bool, device=dev)
+        self.first = torch.full((B,), -1.0, device=dev)
+        self.eng_prev = torch.zeros(B, dtype=torch.bool, device=dev)
+        self.eng_ma_end = z()
+        self.pre = []                               # (the last PRE_S seconds' counts within NEAR_M)
+        self.pre_mean = torch.full((B,), float("nan"), device=dev)
+        self.sec = 0
+
+    def __call__(self, st, chain, live, spacing):
+        from net.unit import scripts as SC
+        from sim import orders as O
+        u = st.u
+        B = st.B
+        bi = torch.arange(B, device=st.device)
+        li = self.li
+        up = (u["men"][bi, li] > 0) & ~u["r"][bi, li] & ~u["gone"][bi, li] & live
+        self.routed |= ((u["r"][bi, li] | (u["men"][bi, li] <= 0)) & live)
+        front, depth = geometry.dims(u, spacing)
+        gp = geometry.rect_gap(u["x"], u["z"], u["b"], front, depth)[bi, li]                 # [B, N]
+        foe = (u["side"] == 2) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & u["vis"].bool()
+        touch = (foe & (gp <= SC.TOUCH_M)).sum(1).float()
+        eng = up & (u["m"][bi, li] | (touch > 0))
+        d = torch.sqrt((u["x"] - u["x"][bi, li][:, None]) ** 2 + (u["z"] - u["z"][bi, li][:, None]) ** 2)
+        mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0) & ~u["gone"] & ~u["r"]
+        n35 = (mine & (d < self.NEAR_M)).sum(1).float()
+        new_first = eng & (self.first < 0)
+        if bool(new_first.any()) and self.pre:
+            pm = torch.stack(self.pre[-self.PRE_S:], 0).mean(0)
+            self.pre_mean = torch.where(new_first, pm, self.pre_mean)
+        self.first = torch.where(new_first, torch.full_like(self.first, float(self.sec)), self.first)
+        self.pre.append(n35)
+        self.pre = self.pre[-self.PRE_S:]
+        k = getattr(chain, "l_dec", None)
+        new = up & (k != O.KEEP) if k is not None else torch.zeros_like(up)
+        ma = new & ((k == O.MOVE) | (k == O.ATTACK)) if k is not None else new
+        self.orders += new.float()
+        self.up_s += up.float()
+        self.eng_s += eng.float()
+        self.eng_ma += (ma & self.eng_prev).float()
+        self.eng_ma_end += (ma & eng).float()
+        self.eng_prev = eng
+        in20 = eng & (self.first >= 0) & (float(self.sec) - self.first < self.FIRST_S)
+        self.t20_sum += touch * in20
+        self.t20_n += in20.float()
+        self.ring2 += (eng & (touch >= 2)).float()
+        self.sec += 1
+
+    def measures(self):
+        nan = lambda v: torch.full_like(v, float("nan"))                              # noqa: E731
+        es = self.eng_s
+        return {"lord_orders_min": self.orders / (self.up_s / 60.0).clamp(min=1e-6),
+                "lord_engaged_s": es,
+                "lord_melee_ma_min": torch.where(es > 0, self.eng_ma / (es / 60.0).clamp(min=1e-6), nan(es)),
+                "lord_melee_ma_end": torch.where(es > 0, self.eng_ma_end / (es / 60.0).clamp(min=1e-6), nan(es)),
+                "lord_touch20": torch.where(self.t20_n > 0, self.t20_sum / self.t20_n.clamp(min=1), nan(es)),
+                "lord_ring2": torch.where(es > 0, self.ring2 / es.clamp(min=1), nan(es)),
+                "lord_routed": self.routed.float(), "lord_near35_pre": self.pre_mean}
+
+
+def hp_trade_in(u):
+    """[B] hp_trade with the lords IN (module doc): their cost and health lost counted like any unit's."""
+    return hp_trade(u, torch.zeros_like(u["lord"]))
 
 
 def hp_trade(u, lord):
@@ -317,6 +412,7 @@ class PinWatch(Watch):
         self.r_prev = st.u["r"].clone()
         self.series = []
         self.hp_last = None
+        self.series_in, self.hp_in_last = [], None
         self.ev = {k: z.clone() for k in ("attack_orders", "intercepted", "pin_lost", "gone_before",
                                           "resumed_on_rallied", "resumed_way_m", "reached")}
         zb = lambda: torch.zeros((B, N), dtype=torch.bool, device=dev)          # noqa: E731
@@ -377,8 +473,11 @@ class PinWatch(Watch):
                 self.adv[w] = torch.where(due, m, self.adv[w])
         hp = hp_trade(u, self.lord)
         self.hp_last = hp if self.hp_last is None else torch.where(live, hp, self.hp_last)
+        hpi = hp_trade_in(u)
+        self.hp_in_last = hpi if self.hp_in_last is None else torch.where(live, hpi, self.hp_in_last)
         if sec % self.SERIES_S == 0:
             self.series.append(self.hp_last.clone())
+            self.series_in.append(self.hp_in_last.clone())
         tac = getattr(self.chain, "tac", None)
         if tac is None or getattr(tac, "player", None) is None:
             return
@@ -568,6 +667,11 @@ class PinWatch(Watch):
         if ser.shape[1] < T:
             ser = torch.cat([ser, ser[:, -1:].expand(-1, T - ser.shape[1])], 1)
         m["hp_series"] = ser[:, :T]
+        m["hp_trade_lords"] = hp_trade_in(u)
+        si = torch.stack(self.series_in, 1)
+        if si.shape[1] < T:
+            si = torch.cat([si, si[:, -1:].expand(-1, T - si.shape[1])], 1)
+        m["hp_series_lords"] = si[:, :T]
         m.update(self.ev)
         return m
 

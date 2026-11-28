@@ -18,7 +18,11 @@ Every state document (one a battle second):
                with the state's lords = 'park' (bridge.build --park-lords) the lord gets no order at all (marked out,
                no op MOVE): the game's script holds him in a corner; with BAI_LORD_SCRIPT=T (the lord line's lane
                instrument, off by default) the lord's line and his `ability` lines come from lord_script.LordScript
-               (the levels' input unchanged: he stays hidden from them)
+               (the levels' input unchanged: he stays hidden from them) in the mode BAI_LORD_MODE (t2 - unset -,
+               post, tactic); tactic: the level commands him too (tactic/side.Side with a lord player,
+               BAI_LORD_PLAYER - tactic/lordtac.PLAYERS, unset LT; pass 1 still gets his row hidden), the level's
+               lord store's target is the script's command, the script's drops go back into the store on the same
+               second; the script's line is the last writer of the lord's order (after the operative's MOVE)
 A tactic_v3 checkpoint (heads.TacticNet3, drill T0-2 'side of the strike') runs the same chain: the network's approach
 goes through the level's masks into the unit's order; the record adds own() of 19, the S2 row columns, the side head's
 columns and the approach.
@@ -119,6 +123,13 @@ class TacticChain:
         if arm not in (None, "T"):
             raise ValueError(f"BAI_LORD_SCRIPT={arm!r}: 'T' or unset")
         self.lord_arm, self.lord_script = arm, None
+        from bridge.companion import lord_script as LS
+        self.lord_mode = os.environ.get("BAI_LORD_MODE") or "t2"
+        if self.lord_mode not in LS.MODES:
+            raise ValueError(f"BAI_LORD_MODE={self.lord_mode!r}: one of {LS.MODES} or unset")
+        if self.lord_mode != "t2" and arm is None:
+            raise ValueError("BAI_LORD_MODE without BAI_LORD_SCRIPT=T")
+        self.lord_player_name = os.environ.get("BAI_LORD_PLAYER") or "LT"
         self.batch, self.parked = None, False
         self.times, self.extra = {}, None
 
@@ -136,7 +147,12 @@ class TacticChain:
         by_name = torch.tensor([[n.endswith("_lord") for n in self.names]], device=r.device) & side
         hide = hide | by_name
         mine = mine & ~hide
-        self.side = TS.Side(PN.NetPlayer(self.net, greedy=self.greedy), self.hygiene, dev).start(x, z, b, mine, hide)
+        lp = None
+        if self.lord_arm is not None and self.lord_mode == "tactic":
+            from net.tactic import lordtac as LT
+            lp = LT.player(self.lord_player_name)
+        self.side = TS.Side(PN.NetPlayer(self.net, greedy=self.greedy), self.hygiene, dev,
+                            lord_player=lp).start(x, z, b, mine, hide)
         N = r.shape[1]
         self.units = GameUnits(r[..., :TR.BASE], self.keys, self.card, self.P, SC.Unit(), targets=False, still=True,
                                aim=True, lords=hide)
@@ -163,9 +179,9 @@ class TacticChain:
                                  "script's - build with --park-lords enemy or none")
             from bridge.companion import lord_script as LS
             self.lord_script = LS.LordScript(self.names, self.keys, [int(u["side"]) for u in doc["units"]],
-                                             self.own, self.lord_arm)
+                                             self.own, self.lord_arm, mode=self.lord_mode)
             self.start_info["lord_script"] = {"arm": self.lord_arm, "lord": self.lord_script.lord,
-                                              "press": self.lord_script.press}
+                                              "press": self.lord_script.press, "mode": self.lord_mode}
 
     def script_second(self, raw_u, sec=0.0):
         """lower.Units.second's script branch on the unit level's raw [1, N, RAW] at battle second sec -> (the gated
@@ -242,7 +258,10 @@ class TacticChain:
         if self.lord_script is not None:
             # (lord_script.py) the lord's line replaced by the script's (after the Gate); its button as an `ability`
             # line; what the reply does not carry (a lord marked out) is not cached as sent (commit)
-            lo, uses = self.lord_script.decide(doc, [x for x in out if x["unit"] in ctrl])   # (the run-in's onset)
+            cmd, eng = self._lord_command(r)
+            lo, uses = self.lord_script.decide(doc, [x for x in out if x["unit"] in ctrl], cmd=cmd,
+                                               engaged=eng)                                   # (the run-in's onset)
+            self._lord_mirror()
             out = [dict(lo) if x["unit"] == self.lord_script.lord else x for x in out]
             delivered = self.lord_script.lord in ctrl
             self.lord_script.commit(delivered)
@@ -255,6 +274,31 @@ class TacticChain:
         if self.lord_script is not None:
             self.extra["lord"] = self.lord_script.note
         return out, (time.perf_counter() - t0) * 1000, uses
+
+    def _lord_command(self, r):
+        """Mode tactic: (the level's lord target by name or None, net/unit/lord.engaged_of on this raw) - else (None,
+        None)."""
+        tac = self.side.tac
+        if self.lord_mode != "tactic" or getattr(tac, "lord_player", None) is None:
+            return None, None
+        from net.unit import lord as LD
+        li = torch.tensor([self.names.index(self.lord_script.lord)], device=r.device)
+        eng = bool(LD.engaged_of(r[..., :TR.BASE], li, self.own)[0])
+        t = int(tac.l_tgt[0])
+        return (self.names[t] if 0 <= t < len(self.names) else None), eng
+
+    def _lord_mirror(self):
+        """Mode tactic: the script's drop of the command into the level's store on the same second (BUILD_NOTES 8),
+        and his step-out (not the level's while he steps out)."""
+        tac = self.side.tac
+        if self.lord_mode != "tactic" or getattr(tac, "lord_player", None) is None:
+            return
+        from net.unit import lord as LD
+        ls = self.lord_script
+        dev = tac.l_tgt.device
+        if ls.drop is not None:
+            tac.lord_drop(torch.ones(1, dtype=torch.bool, device=dev), LD.DROP_NAMES.index(ls.drop))
+        tac.l_busy = torch.tensor([ls.step is not None or bool(ls.out)], device=dev)
 
     # -- the log
     def _name(self, i):

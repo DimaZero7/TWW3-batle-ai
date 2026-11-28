@@ -283,6 +283,9 @@ class View:
     # the rows' parcel (R groups, parcel.Parcel) as the level got it: what inputs.build reads beside raw, card, tiles,
     # the areas and bounds - the training buffer rebuilds the network's input from them (tactic/imitate.py)
     parcel: object = None
+    # our lord (tactic/lordtac.facts' dict, the level with a lord player; None without): his unhidden raw row, slot,
+    # issued order, eligible, legal [r, K], ...; after the lord's player also request, new, (label)
+    lord: object = None
 
     def frames(self, must=None):
         """frame_walk with this tick's frames in force and masks (must: another set of units forced)."""

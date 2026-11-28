@@ -26,12 +26,23 @@ bridge script's (contract/test_lord_script_parity.py).
               that button. What the bridge reads from the card (the phase seen) is the timer here: on the bridge's
               documents the two agree (exchange.ability_timers zeroes a use the card does not show)
 
-T2(lord, keys, rank, device, own=1, buttons=True)   lord [B] the lord's slot, keys [B] his unit key, rank [B, N] the
-              slots' order numbers (the bridge's slot_no of the names; the simulator's slot index)
+modes (MODES; the bridge script's LordScript(mode=) - the same rules):
+    t2        all of the above (the T2 script alone: it chooses whom he fights)
+    post      the post and the run-in only: he never fights (no target ever; the IDLE control); step-out and hygiene stay
+    tactic    the tactic level commands him (net/operative/lower.Tacticians' lord store, tmp/drill_lord_t1/DRILL_v2.md
+              section 3): T2's own choice of a target and its GRACE_S witnessed drop are off - the command's slot (cmd)
+              is his ATTACK, no command -> post / run-in as t2; the command dropped here when its target is unseen or
+              down, and at the step-out (self.drop [B]: DROP_*; the caller mirrors it into the level's store on the
+              same tick); 'in melee' (hygiene, the one-second post MOVE) is engaged_of - his melee flag OR an edge gap
+              <= scripts.TOUCH_M to a seen standing enemy - not the raw flag alone (the game's flag flickers)
+T2(lord, keys, rank, device, own=1, buttons=True, mode="t2")   lord [B] the lord's slot, keys [B] his unit key, rank
+              [B, N] the slots' order numbers (the bridge's slot_no of the names; the simulator's slot index)
 T2.decide(raw [B, N, len(V.RAW)], tgt [B, N] long (-1 none, -2 a unit not in the battle's rows), a_on / a_cd [B, N, A]
               (net/tactic/raw.ARSENAL), kinds [B, N] long (this second's orders of our other units, KEEP none), t [B] s,
-              live [B]) -> the lord's decision {kind [B] (O.KEEP: none new), x, z, face, run, target [B], press [B] (the
-              simulator's ability slot, -1 none), key [B] (index of PRIORITY, -1)}; self.ph [B] the branch (PHASES)
+              live [B], cmd [B] long (mode tactic: the commanded target's slot, -1 none)) -> the lord's decision {kind
+              [B] (O.KEEP: none new), x, z, face, run, target [B], press [B] (the simulator's ability slot, -1 none),
+              key [B] (index of PRIORITY, -1)}; self.ph [B] the branch (PHASES); self.drop, self.busy [B] (mode tactic)
+engaged_of(raw, li, own=1)   [B] the lord engaged (mode tactic's 'in melee'; the tactic level's lord_engaged: one code)
 lord_inputs_sim(st, P) / lord_inputs_doc(doc, names, seer_raw)   (raw, tgt, a_on, a_cd) the same columns of the two
 """
 import torch
@@ -47,6 +58,42 @@ READY, PENDING, COOL, UNKNOWN, WALL = range(5)
 NONE = -1                                    # (kind: no order given yet - the bridge script's None)
 PHASES = ("down", "out", "stepping", "step_out", "melee", "fight", "alone", "place")
 F64 = torch.float64
+MODES = ("post", "t2", "tactic")
+DROP_NONE, DROP_GONE, DROP_STEP = range(3)       # (mode tactic: why the command was dropped - unseen / down, step-out)
+DROP_NAMES = ("none", "gone", "step_out")
+
+
+def mode_of(v):
+    """A config value -> a mode of MODES or None (off): False / None / 'off' off; True - 't2' (stage0.json lord_script:
+    true, as before)."""
+    if v is None or v is False or v == "off":
+        return None
+    if v is True:
+        return "t2"
+    if v not in MODES:
+        raise ValueError(f"lord mode {v!r}: one of {MODES}, true (= t2) or off")
+    return v
+
+
+def engaged_of(raw, li, own=1):
+    """[B] the lord at slot li [B] (own: his side, an int or [B]) engaged: his raw melee flag m, or an edge gap (sim/geometry.rect_gap on the raw's
+    place, facing, front and depth) <= scripts.TOUCH_M to a seen (vis), standing (alive, not r / s) enemy. raw: the
+    unit level's columns (view.RAW; the tactic raw's first BASE columns are the same)."""
+    from net.unit import scripts as SC
+    from sim import geometry
+    I = V.I
+    B = raw.shape[0]
+    bi = torch.arange(B, device=raw.device)
+    li = li.to(raw.device).long()
+    c = lambda k: raw[..., I[k]].float()                                              # noqa: E731
+    side = raw[..., I["side"]].round().long()
+    own = torch.as_tensor(own, device=raw.device).long()
+    own = own.expand(B) if own.dim() == 0 else own
+    foe = (side != own[:, None]) & (side > 0) & (raw[..., I["vis"]] > 0) & (raw[..., I["alive"]] > 0) & \
+        ~(raw[..., I["r"]] > 0) & ~(raw[..., I["s"]] > 0)
+    gap = geometry.rect_gap(c("x"), c("z"), c("b"), c("front"), c("depth"))[bi, li]      # [B, N] from the lord
+    near = (foe & (gap <= SC.TOUCH_M)).any(1)
+    return (raw[bi, li, I["m"]] > 0) | near
 
 
 def _fwd(h):
@@ -67,7 +114,7 @@ def _w(m, a, b):
 
 
 class T2:
-    def __init__(self, lord, keys, rank, device, own=1, buttons=True):
+    def __init__(self, lord, keys, rank, device, own=1, buttons=True, mode="t2"):
         from net.cards import abilities as MA
         from net.cards import passport
         from sim import abilities as SA
@@ -76,6 +123,8 @@ class T2:
         self.li = lord.to(device).long()
         self.rank = rank.to(device).to(F64)
         self.buttons = buttons
+        self.mode = mode_of(mode)
+        assert self.mode is not None, "T2: a mode of MODES"
         units, pp = passport.load(), {**MA.load_spells(), **MA.load()}
         K = len(PRIORITY)
         self.owns = torch.zeros((B, K), dtype=torch.bool, device=device)
@@ -120,6 +169,10 @@ class T2:
         self.presses = torch.zeros(B, device=device)
         self.n_orders, self.n_melee_orders, self.n_melee_ma, self.melee_s = (torch.zeros(B, device=device)
                                                                              for _ in range(4))
+        # mode tactic: the command's drop of this decision (DROP_*), stepping out / out (not eligible for the level)
+        self.drop = torch.zeros(B, dtype=torch.long, device=device)
+        self.busy = zb()
+        self.n_drop = torch.zeros((B, len(DROP_NAMES)), device=device)
 
     # ------------------------------------------------------------------ the buttons' bookkeeping
     def _follow(self, live, t, on, cd):
@@ -142,7 +195,7 @@ class T2:
 
     # ------------------------------------------------------------------ one decision
     @torch.no_grad()
-    def decide(self, raw, tgt, a_on, a_cd, kinds, t, live):
+    def decide(self, raw, tgt, a_on, a_cd, kinds, t, live, cmd=None):
         B, N = raw.shape[:2]
         dev = self.dev
         I = V.I
@@ -176,6 +229,12 @@ class T2:
         inf = own & standing & ~lmask
         foe = (side != self.own) & (side > 0) & vis & standing
         lord_m = g(m)
+        tac = self.mode == "tactic"
+        if tac:
+            # (mode tactic: 'in melee' by the contact gap - module doc)
+            lord_m = engaged_of(raw, li, self.own) & up
+            cmd = torch.full((B,), -1, dtype=torch.long, device=dev) if cmd is None else cmd.to(dev).long()
+            self.drop = torch.zeros_like(self.drop)
         self.contact = self.contact | (up & (inf & m).any(1))
         # the line's heading, the post
         self._heading(up, inf, foe, x, z, bb)
@@ -205,8 +264,19 @@ class T2:
         self._stepping(b_step, inf, x, z, bb, lx, lz, dl, t, o, ph)
         self._step_out(b_so, inf, x, z, bb, lx, lz, dl, t, o, ph)
         lt = g(tgt)
-        self._keep_target(b_mel, held, foe, lord_m, lt, tgt, t)
-        self._move_or_fight(b_mf, held, foe, lord_m, lt, tgt, t, x, z, lx, lz, post_ok, px, pz, o, ph)
+        if self.mode == "t2":
+            self._keep_target(b_mel, held, foe, lord_m, lt, tgt, t)
+        elif tac:
+            self._take_cmd(b_mel, foe, cmd)
+        self._move_or_fight(b_mf, held, foe, lord_m, lt, tgt, t, x, z, lx, lz, post_ok, px, pz, o, ph, cmd)
+        if tac:
+            # the step-out (and after it) drops the command: he is not the level's while stepping out (BUILD_NOTES 8)
+            stepd = up & (self.step | self.out) & (cmd >= 0)
+            self.drop = _w(stepd, torch.full_like(self.drop, DROP_STEP), self.drop)
+            self.target = _w(up & (self.step | self.out), torch.full_like(self.target, -1), self.target)
+            self.busy = up & (self.step | self.out)
+            self.n_drop += torch.nn.functional.one_hot(self.drop, len(DROP_NAMES)).float() * \
+                (self.drop > DROP_NONE).float()[:, None]
         self.ph = ph
         # the button (one a decision, by priority)
         press = torch.full((B,), -1, dtype=torch.long, device=dev)
@@ -415,11 +485,28 @@ class T2:
         o[4] = _w(on, run, o[4])
         o[5] = _w(on, torch.full_like(o[5], -1), o[5])
 
-    def _move_or_fight(self, on, held, foe, lord_m, lt, tgt, t, x, z, lx, lz, post_ok, px, pz, o, ph):
+    def _take_cmd(self, on, foe, cmd):
+        """Mode tactic: [B] the command's target stands for the battles on (seen, standing: foe) - his target; else
+        dropped here (DROP_GONE, mirrored by the caller) and none."""
+        bi = torch.arange(on.shape[0], device=self.dev)
+        has = on & (cmd >= 0)
+        ok = has & foe[bi, cmd.clamp(min=0)]
+        self.drop = _w(has & ~ok, torch.full_like(self.drop, DROP_GONE), self.drop)
+        self.target = _w(on, _w(ok, cmd, torch.full_like(cmd, -1)), self.target)
+        return ok
+
+    def _move_or_fight(self, on, held, foe, lord_m, lt, tgt, t, x, z, lx, lz, post_ok, px, pz, o, ph, cmd=None):
         B = on.shape[0]
         dev = self.dev
-        has = self._keep_target(on, held, foe, lord_m, lt, tgt, t)
-        pick = on & self.contact & ~has & (held & foe).any(1)
+        if self.mode == "t2":
+            has = self._keep_target(on, held, foe, lord_m, lt, tgt, t)
+            pick = on & self.contact & ~has & (held & foe).any(1)
+        elif self.mode == "tactic":
+            has = self._take_cmd(on, foe, cmd)
+            pick = torch.zeros_like(on)
+        else:                                       # (post: he never fights)
+            has = torch.zeros_like(on)
+            pick = torch.zeros_like(on)
         d = torch.sqrt((x - lx[:, None]) ** 2 + (z - lz[:, None]) ** 2)
         INF = torch.tensor(float("inf"), dtype=F64, device=dev)
         j = _w(held & foe, d, INF).argmin(1)

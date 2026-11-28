@@ -149,10 +149,11 @@ def battles(specs):
     for s in specs:
         mine = [BA._unit(k, *p) for k, p in zip(s["mine"], s["places_mine"])]
         theirs = [BA._unit(k, *p) for k, p in zip(s["theirs"], s["places_theirs"])]
+        # (a lord that plays - stage0.json lord_script / enemy_lord_fights: at the T2 post's distance, BA.lord_back)
         l1 = BA._unit(scfg()["lords"][s["fac"][1]], *CR.lord_place(s["places_mine"], s["places_mine"][0][2],
-                                                                   s["mine_zone"]), general=True)
+                                                                   s["mine_zone"], back=BA.lord_back(1)), general=True)
         l2 = BA._unit(scfg()["lords"][s["fac"][2]], *CR.lord_place(s["places_theirs"], s["enemy_zone"]["b"],
-                                                                   s["enemy_zone"]), general=True)
+                                                                   s["enemy_zone"], back=BA.lord_back(2)), general=True)
         out.append({1: [l1] + mine, 2: [l2] + theirs, "factions": dict(s["factions"])})
     return out
 

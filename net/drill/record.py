@@ -3,7 +3,8 @@ only additively).
 
     Batch       M rows x G decision units x C candidates (0 = KEEP): what a unit saw, the order in force, the legal
                 candidates and don't-cares (only from masks.of), decided / delegated and the reason bits, the proposed /
-                executed / teacher candidate (-1 none) and the conditional heads' facts (aux). Delegated is not KEEP: a
+                executed / teacher candidate (-1 none) and the conditional heads' facts (aux; with our lord also
+                LORD_KEYS - his row, slot map, order, eligible, legal, label, weight). Delegated is not KEEP: a
                 delegated unit has no label and is in no denominator; KEEP (candidate 0) is a legal choice, a label
     Level       the protocol a level adapter fills (tick_s, play, rebuild, losses, ask, tick0, judge, save, load)
     loss(level, net, batch, w)   (the sum of the level's loss terms, {term: tensor | None}) - the one loss call of fit,
@@ -112,6 +113,10 @@ OBS_KEYS = ("raw", "cols", "own", "g_row", "g_on", "pair", "bounds") + tuple("p_
     "t_" + k for k in T_KEYS) + tuple("a_" + k for k in A_KEYS)
 OBS_SIDE = ("s2",)
 AUX_KEYS = ("ap", "x_k", "dc_thr", "drop", "kinds", "trivial", "near2") + ("drop_base",)   # (+ drop_base: additive, step 3)
+# our lord's rows (additive; net/tactic/imitate.py LORD_KEYS): his raw row, slot, issued order, eligible, engaged, legal /
+# bound / dist over the rows, the label (-1 KEEP or none), its weight, the infantry's own selection inf_sel - in aux
+LORD_KEYS = ("lord_raw", "lord_slot", "lord_skill", "lord_tgt", "lord_age", "lord_eligible", "lord_engaged",
+             "lord_legal", "lord_bound", "lord_dist", "lord_label", "lord_w", "inf_sel")
 
 
 def from_netbuffer(d, idx=None):
@@ -131,7 +136,7 @@ def from_netbuffer(d, idx=None):
     dc = g("dc").bool()
     one = torch.ones(opn.shape[:-1] + (1,), dtype=torch.bool)
     label = g("label").long()
-    aux = {k: g(k) for k in AUX_KEYS if k in d}
+    aux = {k: g(k) for k in AUX_KEYS + LORD_KEYS if k in d}
     why = MK.tactic_why(head, aux)
     if done is not None:
         why = why | (done.expand_as(head).int() * MK.R_DONE)

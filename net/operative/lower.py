@@ -8,7 +8,13 @@
                  starts anew (new tiles, no frames); a move of the same members and form: the same tiles (holes too)
                  on the new centre and turn, the frames in the zone's axes go with it. With a player (tactic/pin.py, in
                  the formula's place) the level carries orders in force - skill, main target, side, the order's second
-                 - beside the frames, under the code's masks (tactic/orders.py); a fresh parcel resets them too
+                 - beside the frames, under the code's masks (tactic/orders.py); a fresh parcel resets them too.
+                 With a lord player (tactic/lordtac.py; lord_start(slot) names each battle's lord) the level also
+                 commands our lord: his order store per battle [B] (l_skill, l_tgt, l_born; l_gate - drill 3 sets it,
+                 config orders.lord.gate 'contact': on only from our group's first melee; l_busy - the executor steps
+                 out), View.lord = lordtac.facts after the CANCEL hygiene, the player's request under lordtac.masks,
+                 the counts lord_*; lord_drop(mask, code) - the executor's drops mirrored on the same tick. Off (no
+                 lord player): the infantry's path is bit for bit as before
     Units       the unit network's second (as tactic/env.play): the frames -> the units' areas (a shooter's fire
                  sector forward along the zone), the order with the stage by code, the latency, the leash
 """
@@ -39,7 +45,8 @@ FR_KEYS = ("s", "f", "hw", "hd")
 
 
 class Tacticians:
-    def __init__(self, B, N, G, device, net=None, greedy=False, player=None, hygiene=True):
+    def __init__(self, B, N, G, device, net=None, greedy=False, player=None, hygiene=True, lord_player=None,
+                 lord_labeller=None):
         R = B * G
         self.B, self.N, self.G, self.R = B, N, G, R
         self.dev = device
@@ -79,6 +86,39 @@ class Tacticians:
         self.tile = torch.zeros((R, N), dtype=torch.long, device=device)
         self.fell = 0.0
         self.ticks = 0
+        # our lord (module doc): his player, the labeller asked on the same view (its answer View.lord['label']), the
+        # store per battle; lord_start names his slot
+        self.lord_player, self.lord_labeller = lord_player, lord_labeller
+        self.l_slot = torch.full((B,), -1, dtype=torch.long, device=device)
+        self.l_skill = torch.zeros(B, dtype=torch.long, device=device)
+        self.l_tgt = torch.full((B,), -1, dtype=torch.long, device=device)
+        self.l_born = torch.zeros(B, device=device)
+        self.l_gate = torch.ones(B, dtype=torch.bool, device=device)
+        self.l_contact = torch.zeros(B, dtype=torch.bool, device=device)
+        self.l_busy = torch.zeros(B, dtype=torch.bool, device=device)
+        self.lcnt = {}
+
+    def lord_start(self, slot):
+        """slot [B] each battle's lord (-1 none)."""
+        self.l_slot = slot.to(self.dev).long()
+
+    def _lcount(self, name, bi, v):
+        if name not in self.lcnt:
+            self.lcnt[name] = torch.zeros(self.B, device=self.dev)
+        self.lcnt[name].index_add_(0, bi, v.float())
+
+    def lord_drop(self, mask, why):
+        """The executor dropped the lord's command where mask [B] (net/unit/lord.DROP_NAMES[why] for the count):
+        his store cleared on the same tick (BUILD_NOTES 8)."""
+        from net.unit import lord as LD
+        m = mask.to(self.dev) & (self.l_tgt >= 0)
+        self.l_skill = torch.where(m, torch.zeros_like(self.l_skill), self.l_skill)
+        self.l_tgt = torch.where(m, torch.full_like(self.l_tgt, -1), self.l_tgt)
+        self._lcount("lord_drop_" + LD.DROP_NAMES[int(why)], torch.arange(self.B, device=self.dev), m)
+
+    def lord_orders(self):
+        """{skill, tgt, born} [B] the lord's order in force (the executor reads tgt)."""
+        return {"skill": self.l_skill, "tgt": self.l_tgt, "born": self.l_born}
 
     def parcel(self, idx=None):
         idx = torch.arange(self.R, device=self.dev) if idx is None else idx
@@ -169,17 +209,18 @@ class Tacticians:
         self.tmask[idx] = tiles.mask
         return tiles
 
-    def tick(self, raw, card, bounds=None, now=None, sim=None):
+    def tick(self, raw, card, bounds=None, now=None, sim=None, lord_raw=None):
         """The tacticians' decision (every 5 s): the frames of the active rows (per slot); with a player also the orders
         (now: the battle's second; None - this level's own clock, decide_s a tick). raw, card and bounds go on the
-        player's View; for a player with needs_input also inputs.build with them and the areas of the frames in force."""
+        player's View; for a player with needs_input also inputs.build with them and the areas of the frames in force.
+        lord_raw: the raw state with our lord NOT hidden (the lord's facts; used only with a lord player)."""
         now = self.clock if now is None else float(now)
         self.clock = now + float(tcfg()["decide_s"])
         idx = (self.active & self.mine.any(1)).nonzero()[:, 0]
         if idx.numel() == 0:
             return
         if self.player is not None:
-            return self._tick_player(raw, card, idx, now, bounds, sim)
+            return self._tick_player(raw, card, idx, now, bounds, sim, lord_raw)
         tiles = self._keep(raw, idx)
         p = self.parcel(idx)
         my = DC.my_slots(p)                                                   # [r, Gm]
@@ -218,7 +259,7 @@ class Tacticians:
         v = v.float()
         self.cnt[name][idx] += v.sum(1) if v.dim() > 1 else v
 
-    def _tick_player(self, raw, card, idx, now, bounds=None, sim=None):
+    def _tick_player(self, raw, card, idx, now, bounds=None, sim=None, lord_raw=None):
         """A tick with a player (module doc of tactic/orders.py): the causes and the exempt, the player's output, the
         code's masks, then the frames and the orders written back per slot. The View carries the rows' raw, card and
         bounds as given (a recorder's; None where the caller has none)."""
@@ -283,6 +324,8 @@ class Tacticians:
         view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene, raw=S,
                        card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim, inp=inp,
                        command=self.order[idx], parcel=p)
+        if self.lord_player is not None and lord_raw is not None:
+            self._lord_tick(view, fx, lord_raw, idx, now)
         out = self.player(view)
         skill, tgt, side, change, cnt, approach = OR.masks(view, out, getattr(self.player, "allow", (0, 2)),
                                                            with_approach=True)
@@ -318,11 +361,70 @@ class Tacticians:
             cur[sel] = v[on_my]
             getattr(self, name)[idx] = cur
         self.view = {"view": view, "skill": skill, "tgt": tgt, "side": side, "change": change, "new_attack": new_att, "bi": bi,
-                     "my": my, "approach": approach}
+                     "my": my, "approach": approach, "lord": view.lord}
+
+    def _lord_tick(self, view, fx, lord_raw, idx, now):
+        """Our lord's tick (module doc): one row a battle (its first active group's), before the infantry's player -
+        the order store's end on his own rout, the gate, the CANCEL hygiene, View.lord, the player's request under the
+        masks, the labeller's answer. Reads fx and the raw only; draws no random number."""
+        from net.tactic import lordtac as LT
+        bi = self.bi[idx]
+        r = idx.shape[0]
+        first = torch.ones(r, dtype=torch.bool, device=self.dev)
+        if self.G > 1:
+            seen = set()
+            for j, b in enumerate(bi.tolist()):
+                first[j] = b not in seen
+                seen.add(b)
+        S = lord_raw[bi]
+        ls = torch.where(first, self.l_slot[bi], torch.full_like(bi, -1))
+        k = torch.arange(r, device=self.dev)
+        has = ls >= 0
+        L = S[k, ls.clamp(min=0)]
+        down = has & ((L[:, TR.I["alive"]] <= 0) | (L[:, TR.I["r"]] > 0) | (L[:, TR.I["s"]] > 0))
+        att = has & (self.l_tgt[bi] >= 0)
+        lost = att & down                       # (his own rout or death ends his order: cap_all's rule for him)
+        self._lcount("lord_lost", bi, lost)
+        hb = bi[has]                            # (one row a battle writes its store: no duplicate index)
+        self.l_tgt[hb] = torch.where(lost, torch.full_like(ls, -1), self.l_tgt[bi])[has]
+        self.l_skill[hb] = torch.where(lost, torch.zeros_like(ls), self.l_skill[bi])[has]
+        gm = str(LT.c_lord().get("gate", "on"))
+        if gm == "contact":
+            self.l_contact[hb] = (self.l_contact[bi] | (fx.mine & fx.m).any(1))[has]
+            gate = self.l_gate[bi] & self.l_contact[bi]
+        else:
+            assert gm == "on", f"orders.lord.gate {gm!r}: on or contact"
+            gate = self.l_gate[bi]
+        order = {"skill": self.l_skill[bi], "tgt": self.l_tgt[bi], "born": self.l_born[bi]}
+        from net.unit import lord as LD
+        own = torch.where(has, L[:, TR.I["side"]].round().long(), torch.ones_like(ls))
+        engaged = LD.engaged_of(S[..., :TR.BASE], ls.clamp(min=0), own) & has
+        cx = LT.cancel(fx, S, ls, order, engaged)
+        self._lcount("lord_cancel", bi, cx)
+        order = {"skill": torch.where(cx, torch.zeros_like(order["skill"]), order["skill"]),
+                 "tgt": torch.where(cx, torch.full_like(order["tgt"], -1), order["tgt"]), "born": order["born"]}
+        lv = LT.facts(fx, S, ls, order, gate, self.l_busy[bi] & has, now)
+        lv["cancel"] = cx
+        view.lord = lv
+        req = self.lord_player(view)["k"]
+        ok, slot, cnt = LT.masks(lv, req, fx)
+        for name, v in cnt.items():
+            self._lcount(name, bi, v)
+        self._lcount("lord_eligible_ticks", bi, lv["eligible"])
+        self._lcount("lord_engaged_ticks", bi, lv["engaged"])
+        lv["request"], lv["new"] = req, ok
+        if self.lord_labeller is not None:
+            lv["label"] = self.lord_labeller(view)["k"]
+        sk = torch.where(ok, torch.full_like(order["skill"], 2), order["skill"])
+        tg = torch.where(ok, slot, order["tgt"])
+        bo = torch.where(ok, torch.full_like(order["born"], float(now)), order["born"])
+        self.l_skill[hb], self.l_tgt[hb], self.l_born[hb] = sk[has], tg[has], bo[has]
 
     def counts(self):
-        """{name: [B]} the level's counts (self.cnt) summed over each battle's rows."""
-        return {n: v.view(self.B, self.G).sum(1) for n, v in self.cnt.items()}
+        """{name: [B]} the level's counts (self.cnt) summed over each battle's rows; the lord's (lcnt, per battle)."""
+        out = {n: v.view(self.B, self.G).sum(1) for n, v in self.cnt.items()}
+        out.update(self.lcnt)
+        return out
 
     def orders_of(self):
         """{skill, tgt, born, approach} [B, N] each unit's order in force (the row of its group; skill 0, tgt -1, approach

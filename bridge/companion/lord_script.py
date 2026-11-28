@@ -60,6 +60,14 @@ never read. Distances are centre to centre, strictly below the radius (the game'
     hygiene   no new order while he is in melee (m true or unreadable), except the step-out
 What the reply does not deliver (a lord marked out by the chain) is undone by commit(False): no order or press is
 taken as sent.
+modes (LordScript(mode=); net/unit/lord.py's T2 the same rules, contract/test_lord_script_parity.py):
+    t2        all of the above
+    post      the post and the run-in only, he never fights (the IDLE control); step-out and hygiene stay
+    tactic    the tactic level commands him (decide(cmd=the target's name or None, engaged=)): 'fight' above is off - his
+              target is the command's (dropped at once unseen / down: self.drop 'gone'; no GRACE_S); no command -> the
+              post; the step-out drops the command (self.drop 'step_out'); 'in melee' is engaged (the caller's
+              net/unit/lord.engaged_of: his m or an edge gap <= TOUCH_M to a seen standing enemy), not m alone
+buttons: LordScript(buttons=) - None: BAI_LORD_PRESS as before.
 
 _why: AURA_M 35 - the passports' range_m (sim/config/abilities.json, the game's database; centre to centre: sim/evidence/
 effectsimpl/compare.md T-E2; strict <: abil_re Q1); STEP_OUT_HP 0.35 - the orchestrator's margin above the single
@@ -85,6 +93,7 @@ from net.cards import passport
 from sim import abilities as sim_abilities
 
 ARMS = ("T",)
+MODES = ("post", "t2", "tactic")
 POST_BACK_M, POST_MIN_M = 20.0, 10.0
 REORDER_M = 5.0
 RUN_FAR_M = 15.0
@@ -276,8 +285,11 @@ def witnessed(e, inf):
 class LordScript:
     """One battle's lord script (module doc). names, keys, sides: the state's units in order; own: our side."""
 
-    def __init__(self, names, keys, sides, own=1, arm="T"):
+    def __init__(self, names, keys, sides, own=1, arm="T", mode="t2", buttons=None):
         self.arm, self.own = arm_of(arm), own
+        if mode not in MODES:
+            raise ValueError(f"lord script mode {mode!r}: one of {MODES}")
+        self.mode, self.drop = mode, None
         self.names, self.keys = list(names), list(keys)
         lords = [i for i, n in enumerate(self.names) if int(sides[i]) == own and n.endswith("_lord")]
         if len(lords) != 1:
@@ -303,7 +315,7 @@ class LordScript:
         self.failed = []                  # the run fails (the reader and the series stop): causes
         self.note, self._saved = None, None
         # BAI_LORD_PRESS=0 (the lord line's arm N, tmp/lordline/t2): no button ever pressed; unset / anything else - on
-        self.buttons = os.environ.get("BAI_LORD_PRESS", "") != "0"
+        self.buttons = os.environ.get("BAI_LORD_PRESS", "") != "0" if buttons is None else bool(buttons)
 
     # -- delivery
     def commit(self, delivered):
@@ -444,10 +456,13 @@ class LordScript:
         return note
 
     # -- one decision
-    def decide(self, doc, orders=()):
+    def decide(self, doc, orders=(), cmd=None, engaged=None):
         """-> (the lord's order dict (exchange.orders_list's form; kind 'keep': none new), [at most one ability use])
         for one state document; orders: this reply's lines for our units (the chain's, before the lord's is replaced:
-        the run-in's onset). self.note: the decision's record (the companion's log row 'lord'). Then commit()."""
+        the run-in's onset). self.note: the decision's record (the companion's log row 'lord'). Then commit().
+        Mode tactic: cmd - the tactic level's target (a name, None none), engaged - net/unit/lord.engaged_of of the
+        document's raw (bool); self.drop - the command dropped here ('gone', 'step_out') or None."""
+        self.drop = None
         for o in orders or ():
             if o.get("unit") != self.lord and o.get("kind") not in (None, "keep"):
                 self.pair_orders[o["unit"]] = o["kind"]        # (the order in force: a 'keep' line keeps it)
@@ -469,6 +484,8 @@ class LordScript:
         foes = [u for u in doc["units"] if int(u.get("side", 0)) != self.own and u.get("v") is True and standing(u)]
         hp = float(lord["hp"]) if fin(lord.get("hp")) else None
         melee = lord.get("m")
+        if self.mode == "tactic" and engaged:
+            melee = True                                 # (the contact gap, module doc 'modes')
         if self.contact_t is None and any(u.get("m") is True for u in inf):
             self.contact_t = t
         if melee is True and self.contact_t is None and self.touched_first is None:
@@ -491,9 +508,18 @@ class LordScript:
             order = self._step_out(lord, inf, t, note)
         elif melee is not False:
             note["ph"] = "melee" if melee is True else "melee_unread"      # hygiene: no new order in melee
-            self._keep_target(lord, rows, inf, t, note)
+            if self.mode == "t2":
+                self._keep_target(lord, rows, inf, t, note)
+            elif self.mode == "tactic":
+                self._take_cmd(rows, cmd, note)
         else:
-            order = self._move_or_fight(lord, rows, inf, foes, post, t, note)
+            order = self._move_or_fight(lord, rows, inf, foes, post, t, note, cmd)
+        if self.mode == "tactic" and (self.step is not None or self.out):
+            if cmd is not None:
+                self.drop = "step_out"
+            self.target = None
+        if self.drop is not None:
+            note["cmd_drop"] = [cmd, self.drop]
         note["tg"] = self.target
         if order["kind"] != "keep":
             note["o"] = order["kind"]
@@ -574,10 +600,28 @@ class LordScript:
             return False
         return True
 
-    def _move_or_fight(self, lord, rows, inf, foes, post, t, note):
+    def _take_cmd(self, rows, cmd, note):
+        """Mode tactic: the command's target stands (seen, standing) - his target, True; else dropped ('gone')."""
+        if cmd is None:
+            self.target = None
+            return False
+        e = rows.get(cmd)
+        if e is None or e.get("v") is not True or not standing(e):
+            self.drop, self.target = "gone", None
+            note["dropped"] = [cmd, "unseen" if (e is not None and e.get("v") is not True) else "down"]
+            return False
+        self.target = cmd
+        return True
+
+    def _move_or_fight(self, lord, rows, inf, foes, post, t, note, cmd=None):
         keep = {"unit": self.lord, "kind": "keep"}
-        has = self._keep_target(lord, rows, inf, t, note)
-        if self.contact_t is not None and not has:
+        if self.mode == "tactic":
+            has = self._take_cmd(rows, cmd, note)
+        elif self.mode == "post":
+            has = False
+        else:
+            has = self._keep_target(lord, rows, inf, t, note)
+        if self.mode == "t2" and self.contact_t is not None and not has:
             held, odd = [], []
             for e in foes:
                 ok, amb = witnessed(e, inf)

@@ -184,14 +184,18 @@ def _base(rnd, held):
 
 def _lords(sp, mine_xy, theirs_xy, away):
     """{1, 2: (x, z, b)} (config lord_back_m): mine behind my units' middle along my zone's facing; theirs beyond its
-    units' middle along away (the unit vector from the scene to the enemy)."""
+    units' middle along away (the unit vector from the scene to the enemy). A lord that plays (stage0.json
+    lord_script / enemy_lord_fights: stage0/battle.lord_back) - at the T2 post's distance instead."""
+    from net.stage0 import battle as BA
     back = float(c()["lord_back_m"])
+    b1, b2 = BA.lord_back(1), BA.lord_back(2)
+    b1, b2 = back if b1 is None else b1, back if b2 is None else b2
     mz = sp["mine_zone"]
     mx, mzz = np.mean([p[0] for p in mine_xy]), np.mean([p[1] for p in mine_xy])
     a = math.radians(mz["b"])
-    l1 = (float(mx - back * math.sin(a)), float(mzz - back * math.cos(a)), float(mz["b"]))
+    l1 = (float(mx - b1 * math.sin(a)), float(mzz - b1 * math.cos(a)), float(mz["b"]))
     ex, ez = np.mean([p[0] for p in theirs_xy]), np.mean([p[1] for p in theirs_xy])
-    l2 = (float(ex + back * away[0]), float(ez + back * away[1]), _bearing(0, 0, -away[0], -away[1]))
+    l2 = (float(ex + b2 * away[0]), float(ez + b2 * away[1]), _bearing(0, 0, -away[0], -away[1]))
     return {1: l1, 2: l2}
 
 

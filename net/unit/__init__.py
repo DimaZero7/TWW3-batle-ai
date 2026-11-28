@@ -25,7 +25,8 @@ Design: sim/evidence/diag_g49/unit_base.md (the user's decisions), sim/evidence/
     realmap.py     skirmishes laid on the captured maps at a random place and turn (u2.py)
     scripts.py     the unit level now: the script that carries out the tactician's order (no network)
     lord.py        the lord's executor: the T2 lord script (bridge/companion/lord_script.py) batched in torch, his
-                   default order (net/stage0/battle.py key lord_script)
+                   default order (net/stage0/battle.py key lord_script) in a mode: post, t2, tactic (commanded by the
+                   tactic level, tactic/lordtac.py)
     u2.py, skills.py, exam_u2.py   the unit script's drills and exams (METHOD.md 'Личный уровень - без сети')
 
 Outside tools/nn/model on purpose: that folder is part of the simulator's version (tools/nn/train/version.py).
