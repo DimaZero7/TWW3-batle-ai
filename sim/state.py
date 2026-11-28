@@ -17,6 +17,7 @@ Three groups of per-unit tensors, all [B, N]:
 
 Names are importable without torch; the tensors need it.
 """
+import copy
 from dataclasses import dataclass, field
 
 try:
@@ -629,6 +630,8 @@ class State:
     lord_dead_s: "torch.Tensor"
     bounds: float = 1020.0
     keys: list = field(default_factory=list)
+    cfg: dict = None                # the sim.json (params.sim) the battle was built with (scenario.build; the scripts'
+    #                                 switches read it: scripts.game_line); None: sim.params.load()'s
 
     @property
     def B(self):
@@ -685,7 +688,7 @@ class State:
     def clone(self):
         return State({k: v.clone() for k, v in self.u.items()}, self.t.clone(), self.attacker.clone(),
                      self.done.clone(), self.winner.clone(), self.lord_dead_s.clone(), self.bounds,
-                     [list(r) for r in self.keys])
+                     [list(r) for r in self.keys], copy.deepcopy(self.cfg))
 
 
 def empty(B, N, device="cpu", history=0):

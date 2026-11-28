@@ -54,6 +54,8 @@ def step(st, orders, params=None, dt=None):
     """Advance every unfinished battle of st by one step (in place). orders: sim/orders.Orders."""
     params = params or load()
     dt = dt or params.dt
+    if not torch.compiler.is_compiling():
+        st.cfg = params.sim         # (the scripts read the config the battle runs with: scripts.game_line)
     u = st.u
     if core.on(params, "share") or core.on(params, "shared_front_cap"):
         core.ensure(u)              # (melee.core: the ledger before the snapshot - a state built with share off)
@@ -1935,7 +1937,12 @@ def stepper(device, compile=None):
         return step
     if "step" not in _COMPILED:
         from sim.compiled import compiled
-        _COMPILED["step"] = compiled(step)
+        inner = compiled(step)
+
+        def advance(st, orders, params=None, dt=None):
+            st.cfg = (params or load()).sim     # (outside the compiled graph: step's own binding is skipped there)
+            return inner(st, orders, params, dt)
+        _COMPILED["step"] = advance
     return _COMPILED["step"]
 
 
@@ -1947,6 +1954,7 @@ def run(st, policy, params=None, until_s=None, every_s=None, record=None, compil
     limit = until_s or params.limit_s
     every = max(1, int(round((every_s or dt) / dt)))
     advance = stepper(st.device, compile)
+    st.cfg = params.sim             # (the policy's first call comes before the first step)
     n = 0
     orders = None
     while not bool((st.done | (st.t >= limit)).all()):

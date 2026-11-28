@@ -37,7 +37,7 @@ of the side it plays.
                 the numbers (mine, from those battles: no fit; the attack's from the manual and the database)
 """
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 
@@ -296,6 +296,16 @@ class Line:
     pursue_share: tuple = ((30.0, 0.16), (60.0, 0.20), (100.0, 0.24), (BIG, 0.61))
     pursue_mean_s: float = 24.0
     pursue_drop_m: float = 40.0
+    # ai_game.approach (sim/config/sim.json; sim/evidence/ai_approach). New fields go here, at the end (positional
+    # construction keeps its meaning).
+    step_beyond: tuple = ()       # with step_around: the line's own march point (the infantry's advance at the enemy,
+    #                               not a post, a flank point or a withdrawal) on 'cannot stand' ground goes first to
+    #                               the first free point further along the same way inside the field (these shares of
+    #                               the way), the detour (sim/detour.py) walking round the ground on the way; then
+    #                               AROUND; none free: the nearest free point short of it on the way (STEP_SHORT), else
+    #                               the unit holds where it stands. Every other order: AROUND as before. (): off
+    wait_all: bool = False        # start_wait_s holds every standing unit of the side out of melee (shooters and the
+    #                               lord too), not only the melee line's moves. False: as before
 
 
 def _centroid(x, z, mask):
@@ -513,9 +523,11 @@ def ai_like(st, p=Line()):
     behind = (ahead - rear_s <= p.slack_m) | side_fought        # (after the first fight nobody waits for the line)
     o = O.hold(st.B, st.N, st.device)
     kind, tx, tz, target, run = o.kind, x.clone(), z.clone(), o.target, o.run
+    march = torch.zeros_like(standing)                         # the line's march order stands (Line.step_beyond)
 
     def put(mask, k, px=None, pz=None, tg=None, r=False):
-        nonlocal kind, tx, tz, target, run
+        nonlocal kind, tx, tz, target, run, march
+        march = march & ~mask
         kind = torch.where(mask, torch.full_like(kind, k), kind)
         if px is not None:
             tx, tz = torch.where(mask, px, tx), torch.where(mask, pz, tz)
@@ -527,6 +539,7 @@ def ai_like(st, p=Line()):
     # The line: charge, or advance with the line (attacker), or hold.
     walk = (line | lone_lord) & has & ~charge & advance_side & behind
     put(walk, O.MOVE, fwd_x, fwd_z, r=p.advance_run)
+    march = walk & line
     if p.overlap_m > 0:
         # Before contact the line widens to lap the enemy's line at both ends: a marching unit adds the shift
         # aside to its point (at most half a step), a holding one sidesteps (within the simulator's step_m it
@@ -535,6 +548,7 @@ def ai_like(st, p=Line()):
         free = line & has & ~charge & ~fighting & ~cur_ok & ~side_fought
         sh = shift.clamp(-p.step_m / 2, p.step_m / 2)
         put(walk & free, O.MOVE, fwd_x - fz * sh, fwd_z + fx * sh, r=p.advance_run)
+        march = march | (walk & free & line)
         side_step = free & ~walk & (shift.abs() > 3.0)
         sh = shift.clamp(-8.0, 8.0)
         put(side_step, O.MOVE, x - fz * sh, z + fx * sh, r=False)
@@ -678,18 +692,34 @@ def ai_like(st, p=Line()):
     ok = standing & has
     kind = torch.where(ok | (kind == O.HOLD), kind, torch.full_like(kind, O.HOLD))
     target = torch.where(kind == O.ATTACK, target, torch.full_like(target, -1))
+    wait_all = getattr(p, "wait_all", False)                  # (a parameter object without the new fields: as before)
+    beyond = getattr(p, "step_beyond", ())
     if p.start_wait_s > 0:
-        wait = (st.t[:, None] < p.start_wait_s) & line & (kind == O.MOVE) & ~fighting
+        if wait_all:
+            # every unit alike, the advance only: a move towards the enemy or a melee attack waits; withdrawals,
+            # side steps, turns and the shooters' fire orders pass
+            fwd = (tx - x) * fx + (tz - z) * fz > 0
+            wait = ((st.t[:, None] < p.start_wait_s) & standing & ~fighting
+                    & (((kind == O.MOVE) & fwd) | ((kind == O.ATTACK) & ~missile)))
+            target = torch.where(wait, torch.full_like(target, -1), target)
+        else:
+            wait = (st.t[:, None] < p.start_wait_s) & line & (kind == O.MOVE) & ~fighting
         kind = torch.where(wait, torch.full_like(kind, O.HOLD), kind)
         tx, tz = torch.where(wait, x, tx), torch.where(wait, z, tz)
     if p.fast_free:
-        fast = line & (u["run"] >= p.fast_run_ms) & standing & has & (st.t[:, None] >= p.fast_go_s)
+        go_s = max(p.fast_go_s, p.start_wait_s) if wait_all else p.fast_go_s     # (wait_all: they wait too)
+        fast = line & (u["run"] >= p.fast_run_ms) & standing & has & (st.t[:, None] >= go_s)
         fast = fast & ~((kind == O.ATTACK) & (target >= 0)) & ~(kind == O.WITHDRAW)
         ni = d_foe.argmin(2)
         kind = torch.where(fast, torch.full_like(kind, O.ATTACK), kind)
         target = torch.where(fast, ni, target)
         run = run | fast
-    if p.step_around:
+    if p.step_around and beyond:
+        mv = march & (kind == O.MOVE)
+        kind, mx, mz, _short, _held = _march_round(u, kind, x, z, tx, tz, mv, beyond, st.bounds)
+        ox, oz = _around(u, torch.where(mv, torch.full_like(kind, O.HOLD), kind), x, z, tx, tz)
+        tx, tz = torch.where(mv, mx, ox), torch.where(mv, mz, oz)
+    elif p.step_around:
         tx, tz = _around(u, kind, x, z, tx, tz)
     return O.Orders(kind=kind, x=tx, z=tz, target=target, run=run & ((kind == O.ATTACK) | (kind == O.MOVE)
                                                                        | (kind == O.WITHDRAW)))
@@ -722,13 +752,89 @@ def _around(u, kind, x, z, tx, tz):
     return nx, nz
 
 
+STEP_SHORT = (0.75, 0.25)       # Line.step_beyond's last resort: shares of the way short of the blocked point, straight
+
+
+def in_field(u, x, z, bounds):
+    """[B, ...] points x, z (the battle's frame) inside the playable field: a battle on a map - its field (terrain.FRAMES,
+    terrain.frame_local), where movement.clamp_to_map keeps the standing units; a flat one - |x|, |z| <= bounds."""
+    from sim import terrain
+    flat = (x.abs() <= bounds) & (z.abs() <= bounds)
+    if not ("tpx" in u and "terr" in u and bool((u["terr"][:, 0] >= 0).any())):
+        return flat
+    cx, cz, b, front, depth = terrain.frame_local(u["terr"][:, 0], [u[k][:, 0] for k in terrain.PLACE])
+    t = (b * (math.pi / 180))[:, None]
+    c, s = torch.cos(t), torch.sin(t)
+    dx, dz = x - cx[:, None], z - cz[:, None]
+    across, along = dx * c - dz * s, dx * s + dz * c         # (movement.clamp_to_map's frame)
+    inside = (across.abs() <= (front / 2)[:, None]) & (along.abs() <= (depth / 2)[:, None])
+    return torch.where((u["terr"][:, :1] >= 0).expand_as(x), inside, flat)
+
+
+def _march_round(u, kind, x, z, tx, tz, mv, beyond, bounds):
+    """Line.step_beyond: the line's march points mv [B, N] (MOVE) on 'cannot stand' ground -> the first free point inside
+    the field of: the way straight on at the shares beyond, AROUND, the way short of it at STEP_SHORT; none: the order
+    in force if it is a move / withdrawal to a free point in the field, else HOLD where it stands. Returns kind, x, z and
+    the masks short (a STEP_SHORT point taken) and held (HOLD given)."""
+    from sim import ground
+    bad = mv & ground.blocked(u, tx, tz)
+    none = torch.zeros_like(bad)
+    if not bool(bad.any()):
+        return kind, tx, tz, none, none
+    vx, vz = tx - x, tz - z
+    n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-6)
+    ax, az = -vz / n, vx / n                                    # across the way
+    nx, nz = tx.clone(), tz.clone()
+    left = bad.clone()
+    short = none.clone()
+    tries = ([(s, 0.0, False) for s in beyond] + [(s, m, False) for s, m in AROUND]
+             + [(s, 0.0, True) for s in STEP_SHORT])
+    for share, side_m, last in tries:
+        cx, cz = x + vx * share + ax * side_m, z + vz * share + az * side_m
+        free = left & ~ground.blocked(u, cx, cz) & in_field(u, cx, cz, bounds)
+        nx, nz = torch.where(free, cx, nx), torch.where(free, cz, nz)
+        if last:
+            short = short | free
+        left = left & ~free
+        if not bool(left.any()):
+            break
+    # none free: the order in force goes on when it is a move / withdrawal to a free point inside the field (as before,
+    # when the refused point left it in force); else the unit holds where it stands
+    ik = u["order_kind"]
+    keep = left & ((ik == O.MOVE) | (ik == O.WITHDRAW)) & ~ground.blocked(u, u["ox"], u["oz"])         & in_field(u, u["ox"], u["oz"], bounds)
+    kind = torch.where(keep, ik, torch.where(left, torch.full_like(kind, O.HOLD), kind))
+    nx, nz = torch.where(keep, u["ox"], torch.where(left, x, nx)), torch.where(keep, u["oz"], torch.where(left, z, nz))
+    return kind, nx, nz, short, left & ~keep
+
+
 GAME = Line(step_around=True, fast_free=True, start_wait_s=60.0)
+
+
+_APPROACH = {}
+
+
+def game_line(st=None):
+    """GAME, or with sim/config/sim.json ai_game.approach on its start_wait_s, step_beyond and slack_m, every unit
+    waiting alike (sim/evidence/ai_approach). The switch is read from the config the battle was built with (st.cfg:
+    sim.scenario.build's params.sim); a state without one (or none given): sim.params.load()'s."""
+    cfg = getattr(st, "cfg", None)
+    if cfg is None:
+        from sim.params import load
+        cfg = load().sim
+    a = (cfg.get("ai_game") or {}).get("approach") or {}
+    if not a.get("on"):
+        return GAME
+    slack = a.get("slack_m", GAME.slack_m)                     # (null: nobody waits for the line)
+    key = (float(a["start_wait_s"]), tuple(float(s) for s in a["beyond"]), BIG if slack is None else float(slack))
+    if key not in _APPROACH:
+        _APPROACH[key] = replace(GAME, start_wait_s=key[0], step_beyond=key[1], slack_m=key[2], wait_all=True)
+    return _APPROACH[key]
 
 
 def ai_game(st):
     """ai_like for the user's matchups (tools/nn/matchup; sim/evidence/diag_m1/night.md 28, 31): the same line, stepping round
-    'cannot stand' ground, standing its first start_wait_s, its fast units running ahead alone."""
-    return ai_like(st, GAME)
+    'cannot stand' ground, standing its first start_wait_s, its fast units running ahead alone (ai_game.approach: game_line)."""
+    return ai_like(st, game_line(st))
 
 
 @dataclass(frozen=True)

@@ -92,6 +92,7 @@ def build(armies, params=None, device="cpu", per_side=None):
         core.ensure(u)              # (melee.core.share: the pair clock and the kept classes, sim/core.py)
     st.attacker = torch.tensor(attacker, dtype=torch.int64, device=device)
     st.bounds = params.map_half
+    st.cfg = params.sim             # (the scripts' switches: scripts.game_line)
     return st
 
 
