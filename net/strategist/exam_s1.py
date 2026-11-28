@@ -237,6 +237,9 @@ def play(specs, arm, tseed, device="cpu", chunk=256, k_net=None):
     """[row] per spec (module doc) of the arm."""
     import torch
     from net.stage0 import battle as BA
+    if BA.lord_mode() == "group":
+        raise NotImplementedError("stage0.json lord_script 'group': S0-1 is not built for the lord's group (tactic "
+                                  "level only)")
     from net.stage0 import watch as W
     from net.strategist import s1_ground as SG
     from net.tactic import exam_pin as EP

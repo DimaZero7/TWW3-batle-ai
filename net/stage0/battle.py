@@ -24,7 +24,10 @@ for bit as before): lord_script - my lord (UnitSide, TacticSide) played by the l
 (lord.MODES; true = 't2' as before): 't2' the T2 script alone, 'post' at the post, never fighting (the IDLE
 control), 'tactic' (TacticSide only) the tactic level commands him (tactic/lordtac.py: the level's lord store, his
 ATTACK; the executor's drops mirrored into the store on the same second; config lord_player names the level's
-lord player when none is given - LT); lord_buttons - his buttons on / off; deployed lord_script.POST_BACK_M behind my
+lord player when none is given - LT), 'group' (TacticSide only) our lord a group of one anchored to the infantry
+group (tactic/side.py group mode: the groups from groups.stage0, his row under the infantry's own player and order store,
+his parcel by code; the executor reads his command from that store, its drops cleared there, its post his group's zone,
+its pair from the anchor's members); lord_buttons - his buttons on / off; deployed lord_script.POST_BACK_M behind my
 units (unit_battles; lord_back(side) for the scenes' own placers); enemy_lord_fights - the enemy's lord by its
 script's own lord rules (Scripts: sim/scripts.py ai_game / human / nearest ... each moves its lord; SceneEnemy:
 ai_game's lord rule), deployed the same (unit_battles, Prep). Pass 1 of the tactic level never sees my lord (his row
@@ -383,17 +386,25 @@ class UnitSide(DU.Chain):
         self.hide = u["lord"] & own
         self.stats = {"parcels": 0, "parcel_errors": 0, "errors": [], "groups": 0.0, "decisions": 0}
         if self.lord_script:
-            if self.lord_mode == "tactic" and not isinstance(self, TacticSide):
-                raise ValueError("lord mode 'tactic': the tactic level commands the lord - TacticSide only")
+            if self.lord_mode in ("tactic", "group") and not isinstance(self, TacticSide):
+                raise ValueError(f"lord mode {self.lord_mode!r}: the tactic level commands the lord - TacticSide only")
             self._lord_start(st, device)
 
     def _lord_start(self, st, device):
         """The T2 lord script on my lord (module doc 'The lords'): one lord a battle, his order in force kept."""
         from net.unit import lord as LD
         B, N = st.B, st.N
-        assert bool((self.hide.sum(1) == 1).all()), "lord_script: one lord of mine in every battle"
+        assert bool((self.hide.sum(1) <= 1).all()), "lord_script: at most one lord of mine in every battle"
+        if self.lord_mode != "group":
+            assert bool((self.hide.sum(1) == 1).all()), "lord_script: one lord of mine in every battle"
+        # (mode group: a battle without a lord - his executor runs on slot 0 with live off: no decision, no order -
+        # the merge of his orders is over the hidden rows, none there)
+        self.has_lord = self.hide.any(1)
         li = self.hide.float().argmax(1)
-        keys = [st.keys[b][int(li[b])] for b in range(B)]
+        keys = [st.keys[b][int(li[b])] if bool(self.has_lord[b]) else None for b in range(B)]
+        some = next((k for k in keys if k is not None), None)
+        assert some is not None, "lord_script: no lord of mine in any battle"
+        keys = [some if k is None else k for k in keys]      # (a lordless battle: a placeholder key, never live)
         rank = torch.arange(N, dtype=torch.float64, device=device)[None, :].expand(B, N)
         self.lexe = LD.T2(li, keys, rank, device, buttons=self.lord_buttons, mode=self.lord_mode)
         self.l_int = O.hold(B, N, device)
@@ -417,12 +428,27 @@ class UnitSide(DU.Chain):
         (a KEEP: his order in force goes on, as the bridge's)."""
         from net.unit import lord as LD
         raw, tgt, a_on, a_cd = LD.lord_inputs_sim(st, self.setup.P, self.units.ubuf[-1])
-        cmd = None
+        cmd = members = None
         tac = self.tac if (self.lord_mode == "tactic" and getattr(self.tac, "lord_player", None) is not None) else None
         if self.lord_mode == "tactic":
             assert tac is not None, "lord mode 'tactic' without the level's lord player"
             cmd = tac.l_tgt
-        d = self.lexe.decide(raw, tgt, a_on, a_cd, self.units.intended.kind, st.t.float(), ~st.done, cmd=cmd)
+        grp = self.wrap if self.lord_mode == "group" else None
+        live = ~st.done
+        if grp is not None:
+            # (his group's row: the contact latched and the command checked against his legal targets on this
+            # second's raw, then the command from the common store, the post's pair from the anchor's members)
+            grp.second(raw, self.setup.card)
+            cmd = grp.lord_cmd()
+            members = self.mine
+            live = live & self.has_lord
+        d = self.lexe.decide(raw, tgt, a_on, a_cd, self.units.intended.kind, st.t.float(), live, cmd=cmd,
+                             members=members)
+        if grp is not None:
+            for code in (LD.DROP_GONE, LD.DROP_STEP):
+                grp.lord_drop(self.lexe.drop == code, LD.DROP_NAMES[code])
+            grp.busy = self.lexe.busy.clone()
+            grp.posts(self.lexe.lpx, self.lexe.lpz, self.lexe.h, self.lexe.has_lpost & self.lexe.has_h)
         if tac is not None:
             # (the executor's drops into the level's store on the same second: BUILD_NOTES 8)
             for code in (LD.DROP_GONE, LD.DROP_STEP):
@@ -475,7 +501,7 @@ class TacticSide(UnitSide):
     each battle, both sides with lords, at most config step.men_max (the 100 ms step)."""
 
     def __init__(self, player, hygiene=True, unit_level=None, zones=None, seed=None, worn=None, fearless=None,
-                 lord_script=None, lord_player=None, lord_labeller=None, lord_buttons=None):
+                 lord_script=None, lord_player=None, lord_labeller=None, lord_buttons=None, group_player=None):
         from net.unit import scripts as SC
         super().__init__(SC.Unit() if unit_level is None else unit_level, gate=True, unit_greedy=False,
                          lord_script=lord_script, lord_buttons=lord_buttons)
@@ -484,9 +510,13 @@ class TacticSide(UnitSide):
         from net.tactic import lordtac as LT
         if isinstance(lord_player, str):
             lord_player = LT.player(lord_player)
+        if self.lord_mode == "group":
+            assert lord_player is None, "lord mode 'group': his row is the level's own - no lord player"
         if lord_player is None and self.lord_mode == "tactic":
             lord_player = LT.player(cfg().get("lord_player") or "LT")
         self.lord_player, self.lord_labeller = lord_player, lord_labeller
+        # (lord mode 'group': his group's own player - tactic/side.Side group_player; None: a copy of player's state)
+        self.group_player = group_player
         self.player, self.hygiene = player, hygiene
         self.zones, self.seed, self.worn = zones, seed, worn
         self.fearless = fearless
@@ -513,7 +543,8 @@ class TacticSide(UnitSide):
         self.mine = (u["side"] == 1) & ~u["lord"] & (u["men"] > 0)
         # the level through the one side wrapper (tactic/side.py), shared with the bridge's companion
         self.wrap = TS.Side(self.player, self.hygiene, device, lord_player=self.lord_player,
-                            lord_labeller=self.lord_labeller).start(u["x"], u["z"], u["b"], self.mine, self.hide,
+                            lord_labeller=self.lord_labeller, group=self.lord_mode == "group",
+                            group_player=self.group_player).start(u["x"], u["z"], u["b"], self.mine, self.hide,
                                                                     self.zones)
         self.tac, self.worst = self.wrap.tac, self.wrap.worst
         self.acc = {k: torch.zeros(B, device=device) for k in ("unpinned_attacks", "two_on_side")}
@@ -534,6 +565,16 @@ class TacticSide(UnitSide):
                     u["hp"][b, i] = share
 
     def tick(self, st, raw):
+        if self.lord_mode == "group" and self.lexe is not None:
+            # (his group's zone: the post of this second - the executor's rule on this second's raw, its state kept)
+            from net.unit import lord as LD
+            from net.unit import view as V
+            P = self.setup.P
+            ru = V.raw(st, self.units.spacing, leash=self.units.leash.on, missile=P.sim["missile"])
+            r_, tg_, on_, cd_ = LD.lord_inputs_sim(st, P, ru)
+            px, pz, h, ok = self.lexe.peek_post(r_, tg_, on_, cd_, st.t.float(), ~st.done & self.has_lord,
+                                                cmd=self.wrap.lord_cmd(), members=self.mine)
+            self.wrap.posts(px, pz, h, ok)
         self.wrap.tick(raw, self.setup.card, self.bounds, now=float(st.t.float().max()), sim=st)
         self.units.write(self.tac)
         self._measure()
@@ -596,7 +637,7 @@ class TacticSide(UnitSide):
 
 def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None, watch_cls=None, seeds=None,
                 full=False, by_limit=False, on_chunk=None, chunk_args=False, battles=None, enemy=None,
-                lord_player=None):
+                lord_player=None, group_player=None):
     """(measures {name: [B]}, stats) of stage 0's general battles of the unit level (play_units' battles and enemies)
     with my side through the tactic level (TacticSide) under player() - a factory of a fresh player of tactic/pin.py
     each batch (its memory starts anew); watch_cls - a watch.Watch subclass (watch.PinWatch for the drill's events).
@@ -610,7 +651,9 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
     (specs.drill_general, tactic/scenes) and worn starts go to TacticSide. battles(batch) - the battles of a batch
     (None: unit_battles; scene_battles for tactic/scenes' specs), enemy(batch, device) - its enemy side (None: Scripts
     of the specs' scripts; SceneEnemy for scenes). lord_player - a factory of a fresh lord player each batch (or a
-    tactic/lordtac.PLAYERS name; None: none, or config lord_player under lord mode 'tactic')."""
+    tactic/lordtac.PLAYERS name; None: none, or config lord_player under lord mode 'tactic'). group_player - lord mode
+    'group': a factory of the lord's group's player each batch (group_player(ii) with chunk_args; None: a copy of the
+    player's state, tactic/side.group_copy)."""
     assert all(s["enemy"] != "chain" for s in specs), "the unit level's general battles: script enemies only"
     assert all(len(s["mine"]) <= PER_SIDE - 1 and len(s["theirs"]) <= PER_SIDE - 1 for s in specs), "<= 8 units a side"
     parts, total = {}, {"battles": 0, "wall_s": 0.0}
@@ -633,7 +676,9 @@ def play_tactic(specs, player, P, device, hygiene=True, chunk=512, compile=None,
                           worn=worn if any(w is not None for w in worn) else None,
                           fearless=fear if any(f is not None for f in fear) else None,
                           lord_player=lord_player if lord_player is None or isinstance(lord_player, str)
-                          else lord_player())
+                          else lord_player(),
+                          group_player=None if group_player is None else
+                          (group_player(ii) if chunk_args else group_player()))
         foe = Scripts([s["enemy"] for s in batch], device) if enemy is None else enemy(batch, device)
         wk = {"ii": ii} if chunk_args else {}
         watch = (watch_cls or W.Watch)(P, cfg()["general"], chain=mine, **wk)

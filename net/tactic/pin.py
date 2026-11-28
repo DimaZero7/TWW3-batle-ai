@@ -3,7 +3,7 @@ the facts of the teacher's rule and the players - each a callable in the place o
 returning the level's output for a tick (tactic/orders.py: module doc). They read the level's input only (orders.Facts:
 the rows and the orders in force); the code's masks (orders.masks) stand over all of them.
 
-    pinned(fx)   [R, K] valid(e), in melee, its speed under scripts.APPROACH_MS, and a standing unit of mine in melee
+    pinned(fx)   [R, K] valid(e), in melee, its speed under scripts.APPROACH_MS, and a standing unit of ours (fx.ours) in melee
                  whose formation is within scripts.TOUCH_M of e's
     K            keep everything; a unit that must change (no frame, or the code's causes) holds at the open cell nearest it
     T            the teacher (design section 2): in slot order - in melee: keep; forced: attack the nearest e of cand(i)
@@ -65,7 +65,7 @@ RECALL_M = 30.0                      # T_recall: farther than this from its targ
 def pinned(fx, speed=True, touch=None):
     """[R, K] (module doc); speed False: without the speed rule on e (A1's); touch - the edge gap of 'touches', m (None:
     scripts.TOUCH_M, 4 m - every player but TEACH and every measure column: cell, unpinned_attacks)."""
-    hold = fx.mine & ~fx.r & fx.m                                                   # [R, K] my units in melee
+    hold = fx.ours & ~fx.r & fx.m          # [R, K] the witnesses in melee: my units; an anchored row's - the other groups'
     touch = hold[:, :, None] & (fx.gap <= (SC.TOUCH_M if touch is None else float(touch)))     # [R, a, e]
     slow = (fx.speed < SC.APPROACH_MS) if speed else torch.ones_like(fx.valid)
     return fx.valid & fx.m & slow & touch.any(1)

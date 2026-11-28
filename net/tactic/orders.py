@@ -86,7 +86,7 @@ class Facts:
     """The level's facts at a tick (module doc). Rows k of rr [R, K]; my units g in slot order [R, G] (ctx.rows: their
     row). order {skill, tgt, side} [R, G] the orders in force (tgt: the battle's slot)."""
 
-    def __init__(self, rr, ctx, order):
+    def __init__(self, rr, ctx, order, bind=None, lord_ok=None):
         from sim import geometry
         c = cfg()
         x = rr["rows"]
@@ -111,6 +111,15 @@ class Facts:
         self.mine = (who == RW.OWN_GROUP) & self.mask
         self.enemy = ((who == RW.ENEMY_TARGET) | (who == RW.ENEMY_OTHER)) & self.mask
         self.valid = self.enemy & ~self.r & ~self.lord                          # [R, K] valid(e)
+        # ours: pin.pinned's witnesses of 'bound by ours' - my units (as before); an anchored group's row (bind [R]): the
+        # other own groups' units (stage 0: the anchor's infantry), never the anchored unit itself. bind: only the
+        # enemies of its parcel's target mask are valid (lower.Tacticians module doc)
+        self.ours = self.mine
+        if bind is not None:
+            self.ours = torch.where(bind[:, None], (who == RW.OWN_OTHER) & self.mask, self.mine)
+            if lord_ok is not None:     # (an anchored row whose parcel admits the enemy lord: its mask decides)
+                self.valid = self.valid | (self.enemy & ~self.r & self.lord & lord_ok[:, None])
+            self.valid = self.valid & (~bind[:, None] | (who == RW.ENEMY_TARGET))
         self.gap = geometry.rect_gap(self.s, self.f, self.b, self.front, self.depth)       # [R, K, K]
         self.dist = torch.sqrt((self.s[:, :, None] - self.s[:, None, :]) ** 2 + (self.f[:, :, None] - self.f[:, None, :]) ** 2)
         # my units g -> their rows

@@ -10,7 +10,7 @@
 | `lua/entries/*` | 6 входов: `nn_arena` (бой цепочки, человека, ИИ против ИИ), `charge/missile/morale_probe` (пробы механик), `map_capture` (снять карту), `move_probe` (путь) |
 | `build.py`, `pack/` | `python -m bridge.build <цель>`: Lua в один скрипт и `.pack` в `build/<цель>/` (цели `nn-arena human charge-probe missile-probe morale-probe map-capture move-probe`) |
 | `launcher/` | `launch.ps1`: ставит пак в `data/` игры, «Нормальная», графика (`BAI_GRAPHICS`), запуск, уборка; `watch.ps1` — бой с помощником |
-| `companion/` | помощник (образ `snake-ai-trainer`): `--chain` (оперативник → тактики → сеть отряда; с `--chain-tactic` чекпойнта `tactic_v2` — «только тактик», `tactic_chain.py`: сеть тактика, скрипт отряда, одна группа), `--strategist` (расстановка; файл `.json` — переключатель мест: пехота на линии файла, `deploy.LinePlace`); сети — через `net.<уровень>.ckpt` |
+| `companion/` | помощник (образ `snake-ai-trainer`): `--chain` (оперативник → тактики → сеть отряда; с `--chain-tactic` чекпойнта `tactic_v2` — «только тактик», `tactic_chain.py`: сеть тактика, скрипт отряда, одна группа; с BAI_LORD_SCRIPT=T BAI_LORD_MODE=group — лорд группой из одного при пехоте), `--strategist` (расстановка; файл `.json` — переключатель мест: пехота на линии файла, `deploy.LinePlace`); сети — через `net.<уровень>.ckpt` |
 | `config.py`, `config/` | папка игры (`local.json` вне git поверх `default.json`), обязательный мод True Sight, memreader, планы `move-probe` |
 | `scenarios/` | файлы боя: `nn_arena.xml` (арена `sim/arena.py`), `map_capture.xml`, `move_probe.xml`, `lord_swarm.xml` (основа проб) |
 

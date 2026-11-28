@@ -14,7 +14,13 @@
                  config orders.lord.gate 'contact': on only from our group's first melee; l_busy - the executor steps
                  out), View.lord = lordtac.facts after the CANCEL hygiene, the player's request under lordtac.masks,
                  the counts lord_*; lord_drop(mask, code) - the executor's drops mirrored on the same tick. Off (no
-                 lord player): the infantry's path is bit for bit as before
+                 lord player): the infantry's path is bit for bit as before.
+                 An anchored group (groups.Groups.anchor >= 0: our lord as a group of one, tactic/side.Side group mode)
+                 is an ordinary row under the same player and the same order store; its parcel's target mask binds:
+                 only enemies in the mask are valid for it (orders.Facts bind; an empty mask - it can only keep), and
+                 its order on a target that left the mask ends (ended_off_mask). tick(rows=) ticks a subset of rows (the
+                 caller's raw for them); a tick of anchored rows only keeps its View as view_lord, its counts as
+                 'grp_<name>' (counts())
     Units       the unit network's second (as tactic/env.play): the frames -> the units' areas (a shooter's fire
                  sector forward along the zone), the order with the stage by code, the latency, the leash
 """
@@ -97,6 +103,10 @@ class Tacticians:
         self.l_contact = torch.zeros(B, dtype=torch.bool, device=device)
         self.l_busy = torch.zeros(B, dtype=torch.bool, device=device)
         self.lcnt = {}
+        self.anchor = torch.full((R,), -1, dtype=torch.long, device=device)
+        self.view_lord = None
+        self.lord_ok = torch.zeros(R, dtype=torch.bool, device=device)   # (an anchored row may target the enemy lord)
+        self.by_battle = False                 # (View.idx by battle: tactic/side.Side group mode sets it)
 
     def lord_start(self, slot):
         """slot [B] each battle's lord (-1 none)."""
@@ -146,6 +156,7 @@ class Tacticians:
         self.mine = torch.where(t[:, None], mem, self.mine & self.active[:, None])
         self.target = torch.where(t[:, None], groups.target.reshape(self.R, self.N), self.target)
         self.seed = torch.where(t, groups.seed.reshape(-1), self.seed)
+        self.anchor = torch.where(t, groups.anchor.reshape(-1), self.anchor)
         for k in ("cx", "cz", "heading"):
             setattr(self, k, torch.where(t, getattr(groups, k).reshape(-1), getattr(self, k)))
         self.line = torch.where(t, groups.line.reshape(-1), self.line)
@@ -209,14 +220,18 @@ class Tacticians:
         self.tmask[idx] = tiles.mask
         return tiles
 
-    def tick(self, raw, card, bounds=None, now=None, sim=None, lord_raw=None):
+    def tick(self, raw, card, bounds=None, now=None, sim=None, lord_raw=None, rows=None):
         """The tacticians' decision (every 5 s): the frames of the active rows (per slot); with a player also the orders
         (now: the battle's second; None - this level's own clock, decide_s a tick). raw, card and bounds go on the
         player's View; for a player with needs_input also inputs.build with them and the areas of the frames in force.
-        lord_raw: the raw state with our lord NOT hidden (the lord's facts; used only with a lord player)."""
+        lord_raw: the raw state with our lord NOT hidden (the lord's facts; used only with a lord player). rows [R] bool:
+        only these rows tick (module doc; None - all)."""
         now = self.clock if now is None else float(now)
         self.clock = now + float(tcfg()["decide_s"])
-        idx = (self.active & self.mine.any(1)).nonzero()[:, 0]
+        on = self.active & self.mine.any(1)
+        if rows is not None:
+            on = on & rows.to(self.dev)
+        idx = on.nonzero()[:, 0]
         if idx.numel() == 0:
             return
         if self.player is not None:
@@ -237,7 +252,7 @@ class Tacticians:
             out = TC.drive(ctx.mine_raw, ctx.able, tiles)
         else:
             areas = U.world(prev, tiles) if has_prev else None
-            inp = TIN.build(raw, card, p, tiles, areas, bounds=bounds, rows=K)
+            inp = TIN.build(raw, card, p, tiles, areas, bounds=self._bounds_of(bounds, idx), rows=K)
             out, _, ctx = self.net(inp, self.order[idx], p, tiles, prev=prev if has_prev else None, greedy=self.greedy)
         self.fell += float(out["fell"].sum())
         self.ticks += r
@@ -251,6 +266,13 @@ class Tacticians:
         cur = self.fr_on[idx]
         cur[k.expand_as(s0)[my >= 0], s0[my >= 0]] = (on | prev["on"])[my >= 0]
         self.fr_on[idx] = cur
+
+    def _bounds_of(self, bounds, idx):
+        """The battles' bounds for the rows idx: a per-battle tensor [B] gathered by the rows' battles (fewer rows than
+        battles: some groups off); a number or None as given."""
+        if torch.is_tensor(bounds) and bounds.dim() == 1 and bounds.numel() == self.B and bounds.numel() > 1:
+            return bounds.to(self.dev)[self.bi[idx]]
+        return bounds
 
     def _count(self, name, idx, v):
         """self.cnt[name] [R] += v [r] (summed over its last axis when 2-D)."""
@@ -280,7 +302,7 @@ class Tacticians:
             # a player reading the level's whole input (pin.NetPlayer): inputs.build with the battle's bounds and the
             # personal areas of the frames in force, as the net path above; its rows are rows.build's (the same call)
             areas = U.world(prev, tiles) if has_prev else None
-            inp = TIN.build(raw, card, p, tiles, areas, bounds=bounds, rows=K)
+            inp = TIN.build(raw, card, p, tiles, areas, bounds=self._bounds_of(bounds, idx), rows=K)
             rr = inp
         else:
             rr = RW.build(raw, card, p, tiles, rows=K)
@@ -306,7 +328,17 @@ class Tacticians:
             order["skill"] = torch.where(out_me, torch.zeros_like(order["skill"]), order["skill"])
             order["tgt"] = torch.where(out_me, torch.full_like(order["tgt"], -1), order["tgt"])
             self._count("striker_routed", idx, out_me & (order["tgt"] >= -1))
-        fx = OR.Facts(rr, ctx, order)
+        bind = self.anchor[idx] >= 0
+        if bool(bind.any()):
+            # an anchored group's parcel binds its targets (module doc): an order on a target outside the mask ends
+            tc = order["tgt"].clamp(min=0)
+            off = on_my & bind[:, None] & (order["tgt"] >= 0) & ~self.target[idx].gather(1, tc)
+            order["tgt"] = torch.where(off, torch.full_like(order["tgt"], -1), order["tgt"])
+            self._count("ended_off_mask", idx, off)
+        else:
+            bind = None
+        lord_ok = None if bind is None else (bind & self.lord_ok[idx])
+        fx = OR.Facts(rr, ctx, order, bind=bind, lord_ok=lord_ok)
         # ticks in melee (self.mt): this tick counts; the rows read it as fx.mt [r, K]
         seen_m = torch.zeros((r, self.N + 1), dtype=torch.bool, device=self.dev)     # (column N: the empty rows)
         on_m = rr["mask"] & (rr["rows"][..., RW.RI["m"]] > 0.5)
@@ -319,11 +351,27 @@ class Tacticians:
         hole = not bool(tcfg()["orders"]["hole_fits"])
         must = cause["first"] | cause["zone"] | (cause["hole"] if hole else torch.zeros_like(cause["hole"]))
         melee = fx.g_m
+        if bind is not None:
+            # (an anchored row: 'in melee' is the executor's engaged - its m, or a standing enemy within
+            # scripts.TOUCH_M of it edge to edge (net/unit/lord.engaged_of): the level never stores an attack the
+            # executor would defer)
+            from net.unit import scripts as SC
+            shat = rr["rows"][..., RW.RI["s"]] > 0.5
+            foe = fx.enemy & ~fx.r & ~shat                                         # [r, K]
+            eng = ((fx.g_gap <= SC.TOUCH_M) & foe[:, None, :]).any(2) & fx.able     # [r, G]
+            melee = torch.where(bind[:, None], melee | eng, melee)
         exempt = fx.striking | (melee if self.hygiene else torch.zeros_like(melee))
         must = must & ~exempt
-        view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now, idx, self.hygiene, raw=S,
+        # (View.idx: the level's rows; by_battle (tactic/side.Side group mode, each group ticked apart) - the rows'
+        # battles, so the infantry's players and readers key as with one group a battle; View.row the rows, View.grp
+        # their groups)
+        view = OR.View(rr, ctx, tiles, fx, order, must, exempt, melee, cause, now,
+                       self.bi[idx] if self.by_battle else idx, self.hygiene, raw=S,
                        card=None if card is None else card[self.bi[idx]], bounds=bounds, sim=sim, inp=inp,
                        command=self.order[idx], parcel=p)
+        view.row = idx
+        if self.by_battle:
+            view.grp = self.gi[idx]
         if self.lord_player is not None and lord_raw is not None:
             self._lord_tick(view, fx, lord_raw, idx, now)
         out = self.player(view)
@@ -360,8 +408,12 @@ class Tacticians:
             cur = getattr(self, name)[idx]
             cur[sel] = v[on_my]
             getattr(self, name)[idx] = cur
-        self.view = {"view": view, "skill": skill, "tgt": tgt, "side": side, "change": change, "new_attack": new_att, "bi": bi,
-                     "my": my, "approach": approach, "lord": view.lord}
+        rec = {"view": view, "skill": skill, "tgt": tgt, "side": side, "change": change, "new_attack": new_att, "bi": bi,
+               "my": my, "approach": approach, "lord": view.lord}
+        if bind is not None and bool(bind.all()):
+            self.view_lord = rec              # (a tick of anchored rows only: the infantry's view stays the last one)
+        else:
+            self.view = rec
 
     def _lord_tick(self, view, fx, lord_raw, idx, now):
         """Our lord's tick (module doc): one row a battle (its first active group's), before the infantry's player -
@@ -422,7 +474,12 @@ class Tacticians:
 
     def counts(self):
         """{name: [B]} the level's counts (self.cnt) summed over each battle's rows; the lord's (lcnt, per battle)."""
-        out = {n: v.view(self.B, self.G).sum(1) for n, v in self.cnt.items()}
+        anc = (self.anchor >= 0).float()
+        out = {}
+        for n, v in self.cnt.items():
+            out[n] = (v * (1 - anc)).view(self.B, self.G).sum(1)
+            if bool((anc > 0).any()):
+                out["grp_" + n] = (v * anc).view(self.B, self.G).sum(1)
         out.update(self.lcnt)
         return out
 

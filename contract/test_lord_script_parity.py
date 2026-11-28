@@ -31,6 +31,10 @@ documents' raw, its lord store's target fed to both executors each second (the b
 of the document's raw as the bridge's 'engaged', the torch executor's drop mirrored into the store (and the bridge's
 drop must be the same); buttons off in both (the button classes above are the t2 mode's). The same lines: agreement
 (kind, target, point, drop) >= 0.98 of >= 2000 ticks from >= 6 runs, no 'other'.
+
+The group mode (the lord a group of one anchored to the infantry, tactic/side.Side group mode): the same, the command
+the lord's row's target in the common order store under the infantry's player T (no lord player), both executors given
+the anchor's members; the same lines.
 """
 import json
 import math
@@ -291,3 +295,134 @@ def test_the_tactic_mode_sim_equals_bridge():
     assert len(per) >= MIN_RUNS and ticks >= TICKS
     assert cmds > 0, "no LT command in the replay: the tactic mode not exercised"
     assert agree / ticks >= SHARE, (agree, ticks)
+
+
+def replay_group(run, drop_m_every=0):
+    """Per tick {ok, why, tick, cmd, bridge, torch} of one run in mode group: the lord a group of one anchored to the
+    infantry (tactic/side.Side group mode, the infantry player T - its attacks of the bound enemies give the lord's row
+    its commands from the common order store). Two independent Sides - one fed by the bridge's LordScript
+    (tactic_chain.group_mirror, its peek_post), one by the torch executor (its drops, busy, post, peek_post) - each
+    with its own per-second Side.second; a tick agrees when both executors' decisions agree and both Sides' commands,
+    masks, busy flags and posts agree. drop_m_every k > 0: every k-th document has the lord's m taken away (unread) -
+    the bridge keeps 'melee unread', the torch executor gets m_known False."""
+    import copy as _copy
+    import torch
+    from bridge.companion import lord_script as LS
+    from bridge.companion import tactic_chain as TCH
+    from bridge.companion import tactic_input as TI
+    from net.tactic import pin as PN
+    from net.tactic import raw as TR
+    from net.tactic import side as TS
+    from net.unit import lord as L
+    from sim import orders as O
+    kind_of = {"keep": O.KEEP, "move": O.MOVE, "attack": O.ATTACK, "withdraw": O.WITHDRAW, "hold": O.HOLD}
+    rows = [(d, real, rep) for d, real, rep in rebuild(run) if rep is not None]
+    d0 = rows[0][0]
+    names = [u["n"] for u in d0["units"]]
+    keys = [u.get("key") or "" for u in d0["units"]]
+    ls = LS.LordScript(names, keys, [int(u["side"]) for u in d0["units"]], mode="group", buttons=False)
+    li = names.index(ls.lord)
+    seer = TI.TacticSeer(device="cpu", allow_flat=True)
+    ex = L.T2(torch.tensor([li]), [keys[li]], L.rank_of_names(names), "cpu", buttons=False, mode="group")
+    sb = st = None
+    nxt, out, members, mine = None, [], None, None
+    one = torch.ones(1, dtype=torch.bool)
+    f = lambda v: torch.tensor([float(v)])                                                # noqa: E731
+    for j, (doc, real, rep) in enumerate(rows):
+        if drop_m_every and j % drop_m_every == 0:
+            doc = _copy.deepcopy(doc)
+            for u in doc["units"]:
+                if u["n"] == ls.lord:
+                    u.pop("m", None)
+        lrow = {u["n"]: u for u in doc["units"]}.get(ls.lord) or {}
+        m_known = torch.tensor([lrow.get("m") is not None])
+        r = seer.raw(doc)
+        sec = int(round(doc["t"] / 1000.0))
+        if sb is None:
+            x, z, b, mine, hide = TS.of_raw(r, seer.card, 1)
+            hide = torch.zeros_like(hide)
+            hide[0, li] = True
+            mine = mine & ~hide
+            members = [n for i, n in enumerate(names) if bool(mine[0, i])]
+            sb = TS.Side(PN.player("T"), True, "cpu", group=True).start(x, z, b, mine, hide)
+            st = TS.Side(PN.player("T"), True, "cpu", group=True).start(x, z, b, mine, hide)
+            nxt = sec
+        raw, tgt, a_on, a_cd = L.lord_inputs_doc(doc, names, r)
+        eng = bool(L.engaged_of(r[..., :TR.BASE], torch.tensor([li]), 1)[0])
+        tv = torch.tensor([doc["t"] / 1000.0])
+        if sec >= nxt:
+            cb = int(sb.lord_cmd()[0])
+            post, h = ls.peek_post(doc, cmd=names[cb] if cb >= 0 else None, engaged=eng, members=members)
+            if post is not None and h is not None:
+                sb.posts(f(post[0]), f(post[1]), f(h), one)
+            st.posts(*ex.peek_post(raw, tgt, a_on, a_cd, tv, one, cmd=st.lord_cmd().clone(), members=mine))
+            sb.tick(r, seer.card, seer.P.map_half, now=float(sec))
+            st.tick(r, seer.card, seer.P.map_half, now=float(sec))
+            while nxt <= sec:
+                nxt += 5
+        sb.second(r, seer.card)
+        st.second(raw, seer.card)
+        c = int(sb.lord_cmd()[0])
+        cmd = names[c] if c >= 0 else None
+        lines = [o for o in rep["orders"] if not o.get("out")]
+        lo, _ = ls.decide(doc, lines, cmd=cmd, engaged=eng, members=members)
+        ls.commit(ls.lord in {o["unit"] for o in lines})
+        TCH.group_mirror(sb, ls)
+        kinds = torch.full((1, len(names)), O.KEEP, dtype=torch.long)
+        for o in lines:
+            kinds[0, names.index(o["unit"])] = kind_of[o["kind"]]
+        d = ex.decide(raw, tgt, a_on, a_cd, kinds, tv, one, cmd=st.lord_cmd().clone(), members=mine, m_known=m_known)
+        for code in (L.DROP_GONE, L.DROP_STEP):
+            st.lord_drop(ex.drop == code, L.DROP_NAMES[code])
+        st.busy = ex.busy.clone()
+        st.posts(ex.lpx, ex.lpz, ex.h, ex.has_lpost & ex.has_h)
+        k = int(d["kind"][0])
+        b_ = {"kind": kind_of[lo["kind"]], "target": lo.get("target"), "p": (lo["x"], lo["z"]) if "x" in lo else None,
+              "drop": ls.drop}
+        t_ = {"kind": k, "target": names[int(d["target"][0])] if k == O.ATTACK else None,
+              "p": (float(d["x"][0]), float(d["z"][0])) if k in (O.MOVE, O.WITHDRAW) else None,
+              "drop": None if int(ex.drop[0]) == L.DROP_NONE else L.DROP_NAMES[int(ex.drop[0])]}
+        ok = b_["kind"] == t_["kind"] and b_["target"] == t_["target"] and b_["drop"] == t_["drop"]
+        if ok and b_["p"] is not None:
+            ok = math.hypot(b_["p"][0] - t_["p"][0], b_["p"][1] - t_["p"][1]) <= POINT_M
+        why = None if ok else "other"
+        same = (int(sb.lord_cmd()[0]) == int(st.lord_cmd()[0]) and bool(sb.busy[0]) == bool(st.busy[0])
+                and torch.equal(sb.mask, st.mask))
+        if ok and not same:
+            ok, why = False, "sides"
+        out.append({"t": doc["t"] / 1000.0, "tick": LS.standing(lrow or None), "ok": ok, "why": why, "cmd": cmd,
+                    "bridge": b_, "torch": t_, "unread": not bool(m_known[0])})
+    return out
+
+
+def test_the_group_mode_sim_equals_bridge():
+    """Mode group (replay_group, the tactic mode's lines): agreement >= 0.98 of >= 2000 ticks of >= 6 runs, the
+    store's command exercised."""
+    runs = _have()
+    ticks = agree = cmds = drops = 0
+    per = {}
+    for run in runs:
+        recs = [r for r in replay_group(run) if r["tick"]]
+        per[run.name] = (sum(r["ok"] for r in recs), len(recs))
+        ticks += len(recs)
+        agree += sum(r["ok"] for r in recs)
+        cmds += sum(r["cmd"] is not None for r in recs)
+        drops += sum(r["torch"]["drop"] is not None for r in recs)
+    print(json.dumps({"mode": "group", "ticks": ticks, "agree": agree, "share": round(agree / ticks, 4),
+                      "runs": len(per), "ticks_with_command": cmds, "drops": drops, "per_run": per}))
+    assert len(per) >= MIN_RUNS and ticks >= TICKS
+    assert cmds > 0, "no command from the lord's group row in the replay: mode group not exercised"
+    assert agree / ticks >= SHARE, (agree, ticks)
+
+
+def test_the_group_mode_with_unread_melee():
+    """Mode group, every 7th document without the lord's m (unread): the bridge keeps 'melee unread', the torch
+    executor (m_known False) the same - agreement >= 0.98 on the unread ticks of the runs."""
+    runs = _have()
+    n = ok = 0
+    for run in runs:
+        recs = [r for r in replay_group(run, drop_m_every=7) if r["tick"] and r["unread"]]
+        n += len(recs)
+        ok += sum(r["ok"] for r in recs)
+    print(json.dumps({"mode": "group_unread_m", "ticks": n, "agree": ok}))
+    assert n > 0 and ok / n >= SHARE, (ok, n)

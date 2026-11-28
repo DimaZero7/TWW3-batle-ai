@@ -60,6 +60,9 @@ class O1Side(BA.TacticSide):
 
     def __init__(self, tactic_player, op_player, specs, seed=None, zones=None, recorder=None, shadow=None, visible=None):
         super().__init__(tactic_player, hygiene=True, zones=zones, seed=seed)
+        if self.lord_mode == "group":
+            raise NotImplementedError("stage0.json lord_script 'group': the operative's side reads the tactic level as "
+                                      "one group a battle - not built for the lord's group (tactic level only)")
         # (visible: the level's facts on the SEEN foes only - the network's input is built from them (Astra's o1 review
         # 1: the teacher must see what the network sees); None - o1.visible (False: the legacy exams' teacher))
         self.visible = visible

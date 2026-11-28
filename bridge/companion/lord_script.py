@@ -67,6 +67,8 @@ modes (LordScript(mode=); net/unit/lord.py's T2 the same rules, contract/test_lo
               target is the command's (dropped at once unseen / down: self.drop 'gone'; no GRACE_S); no command -> the
               post; the step-out drops the command (self.drop 'step_out'); 'in melee' is engaged (the caller's
               net/unit/lord.engaged_of: his m or an edge gap <= TOUCH_M to a seen standing enemy), not m alone
+    group     the rules of tactic, the post re-sent only past GROUP_REORDER_M (no run-in re-send); the command is the level's common order store (his group's row, tactic/side.Side
+              group mode), the post and the pair from the anchor group's members (decide(members=their names))
 buttons: LordScript(buttons=) - None: BAI_LORD_PRESS as before.
 
 _why: AURA_M 35 - the passports' range_m (sim/config/abilities.json, the game's database; centre to centre: sim/evidence/
@@ -93,9 +95,13 @@ from net.cards import passport
 from sim import abilities as sim_abilities
 
 ARMS = ("T",)
-MODES = ("post", "t2", "tactic")
+MODES = ("post", "t2", "tactic", "group")
 POST_BACK_M, POST_MIN_M = 20.0, 10.0
 REORDER_M = 5.0
+# mode group: the post MOVE is re-sent only past the threshold every other order of ours is re-given at
+# (net/common/reissue.MOVE_M 8 m, METHOD 'Уровень'; game/vision's 'a new order') - not past ADV_REORDER_M on the run-in:
+# an idle lord at his post got 4.8 orders a minute against 1.6 attacking (the orchestrator's run of 28.11)
+GROUP_REORDER_M = 8.0
 RUN_FAR_M = 15.0
 AURA_M = 35.0
 SYG_MIN = 2
@@ -455,13 +461,22 @@ class LordScript:
         self._follow(doc, {u["n"]: u for u in doc["units"]}, doc.get("t", 0) / 1000.0, note)
         return note
 
+    def peek_post(self, doc, cmd=None, engaged=None, members=None):
+        """(post (x, z) or None, heading) this document's decision would set (the orders of our other units as in
+        force), this script left as it was - mode group: his group's zone at the tactic tick is the post of the tick's
+        own second (net/unit/lord.T2.peek_post the same)."""
+        c = copy.deepcopy(self)
+        c.decide(doc, (), cmd=cmd, engaged=engaged, members=members)
+        return c.last_post, c.heading
+
     # -- one decision
-    def decide(self, doc, orders=(), cmd=None, engaged=None):
+    def decide(self, doc, orders=(), cmd=None, engaged=None, members=None):
         """-> (the lord's order dict (exchange.orders_list's form; kind 'keep': none new), [at most one ability use])
         for one state document; orders: this reply's lines for our units (the chain's, before the lord's is replaced:
         the run-in's onset). self.note: the decision's record (the companion's log row 'lord'). Then commit().
         Mode tactic: cmd - the tactic level's target (a name, None none), engaged - net/unit/lord.engaged_of of the
-        document's raw (bool); self.drop - the command dropped here ('gone', 'step_out') or None."""
+        document's raw (bool); self.drop - the command dropped here ('gone', 'step_out') or None. Mode group: the
+        same; members - the anchor group's names (None: every own unit)."""
         self.drop = None
         for o in orders or ():
             if o.get("unit") != self.lord and o.get("kind") not in (None, "keep"):
@@ -481,10 +496,12 @@ class LordScript:
             note["ph"] = "down"
             return keep, []
         inf = [u for u in doc["units"] if int(u.get("side", 0)) == self.own and u["n"] != self.lord and standing(u)]
+        if members is not None:
+            inf = [u for u in inf if u["n"] in members]
         foes = [u for u in doc["units"] if int(u.get("side", 0)) != self.own and u.get("v") is True and standing(u)]
         hp = float(lord["hp"]) if fin(lord.get("hp")) else None
         melee = lord.get("m")
-        if self.mode == "tactic" and engaged:
+        if self.mode in ("tactic", "group") and engaged:
             melee = True                                 # (the contact gap, module doc 'modes')
         if self.contact_t is None and any(u.get("m") is True for u in inf):
             self.contact_t = t
@@ -510,11 +527,11 @@ class LordScript:
             note["ph"] = "melee" if melee is True else "melee_unread"      # hygiene: no new order in melee
             if self.mode == "t2":
                 self._keep_target(lord, rows, inf, t, note)
-            elif self.mode == "tactic":
+            elif self.mode in ("tactic", "group"):
                 self._take_cmd(rows, cmd, note)
         else:
             order = self._move_or_fight(lord, rows, inf, foes, post, t, note, cmd)
-        if self.mode == "tactic" and (self.step is not None or self.out):
+        if self.mode in ("tactic", "group") and (self.step is not None or self.out):
             if cmd is not None:
                 self.drop = "step_out"
             self.target = None
@@ -615,7 +632,7 @@ class LordScript:
 
     def _move_or_fight(self, lord, rows, inf, foes, post, t, note, cmd=None):
         keep = {"unit": self.lord, "kind": "keep"}
-        if self.mode == "tactic":
+        if self.mode in ("tactic", "group"):
             has = self._take_cmd(rows, cmd, note)
         elif self.mode == "post":
             has = False
@@ -656,7 +673,11 @@ class LordScript:
         lp = self.last_point
         if self.kind == "move" and lp is not None:
             moved = math.hypot(post[0] - lp[0], post[1] - lp[1])
-            if moved > REORDER_M or ((self.advance or self.led) and moved > ADV_REORDER_M):
+            if self.mode == "group":
+                again = moved > GROUP_REORDER_M          # (mode group: the infantry frame's re-issue threshold)
+            else:
+                again = moved > REORDER_M or ((self.advance or self.led) and moved > ADV_REORDER_M)
+            if again:
                 return self._move(lord, post[0], post[1], self.heading, t, run_in=self.advance)
             if (self.move_t is not None and t - self.move_t >= STUCK_S and lord.get("mv") is not True
                     and math.hypot(float(lord["x"]) - lp[0], float(lord["z"]) - lp[1]) > ARRIVED_M):

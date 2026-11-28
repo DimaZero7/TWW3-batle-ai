@@ -35,11 +35,16 @@ modes (MODES; the bridge script's LordScript(mode=) - the same rules):
               down, and at the step-out (self.drop [B]: DROP_*; the caller mirrors it into the level's store on the
               same tick); 'in melee' (hygiene, the one-second post MOVE) is engaged_of - his melee flag OR an edge gap
               <= scripts.TOUCH_M to a seen standing enemy - not the raw flag alone (the game's flag flickers)
+    group     the lord as a group of one anchored to the infantry group (tactic/side.Side group mode): the rules of
+              tactic, the command (cmd) read from the level's COMMON order store (his row's tgt at his slot), the drops
+              cleared there (Side.lord_drop); the post and the pair from the anchor group's members (decide members);
+              the post re-sent only past LS.GROUP_REORDER_M (the frame's re-issue threshold, no run-in re-send)
 T2(lord, keys, rank, device, own=1, buttons=True, mode="t2")   lord [B] the lord's slot, keys [B] his unit key, rank
               [B, N] the slots' order numbers (the bridge's slot_no of the names; the simulator's slot index)
 T2.decide(raw [B, N, len(V.RAW)], tgt [B, N] long (-1 none, -2 a unit not in the battle's rows), a_on / a_cd [B, N, A]
               (net/tactic/raw.ARSENAL), kinds [B, N] long (this second's orders of our other units, KEEP none), t [B] s,
-              live [B], cmd [B] long (mode tactic: the commanded target's slot, -1 none)) -> the lord's decision {kind
+              live [B], cmd [B] long (mode tactic / group: the commanded target's slot, -1 none), members [B, N] bool
+              (None: every own unit - mode group passes the anchor group's)) -> the lord's decision {kind
               [B] (O.KEEP: none new), x, z, face, run, target [B], press [B] (the simulator's ability slot, -1 none),
               key [B] (index of PRIORITY, -1)}; self.ph [B] the branch (PHASES); self.drop, self.busy [B] (mode tactic)
 engaged_of(raw, li, own=1)   [B] the lord engaged (mode tactic's 'in melee'; the tactic level's lord_engaged: one code)
@@ -58,7 +63,7 @@ READY, PENDING, COOL, UNKNOWN, WALL = range(5)
 NONE = -1                                    # (kind: no order given yet - the bridge script's None)
 PHASES = ("down", "out", "stepping", "step_out", "melee", "fight", "alone", "place")
 F64 = torch.float64
-MODES = ("post", "t2", "tactic")
+MODES = ("post", "t2", "tactic", "group")
 DROP_NONE, DROP_GONE, DROP_STEP = range(3)       # (mode tactic: why the command was dropped - unseen / down, step-out)
 DROP_NAMES = ("none", "gone", "step_out")
 
@@ -195,7 +200,22 @@ class T2:
 
     # ------------------------------------------------------------------ one decision
     @torch.no_grad()
-    def decide(self, raw, tgt, a_on, a_cd, kinds, t, live, cmd=None):
+    def peek_post(self, raw, tgt, a_on, a_cd, t, live, cmd=None, members=None):
+        """(x, z, heading, ok) [B] the post this second's decision would set on this raw (the orders of our other units
+        as in force: kinds KEEP), the executor's state left as it was - mode group: his group's zone at the tactic tick
+        is the post of the tick's own second (lord_script.LordScript.peek_post the same)."""
+        import copy
+        saved = {k: (v.clone() if torch.is_tensor(v) else copy.deepcopy(v)) for k, v in vars(self).items()}
+        try:
+            kinds = torch.full(raw.shape[:2], O.KEEP, dtype=torch.long, device=raw.device)
+            self.decide(raw, tgt, a_on, a_cd, kinds, t, live, cmd=cmd, members=members)
+            out = (self.lpx.clone(), self.lpz.clone(), self.h.clone(), (self.has_lpost & self.has_h).clone())
+        finally:
+            self.__dict__.clear()
+            self.__dict__.update(saved)
+        return out
+
+    def decide(self, raw, tgt, a_on, a_cd, kinds, t, live, cmd=None, members=None, m_known=None):
         B, N = raw.shape[:2]
         dev = self.dev
         I = V.I
@@ -227,12 +247,18 @@ class T2:
         up = live & g(standing)
         ph = torch.zeros(B, dtype=torch.long, device=dev)
         inf = own & standing & ~lmask
+        if members is not None:
+            inf = inf & members.to(dev)                              # (mode group: the anchor group's members)
         foe = (side != self.own) & (side > 0) & vis & standing
         lord_m = g(m)
-        tac = self.mode == "tactic"
+        tac = self.mode in ("tactic", "group")
         if tac:
             # (mode tactic: 'in melee' by the contact gap - module doc)
             lord_m = engaged_of(raw, li, self.own) & up
+            if m_known is not None:
+                # (his melee flag unread - a bridge document without m: 'melee unread', no new order, as the bridge's
+                # LordScript - lord_m True unless the flag is known)
+                lord_m = lord_m | (up & ~m_known.to(dev))
             cmd = torch.full((B,), -1, dtype=torch.long, device=dev) if cmd is None else cmd.to(dev).long()
             self.drop = torch.zeros_like(self.drop)
         self.contact = self.contact | (up & (inf & m).any(1))
@@ -274,7 +300,9 @@ class T2:
             stepd = up & (self.step | self.out) & (cmd >= 0)
             self.drop = _w(stepd, torch.full_like(self.drop, DROP_STEP), self.drop)
             self.target = _w(up & (self.step | self.out), torch.full_like(self.target, -1), self.target)
-            self.busy = up & (self.step | self.out)
+            # (busy: stepping out or out - kept through his rout in mode group, as the bridge's LordScript keeps
+            # step / out; mode tactic as before)
+            self.busy = (self.step | self.out) & (up | (self.mode == "group"))
             self.n_drop += torch.nn.functional.one_hot(self.drop, len(DROP_NAMES)).float() * \
                 (self.drop > DROP_NONE).float()[:, None]
         self.ph = ph
@@ -501,7 +529,7 @@ class T2:
         if self.mode == "t2":
             has = self._keep_target(on, held, foe, lord_m, lt, tgt, t)
             pick = on & self.contact & ~has & (held & foe).any(1)
-        elif self.mode == "tactic":
+        elif self.mode in ("tactic", "group"):
             has = self._take_cmd(on, foe, cmd)
             pick = torch.zeros_like(on)
         else:                                       # (post: he never fights)
@@ -541,7 +569,10 @@ class T2:
         d_lord = torch.sqrt((lx - px) ** 2 + (lz - pz) ** 2)
         moved = torch.sqrt((px - self.lpt_x) ** 2 + (pz - self.lpt_z) ** 2)
         was_move = place & (self.kind == O.MOVE) & self.has_lp
-        go1 = was_move & ((moved > LS.REORDER_M) | ((self.adv | self.led) & (moved > LS.ADV_REORDER_M)))
+        if self.mode == "group":
+            go1 = was_move & (moved > LS.GROUP_REORDER_M)       # (lord_script.GROUP_REORDER_M: one threshold)
+        else:
+            go1 = was_move & ((moved > LS.REORDER_M) | ((self.adv | self.led) & (moved > LS.ADV_REORDER_M)))
         go2 = place & ~was_move & ((self.kind == O.ATTACK) | (d_lord > LS.REORDER_M))
         self._move(go1 | go2, px, pz, self.h, t, lx, lz, o, run_in=self.adv)
 

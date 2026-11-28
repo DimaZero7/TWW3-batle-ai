@@ -185,7 +185,9 @@ def _base(rnd, held):
 def _lords(sp, mine_xy, theirs_xy, away):
     """{1, 2: (x, z, b)} (config lord_back_m): mine behind my units' middle along my zone's facing; theirs beyond its
     units' middle along away (the unit vector from the scene to the enemy). A lord that plays (stage0.json
-    lord_script / enemy_lord_fights: stage0/battle.lord_back) - at the T2 post's distance instead."""
+    lord_script / enemy_lord_fights: stage0/battle.lord_back) - at the T2 post's distance instead, but only when the
+    scene is finished (_post): every draw and check of the layout sees the lord_back_m places, so a lord mode plays
+    the SAME starts as lords off (the re-exam's registry ranges) and only the lord's place differs."""
     from net.stage0 import battle as BA
     back = float(c()["lord_back_m"])
     b1, b2 = BA.lord_back(1), BA.lord_back(2)
@@ -193,10 +195,36 @@ def _lords(sp, mine_xy, theirs_xy, away):
     mz = sp["mine_zone"]
     mx, mzz = np.mean([p[0] for p in mine_xy]), np.mean([p[1] for p in mine_xy])
     a = math.radians(mz["b"])
-    l1 = (float(mx - b1 * math.sin(a)), float(mzz - b1 * math.cos(a)), float(mz["b"]))
     ex, ez = np.mean([p[0] for p in theirs_xy]), np.mean([p[1] for p in theirs_xy])
-    l2 = (float(ex + b2 * away[0]), float(ez + b2 * away[1]), _bearing(0, 0, -away[0], -away[1]))
-    return {1: l1, 2: l2}
+    at = lambda d1, d2: {1: (float(mx - d1 * math.sin(a)), float(mzz - d1 * math.cos(a)), float(mz["b"])),  # noqa
+                         2: (float(ex + d2 * away[0]), float(ez + d2 * away[1]), _bearing(0, 0, -away[0], -away[1]))}
+    sp.pop("lord_post", None)
+    if (b1, b2) != (back, back):
+        sp["lord_post"] = at(b1, b2)
+    return at(back, back)
+
+
+def lord_spot(mp, post, home, step=5.0):
+    """(x, z, b) where a playing lord stands: post if he can stand there, else the first point that can on the way from
+    post to home (step m apart), else home (the place the layout was checked with)."""
+    if post is None or tuple(post) == tuple(home):
+        return tuple(home)
+    d = math.hypot(home[0] - post[0], home[1] - post[1])
+    n = max(int(d // step), 0)
+    for i in range(n + 1):
+        f = i * step / d if d > 0 else 0.0
+        p = (post[0] + f * (home[0] - post[0]), post[1] + f * (home[1] - post[1]), post[2])
+        if can_stand(mp, *p):
+            return (float(p[0]), float(p[1]), float(p[2]))
+    return tuple(home)
+
+
+def _post(sp):
+    """A finished scene's lords moved to their posts (_lords' doc; no lord mode: nothing - sp as it was)."""
+    post = sp.pop("lord_post", None)
+    if post:
+        sp["lords"] = {s: lord_spot(sp["map"], post.get(s), sp["lords"][s]) for s in sp["lords"]}
+    return sp
 
 
 def _keys(rnd, fac, n, held):
@@ -890,7 +918,12 @@ TWINS = {"N1": (twin_n1, ("A1", "A2", "A3", "A6")), "N2": (lambda b, r: twin_own
 
 def make(recipe, seed, held=None, bases=None):
     """One scene of any recipe: a cause recipe (A1-A6), a late twin (A4L, A5L), a twin of a cause scene of the same
-    seed (N1, N2, E1, E3 - their base recipe drawn from the seed among TWINS' bases) or E2 far."""
+    seed (N1, N2, E1, E3 - their base recipe drawn from the seed among TWINS' bases) or E2 far. Playing lords at their
+    posts (_lords, _post) - placed last, the layout unchanged."""
+    return _post(_make(recipe, seed, held, bases))
+
+
+def _make(recipe, seed, held=None, bases=None):
     if recipe == "A1":
         sp = a1(seed, held)
         sp["roles"] = {k: ([v] if v >= 0 else []) if isinstance(v, int) else v for k, v in sp["roles"].items()}
@@ -908,7 +941,7 @@ def make(recipe, seed, held=None, bases=None):
     rnd = random.Random(seed * 7919 + 17)
     for t in range(int(c()["redraw"])):
         b = bases[(seed + t) % len(bases)]
-        base = make(b, seed + t * 100003, held)
+        base = _make(b, seed + t * 100003, held)
         sp = fn(base, rnd)
         if sp is not None:
             sp.update(recipe=recipe, family=recipe, twin_of=(b, int(base["seed"])), seed=int(seed), held=held)
@@ -1040,9 +1073,12 @@ def side_scene(seed, held=None, twin=False):
         if not all(can_stand(tw["map"], *sp["lords"][s]) for s in (1, 2)):
             continue
         tw["lords"] = copy.deepcopy(sp["lords"])
+        tw.pop("lord_post", None)
+        if "lord_post" in sp:
+            tw["lord_post"] = copy.deepcopy(sp["lord_post"])
         sp = tw if twin else sp
         sp.update(seed=int(seed), held=held, recipe="S2N" if twin else "S2", family="S2", s2_cause=not twin)
-        return sp
+        return _post(sp)
     raise RuntimeError(f"S2 seed {seed}: no layout in {c()['redraw']} draws")
 
 

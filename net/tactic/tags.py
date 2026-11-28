@@ -245,6 +245,7 @@ class Record:
             self._first_frames(v, out)
         T = tick(v, lab, self.lab)
         if self.hook is not None:
+            v.driver_out = out              # (the driver's output of this view: a hook's picks read it)
             self.hook(v, lab, T)
         rows = v.idx.tolist()
         keep = T["head_free"] & ~T["attack"]

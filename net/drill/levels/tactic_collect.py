@@ -16,6 +16,7 @@ runner exam_pin.run_player under tags.Record (its hook = imitate.NetBuffer, the 
 import copy
 import random
 import time
+import types
 
 import torch
 
@@ -89,7 +90,8 @@ def ShardBuffer(store, side=False, check=0):
         def __call__(self, v, T, net_driven, lab=None):
             # (additive: the label drop's T0-1 part, dropped | dc_band, kept beside the legacy 'drop' so masks.tactic_drop
             # recomputes imitate.drop_of from its parts)
-            n0, nt = len(self.pending), self.n_triv
+            grp = self.grp_of(v)
+            n0, nt = len(self.pending), (self.n_triv if not grp else self.n_triv_g.get(grp, 0))
             super().__call__(v, T, net_driven, lab)
             if len(self.pending) > n0:
                 out = self.pending[-1]
@@ -101,13 +103,17 @@ def ShardBuffer(store, side=False, check=0):
                     nt += 1
                     if nt % self.every:
                         sel[r] = False
-                assert nt == self.n_triv and int(sel.sum()) == int(out["b"].shape[0])
+                assert nt == (self.n_triv if not grp else self.n_triv_g[grp]) and int(sel.sum()) == int(out["b"].shape[0])
                 base = (T["dropped"] | T["dc_band"])[sel]
                 out["drop_base"] = LN._pad_g(base, False).cpu()
                 out["done_own"] = own_done(v)[sel].cpu()
                 if "dc_thr" not in out:                     # (drill T0-1: the through-own part kept too)
                     out["dc_thr"] = LN._pad_g(T["dc_thr"][sel], False).cpu()
-                pr, ex = picks(v, getattr(self, "seen", None))
+                # (group mode: each group's own driver output - the recorder's View.driver_out)
+                seen = getattr(self, "seen", None)
+                if grp is not None and seen is not None:
+                    seen = types.SimpleNamespace(out=getattr(v, "driver_out", None))
+                pr, ex = picks(v, seen)
                 if pr is not None:
                     out["proposed"] = LN._pad_g(pr[sel], -1).cpu()
                     out["executed"] = LN._pad_g(ex[sel], -1).cpu()

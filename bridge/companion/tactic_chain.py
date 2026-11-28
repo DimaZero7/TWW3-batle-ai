@@ -22,7 +22,10 @@ Every state document (one a battle second):
                post, tactic); tactic: the level commands him too (tactic/side.Side with a lord player,
                BAI_LORD_PLAYER - tactic/lordtac.PLAYERS, unset LT; pass 1 still gets his row hidden), the level's
                lord store's target is the script's command, the script's drops go back into the store on the same
-               second; the script's line is the last writer of the lord's order (after the operative's MOVE)
+               second; the script's line is the last writer of the lord's order (after the operative's MOVE);
+               group: our lord a group of one anchored to the infantry (tactic/side.Side group mode - the simulator's
+               TacticSide 'group'): his row under the same network and order store, its target the script's command,
+               the script's drops cleared there, its post his group's zone, its pair from the anchor's members
 A tactic_v3 checkpoint (heads.TacticNet3, drill T0-2 'side of the strike') runs the same chain: the network's approach
 goes through the level's masks into the unit's order; the record adds own() of 19, the S2 row columns, the side head's
 columns and the approach.
@@ -99,6 +102,19 @@ def _frame0(units, own):
                   "sb": u["b"].clone(), "sw": torch.zeros((B, N), device=dev), "on": own.clone()}
 
 
+def group_mirror(side, ls):
+    """Mode group, after the lord script's decision: its drop cleared in the common store (tactic/side.Side.lord_drop),
+    his step-out (busy: his group's mask empty), its post his group's zone at the next tick (Side.posts)."""
+    dev = side.tac.tgt.device
+    one = torch.ones(1, dtype=torch.bool, device=dev)
+    if ls.drop is not None:
+        side.lord_drop(one, ls.drop)
+    side.busy = torch.tensor([ls.step is not None or bool(ls.out)], device=dev)
+    if ls.last_post is not None and ls.heading is not None:
+        f = lambda v: torch.tensor([float(v)], device=dev)                       # noqa: E731
+        side.posts(f(ls.last_post[0]), f(ls.last_post[1]), f(ls.heading), one)
+
+
 class TacticChain:
     """Our side in the game under the trained tactic level (module doc). net: a heads.TacticNet2 (ckpt.restore of a
     tactic_v2 checkpoint); bounds 'map_half' (default) - the simulator's P.map_half, or a float / None."""
@@ -151,8 +167,10 @@ class TacticChain:
         if self.lord_arm is not None and self.lord_mode == "tactic":
             from net.tactic import lordtac as LT
             lp = LT.player(self.lord_player_name)
+        grp = self.lord_arm is not None and self.lord_mode == "group"
         self.side = TS.Side(PN.NetPlayer(self.net, greedy=self.greedy), self.hygiene, dev,
-                            lord_player=lp).start(x, z, b, mine, hide)
+                            lord_player=lp, group=grp).start(x, z, b, mine, hide)
+        self.members = [n for i, n in enumerate(self.names) if bool(mine[0, i])]
         N = r.shape[1]
         self.units = GameUnits(r[..., :TR.BASE], self.keys, self.card, self.P, SC.Unit(), targets=False, still=True,
                                aim=True, lords=hide)
@@ -245,6 +263,14 @@ class TacticChain:
             self.start(doc, r)
         self.times["raw_ms"] = (time.perf_counter() - t0) * 1000
         sec = int(round(float(doc.get("t", 0)) / 1000.0))
+        grp = self.lord_script is not None and self.lord_mode == "group"
+        if grp and (self.next_tac is None or sec >= self.next_tac):
+            # (mode group: his group's zone at this tick - the post of this second, the script's state kept)
+            cmd, eng = self._lord_command(r)
+            post, h = self.lord_script.peek_post(doc, cmd=cmd, engaged=eng, members=self.members)
+            if post is not None and h is not None:
+                f = lambda v: torch.tensor([float(v)], device=r.device)                   # noqa: E731
+                self.side.posts(f(post[0]), f(post[1]), f(h), torch.ones(1, dtype=torch.bool, device=r.device))
         o, _, rec = self.step(r, sec)
         col = lambda f: getattr(o, f)[0].cpu().numpy()        # noqa: E731
         side = [int(u["side"]) for u in doc["units"]]
@@ -258,9 +284,11 @@ class TacticChain:
         if self.lord_script is not None:
             # (lord_script.py) the lord's line replaced by the script's (after the Gate); its button as an `ability`
             # line; what the reply does not carry (a lord marked out) is not cached as sent (commit)
+            if self.lord_mode == "group":
+                self.side.second(r, self.card)     # (the contact latched, the command checked: Side.second)
             cmd, eng = self._lord_command(r)
-            lo, uses = self.lord_script.decide(doc, [x for x in out if x["unit"] in ctrl], cmd=cmd,
-                                               engaged=eng)                                   # (the run-in's onset)
+            lo, uses = self.lord_script.decide(doc, [x for x in out if x["unit"] in ctrl], cmd=cmd, engaged=eng,
+                                               members=self.members if self.lord_mode == "group" else None)
             self._lord_mirror()
             out = [dict(lo) if x["unit"] == self.lord_script.lord else x for x in out]
             delivered = self.lord_script.lord in ctrl
@@ -279,22 +307,26 @@ class TacticChain:
         """Mode tactic: (the level's lord target by name or None, net/unit/lord.engaged_of on this raw) - else (None,
         None)."""
         tac = self.side.tac
-        if self.lord_mode != "tactic" or getattr(tac, "lord_player", None) is None:
+        grp = self.lord_mode == "group"
+        if not grp and (self.lord_mode != "tactic" or getattr(tac, "lord_player", None) is None):
             return None, None
         from net.unit import lord as LD
         li = torch.tensor([self.names.index(self.lord_script.lord)], device=r.device)
         eng = bool(LD.engaged_of(r[..., :TR.BASE], li, self.own)[0])
-        t = int(tac.l_tgt[0])
+        t = int(self.side.lord_cmd()[0]) if grp else int(tac.l_tgt[0])
         return (self.names[t] if 0 <= t < len(self.names) else None), eng
 
     def _lord_mirror(self):
         """Mode tactic: the script's drop of the command into the level's store on the same second (BUILD_NOTES 8),
         and his step-out (not the level's while he steps out)."""
         tac = self.side.tac
+        ls = self.lord_script
+        if self.lord_mode == "group":
+            group_mirror(self.side, ls)
+            return
         if self.lord_mode != "tactic" or getattr(tac, "lord_player", None) is None:
             return
         from net.unit import lord as LD
-        ls = self.lord_script
         dev = tac.l_tgt.device
         if ls.drop is not None:
             tac.lord_drop(torch.ones(1, dtype=torch.bool, device=dev), LD.DROP_NAMES.index(ls.drop))

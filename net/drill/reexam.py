@@ -30,7 +30,8 @@ What each drill's lines read (its own exam code, its own set's recipe):
                                [--ckpt <a candidate's weights>]
 --sim-set changes sim.json's value in this process only (the cached sim.params.load() object; the file untouched).
 --lord-mode: the re-exam with lords in play - net/config/stage0.json lord_script = the mode (net/unit/lord.MODES: post -
-my lord at the T2 post, never fighting; t2 - the T2 lord script) and enemy_lord_fights on, lord_buttons by --buttons,
+my lord at the T2 post, never fighting; t2 - the T2 lord script; group - my lord a group of one under the tactic
+level's own network, tactic/side.py) and enemy_lord_fights on, lord_buttons by --buttons,
 in this process only; the scene lords of T0-1 / O0-1 / S0-1 then start at the T2 post (stage0/battle.lord_back), not
 lord_back_m back; off (the default) - the lords as the rows were accepted. --lords on = --lord-mode t2 --buttons on.
 With a lord mode the report adds the aura exposure: the share of the tactic level's infantry decisions (my able units
@@ -327,8 +328,9 @@ class Aura:
         n = self.n
 
         def wrapped(tac, *a, **k):
+            before = tac.view
             out = orig(tac, *a, **k)
-            v = (tac.view or {}).get("view")
+            v = (tac.view or {}).get("view") if tac.view is not before else None   # (a lord group's tick: not ours)
             if v is not None and v.raw is not None:
                 fx = v.fx
                 my = fx.my.clamp(min=0)
@@ -428,7 +430,7 @@ def main(argv=None):
     ap.add_argument("--sim-set", action="append", default=[], help="sim.json path=value in this process only")
     ap.add_argument("--lords", default=None, choices=("off", "on"),
                     help="on: = --lord-mode t2 --buttons on (the old switch)")
-    ap.add_argument("--lord-mode", default=None, choices=("off", "post", "t2"),
+    ap.add_argument("--lord-mode", default=None, choices=("off", "post", "t2", "group"),
                     help="stage0.json lord_script in this process only (module doc)")
     ap.add_argument("--buttons", default=None, choices=("on", "off"), help="the lord's buttons (default on)")
     ap.add_argument("--ckpt", default="", help="a candidate's weights instead of the journal row's (one drill)")
@@ -447,6 +449,10 @@ def main(argv=None):
     lk = lords(a.lord_mode, a.buttons)
     rows = accepted_rows()
     want = [x for x in a.drills.split(",") if x]
+    if a.lord_mode == "group" and any(dr != "T0-1" for dr in want):
+        # (lord mode group commands the lord through the tactic level only: the operative's O0-1 side and the
+        # strategist's S0-1 read the level as one group a battle - not built for his group)
+        raise SystemExit("--lord-mode group: T0-1 only (--drills T0-1); O0-1 / S0-1 are not built for the lord's group")
     ck_sha = None
     if a.ckpt:
         if len(want) != 1:

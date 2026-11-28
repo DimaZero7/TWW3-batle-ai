@@ -161,7 +161,7 @@ class NetBuffer:
     def __init__(self, check=0, every=None, side=False):
         self.every = int(LN._c()["loss"]["trivial_every"] if every is None else every)
         self.pending, self.ticks, self.meta, self.cards, self.pend_card = [], [], [], [], {}
-        self.n_triv = 0
+        self.n_triv, self.n_triv_g = 0, {}
         self.check, self.checked, self.check_max = int(check), 0, 0.0
         self.NK = None
         self.side = bool(side)
@@ -170,13 +170,23 @@ class NetBuffer:
     def hook(self, net_driven):
         return lambda v, lab, T: self(v, T, net_driven, lab)
 
+    def grp_of(self, v):
+        """The view's group (tactic/side.Side group mode: View.grp, one group a pass; None - no groups)."""
+        g = getattr(v, "grp", None)
+        if g is None or g.numel() == 0:
+            return None
+        assert bool((g == g[0]).all()), "a view of several groups"
+        return int(g[0])
+
     def __call__(self, v, T, net_driven, lab=None):
         dn = done_rows(v)
         h0 = T["head_free"].any(1)
-        for b, a_, d_ in zip(v.idx.tolist(), h0.tolist(), (h0 & dn).tolist()):
-            c = self.pend_done.setdefault(b, [0, 0])
-            c[0] += int(a_)
-            c[1] += int(d_)
+        grp = self.grp_of(v)
+        if not grp:                         # (the finished-battle stats: the infantry's rows only)
+            for b, a_, d_ in zip(v.idx.tolist(), h0.tolist(), (h0 & dn).tolist()):
+                c = self.pend_done.setdefault(b, [0, 0])
+                c[0] += int(a_)
+                c[1] += int(d_)
         head = T["head_free"] & ~dn[:, None]
         sel = head.any(1)
         lv = getattr(v, "lord", None)
@@ -185,12 +195,18 @@ class NetBuffer:
             return
         triv = sel & ~(head & ~T["trivial"]).any(1)
         tw = torch.ones(sel.shape, device=sel.device)
+        # (the trivial ticks thinned by a counter of their own group: another group's rows never move the infantry's)
+        nt = self.n_triv if not grp else self.n_triv_g.get(grp, 0)
         for r in triv.nonzero()[:, 0].tolist():
-            self.n_triv += 1
-            if self.n_triv % self.every:
+            nt += 1
+            if nt % self.every:
                 sel[r] = False
             else:
                 tw[r] = float(self.every)
+        if not grp:
+            self.n_triv = nt
+        else:
+            self.n_triv_g[grp] = nt
         inf_sel = sel.clone()
         if lel is not None:
             # (the lord's eligible ticks kept, never thinned; the infantry's selection above untouched: BUILD_NOTES 1)
@@ -260,6 +276,8 @@ class NetBuffer:
             self.check_max = max(self.check_max, _diff({k: v.inp[k] for k in got}, got))
         out = {"b": v.idx[sel].cpu(), "sec": torch.full((int(sel.sum()),), int(round(float(v.now))), dtype=torch.int16),
                "tw": tw[sel].cpu(), "net": torch.full((int(sel.sum()),), bool(net_driven))}
+        if grp is not None:                 # (group mode: each row's group - 0 the infantry, 1 the lord's)
+            out["grp"] = torch.full((int(sel.sum()),), grp, dtype=torch.int8)
         for k, t in st.items():
             t = t[sel]
             if t.dim() >= 2 and t.shape[1] == G and (k in ("own", "g_row", "g_on", "open", "pair", "label", "dc",
@@ -319,6 +337,12 @@ class Disturb:
     @property
     def last_tags(self):
         return self.t.last_tags
+
+    def group_copy(self):
+        """Another group's driver (tactic/side.group_copy): the teacher's own copy, no disturbance - the plans are
+        the infantry's."""
+        from net.tactic import side as TS
+        return TS.group_copy(self.t)
 
     def __call__(self, v):
         out = self.t(v)
@@ -420,6 +444,9 @@ class Marks:
         return lambda v, lab, T: self(v, T, drv, lab)
 
     def __call__(self, v, T, drv, lab=None):
+        g = getattr(v, "grp", None)
+        if g is not None and bool((g > 0).any()):
+            return                  # (T0-1's marks are the infantry's: the lord's group's rows - its own drill's reads)
         fx = v.fx
         dn = done_rows(v)
         h0 = T["head_free"].any(1)

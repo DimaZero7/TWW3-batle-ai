@@ -9,7 +9,11 @@
     verb, pace [B, G] long
     n0     [B, G] long   the tiles' count of the zone (the members when its tactician started: its zone keeps the size)
     age    [B, G]        seconds since the group got its members
+    anchor [B, G] long   the group this one is attached to (-1: none) - its zone is derived from the anchor's (a lord
+                         is a group of one behind the infantry group, stage0(); tactic/side.Side)
 
+stage0(mine, lord): THE group builder of stage 0 (the scenes and the general battles alike, through tactic/side.Side):
+my units but the lord one group (0, verb hold - as before), with lord given the lord a group of one (1) anchored to it.
 drop_dead(): a dead unit leaves its group (free, not chosen: the parcel's slots must be alive); a group with no member
 left goes off. A routing unit stays (the tactician's rule). prev(): the last groups as numbers per row (the input).
 """
@@ -41,6 +45,7 @@ class Groups:
     pace: torch.Tensor
     n0: torch.Tensor
     age: torch.Tensor
+    anchor: torch.Tensor
 
     @staticmethod
     def empty(B, N, G=None, device="cpu"):
@@ -49,7 +54,7 @@ class Groups:
         return Groups(torch.full((B, N), -1, dtype=torch.long, device=device), z(torch.bool),
                       torch.zeros((B, G, N), dtype=torch.bool, device=device),
                       torch.full((B, G), -1, dtype=torch.long, device=device), z(), z(), z(), z(torch.bool),
-                      z(torch.long), z(torch.long), z(torch.long), z())
+                      z(torch.long), z(torch.long), z(torch.long), z(), z(torch.long) - 1)
 
     @property
     def G(self):
@@ -135,6 +140,26 @@ class Groups:
         t = float(ZN.cfg()["tile_m"])
         return {"x": self.cx, "z": self.cz, "b": self.heading, "front": cols.float() * t, "depth": rows.float() * t,
                 "on": self.on}
+
+
+def stage0(mine, lord=None, hold=0):
+    """(module doc) Groups [B, N, G] of stage 0: G 1 without lord, 2 with it; mine [B, N] my units but the lord, lord
+    [B, N] (each battle's lord, at most one) - group 1, anchored to group 0. Zones are the caller's (side.Side: the
+    infantry's by formation, the lord's from his anchor every tick). hold: the verb's index (decide.VERBS 'hold')."""
+    B, N = mine.shape
+    G = 1 if lord is None else 2
+    g = Groups.empty(B, N, G, mine.device)
+    g.member = torch.where(mine, torch.zeros_like(g.member), g.member)
+    g.on[:, 0] = mine.any(1)
+    g.n0[:, 0] = mine.sum(1)
+    g.verb[:] = int(hold)
+    if lord is not None:
+        assert bool((lord.sum(1) <= 1).all()), "stage0 groups: one lord a battle"
+        g.member = torch.where(lord, torch.ones_like(g.member), g.member)
+        g.on[:, 1] = lord.any(1)
+        g.n0[:, 1] = lord.sum(1)
+        g.anchor[:, 1] = torch.where(lord.any(1), torch.zeros_like(g.anchor[:, 1]), g.anchor[:, 1])
+    return g
 
 
 def grid(n, line):
